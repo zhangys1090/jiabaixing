@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>jiabaixing 演化规划 — 从御姐秘书到全自主桌面智能体</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-size: 16px; scroll-behavior: smooth; }
+body {
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: #0b0e14; color: #c8ccd4; line-height: 1.7;
+  max-width: 1200px; margin: 0 auto; padding: 0 24px;
+}
+a { color: #9da5b4; }
+code { font-family: "JetBrains Mono", "Fira Code", monospace; font-size: 0.85em; background: #1a1f2b; padding: 1px 5px; border-radius: 3px; }
+pre { background: #1a1f2b; border-radius: 8px; padding: 16px; overflow-x: auto; font-size: 0.85em; line-height: 1.5; }
+.hero { text-align: center; padding: 80px 0 60px; border-bottom: 1px solid #1e2430; }
+.hero h1 { font-size: 2.4rem; font-weight: 700; color: #e2e6ed; margin-bottom: 12px; }
+.hero .subtitle { font-size: 1.15rem; color: #6d7789; max-width: 640px; margin: 0 auto; }
+.hero .meta { margin-top: 24px; display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
+.hero .badge { display: inline-flex; align-items: center; gap: 6px; background: #151a24; border: 1px solid #212837; border-radius: 20px; padding: 6px 16px; font-size: 0.85rem; color: #838ea0; }
+.section { padding: 60px 0; border-bottom: 1px solid #1e2430; }
+.section-title { font-size: 1.5rem; font-weight: 700; color: #e2e6ed; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; }
+.section-desc { color: #6d7789; margin-bottom: 32px; max-width: 720px; }
+.ref-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 20px; }
+.ref-card { background: #111620; border: 1px solid #1e2430; border-radius: 12px; padding: 28px; transition: border-color 0.2s; }
+.ref-card:hover { border-color: #2a3344; }
+.ref-card h3 { font-size: 1.1rem; font-weight: 600; color: #d7dce4; margin-bottom: 8px; }
+.ref-card .icon { font-size: 1.6rem; margin-bottom: 10px; display: block; }
+.ref-card p { color: #838ea0; font-size: 0.92rem; margin-bottom: 12px; }
+.ref-card .specs { display: flex; flex-wrap: wrap; gap: 6px; }
+.ref-card .spec { background: #1a1f2b; border-radius: 4px; padding: 3px 8px; font-size: 0.78rem; color: #6d7789; }
+.timeline { position: relative; padding-left: 32px; }
+.timeline::before { content: ''; position: absolute; left: 8px; top: 4px; bottom: 4px; width: 2px; background: linear-gradient(to bottom, #2a7d4f, #2a7d4f 45%, #1e2430 55%, #2a3344); }
+.timeline-item { position: relative; margin-bottom: 48px; }
+.timeline-item:last-child { margin-bottom: 0; }
+.timeline-dot { position: absolute; left: -28px; top: 4px; width: 18px; height: 18px; border-radius: 50%; border: 2px solid #2a3344; background: #111620; }
+.timeline-dot.completed { background: #2a7d4f; border-color: #2a7d4f; }
+.timeline-dot.planned { background: #111620; border-color: #4a5568; }
+.timeline-header { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+.timeline-phase { font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; padding: 4px 10px; border-radius: 4px; }
+.timeline-phase.done { background: #15301f; color: #4ade80; }
+.timeline-phase.wip { background: #312900; color: #facc15; }
+.timeline-phase.plan { background: #1a1f2b; color: #838ea0; }
+.timeline-name { font-size: 1.15rem; font-weight: 600; color: #d7dce4; }
+.timeline-en { font-size: 0.85rem; color: #6d7789; }
+.module-table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 0.88rem; }
+.module-table th { text-align: left; padding: 10px 14px; background: #151a24; color: #6d7789; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1px solid #1e2430; }
+.module-table td { padding: 12px 14px; border-bottom: 1px solid #151a24; vertical-align: top; }
+.module-table td:first-child { color: #e2e6ed; font-weight: 600; font-family: "JetBrains Mono", monospace; font-size: 0.82rem; }
+.module-table td:nth-child(2) { color: #838ea0; }
+.module-table td:nth-child(3) { color: #9da5b4; }
+.module-table td:nth-child(4) { color: #6d7789; font-size: 0.8rem; }
+.module-table tr:hover td { background: #111620; }
+.cap-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.cap-card { background: #111620; border: 1px solid #1e2430; border-radius: 10px; padding: 20px; display: flex; flex-direction: column; gap: 8px; }
+.cap-card .status { display: inline-flex; align-items: center; gap: 5px; font-size: 0.78rem; font-weight: 600; margin-bottom: 4px; }
+.cap-card .status .dot { width: 8px; height: 8px; border-radius: 50%; }
+.cap-card .status .dot.has { background: #4ade80; }
+.cap-card .status .dot.missing { background: #f87171; }
+.cap-card h4 { color: #d7dce4; font-size: 0.95rem; }
+.cap-card p { color: #838ea0; font-size: 0.85rem; }
+.gap-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; }
+.gap-card { background: #1a1116; border: 1px solid #2a1a22; border-radius: 10px; padding: 22px; }
+.gap-card h4 { color: #fca5a5; font-size: 0.95rem; margin-bottom: 6px; }
+.gap-card p { color: #9b7b82; font-size: 0.85rem; margin-bottom: 10px; }
+.gap-card .target { background: #151a24; border-radius: 6px; padding: 10px 14px; font-size: 0.82rem; color: #838ea0; font-family: "JetBrains Mono", monospace; }
+.priority-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.priority-box { background: #111620; border: 1px solid #1e2430; border-radius: 10px; padding: 24px; }
+.priority-box.high { border-left: 3px solid #fca5a5; }
+.priority-box.medium { border-left: 3px solid #facc15; }
+.priority-box.low { border-left: 3px solid #60a5fa; }
+.priority-box h4 { color: #d7dce4; font-size: 0.95rem; margin-bottom: 10px; }
+.priority-box ul { padding-left: 18px; }
+.priority-box li { color: #838ea0; font-size: 0.85rem; margin-bottom: 6px; }
+.nav { position: sticky; top: 0; z-index: 10; background: #0b0e14ee; backdrop-filter: blur(10px); border-bottom: 1px solid #1e2430; padding: 12px 0; display: flex; gap: 20px; flex-wrap: wrap; margin: 0 -24px; padding: 12px 24px; }
+.nav a { text-decoration: none; color: #6d7789; font-size: 0.85rem; transition: color 0.15s; }
+.nav a:hover { color: #d7dce4; }
+.footer { text-align: center; padding: 40px 0; color: #4a5568; font-size: 0.85rem; }
+@media (max-width: 680px) { .hero h1 { font-size: 1.6rem; } .priority-grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <a href="#status">现状</a>
+  <a href="#gaps">差距</a>
+  <a href="#reference">参考</a>
+  <a href="#roadmap">路线图</a>
+  <a href="#phase6">P6·眼</a>
+  <a href="#phase7">P7·手</a>
+  <a href="#phase8">P8·脑</a>
+  <a href="#phase9">P9·记忆</a>
+  <a href="#phase10">P10·全自主</a>
+  <a href="#priority">优先级</a>
+</nav>
+
+<div class="hero">
+  <h1>jiabaixing 演化规划</h1>
+  <p class="subtitle">从"听懂你说话的御姐秘书"到"看得见屏幕、操控得了桌面、用得了任何大模型、能回溯每一步操作"的<strong>全自主桌面智能体</strong></p>
+  <div class="meta">
+    <span class="badge">2026-05-14</span>
+    <span class="badge">Phase 1–5 已完成</span>
+    <span class="badge">Phase 6–10 规划中</span>
+    <span class="badge">参考 Open Interpreter / Manus</span>
+  </div>
+</div>
+
+<section id="status" class="section">
+  <h2 class="section-title">1. 当前能力矩阵</h2>
+  <p class="section-desc">jiabaixing v2.0 AGENT 模式已完成 Phase 1–5。以下是当前已有能力的全景。</p>
+  <div class="cap-grid">
+    <div class="cap-card"><span class="status"><span class="dot has"></span> 已有</span><h4>浏览器操控 PlaywrightSkill</h4><p>浏览器内截图、点击、填表、导航。浏览器内的"手"和"眼"。</p></div>
+    <div class="cap-card"><span class="status"><span class="dot has"></span> 已有</span><h4>视觉理解 VisionEngine</h4><p>通过 LLM Vision API 分析图片内容，截了图能看懂。</p></div>
+    <div class="cap-card"><span class="status"><span class="dot has"></span> 已有</span><h4>文件与命令 FileSkill+CommandSkill</h4><p>读写本地文件、执行shell命令。文件系统的"手"。</p></div>
+    <div class="cap-card"><span class="status"><span class="dot has"></span> 已有</span><h4>技能注册 SkillRegistry 22技能</h4><p>统一的技能注册/发现/执行框架。</p></div>
+    <div class="cap-card"><span class="status"><span class="dot has"></span> 已有</span><h4>任务分解 TaskDecomposer</h4><p>复杂任务拆为子任务序列，含依赖关系和预估时间。</p></div>
+    <div class="cap-card"><span class="status"><span class="dot has"></span> 已有</span><h4>双层意图识别 IntentRecognizer</h4><p>7个一级意图 + 18个二级子意图。</p></div>
+    <div class="cap-card"><span class="status"><span class="dot has"></span> 已有</span><h4>记忆引擎 MemoryEngine</h4><p>SQLite + 向量双层记忆，含用户画像和行为分析。</p></div>
+    <div class="cap-card"><span class="status"><span class="dot has"></span> 已有</span><h4>主动调度 ScenarioAwareScheduler</h4><p>日程/情绪/行为模式感知的主动触发循环。</p></div>
+    <div class="cap-card"><span class="status"><span class="dot has"></span> 已有</span><h4>自我反思 AgentSelfReflection</h4><p>执行后反思 + 质量评估 + 学习洞察生成。</p></div>
+    <div class="cap-card"><span class="status"><span class="dot has"></span> 已有</span><h4>进化引擎 RealTimeFeedbackLoop</h4><p>实时反馈闭环，自适应策略优化。</p></div>
+    <div class="cap-card"><span class="status"><span class="dot has"></span> 已有</span><h4>IDE集成 IDEConnectionManager</h4><p>WebSocket连接到VS Code/Cursor，协议级操作。</p></div>
+    <div class="cap-card"><span class="status"><span class="dot has"></span> 已有</span><h4>多模态输入</h4><p>语音(Whisper) + 图像(Vision) + 文本 + 文件。</p></div>
+    <div class="cap-card"><span class="status"><span class="dot has"></span> 已有</span><h4>插件市场 PluginMarket</h4><p>动态技能发现、安装、卸载。支持社区插件注册与版本管理。</p></div>
+    <div class="cap-card"><span class="status"><span class="dot has"></span> 已有</span><h4>多设备协同 MultiDeviceCollaboration</h4><p>WebSocket 设备发现、消息中继、跨设备任务同步与状态广播。</p></div>
+  </div>
+</section>
+
+<section id="gaps" class="section">
+  <h2 class="section-title">2. 关键差距分析</h2>
+  <p class="section-desc">对照 Open Interpreter（桌面操控）和 Manus（多Agent协作），以下为完全缺失的维度。</p>
+  <div class="gap-grid">
+    <div class="gap-card">
+      <h4>缺失：桌面级屏幕像素识别</h4>
+      <p>Playwright 只在浏览器沙箱内截图。看不到浏览器之外的桌面区域（文件管理器、Office、微信等任意应用）。</p>
+      <div class="target">目标：screenshot-desktop + OCR + UI元素检测，覆盖全桌面任意窗口</div>
+    </div>
+    <div class="gap-card">
+      <h4>缺失：桌面 UI 控件抓取</h4>
+      <p>没有接入 Windows UI Automation / macOS Accessibility API。无法枚举桌面上有哪些窗口、按钮、文本框。</p>
+      <div class="target">目标：Windows UIA / macOS AX → 结构化 UI 树 → 可编程操控</div>
+    </div>
+    <div class="gap-card">
+      <h4>缺失：系统级鼠标键盘模拟</h4>
+      <p>没有 RobotJS / nut.js / pyautogui 层。鼠标键盘只能作用于浏览器内，无法操控桌面其他应用。</p>
+      <div class="target">目标：系统级 mouse/keyboard API → 全桌面 click/type/drag/scroll</div>
+    </div>
+    <div class="gap-card">
+      <h4>缺失：状态快照可回溯</h4>
+      <p>没有 checkpoint/restore 机制。Agent 执行出错后无法回滚到之前的状态。</p>
+      <div class="target">目标：操作前自动截图+状态采集 → checkpoint → 支持 restore/diff/undo</div>
+    </div>
+    <div class="gap-card">
+      <h4>缺失：多模型路由</h4>
+      <p>当前只对接了单一 LLM.server 端点。没有多模型注册/路由/降级/能力评估。</p>
+      <div class="target">目标：ModelRegistry → 能力画像 → 智能路由 → 失败自动切换</div>
+    </div>
+    <div class="gap-card">
+      <h4>缺失：全自主桌面闭环</h4>
+      <p>Agent 在浏览器内能执行闭环，但出不了浏览器。桌面级"看→想→动→验"的完整循环尚未建立。</p>
+      <div class="target">目标：DesktopAgentLoop = 看屏幕 → 理解UI → 计划动作 → 执行 → 验证结果 → 学习</div>
+    </div>
+    <div class="gap-card">
+      <h4>已有但需深化：插件市场</h4>
+      <p>PluginMarket 基础框架已存在，但缺少桌面级插件类型、UI控件插件、自动化脚本插件等扩展类别。</p>
+      <div class="target">目标：支持桌面操控插件、视觉识别插件、自定义工作流插件的发布与热加载</div>
+    </div>
+    <div class="gap-card">
+      <h4>已有但需深化：多设备协同</h4>
+      <p>MultiDeviceCollaboration 已实现局域网设备发现和消息中继，但缺少桌面状态跨设备同步、远程操控能力。</p>
+      <div class="target">目标：手机/平板可远程查看桌面状态、接收任务通知、跨设备任务接力</div>
+    </div>
+  </div>
+</section>
+
+<section id="reference" class="section">
+  <h2 class="section-title">3. 参考对象</h2>
+  <p class="section-desc">以下项目在桌面操控和 Agent 架构方面提供了重要的设计参考。</p>
+  <div class="ref-grid">
+    <div class="ref-card">
+      <span class="icon">🦀</span>
+      <h3>Open Interpreter (CLAW)</h3>
+      <p>桌面级 AI Agent——能看屏幕、操控鼠标键盘、执行代码、操作任何桌面应用。jiabaixing 的桌面操控层直接对标其 Computer API。</p>
+      <div class="specs"><span class="spec">桌面截图</span><span class="spec">系统级鼠标/键盘</span><span class="spec">OCR</span><span class="spec">代码执行沙箱</span><span class="spec">多模型支持</span></div>
+    </div>
+    <div class="ref-card">
+      <span class="icon">🤖</span>
+      <h3>Manus (多Agent架构)</h3>
+      <p>多个专用 Agent 协作完成任务。jiabaixing 可借鉴其 TaskDecomposer + 多 Skill 并行调度模型。</p>
+      <div class="specs"><span class="spec">多Agent协作</span><span class="spec">任务规划</span><span class="spec">工具编排</span><span class="spec">浏览器自动化</span><span class="spec">文件管理</span></div>
+    </div>
+    <div class="ref-card">
+      <span class="icon">🖥️</span>
+      <h3>Claude Computer Use</h3>
+      <p>Anthropic 的桌面操控 API，定义了标准化的 computer use 工具集（screenshot → cursor_position → click → type → 验证）。jiabaixing 可参考其工具定义规范。</p>
+      <div class="specs"><span class="spec">标准化computer工具</span><span class="spec">screenshot驱动</span><span class="spec">像素级坐标定位</span><span class="spec">安全沙箱</span></div>
+    </div>
+  </div>
+</section>
+
+<section id="roadmap" class="section">
+  <h2 class="section-title">4. 演化路线图</h2>
+  <p class="section-desc">五个新 Phase，每个构建在前一个之上。Phase 10 达到"你自己不用碰电脑、jiabaixing 能全自动完成桌面办公"。</p>
+  <div class="timeline">
+    <div class="timeline-item">
+      <div class="timeline-dot completed"></div>
+      <div class="timeline-header"><span class="timeline-phase done">Phase 1–5·已完成</span><span class="timeline-name">感知 + 执行 + 个性化 + 进化 + 生态</span></div>
+      <p style="color:#6d7789; font-size:0.9rem;">语音识别、视觉理解、浏览器操控、22技能系统、双层记忆、主动调度、自我反思、进化闭环、IDE集成。整体完成度 ~85%。</p>
+    </div>
+    <div class="timeline-item">
+      <div class="timeline-dot planned"></div>
+      <div class="timeline-header"><span class="timeline-phase plan">Phase 6</span><span class="timeline-name">桌面之眼</span><span class="timeline-en">Desktop Eyes</span></div>
+      <p style="color:#6d7789; font-size:0.9rem; margin-bottom:12px;">让 jiabaixing 能看到整个桌面：截图任意窗口、OCR识别文字、枚举UI控件树。</p>
+    </div>
+    <div class="timeline-item">
+      <div class="timeline-dot planned"></div>
+      <div class="timeline-header"><span class="timeline-phase plan">Phase 7</span><span class="timeline-name">桌面之手</span><span class="timeline-en">Desktop Hands</span></div>
+      <p style="color:#6d7789; font-size:0.9rem; margin-bottom:12px;">让 jiabaixing 能操控整个桌面：移动鼠标、敲键盘、拖拽窗口、管理进程。</p>
+    </div>
+    <div class="timeline-item">
+      <div class="timeline-dot planned"></div>
+      <div class="timeline-header"><span class="timeline-phase plan">Phase 8</span><span class="timeline-name">多模型脑</span><span class="timeline-en">Multi-Model Brain</span></div>
+      <p style="color:#6d7789; font-size:0.9rem; margin-bottom:12px;">兼容全网主流大模型：智能路由 + 能力画像 + 自动降级。</p>
+    </div>
+    <div class="timeline-item">
+      <div class="timeline-dot planned"></div>
+      <div class="timeline-header"><span class="timeline-phase plan">Phase 9</span><span class="timeline-name">状态记忆</span><span class="timeline-en">State Memory</span></div>
+      <p style="color:#6d7789; font-size:0.9rem; margin-bottom:12px;">操作前自动 checkpoint、状态 diff、任意步骤回滚。</p>
+    </div>
+    <div class="timeline-item">
+      <div class="timeline-dot planned"></div>
+      <div class="timeline-header"><span class="timeline-phase plan">Phase 10</span><span class="timeline-name">全自主桌面智能</span><span class="timeline-en">Full Desktop Autonomy</span></div>
+      <p style="color:#6d7789; font-size:0.9rem; margin-bottom:12px;">统一感知-推理-行动-验证循环。跨应用编排。AI 真正接管桌面办公。</p>
+    </div>
+  </div>
+</section>
+
+<section id="phase6" class="section">
+  <h2 class="section-title"><span class="timeline-phase plan" style="margin-right:10px;">Phase 6</span> 桌面之眼 — Desktop Eyes</h2>
+  <p class="section-desc">让 jiabaixing 看到整个桌面，不限于浏览器。能截取任意显示器/窗口的屏幕内容，用 OCR 读出文字，用 UI Automation 枚举控件。</p>
+  <table class="module-table">
+    <thead><tr><th>模块</th><th>功能</th><th>关键接口</th><th>技术栈</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>ScreenCapture</td>
+        <td>桌面/窗口/区域截图，返回 Buffer</td>
+        <td>captureFullScreen(displayId?) → Buffer<br>captureWindow(title) → Buffer<br>captureRegion(x,y,w,h) → Buffer<br>listDisplays() → DisplayInfo[]<br>listWindows() → WindowInfo[]</td>
+        <td>screenshot-desktop (npm)<br>Win: DXGI / Mac: CGWindow</td>
+      </tr>
+      <tr>
+        <td>DesktopVisionEngine</td>
+        <td>截图 → LLM Vision → 结构化描述</td>
+        <td>analyzeScreen(buffer) → ScreenDescription<br>findElement(desc) → BBox<br>readText(region) → string<br>detectUI() → UIElement[]</td>
+        <td>LLM Vision API + OCR引擎</td>
+      </tr>
+      <tr>
+        <td>DesktopUIInspector</td>
+        <td>枚举桌面 UI 控件树</td>
+        <td>getUITree(handle) → UITreeNode<br>findByAutomationId(id) → UIElement<br>findByText(text) → UIElement[]<br>getFocusedElement() → UIElement</td>
+        <td>Win: UIAutomation<br>Mac: Accessibility API</td>
+      </tr>
+      <tr>
+        <td>OCRService</td>
+        <td>像素级文字识别（中文优化）</td>
+        <td>recognize(image) → OCRResult[]<br>recognizeRegion(x,y,w,h) → OCRResult[]<br>findText(text) → BBox[]</td>
+        <td>PaddleOCR / Tesseract.js<br>本地离线优先</td>
+      </tr>
+      <tr>
+        <td>ElementMatcher</td>
+        <td>Vision识别结果与UIA控件树对齐</td>
+        <td>align(vision, ui) → MatchedElement[]<br>getBestClickTarget(desc) → ClickTarget</td>
+        <td>自研匹配算法</td>
+      </tr>
+    </tbody>
+  </table>
+  <div style="margin-top:20px; padding:16px; background:#111620; border-radius:8px; border-left:3px solid #2a7d4f;">
+    <strong style="color:#4ade80;">成功标准</strong><br>
+    <span style="color:#838ea0; font-size:0.88rem;">① 能截取桌面任意区域含任意第三方应用窗口；② OCR中文准确率≥95%；③ UIA能枚举资源管理器/Finder控件树；④ Vision+UIA对齐：自然语言→控件坐标≥80%</span>
+  </div>
+</section>
+
+<section id="phase7" class="section">
+  <h2 class="section-title"><span class="timeline-phase plan" style="margin-right:10px;">Phase 7</span> 桌面之手 — Desktop Hands</h2>
+  <p class="section-desc">让 jiabaixing 能操作整个桌面的任意应用。系统级鼠标移动/点击/拖拽、键盘输入、窗口管理、剪贴板操控。</p>
+  <table class="module-table">
+    <thead><tr><th>模块</th><th>功能</th><th>关键接口</th><th>技术栈</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>SystemMouse</td>
+        <td>系统级鼠标操控</td>
+        <td>moveTo(x,y,speed?) → void<br>click(button?) → void<br>doubleClick() → void<br>rightClick() → void<br>drag(from,to) → void<br>scroll(amount,dir?) → void<br>getPosition() → {x,y}</td>
+        <td>nut.js v3+ (跨平台)<br>RobotJS (备选)</td>
+      </tr>
+      <tr>
+        <td>SystemKeyboard</td>
+        <td>系统级键盘输入</td>
+        <td>type(text,speed?) → void<br>keyPress(key) → void<br>keyDown(key)/keyUp(key) → void<br>hotkey(mods,key) → void</td>
+        <td>nut.js<br>node-global-key-listener</td>
+      </tr>
+      <tr>
+        <td>WindowManager</td>
+        <td>窗口枚举/激活/调整</td>
+        <td>listWindows() → WindowInfo[]<br>focusWindow(title) → void<br>resizeWindow(h,w,h) → void<br>minimize/maximize/close(h) → void</td>
+        <td>Win: node-ffi+user32<br>Mac: applescript</td>
+      </tr>
+      <tr>
+        <td>DesktopClipboard</td>
+        <td>系统剪贴板读写</td>
+        <td>read() → ClipboardContent<br>write(content) → void<br>copyImage(buf) → void<br>readImage() → Buffer</td>
+        <td>clipboardy (npm)<br>node-clipboard-watcher</td>
+      </tr>
+      <tr>
+        <td>DesktopActionExecutor</td>
+        <td>统一桌面操作调度层</td>
+        <td>execute(plan) → ActionResult<br>verify(action,expected) → bool<br>waitForCondition(cond,to) → void</td>
+        <td>编排以上各模块</td>
+      </tr>
+    </tbody>
+  </table>
+  <div style="margin-top:20px; padding:16px; background:#111620; border-radius:8px; border-left:3px solid #2a7d4f;">
+    <strong style="color:#4ade80;">成功标准</strong><br>
+    <span style="color:#838ea0; font-size:0.88rem;">① 鼠标能在桌面任意位置准确点击；② 键盘能向任意前台窗口输入中英文；③ 窗口管理器能列出所有窗口+激活指定窗口；④ 结合Phase6的眼形成闭环：看屏幕→找到按钮→移动点击→截图验证</span>
+  </div>
+</section>
+
+<section id="phase8" class="section">
+  <h2 class="section-title"><span class="timeline-phase plan" style="margin-right:10px;">Phase 8</span> 多模型脑 — Multi-Model Brain</h2>
+  <p class="section-desc">脱离对单一 LLM 端点的硬编码依赖。接入 OpenAI / Claude / Gemini / Qwen / DeepSeek / Kimi 等任意兼容 OpenAI 格式的模型端点，自动评估能力、智能路由、失败降级。</p>
+  <table class="module-table">
+    <thead><tr><th>模块</th><th>功能</th><th>关键接口</th><th>技术栈</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>ModelRegistry</td>
+        <td>注册/管理多个 LLM 端点</td>
+        <td>register(config) → ModelId<br>unregister(id) → void<br>listModels() → ModelInfo[]<br>getModel(id) → ModelConfig</td>
+        <td>纯 TypeScript<br>配置持久化本地JSON</td>
+      </tr>
+      <tr>
+        <td>ModelRouter</td>
+        <td>基于任务类型的智能路由</td>
+        <td>route(task) → ModelId[]<br>selectBest(task,candidates) → ModelId<br>getCapabilities(id) → Profile</td>
+        <td>加权评分矩阵<br>实时延迟/质量追踪</td>
+      </tr>
+      <tr>
+        <td>CapabilityAnalyzer</td>
+        <td>自动评估模型能力</td>
+        <td>benchmark(id) → Result<br>testVision(id) → Score<br>testCoding(id) → Score<br>testSpeed(id) → Latency</td>
+        <td>标准化测试用例集<br>自动跑分</td>
+      </tr>
+      <tr>
+        <td>FallbackChain</td>
+        <td>失败自动切换</td>
+        <td>executeWithFallback(req,chain) → Resp<br>onModelFailure(id,err) → void<br>getHealthStatus() → HealthMap</td>
+        <td>Promise链式调用<br>熔断器模式</td>
+      </tr>
+      <tr>
+        <td>MultiModelLLMProvider</td>
+        <td>多模型统一适配层</td>
+        <td>chat(msgs,opts?) → Response<br>streamChat(msgs,opts?) → Stream<br>embed(text,model?) → Vector<br>vision(img,prompt) → Desc</td>
+        <td>OpenAI兼容格式适配<br>各厂商差异抽象</td>
+      </tr>
+    </tbody>
+  </table>
+  <div style="margin-top:20px; padding:16px; background:#111620; border-radius:8px; border-left:3px solid #2a7d4f;">
+    <strong style="color:#4ade80;">目标兼容模型</strong><br>
+    <span style="color:#838ea0; font-size:0.85rem;">OpenAI(GPT-4o/4.1) · Claude(3.5/4) · Gemini(2.0/2.5) · Qwen(2.5/3) · DeepSeek(V3/R1) · Kimi(k2) · GLM · 本地Ollama。所有端点统一 OpenAI-compatible 格式。</span>
+  </div>
+</section>
+
+<section id="phase9" class="section">
+  <h2 class="section-title"><span class="timeline-phase plan" style="margin-right:10px;">Phase 9</span> 状态记忆 — State Memory</h2>
+  <p class="section-desc">每次操作前自动保存状态快照（截图+UI树+文件状态+应用状态），支持任意步骤回滚。Agent犯错后能优雅恢复。</p>
+  <table class="module-table">
+    <thead><tr><th>模块</th><th>功能</th><th>关键接口</th><th>技术栈</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>StateSnapshot</td>
+        <td>采集当前桌面/应用完整状态</td>
+        <td>capture(opts?) → Snapshot<br>captureFocused() → Snapshot<br>captureWindow(h) → AppSnapshot</td>
+        <td>截图+UIA树+窗口列表<br>+剪贴板+前台进程</td>
+      </tr>
+      <tr>
+        <td>CheckpointManager</td>
+        <td>创建/列表/恢复检查点</td>
+        <td>create(label) → id<br>list() → Meta[]<br>restore(id) → bool<br>delete(id) → void<br>prune(keepN) → void</td>
+        <td>本地文件存储<br>SQLite索引</td>
+      </tr>
+      <tr>
+        <td>DiffEngine</td>
+        <td>计算两个快照之间的差异</td>
+        <td>diff(before,after) → Diff<br>diffUI(before,after) → UIDiff<br>diffFiles(before,after) → FileDiff<br>summarize(diff) → string</td>
+        <td>pixelmatch图像diff<br>结构化UI树diff</td>
+      </tr>
+      <tr>
+        <td>UndoManager</td>
+        <td>操作回滚引擎</td>
+        <td>pushAction(a) → void<br>undo() → bool<br>redo() → bool<br>getUndoStack() → Action[]</td>
+        <td>命令模式<br>操作日志持久化</td>
+      </tr>
+      <tr>
+        <td>ActionTracer</td>
+        <td>操作全链路追踪</td>
+        <td>startTrace(sid) → void<br>logStep(s) → void<br>getTrace(sid) → Trace<br>replay(tid) → void</td>
+        <td>结构化日志<br>可视化时间线</td>
+      </tr>
+    </tbody>
+  </table>
+  <div style="margin-top:20px; padding:16px; background:#111620; border-radius:8px; border-left:3px solid #2a7d4f;">
+    <strong style="color:#4ade80;">Snapshot 数据结构</strong>
+    <pre style="margin-top:8px;">{
+  id, timestamp, label,
+  screenshots: [{ displayId, buffer, resolution }],
+  uiTree: UITreeNode,
+  focusedWindow: { title, handle, processName },
+  foregroundProcess: { name, pid, mainWindowTitle },
+  clipboardSnapshot: ClipboardContent,
+  openWindows: WindowInfo[],
+  fileChanges: FileChange[]
+}</pre>
+  </div>
+</section>
+
+<section id="phase10" class="section">
+  <h2 class="section-title"><span class="timeline-phase plan" style="margin-right:10px;">Phase 10</span> 全自主桌面智能 — Full Desktop Autonomy</h2>
+  <p class="section-desc">将 Phase 1–9 的所有能力整合为统一的感知-推理-行动-验证闭环。jiabaixing 成为真正的桌面级 AGENT。</p>
+  <table class="module-table">
+    <thead><tr><th>模块</th><th>功能</th><th>关键接口</th><th>依赖</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>DesktopAgentLoop</td>
+        <td>统一感知-行动循环引擎</td>
+        <td>run(task) → TaskResult<br>observe() → WorldState<br>plan(goal,state) → ActionPlan<br>act(plan) → ActionResult<br>verify(result,exp) → bool<br>learn(exp) → void</td>
+        <td>P6+P7+P8+P9</td>
+      </tr>
+      <tr>
+        <td>CrossAppOrchestrator</td>
+        <td>跨应用任务编排</td>
+        <td>orchestrate(wf) → Result<br>coordinate(apps,actions) → void<br>handleAppSwitch(from,to) → void<br>waitForAppReady(app) → Promise</td>
+        <td>P6+P7</td>
+      </tr>
+      <tr>
+        <td>ProactiveDesktop</td>
+        <td>桌面级主动感知与建议</td>
+        <td>detectWorkPattern() → Pattern[]<br>suggestAutomation(t) → Plan<br>learnUserWorkflow() → Template<br>autoHandleRoutine() → void</td>
+        <td>P5+P6+P9</td>
+      </tr>
+      <tr>
+        <td>SelfHealingRecovery</td>
+        <td>执行失败自动诊断与恢复</td>
+        <td>detectAnomaly(s) → Anomaly<br>diagnose(err,s) → Diagnosis<br>recover(err,s) → Plan<br>canAutoRecover(err) → bool</td>
+        <td>P9</td>
+      </tr>
+      <tr>
+        <td>DesktopSkillBridge</td>
+        <td>22个技能桥接到桌面层</td>
+        <td>adaptSkillToDesktop(s) → Skill<br>registerDesktopSkill(s) → void<br>getDesktopSkills() → Skill[]</td>
+        <td>P1–P5+P6+P7</td>
+      </tr>
+      <tr>
+        <td>AutonomyDashboard</td>
+        <td>自主运行状态可视化面板</td>
+        <td>getActiveTasks() → Task[]<br>getDesktopState() → State<br>getPerformanceMetrics() → Metrics<br>getLearningInsights() → Insight[]</td>
+        <td>P9+P10</td>
+      </tr>
+    </tbody>
+  </table>
+  <div style="margin-top:20px; padding:20px; background:#111620; border-radius:8px; border-left:3px solid #facc15; border:1px solid #1e2430;">
+    <strong style="color:#facc15;">DesktopAgentLoop 核心循环伪代码</strong>
+    <pre style="margin-top:8px; color:#9da5b4;">
+async function desktopAgentLoop(task: string) {
+  const intent = await intentRecognizer.recognize(task);
+  const plan = await taskDecomposer.decompose(task);
+  const checkpoint = await checkpointManager.create(`task-${Date.now()}`);
+
+  for (const step of plan.subTasks) {
+    const screenshot = await screenCapture.captureFullScreen();
+    const vision = await desktopVision.analyzeScreen(screenshot);
+    const uiTree = await desktopUIInspector.getUITree();
+    const model = await modelRouter.selectBest(step);
+    const action = await llm.decide(vision, uiTree, step);
+
+    await mouse.moveTo(action.x, action.y);
+    await mouse.click();
+    await keyboard.type(action.text);
+
+    await sleep(500);
+    const after = await screenCapture.captureFullScreen();
+    const diff = await diffEngine.diff(screenshot, after);
+    const success = action.expectedState === diff.summary;
+
+    if (!success) {
+      await selfHealing.diagnose(action, diff);
+      await undoManager.undo();
+    }
+    await reflection.recordExecution({ step, success, diff });
+  }
+}</pre>
+  </div>
+  <div style="margin-top:20px; padding:16px; background:#111620; border-radius:8px; border-left:3px solid #4ade80;">
+    <strong style="color:#4ade80;">成功标准</strong><br>
+    <span style="color:#838ea0; font-size:0.88rem;">① "帮我把Excel数据复制到微信发给老板"端到端完成；② 操作失败自动诊断+重试/回滚；③ 学习用户习惯，主动建议自动化；④ VS Code↔Chrome↔微信↔Office自由切换操控；⑤ 所有操作可追溯/可回放/可审计</span>
+  </div>
+</section>
+
+<section id="priority" class="section">
+  <h2 class="section-title">5. 开发优先级与里程碑</h2>
+  <p class="section-desc">按"先打通全链路骨架，再逐个模块深化"的原则。</p>
+  <div class="priority-grid">
+    <div class="priority-box high">
+      <h4>P0 先打通眼睛 (约4天)</h4>
+      <ul>
+        <li>ScreenCapture — screenshot-desktop npm (1天)</li>
+        <li>OCRService — PaddleOCR.js 本地中文OCR (2天)</li>
+        <li>DesktopVisionEngine — LLM Vision分析 (1天)</li>
+        <li>里程碑 M1：jiabaixing能说"我看到你桌面有个Chrome窗口..."</li>
+      </ul>
+    </div>
+    <div class="priority-box high">
+      <h4>P0 再打通手 (约4天)</h4>
+      <ul>
+        <li>SystemMouse+SystemKeyboard — nut.js (2天)</li>
+        <li>WindowManager — 窗口枚举+激活 (1天)</li>
+        <li>DesktopActionExecutor — 统一操作层 (1天)</li>
+        <li>里程碑 M2：jiabaixing能"打开记事本，输入文字，保存"</li>
+      </ul>
+    </div>
+    <div class="priority-box high">
+      <h4>P0 打通最小闭环 (约3天)</h4>
+      <ul>
+        <li>DesktopAgentLoop骨架 — 观察→决策→执行→验证 (2天)</li>
+        <li>集成到JiabaixingCore.processInput() (1天)</li>
+        <li>里程碑 M3：一句话 → 操作桌面 → 完成 → 汇报结果</li>
+      </ul>
+    </div>
+    <div class="priority-box medium">
+      <h4>P1 强化感知与控制 (约6天)</h4>
+      <ul>
+        <li>DesktopUIInspector — Win UIA控件树 (3天)</li>
+        <li>ElementMatcher — Vision↔UIA对齐 (2天)</li>
+        <li>DesktopClipboard — 系统剪贴板 (0.5天)</li>
+        <li>里程碑 M4：精确到像素的UI定位和操控</li>
+      </ul>
+    </div>
+    <div class="priority-box medium">
+      <h4>P1 多模型兼容 (约5天)</h4>
+      <ul>
+        <li>ModelRegistry+ModelRouter (2天)</li>
+        <li>MultiModelLLMProvider适配层 (2天)</li>
+        <li>FallbackChain失败降级 (1天)</li>
+        <li>里程碑 M5：同时接入3个模型，自动路由切换</li>
+      </ul>
+    </div>
+    <div class="priority-box medium">
+      <h4>P1 状态快照基础 (约3天)</h4>
+      <ul>
+        <li>StateSnapshot (1天)</li>
+        <li>CheckpointManager (1天)</li>
+        <li>DiffEngine基础版 (1天)</li>
+        <li>里程碑 M6：操作前自动checkpoint，出错可回滚</li>
+      </ul>
+    </div>
+    <div class="priority-box low">
+      <h4>P2 全自主能力 (约9天)</h4>
+      <ul>
+        <li>CrossAppOrchestrator跨应用编排 (3天)</li>
+        <li>SelfHealingRecovery异常诊断恢复 (3天)</li>
+        <li>ProactiveDesktop桌面级主动感知 (2天)</li>
+        <li>ActionTracer全链路追踪 (1天)</li>
+        <li>里程碑 M7：真正"AI接管桌面"</li>
+      </ul>
+    </div>
+    <div class="priority-box low">
+      <h4>P2 生态与体验 (约7天)</h4>
+      <ul>
+        <li>DesktopSkillBridge — 22技能桥接桌面 (2天)</li>
+        <li>AutonomyDashboard — 自主运行面板 (2天)</li>
+        <li>CapabilityAnalyzer — 模型跑分系统 (2天)</li>
+        <li>UndoManager — 完整撤销/重做 (1天)</li>
+        <li>里程碑 M8：产品级桌面Agent体验</li>
+      </ul>
+    </div>
+  </div>
+  <div style="margin-top:28px; padding:18px; background:#111620; border-radius:8px; border:1px solid #1e2430;">
+    <strong style="color:#d7dce4;">预估总工期：约38个开发日（单人全职）</strong><br>
+    <span style="color:#838ea0; font-size:0.88rem;">P0最小闭环 ~11天 → M3可演示 | P1强化能力 ~14天 → M6有回溯 | P2全自主 ~16天 → M8产品级</span>
+  </div>
+</section>
+
+<section class="section">
+  <h2 class="section-title">6. 技术选型参考</h2>
+  <table class="module-table">
+    <thead><tr><th>领域</th><th>推荐方案</th><th>替代方案</th><th>理由</th></tr></thead>
+    <tbody>
+      <tr><td>桌面截图</td><td>screenshot-desktop</td><td>desktop-screenshot, native addon</td><td>零依赖原生绑定，跨平台</td></tr>
+      <tr><td>鼠标键盘</td><td>nut.js v3+</td><td>RobotJS, pyautogui(子进程)</td><td>TypeScript原生，跨平台，维护活跃</td></tr>
+      <tr><td>Win UI枚举</td><td>node-ffi + UIAutomationCore</td><td>uiautomation(py子进程)</td><td>Node原生调用，避免Python依赖</td></tr>
+      <tr><td>Mac UI枚举</td><td>osascript (JXA)</td><td>macos-accessibility (py)</td><td>系统内置，零额外依赖</td></tr>
+      <tr><td>OCR引擎</td><td>PaddleOCR (子进程)</td><td>Tesseract.js, Win OCR API</td><td>中文准确率最高，离线可用</td></tr>
+      <tr><td>多模型适配</td><td>自研MultiModelLLMProvider</td><td>LiteLLM, openai-node</td><td>轻量、可控、TS一体化</td></tr>
+      <tr><td>图像diff</td><td>pixelmatch + pngjs</td><td>looks-same, imagemagick</td><td>纯JS，无原生依赖，速度快</td></tr>
+      <tr><td>剪贴板</td><td>clipboardy</td><td>electron clipboard</td><td>轻量，跨平台，支持文字+图片</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="section">
+  <h2 class="section-title">7. 目标架构 (Phase 10)</h2>
+  <p class="section-desc">新增模块以 <code style="color:#4ade80;">绿色</code> 标注。</p>
+  <pre style="font-size:0.82rem; line-height:1.6;">
+jiabaixing (全自主桌面智能体 — 御姐秘书)
+  ├── PersonaCore          — 人格定义 + 场景自适应语气
+  ├── MemoryEngine         — SQLite + 向量双层记忆
+  ├── Scheduler            — 主动执行循环（含桌面级触发）
+  ├── SkillRegistry        — 可扩展技能挂载
+  │   ├── [已有] 22 个基础技能
+  │   ├── [已有] PluginMarket — 插件发现/安装/卸载/版本管理
+  │   └── <span style="color:#4ade80;">+ DesktopSkill     — 桌面操控技能（桥接Phase6-7）</span>
+  ├── LLMProvider          — <span style="color:#4ade80;">→ 升级为 MultiModelLLMProvider（Phase 8）</span>
+  ├── Multimodal
+  │   ├── [已有] SpeechRecognizer (Whisper)
+  │   ├── [已有] VisionEngine (LLM Vision)
+  │   ├── [已有] FileAnalysis
+  │   ├── <span style="color:#4ade80;">+ ScreenCapture (Phase 6)</span>
+  │   ├── <span style="color:#4ade80;">+ DesktopVisionEngine (Phase 6)</span>
+  │   └── <span style="color:#4ade80;">+ OCRService (Phase 6)</span>
+  ├── Desktop Core <span style="color:#4ade80;">（全新 — Phase 6+7）</span>
+  │   ├── <span style="color:#4ade80;">+ DesktopUIInspector    — 控件树枚举</span>
+  │   ├── <span style="color:#4ade80;">+ SystemMouse           — 系统级鼠标</span>
+  │   ├── <span style="color:#4ade80;">+ SystemKeyboard        — 系统级键盘</span>
+  │   ├── <span style="color:#4ade80;">+ WindowManager         — 窗口管理</span>
+  │   └── <span style="color:#4ade80;">+ DesktopClipboard      — 系统剪贴板</span>
+  ├── AGENT Core
+  │   ├── [已有] IntelligentIntentRecognizer
+  │   ├── [已有] TaskDecomposer
+  │   ├── [已有] AgentSelfReflection
+  │   ├── [已有] EnhancedSkillExecutor
+  │   ├── <span style="color:#4ade80;">+ DesktopAgentLoop      — 感知-行动闭环（Phase 10）</span>
+  │   ├── <span style="color:#4ade80;">+ CrossAppOrchestrator   — 跨应用编排（Phase 10）</span>
+  │   └── <span style="color:#4ade80;">+ SelfHealingRecovery    — 自愈恢复（Phase 10）</span>
+  ├── State <span style="color:#4ade80;">（全新 — Phase 9）</span>
+  │   ├── <span style="color:#4ade80;">+ StateSnapshot         — 多维度状态采集</span>
+  │   ├── <span style="color:#4ade80;">+ CheckpointManager     — 检查点CRUD</span>
+  │   ├── <span style="color:#4ade80;">+ DiffEngine            — 状态差异计算</span>
+  │   ├── <span style="color:#4ade80;">+ UndoManager           — 操作撤销/重做</span>
+  │   └── <span style="color:#4ade80;">+ ActionTracer          — 操作全链路追踪</span>
+  ├── Model <span style="color:#4ade80;">（全新 — Phase 8）</span>
+  │   ├── <span style="color:#4ade80;">+ ModelRegistry         — 模型注册管理</span>
+  │   ├── <span style="color:#4ade80;">+ ModelRouter           — 智能路由</span>
+  │   ├── <span style="color:#4ade80;">+ CapabilityAnalyzer    — 能力评估</span>
+  │   └── <span style="color:#4ade80;">+ FallbackChain         — 失败降级</span>
+  ├── Device Collaboration <span style="color:#4ade80;">（已有 — Phase 2+）</span>
+  │   ├── [已有] DeviceDiscovery — 局域网设备发现
+  │   ├── [已有] MessageRelay — 跨设备消息中继
+  │   └── <span style="color:#4ade80;">+ RemoteDesktopBridge — 桌面状态远程同步（Phase 10）</span>
+  ├── IDE Interface
+  └── Evolution
+      ├── [已有] RealTimeFeedbackLoop
+      ├── [已有] StrategyOptimizer
+      └── <span style="color:#4ade80;">+ DesktopLearningLoop    — 桌面操作经验学习（Phase 10）</span>
+  </pre>
+</section>
+
+<div class="footer">
+  jiabaixing Evolution Plan · 2026-05-14 · Phase 1–5 Complete · Phase 6–10 Planned<br>
+  参考：Open Interpreter (CLAW) · Manus · Claude Computer Use
+</div>
+
+</body>
+</html>

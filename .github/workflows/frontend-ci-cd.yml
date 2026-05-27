@@ -1,0 +1,128 @@
+name: Frontend CI/CD
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '16'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install frontend dependencies
+        run: cd src/frontend && npm ci
+
+      - name: Run linting
+        run: npm run lint
+
+      - name: Run formatting check
+        run: npm run format:check
+
+      - name: Run tests
+        run: npm test
+
+      - name: Run test coverage
+        run: cd src/frontend && npm run test:coverage
+
+      - name: Build frontend
+        run: cd src/frontend && npm run build
+
+      - name: Run Lighthouse CI
+        run: cd src/frontend && npm run lighthouse
+
+      - name: Run security scan
+        run: |
+          echo "Running security scan..."
+          # 安装 OWASP ZAP
+          wget https://github.com/zaproxy/zaproxy/releases/download/v2.14.0/ZAP_2.14.0_Linux.tar.gz
+          tar -xzf ZAP_2.14.0_Linux.tar.gz
+          
+          # 启动 ZAP 并进行扫描
+          cd ZAP_2.14.0
+          ./zap.sh -cmd -quickurl http://localhost:3000 -quickout ../security-report.html
+          
+          # 检查扫描结果
+          echo "Security scan completed. Report saved to security-report.html"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: src/frontend/build
+
+  deploy:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-build
+          path: src/frontend/build
+
+      - name: Deploy to GitHub Pages
+        run: |
+          echo "Deploying to GitHub Pages..."
+          # 配置git用户信息
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          
+          # 构建前端应用
+          cd src/frontend && npm run build
+          
+          # 创建gh-pages分支
+          git checkout -B gh-pages
+          
+          # 移除其他文件，只保留构建产物
+          find . -type f -not -path "./.git/*" -not -path "./src/frontend/build/*" -exec rm -f {} \;
+          
+          # 移动构建产物到根目录
+          mv src/frontend/build/* .
+          
+          # 添加所有文件
+          git add .
+          
+          # 提交变更
+          git commit -m "Deploy to GitHub Pages"
+          
+          # 推送至gh-pages分支
+          git push origin gh-pages --force
+          
+          echo "Deployment to GitHub Pages completed successfully!"
+
+      - name: Create deployment tag
+        run: |
+          # 创建部署标签，用于版本回滚
+          DEPLOYMENT_TAG="deploy-$(date +%Y%m%d%H%M%S)"
+          git tag $DEPLOYMENT_TAG
+          git push origin $DEPLOYMENT_TAG
+          echo "Created deployment tag: $DEPLOYMENT_TAG"
+
+      - name: Notify deployment
+        run: |
+          echo "Deployment completed successfully!"
+          # 添加通知命令，例如：
+          # - 发送Slack消息
+          # - 发送Email通知
+          # - 发送Webhook通知
+          
+          # 示例：发送Slack消息
+          # curl -X POST -H 'Content-type: application/json' --data '{"text":"Deployment to production completed successfully!"}' ${{ secrets.SLACK_WEBHOOK_URL }}

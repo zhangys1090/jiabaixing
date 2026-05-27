@@ -1,0 +1,80 @@
+{
+  "timestamp": "2026-04-13T13:22:44.960Z",
+  "totalTests": 14,
+  "passedTests": 2,
+  "failedTests": 12,
+  "testCases": [
+    {
+      "name": "API健康检查",
+      "status": "passed",
+      "result": {
+        "status": "ok",
+        "message": "jiabaixing API server is running"
+      }
+    },
+    {
+      "name": "正常开发场景 - 咨询代码问题",
+      "status": "failed",
+      "error": "回复内容不符合要求"
+    },
+    {
+      "name": "情绪安抚场景 - 用户表达烦躁",
+      "status": "failed",
+      "error": "回复内容不符合情绪安抚要求"
+    },
+    {
+      "name": "日常闲聊场景 - 日常交流",
+      "status": "failed",
+      "error": "回复内容不符合日常闲聊要求"
+    },
+    {
+      "name": "极端情绪场景 - 用户发脾气",
+      "status": "passed"
+    },
+    {
+      "name": "边界测试场景 - 越界指令",
+      "status": "failed",
+      "error": "回复内容不符合边界测试要求"
+    },
+    {
+      "name": "自主任务闭环测试 - 部署Python项目",
+      "status": "failed",
+      "error": "回复内容不符合自主任务闭环要求"
+    },
+    {
+      "name": "全场景感知测试 - 识别场景",
+      "status": "failed",
+      "error": "回复内容不符合全场景感知要求"
+    },
+    {
+      "name": "记忆能力测试 - 记住用户偏好",
+      "status": "failed",
+      "error": "系统未能记住用户偏好"
+    },
+    {
+      "name": "拟人化交互测试 - 连续对话",
+      "status": "failed",
+      "error": "回复内容不符合拟人化交互要求"
+    },
+    {
+      "name": "代码生成测试 - 生成TypeScript函数",
+      "status": "failed",
+      "error": "回复内容不符合代码生成要求"
+    },
+    {
+      "name": "bug排查测试 - 定位代码bug",
+      "status": "failed",
+      "error": "回复内容不符合bug排查要求"
+    },
+    {
+      "name": "实时建议测试 - 代码优化建议",
+      "status": "failed",
+      "error": "回复内容不符合实时建议要求"
+    },
+    {
+      "name": "全流程开发测试 - 从需求到部署",
+      "status": "failed",
+      "error": "回复内容不符合全流程开发要求"
+    }
+  ]
+}

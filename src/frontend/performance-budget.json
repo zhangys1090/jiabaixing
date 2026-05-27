@@ -1,0 +1,51 @@
+{
+  "budgets": [
+    {
+      "type": "total-byte-gzip",
+      "maximum": 1000000,
+      "warning": 800000
+    },
+    {
+      "type": "script",
+      "maximum": 500000,
+      "warning": 400000
+    },
+    {
+      "type": "css",
+      "maximum": 100000,
+      "warning": 80000
+    },
+    {
+      "type": "image",
+      "maximum": 300000,
+      "warning": 250000
+    },
+    {
+      "type": "font",
+      "maximum": 100000,
+      "warning": 80000
+    }
+  ],
+  "metrics": {
+    "first-contentful-paint": {
+      "maximum": 1800,
+      "warning": 1500
+    },
+    "largest-contentful-paint": {
+      "maximum": 2500,
+      "warning": 2000
+    },
+    "cumulative-layout-shift": {
+      "maximum": 0.1,
+      "warning": 0.05
+    },
+    "first-input-delay": {
+      "maximum": 100,
+      "warning": 50
+    },
+    "time-to-first-byte": {
+      "maximum": 800,
+      "warning": 600
+    }
+  }
+}

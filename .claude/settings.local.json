@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Get-ChildItem -Path \"e:\\\\jiabaixing\\\\src\" -Directory | ForEach-Object { $_.Name })",
+      "PowerShell(try { $r = Invoke-WebRequest -Uri \"http://127.0.0.1:8001/v1/models\" -TimeoutSec 3 -UseBasicParsing; $r.Content } catch { \"LLM server not reachable: $_\" })",
+      "Bash(npm run *)",
+      "WebSearch"
+    ]
+  }
+}

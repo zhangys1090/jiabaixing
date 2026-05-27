@@ -1,0 +1,155 @@
+/* ============================================
+   AionUi 控制台组件 · 御姐秘书视觉扩展
+   参考 AionUiSkill dashboard 分区与指标卡布局
+   ============================================ */
+
+/* === 欢迎空状态 === */
+.chat-welcome {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: var(--s-8) var(--s-5);
+  min-height: 280px;
+  animation: fadeIn 0.5s ease;
+}
+
+.chat-welcome-avatar {
+  width: 72px;
+  height: 72px;
+  border-radius: var(--r-xl);
+  background: var(--accent-gradient);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 36px;
+  margin-bottom: var(--s-5);
+  box-shadow: var(--shadow-glow);
+}
+
+.chat-welcome h3 {
+  margin: 0 0 var(--s-2);
+  font-size: var(--text-xl);
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.02em;
+}
+
+.chat-welcome-tagline {
+  margin: 0 0 var(--s-6);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  max-width: 360px;
+  line-height: var(--leading);
+}
+
+/* === 快捷能力卡片（AionUi widget 风格）=== */
+.welcome-widgets {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--s-3);
+  width: 100%;
+  max-width: 520px;
+}
+
+.welcome-widget {
+  padding: var(--s-4);
+  background: var(--glass-bg);
+  border: var(--border-light);
+  border-radius: var(--r-lg);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--ease),
+    transform var(--ease),
+    box-shadow var(--ease);
+  backdrop-filter: blur(12px);
+}
+
+.welcome-widget:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+}
+
+.welcome-widget-icon {
+  font-size: 20px;
+  margin-bottom: var(--s-2);
+  display: block;
+}
+
+.welcome-widget-label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: var(--s-1);
+}
+
+.welcome-widget-desc {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+/* === 指标条 / 状态指示器 === */
+.aion-gauge {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.aion-gauge-label {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.aion-gauge-bar {
+  height: 4px;
+  background: var(--bg-hover);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.aion-gauge-fill {
+  height: 100%;
+  background: var(--accent-gradient);
+  border-radius: 2px;
+  transition: width 0.6s ease;
+}
+
+/* === 状态徽章 === */
+.aion-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 2px var(--s-3);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  border-radius: 999px;
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  border: var(--border-light);
+}
+
+.aion-badge.online {
+  background: var(--green-dim);
+  color: var(--green);
+  border-color: rgba(107, 175, 123, 0.25);
+}
+
+.aion-badge.offline {
+  background: var(--red-dim);
+  color: var(--red);
+  border-color: rgba(201, 107, 107, 0.25);
+}
+
+.aion-badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pulse 2s ease infinite;
+}

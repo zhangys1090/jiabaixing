@@ -1,0 +1,88 @@
+## jiabaixing 项目架构现状分析
+### 1. 架构总览
+```
+jiabaixing/
+├── src/
+│   ├── core/           # 核心引擎 (30+ 文件)
+│   ├── models/         # LLM模型层 (9 文件)
+│   ├── tools/          # 工具系统 (20+ 文件)
+│   ├── skills/         # 技能系统 (30+ 文件)
+│   ├── memory/         # 记忆系统 (20+ 文件)
+│   ├── evolution/      # 进化引擎 (20+ 文件)
+│   ├── server/         # 后端服务 (15+ 文件)
+│   ├── frontend/       # 前端应用 (50+ 文件)
+│   ├── interaction/    # 交互引擎 (7 文件)
+│   ├── multimodal/     # 多模态 (10 文件)
+│   ├── security/       # 安全模块 (15 文件)
+│   ├── persona/        # 人设系统 (4 文件)
+│   ├── integration/    # 集成层 (3 文件)
+│   └── utils/          # 工具函数 (10 文件)
+```
+总代码量 : 约 200+ TypeScript 文件
+
+### 2. 数据流向图
+```
+用户输入
+    │
+    ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    Frontend (React)                          │
+│  App.tsx → ChatInterface → useWebSocket → API/WS            │
+└─────────────────────────────────────────────────────────────┘
+    │ HTTP/WebSocket
+    ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    Server (Express)                          │
+│  routes/ → middleware/ → services/                           │
+└─────────────────────────────────────────────────────────────┘
+    │
+    ▼
+┌─────────────────────────────────────────────────────────────┐
+│                 JiabaixingCore (中枢)                        │
+│  ┌─────────────┬─────────────┬─────────────┐                │
+│  │ Preprocessor│  LLM Core   │Postprocessor│                │
+│  │ (输入验证)   │(FC循环)     │(质量评分)    │                │
+│  └─────────────┴─────────────┴─────────────┘                │
+└─────────────────────────────────────────────────────────────┘
+    │
+    ├──────────────────┬──────────────────┬─────────────────┐
+    ▼                  ▼                  ▼                 ▼
+┌─────────┐      ┌─────────┐      ┌─────────────┐    ┌──────────┐
+│LLMProvider│    │MemoryEngine│    │ToolExecutor │    │SkillRegistry│
+│(智谱/本地)│    │(SQLite+向量)│    │(21个工具)   │    │(46个技能)   │
+└─────────┘      └─────────┘      └─────────────┘    └──────────┘
+    │                  │                  │                 │
+    └──────────────────┴──────────────────┴─────────────────┘
+                              │
+                              ▼
+                    ┌─────────────────┐
+                    │ EvolutionEngine │
+                    │ (自我进化)       │
+                    └─────────────────┘
+```
+### 3. 核心模块依赖关系
+```
+JiabaixingCore (核心中枢)
+    ├── LLMProvider (模型层)
+    │   ├── MultiModelManager (多模型管理)
+    │   └── OpenAICompatibleModel (API调用)
+    │
+    ├── MemoryEngine (记忆层)
+    │   ├── SQLiteMemoryStore (持久化)
+    │   ├── VectorDatabase (向量检索)
+    │   └── UserProfile (用户画像)
+    │
+    ├── ToolExecutor (工具层)
+    │   ├── ToolRecommendationEngine (推荐)
+    │   ├── SandboxManager (沙箱)
+    │   └── 21个工具实现
+    │
+    ├── SkillRegistry (技能层)
+    │   ├── SkillBridge (桥接器)
+    │   └── 46个技能实现
+    │
+    └── EvolutionOrchestrator (进化层)
+        ├── SelfHealingEngine (自我修复)
+        ├── SelfRefactorEngine (自我重构)
+        └── SelfEnhancementEngine (自我增强)
+```

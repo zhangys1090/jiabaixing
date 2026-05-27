@@ -1,0 +1,42 @@
+{
+  "project": {
+    "name": "jiabaixing",
+    "version": "3.3.0",
+    "description": "LLM-first AI companion - mature secretary persona",
+    "architecture": "LLM-First"
+  },
+  "runtime": {
+    "nodeVersion": ">=18.0.0",
+    "typescript": "5.0.2"
+  },
+  "server": {
+    "port": 3111,
+    "host": "0.0.0.0",
+    "websocket": true
+  },
+  "llm": {
+    "defaultModel": "qwen2.5:3b",
+    "baseUrl": "http://127.0.0.1:8001/v1",
+    "timeout": 60000,
+    "maxTokens": 4096
+  },
+  "features": {
+    "evolution": true,
+    "memory": true,
+    "skills": true,
+    "tools": true,
+    "proactive": true
+  },
+  "logging": {
+    "level": "info",
+    "format": "json",
+    "console": true
+  },
+  "performance": {
+    "alertThresholds": {
+      "responseTime": 10000,
+      "memoryUsage": 1024,
+      "errorRate": 0.1
+    }
+  }
+}

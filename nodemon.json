@@ -1,0 +1,19 @@
+{
+  "watch": [
+    "src"
+  ],
+  "ext": "ts,json",
+  "ignore": [
+    "src/**/*.test.ts",
+    "src/**/*.spec.ts",
+    "node_modules",
+    "dist",
+    "*.log"
+  ],
+  "exec": "ts-node src/main.ts",
+  "delay": "2000",
+  "restartable": "rs",
+  "verbose": true,
+  "signal": "SIGTERM",
+  "legacyWatch": false
+}

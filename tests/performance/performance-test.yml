@@ -1,0 +1,54 @@
+config:
+  target: "http://localhost:3001"
+  phases:
+    - duration: 60
+      arrivalRate: 1
+      rampTo: 10
+      name: "Warming up"
+    - duration: 120
+      arrivalRate: 10
+      name: "Sustained load"
+    - duration: 30
+      arrivalRate: 10
+      rampTo: 20
+      name: "Peak load"
+  payload:
+    path: "test-data.csv"
+    fields:
+      - "input"
+    delimiter: "|"
+    skipHeader: true
+    randomize: true
+
+scenarios:
+  - name: "Core reasoning test"
+    weight: 50
+    flow:
+      - post:
+          url: "/api/reason"
+          json:
+            input: "{{input}}"
+          capture:
+            - json: "$.response"
+              as: "response"
+
+  - name: "Device control test"
+    weight: 25
+    flow:
+      - post:
+          url: "/api/devices/control"
+          json:
+            deviceId: "light-1"
+            command:
+              type: "toggle"
+              parameters: {}
+
+  - name: "Tool execution test"
+    weight: 25
+    flow:
+      - post:
+          url: "/api/tools/execute"
+          json:
+            toolName: "calculator"
+            parameters:
+              expression: "2 + 2"

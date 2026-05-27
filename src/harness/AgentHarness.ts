@@ -1,0 +1,585 @@
+/**
+ * Harness Agent Framework - Agent Harness 入口
+ *
+ * 六层架构组装点，协调 Loop/Tools/Context/Persistence/Verification/Constraints
+ */
+
+import { Logger } from '../utils/Logger';
+import path from 'path';
+import { LoopController } from './loop/LoopController';
+import { Planner } from './loop/Planner';
+import { Executor } from './loop/Executor';
+import { Evaluator } from './loop/Evaluator';
+import { Reporter } from './loop/Reporter';
+import { 
+  IndependentEvaluationService,
+  type IndependentEvaluationServiceDeps
+} from './evaluation/IndependentEvaluationService';
+import { ToolRegistry } from './tools/registry/ToolRegistry';
+import { SchemaValidator } from './tools/registry/SchemaValidator';
+import { PermissionGuard } from './tools/registry/PermissionGuard';
+import { ContextManager } from './context/ContextManager';
+import { VerificationService } from './verification/VerificationService';
+import { ConstraintsService } from './constraints/ConstraintsService';
+import { PersistenceService, type PersistenceServiceDeps } from './persistence/PersistenceService';
+import { TrajectoryDatabase } from './persistence/TrajectoryDatabase';
+import {
+  registerHarnessTools,
+  syncToLegacySkillRegistry,
+  type HarnessToolDeps,
+} from './tools/registerHarnessTools';
+import {
+  UserInput,
+  AgentResult,
+  ChatMessage,
+  LifecycleEvent,
+  HookContext,
+} from './types';
+import type { HarnessConfig } from './types';
+
+/** Harness 依赖 — 需要外部注入 */
+export interface HarnessDeps {
+  /** LLM 提供者 */
+  llm: {
+    chatWithTools(
+      messages: ChatMessage[],
+      tools: Array<Record<string, unknown>>
+    ): Promise<{
+      content: string | null;
+      toolCalls?: Array<{
+        id: string;
+        type: string;
+        function: { name: string; arguments: string };
+      }>;
+    }>;
+    chat(prompt: string, systemPrompt?: string): Promise<string>;
+  };
+  /** 宪法 Prompt 构建器 */
+  constitutionalBuilder: {
+    buildConstitutionPrompt(userId?: string): Promise<string>;
+  };
+  /** 记忆注入器 */
+  memoryInjector: {
+    autoRetrieveMemories(input: string, userId?: string): Promise<string[]>;
+  };
+  /** F0-05: 记忆存储器 — 对话结果回写，确保跨会话持久化 */
+  memoryStore?: {
+    storeConversation(input: string, response: string, metadata: Record<string, unknown>): Promise<void>;
+  };
+  /** 动态上下文提供者 */
+  dynamicContext: {
+    getDynamicContext(): string;
+  };
+  /** 对话历史提供者 */
+  historyProvider: {
+    getRecentHistory(limit: number): ChatMessage[];
+    getAllHistory(): ChatMessage[];
+  };
+  /** 工具层依赖（用于 registerHarnessTools） */
+  toolDeps?: HarnessToolDeps;
+  /** 旧版 SkillRegistry（用于双写兼容） */
+  skillRegistry?: {
+    registerInfrastructureTool(tool: {
+      name: string;
+      description: string;
+      parameters: Array<{
+        name: string;
+        type: string;
+        required: boolean;
+        description: string;
+      }>;
+      execute: (args: Record<string, unknown>, context?: unknown) => Promise<{
+        success: boolean;
+        output: unknown;
+        error?: string;
+        metadata?: Record<string, unknown>;
+      }>;
+    }): void;
+  };
+  /** 持久化层依赖 */
+  persistenceDeps?: import('./persistence/PersistenceService').PersistenceServiceDeps;
+  /** 进化引擎（用于反馈闭环） */
+  evolutionEngine?: {
+    collectFeedback(input: string, response: string, result: { success: boolean; intent?: string; toolsUsed?: string[]; error?: string }, scene?: string): void;
+    assessQuality(traceId: string, success: boolean, qualityScore: number, duration: number): void;
+  };
+  /** 人格核心（进化闭环：语气参数注入 ContextManager → system prompt） */
+  personaCore?: {
+    buildPersonaSummary(): string;
+    buildSceneToneInstruction(scene: string): string;
+    getToneForScene(scene: string): {
+      temperature: number;
+      formality: number;
+      verbosity: number;
+      emojiFrequency: number;
+      proactive: boolean;
+    };
+  };
+  /** 进化纠错示例提供者（进化闭环：PromptExample 注入 Planner） */
+  evolutionExamples?: {
+    getPromptExamples(): Array<{
+      trigger: string;
+      correction: string;
+      example: string;
+      frequency: number;
+    }>;
+  };
+}
+
+/** 从环境变量读取配置 */
+function getEnvConfig(): Partial<HarnessConfig> {
+  const envConfig: Partial<HarnessConfig> = {};
+
+  if (process.env.HARNESS_LOOP !== undefined) {
+    envConfig.useHarnessLoop = process.env.HARNESS_LOOP === 'true';
+  }
+  if (process.env.HARNESS_TOOLS !== undefined) {
+    envConfig.useHarnessTools = process.env.HARNESS_TOOLS === 'true';
+  }
+  if (process.env.HARNESS_CONTEXT !== undefined) {
+    envConfig.useHarnessContext = process.env.HARNESS_CONTEXT === 'true';
+  }
+  if (process.env.HARNESS_VERIFICATION !== undefined) {
+    envConfig.useHarnessVerification = process.env.HARNESS_VERIFICATION === 'true';
+  }
+  if (process.env.HARNESS_CONSTRAINTS !== undefined) {
+    envConfig.useHarnessConstraints = process.env.HARNESS_CONSTRAINTS === 'true';
+  }
+  if (process.env.HARNESS_PERSISTENCE !== undefined) {
+    envConfig.useHarnessPersistence = process.env.HARNESS_PERSISTENCE === 'true';
+  }
+  if (process.env.HARNESS_TRAJECTORY !== undefined) {
+    envConfig.useTrajectoryPersistence = process.env.HARNESS_TRAJECTORY === 'true';
+  }
+  if (process.env.HARNESS_EVALUATOR !== undefined) {
+    envConfig.useIndependentEvaluator = process.env.HARNESS_EVALUATOR === 'true';
+  }
+
+  return envConfig;
+}
+
+/** 默认配置 - 全开 */
+const DEFAULT_CONFIG: HarnessConfig = {
+  useHarnessLoop: true,
+  useHarnessTools: true,
+  useHarnessContext: true,
+  useHarnessVerification: true,
+  useHarnessConstraints: true,
+  useHarnessPersistence: true,
+  useTrajectoryPersistence: true,
+  useIndependentEvaluator: true,
+};
+
+export class AgentHarness {
+  private config: HarnessConfig;
+  private deps: HarnessDeps | null = null;
+  private initialized = false;
+
+  // 六层组件
+  private loopController: LoopController | null = null;
+  private toolRegistry: ToolRegistry | null = null;
+  private schemaValidator: SchemaValidator | null = null;
+  private permissionGuard: PermissionGuard | null = null;
+  private contextManager: ContextManager | null = null;
+  private verificationService: VerificationService | null = null;
+  private constraintsService: ConstraintsService | null = null;
+  private persistenceService: PersistenceService | null = null;
+  private trajectoryDatabase: TrajectoryDatabase | null = null;
+  // 独立评估服务（P0 核心功能）
+  private independentEvaluationService: IndependentEvaluationService | null = null;
+
+  constructor(config?: Partial<HarnessConfig>) {
+    const envConfig = getEnvConfig();
+    this.config = { ...DEFAULT_CONFIG, ...envConfig, ...config };
+  }
+
+  /**
+   * 注入依赖
+   */
+  setDeps(deps: HarnessDeps): void {
+    this.deps = deps;
+  }
+
+  /**
+   * 初始化 Harness 各层
+   */
+  async initialize(): Promise<void> {
+    if (this.initialized) return;
+
+    Logger.info('🏗️ Agent Harness 初始化中...', 'AgentHarness');
+
+    if (!this.deps) {
+      Logger.warn('⚠️ 未注入依赖，部分功能不可用', 'AgentHarness');
+    }
+
+    // Phase 1: 工具层初始化
+    if (this.config.useHarnessTools) {
+      const result = registerHarnessTools(this.deps?.toolDeps ?? ({} as HarnessToolDeps));
+      this.toolRegistry = result.toolRegistry;
+      this.schemaValidator = result.schemaValidator;
+      this.permissionGuard = result.permissionGuard;
+
+      if (this.deps?.skillRegistry) {
+        syncToLegacySkillRegistry(this.toolRegistry, this.deps.skillRegistry as never);
+        Logger.info('  🔄 双写兼容: 已同步到旧版 SkillRegistry', 'AgentHarness');
+      }
+
+      Logger.info(
+        `  🔧 工具层: 启用 (${result.registeredCount} 个工具)`,
+        'AgentHarness'
+      );
+    }
+
+    // Phase 2: 约束层初始化
+    if (this.config.useHarnessConstraints) {
+      this.constraintsService = new ConstraintsService({
+        permissionGuard: this.permissionGuard || new PermissionGuard(),
+      });
+      Logger.info('  🛡️ 约束层: 启用', 'AgentHarness');
+    }
+
+    // Phase 3: 验证层初始化
+    if (this.config.useHarnessVerification) {
+      this.verificationService = new VerificationService(
+        this.deps ? { llm: this.deps.llm } : {}
+      );
+      Logger.info('  ✅ 验证层: 启用', 'AgentHarness');
+    }
+
+    // Phase 4: 持久化层初始化
+    if (this.config.useHarnessPersistence) {
+      this.persistenceService = new PersistenceService(
+        this.deps?.persistenceDeps || {}
+      );
+      await this.persistenceService.initialize();
+      Logger.info('  💾 持久化层: 启用', 'AgentHarness');
+    }
+
+    // Phase 4.2: 独立评估服务初始化（P0 核心功能）
+    if (this.config.useIndependentEvaluator && this.deps) {
+      this.independentEvaluationService = new IndependentEvaluationService({
+        llm: this.deps.llm,
+        enableLLMEvaluation: true,
+      });
+      Logger.info('  📋 独立评估服务: 启用', 'AgentHarness');
+    }
+
+    // Phase 4.5: 轨迹持久化初始化
+    if (this.config.useTrajectoryPersistence) {
+      const dbPath = path.resolve(process.cwd(), 'data', 'trajectory', 'trajectory.db');
+      this.trajectoryDatabase = new TrajectoryDatabase(dbPath);
+      Logger.info('  📊 轨迹持久化: 启用', 'AgentHarness');
+    }
+
+    // Phase 5: 上下文层初始化
+    if (this.config.useHarnessContext && this.deps) {
+      this.contextManager = new ContextManager({
+        constitutionalBuilder: this.deps.constitutionalBuilder,
+        memoryInjector: this.deps.memoryInjector,
+        dynamicContext: this.deps.dynamicContext,
+        historyProvider: this.deps.historyProvider,
+        personaCore: this.deps.personaCore,
+      });
+      Logger.info('  📋 上下文层: 启用', 'AgentHarness');
+      if (this.deps.personaCore) {
+        Logger.info('  🎭 进化闭环: PersonaCore 语气注入已连通', 'AgentHarness');
+      }
+    }
+
+    // Phase 6: 循环层初始化 (依赖前面所有层)
+    if (this.config.useHarnessLoop && this.deps) {
+      const planner = new Planner({
+        llm: this.deps.llm,
+        evolutionExamples: this.deps.evolutionExamples,
+      });
+      const executor = new Executor({
+        llm: this.deps.llm,
+        toolRegistry: this.toolRegistry || new ToolRegistry(),
+        schemaValidator: this.schemaValidator || new SchemaValidator(),
+        permissionGuard: this.permissionGuard || new PermissionGuard(),
+        verificationService: this.verificationService || undefined,
+        constraintsService: this.constraintsService || undefined,
+        trajectoryDatabase: this.trajectoryDatabase || undefined,
+      });
+      const evaluator = new Evaluator({
+        llm: this.deps.llm,
+        enableLLMEvaluation: this.config.useIndependentEvaluator,
+      });
+      const reporter = new Reporter();
+
+      this.loopController = new LoopController({
+        planner,
+        executor,
+        evaluator,
+        reporter,
+        constraintsService: this.constraintsService || undefined,
+        verificationService: this.verificationService || undefined,
+        persistenceService: this.persistenceService || undefined,
+        trajectoryDatabase: this.trajectoryDatabase || undefined,
+      });
+      Logger.info('  🔄 循环层: 启用', 'AgentHarness');
+    }
+
+    // Phase 6.5: 注册敏感信息存储拦截钩子
+    if (this.constraintsService) {
+      this.constraintsService.registerHook(
+        LifecycleEvent.BEFORE_TOOL_CALL,
+        async (hookCtx: HookContext) => {
+          const toolName = hookCtx.toolName || '';
+          if (toolName === 'memory_store' || toolName === 'note_take') {
+            const result = this.constraintsService!.enforceBehaviorConstraint(
+              'no-sensitive-storage',
+              { toolName, params: hookCtx.params }
+            );
+            if (!result.compliant) {
+              return {
+                proceed: false,
+                replacementResult: {
+                  success: false,
+                  output: `🛡️ 安全拦截: ${result.violation}`,
+                  duration: 0,
+                  validated: false,
+                },
+                reason: result.violation,
+              };
+            }
+          }
+          return { proceed: true };
+        }
+      );
+    }
+
+    // Phase 7: 注册进化反馈钩子（闭环）
+    if (this.constraintsService && this.deps?.evolutionEngine) {
+      this.constraintsService.registerHook(
+        LifecycleEvent.AFTER_RESPONSE,
+        async (hookCtx: HookContext) => {
+          const evo = this.deps!.evolutionEngine!;
+          const input = String(hookCtx.metadata.input || '');
+          const response = String(hookCtx.metadata.response || '');
+          const quality = hookCtx.metadata.quality as { overall: number } | undefined;
+          const traceId = String(hookCtx.metadata.traceId || '');
+          const toolsUsed = hookCtx.metadata.toolsUsed as string[] | undefined;
+
+          evo.collectFeedback(input, response, {
+            success: true,
+            toolsUsed: toolsUsed || [],
+          });
+
+          if (quality) {
+            evo.assessQuality(traceId, true, quality.overall, 0);
+          }
+
+          if (this.persistenceService) {
+            this.persistenceService.recordEvolutionMetric({
+              metricType: 'feedback',
+              value: quality?.overall ?? 0.7,
+              timestamp: Date.now(),
+              metadata: { traceId, inputLength: input.length, responseLength: response.length },
+            });
+          }
+
+          return { proceed: true };
+        }
+      );
+      Logger.info('  🧬 进化闭环: 启用', 'AgentHarness');
+    }
+
+    this.initialized = true;
+    Logger.info('✅ Agent Harness 初始化完成', 'AgentHarness');
+  }
+
+  /**
+   * 处理用户输入
+   */
+  async processInput(input: UserInput): Promise<AgentResult> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    // 使用 Harness 循环层
+    if (this.config.useHarnessLoop && this.loopController && this.deps) {
+      // Step 1: 触发 BEFORE_LOOP 钩子
+      await this.executeHook(LifecycleEvent.BEFORE_LOOP, {
+        input: input.text,
+        userId: input.userId,
+        traceId: input.traceId,
+      });
+
+      // 构建上下文
+      let messages: ChatMessage[];
+      if (this.config.useHarnessContext && this.contextManager) {
+        messages = await this.contextManager.buildContext(input);
+      } else {
+        // 降级：简单上下文
+        messages = [
+          { role: 'system', content: '你是一个智能助手。' },
+          { role: 'user', content: input.text },
+        ];
+      }
+
+      const result = await this.loopController.run(input, messages);
+
+      // F0-05: 对话结果回写记忆，确保跨会话持久化
+      if (this.deps.memoryStore && result.response) {
+        try {
+          await this.deps.memoryStore.storeConversation(
+            input.text,
+            result.response,
+            {
+              userId: input.userId,
+              traceId: result.trace.traceId,
+              quality: result.quality.overall,
+              toolCalls: result.metadata.toolCalls,
+              duration: result.metadata.duration,
+            }
+          );
+          Logger.debug('💾 对话结果已回写记忆', 'AgentHarness');
+        } catch (err) {
+          Logger.warn(
+            `⚠️ 记忆回写失败: ${(err as Error).message}`,
+            'AgentHarness'
+          );
+        }
+      }
+
+      // Step 2: 触发 AFTER_RESPONSE 钩子
+      await this.executeHook(LifecycleEvent.AFTER_RESPONSE, {
+        input: input.text,
+        response: result.response,
+        quality: result.quality,
+        traceId: result.trace.traceId,
+        toolsUsed: result.metadata.toolCalls,
+        metadata: result.metadata,
+      });
+
+      return result;
+    }
+
+    // 未启用 Harness 循环层
+    throw new Error(
+      'AgentHarness 循环层未启用。请设置 useHarnessLoop=true 并注入依赖。'
+    );
+  }
+
+  /**
+   * 执行生命周期钩子
+   */
+  private async executeHook(
+    event: LifecycleEvent,
+    extra: Record<string, unknown>
+  ): Promise<void> {
+    if (!this.constraintsService) return;
+
+    try {
+      const hookContext: HookContext = {
+        event,
+        metadata: extra,
+      };
+
+      const result = await this.constraintsService.executeHooks(event, hookContext);
+
+      if (!result.proceed) {
+        Logger.info(
+          `🛑 钩子拦截: ${event} - ${result.reason || '未提供原因'}`,
+          'AgentHarness'
+        );
+      }
+    } catch (err) {
+      Logger.warn(
+        `⚠️ 生命周期钩子执行失败: ${event} - ${(err as Error).message}`,
+        'AgentHarness'
+      );
+    }
+  }
+
+  /**
+   * 获取工具注册表
+   */
+  getToolRegistry(): ToolRegistry | null {
+    return this.toolRegistry;
+  }
+
+  /**
+   * 获取 Schema 验证器
+   */
+  getSchemaValidator(): SchemaValidator | null {
+    return this.schemaValidator;
+  }
+
+  /**
+   * 获取权限守卫
+   */
+  getPermissionGuard(): PermissionGuard | null {
+    return this.permissionGuard;
+  }
+
+  /**
+   * 获取上下文管理器
+   */
+  getContextManager(): ContextManager | null {
+    return this.contextManager;
+  }
+
+  /**
+   * 获取验证服务
+   */
+  getVerificationService(): VerificationService | null {
+    return this.verificationService;
+  }
+
+  /**
+   * 获取约束服务
+   */
+  getConstraintsService(): ConstraintsService | null {
+    return this.constraintsService;
+  }
+
+  /**
+   * 获取持久化服务
+   */
+  getPersistenceService(): PersistenceService | null {
+    return this.persistenceService;
+  }
+
+  /**
+   * 获取轨迹数据库
+   */
+  getTrajectoryDatabase(): TrajectoryDatabase | null {
+    return this.trajectoryDatabase;
+  }
+
+  /**
+   * 获取独立评估服务（P0 核心功能）
+   */
+  getIndependentEvaluationService(): IndependentEvaluationService | null {
+    return this.independentEvaluationService;
+  }
+
+  /**
+   * 获取 Harness 配置
+   */
+  getConfig(): Readonly<HarnessConfig> {
+    return this.config;
+  }
+
+  /**
+   * 更新配置（运行时热更新）
+   */
+  updateConfig(partial: Partial<HarnessConfig>): void {
+    this.config = { ...this.config, ...partial };
+    Logger.info(
+      `Harness 配置更新: ${JSON.stringify(partial)}`,
+      'AgentHarness'
+    );
+  }
+
+  /**
+   * 关闭 Harness
+   */
+  async shutdown(): Promise<void> {
+    Logger.info('🏗️ Agent Harness 关闭', 'AgentHarness');
+    this.initialized = false;
+    this.loopController = null;
+  }
+}

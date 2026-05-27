@@ -1,0 +1,250 @@
+.vibe-coding-panel {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 1000;
+  max-width: 400px;
+}
+
+.clarification-modal {
+  background: var(--accent-gradient);
+  border-radius: var(--r-xl);
+  padding: 20px;
+  margin-bottom: 10px;
+  box-shadow: var(--shadow-lg);
+  animation: slideIn 0.3s ease;
+}
+
+.clarification-content h3 {
+  margin: 0 0 10px 0;
+  color: var(--text-inverse);
+  font-size: 18px;
+}
+
+.clarification-question {
+  color: var(--text-inverse);
+  font-size: var(--text-lg);
+  margin-bottom: 15px;
+  line-height: 1.5;
+}
+
+.clarification-context {
+  color: rgba(255, 255, 255, 0.8);
+  font-size: var(--text-base);
+  margin-bottom: 15px;
+}
+
+.clarification-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.clarification-option-btn {
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: var(--text-inverse);
+  padding: var(--s-3) var(--s-4);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  font-size: var(--text-base);
+  transition: all 0.2s ease;
+}
+
+.clarification-option-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+  transform: translateX(5px);
+}
+
+.clarification-input {
+  width: 100%;
+  padding: var(--s-3);
+  border: none;
+  border-radius: var(--r-md);
+  font-size: var(--text-base);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.execution-preview {
+  background: var(--bg-raised);
+  border-radius: var(--r-lg);
+  padding: var(--s-4);
+  margin-bottom: 10px;
+  box-shadow: var(--shadow);
+  border-left: 4px solid;
+}
+
+.execution-preview.risk-low {
+  border-left-color: var(--green);
+}
+
+.execution-preview.risk-medium {
+  border-left-color: var(--accent);
+}
+
+.execution-preview.risk-high {
+  border-left-color: var(--red);
+}
+
+.preview-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--s-3);
+}
+
+.preview-header h4 {
+  margin: 0;
+  font-size: var(--text-lg);
+}
+
+.risk-badge {
+  padding: var(--s-1) var(--s-2);
+  border-radius: var(--r-sm);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.risk-badge.low {
+  background: var(--green-dim);
+  color: var(--green);
+}
+
+.risk-badge.medium {
+  background: var(--accent-dim);
+  color: var(--accent-muted);
+}
+
+.risk-badge.high {
+  background: var(--red-dim);
+  color: var(--red);
+}
+
+.preview-summary {
+  color: var(--text-muted);
+  font-size: var(--text-base);
+  margin-bottom: var(--s-3);
+}
+
+.preview-actions {
+  max-height: 150px;
+  overflow-y: auto;
+  margin-bottom: var(--s-3);
+}
+
+.preview-action-item {
+  display: flex;
+  justify-content: space-between;
+  padding: var(--s-2) 0;
+  border-bottom: var(--border-light);
+  font-size: var(--text-sm);
+}
+
+.action-file {
+  color: var(--blue);
+  font-family: var(--font-mono);
+}
+
+.action-desc {
+  color: var(--text-muted);
+}
+
+.preview-buttons {
+  display: flex;
+  gap: 10px;
+}
+
+.confirm-btn, .cancel-btn {
+  flex: 1;
+  padding: 10px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: var(--text-base);
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.confirm-btn {
+  background: var(--green);
+  color: var(--text-inverse);
+}
+
+.confirm-btn:hover {
+  background: var(--green);
+}
+
+.cancel-btn {
+  background: var(--gray-9);
+  color: var(--text-muted);
+}
+
+.cancel-btn:hover {
+  background: var(--gray-8);
+}
+
+.tool-trace-panel {
+  background: var(--bg-raised);
+  border-radius: var(--r-lg);
+  padding: var(--s-4);
+  color: var(--text-inverse);
+}
+
+.tool-trace-panel h4 {
+  margin: 0 0 var(--s-3) 0;
+  font-size: var(--text-base);
+  color: var(--text-secondary);
+}
+
+.trace-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.trace-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--s-2) var(--s-3);
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+  font-size: var(--text-sm);
+}
+
+.trace-item.status-completed {
+  border-left: 3px solid var(--green);
+}
+
+.trace-item.status-failed {
+  border-left: 3px solid var(--red);
+}
+
+.trace-item.status-started {
+  border-left: 3px solid var(--blue);
+}
+
+.trace-tool {
+  font-family: var(--font-mono);
+  color: var(--blue);
+}
+
+.trace-status {
+  font-size: var(--text-lg);
+}
+
+.trace-duration {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

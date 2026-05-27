@@ -1,0 +1,140 @@
+/* ============================================
+   家百星 · 极简设计系统
+   原则：内容优先，空间分割替代线条分割，
+   单一强调色，快速动效，无装饰元素
+   ============================================ */
+
+:root {
+  /* === 灰度 === */
+  --gray-0: #0a0a0a;
+  --gray-1: #141414;
+  --gray-2: #1c1c1c;
+  --gray-3: #262626;
+  --gray-4: #333333;
+  --gray-5: #525252;
+  --gray-6: #757575;
+  --gray-7: #a3a3a3;
+  --gray-8: #d4d4d4;
+  --gray-9: #f0f0f0;
+  --gray-10: #fafafa;
+
+  /* === 强调色（暖琥珀 · 御姐秘书） === */
+  --accent: #c9956b;
+  --accent-dim: rgba(201, 149, 107, 0.14);
+  --accent-hover: #ddb88a;
+  --accent-muted: #a67c52;
+  --accent-gradient: linear-gradient(
+    135deg,
+    #c9956b 0%,
+    #a67c52 50%,
+    #8b6544 100%
+  );
+  --accent-glow: rgba(201, 149, 107, 0.12);
+  --shadow-glow: 0 0 32px rgba(201, 149, 107, 0.2);
+  --glass-bg: rgba(28, 28, 28, 0.72);
+
+  /* === 功能色 === */
+  --green: #6baf7b;
+  --green-dim: rgba(107, 175, 123, 0.12);
+  --red: #c96b6b;
+  --red-dim: rgba(201, 107, 107, 0.12);
+  --blue: #6b8fc9;
+  --blue-dim: rgba(107, 143, 201, 0.12);
+
+  /* === 语义变量 === */
+  --bg: var(--gray-0);
+  --bg-raised: var(--gray-1);
+  --bg-surface: var(--gray-2);
+  --bg-hover: var(--gray-3);
+  --bg-active: rgba(201, 149, 107, 0.08);
+
+  --text: var(--gray-9);
+  --text-secondary: var(--gray-7);
+  --text-muted: var(--gray-6);
+  --text-inverse: var(--gray-0);
+
+  --border: 1px solid var(--gray-4);
+  --border-light: 1px solid var(--gray-3);
+
+  /* === 间距 === */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-8: 48px;
+  --s-10: 64px;
+
+  /* === 圆角 === */
+  --r-sm: 4px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-xl: 16px;
+
+  /* === 阴影 === */
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.5);
+
+  /* === 动效 === */
+  --ease: 0.15s ease;
+
+  /* === 字体 === */
+  --font:
+    'DM Sans', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-mono: 'SF Mono', 'JetBrains Mono', 'Fira Code', monospace;
+
+  /* === 字号 === */
+  --text-xs: 11px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+  --text-2xl: 24px;
+
+  /* === 行高 === */
+  --leading: 1.6;
+  --leading-tight: 1.3;
+
+  /* === 兼容别名（旧组件引用，逐步迁移后删除）=== */
+  --surface-color: var(--bg-surface);
+  --border-color: var(--gray-4);
+  --text-primary: var(--text);
+  --primary-color: var(--accent);
+  --accent-color: var(--accent);
+  --accent-hover: var(--accent-hover);
+  --bg-primary: var(--bg);
+  --bg-input: var(--bg);
+  --font-family: var(--font);
+  --border-radius: var(--r-md);
+  --spacing-sm: var(--s-2);
+  --spacing-md: var(--s-4);
+}
+
+/* 浅色模式 */
+[data-theme='light'] {
+  --bg: #f7f5f2;
+  --bg-raised: #ffffff;
+  --bg-surface: #ffffff;
+  --bg-hover: #f0ebe4;
+  --bg-active: rgba(201, 149, 107, 0.1);
+
+  --text: #1a1614;
+  --text-secondary: #5c534c;
+  --text-muted: #8a8178;
+  --text-inverse: #faf8f6;
+
+  --border: 1px solid #e8e2da;
+  --border-light: 1px solid #f0ebe4;
+
+  --shadow: 0 1px 3px rgba(26, 22, 20, 0.06);
+  --shadow-lg: 0 8px 24px rgba(26, 22, 20, 0.08);
+
+  --accent-glow: rgba(201, 149, 107, 0.15);
+  --glass-bg: rgba(255, 255, 255, 0.85);
+  --shadow-glow: 0 4px 24px rgba(201, 149, 107, 0.15);
+
+  --border-color: #e8e2da;
+  --bg-input: #f5f0ea;
+}

@@ -1,0 +1,64 @@
+.layout-header {
+  height: 48px;
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--gray-4);
+  display: flex;
+  align-items: center;
+  padding: 0 var(--s-4);
+  gap: var(--s-3);
+  flex-shrink: 0;
+}
+
+.layout-header__brand-mark {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 1px;
+  margin-right: var(--s-2);
+}
+
+.layout-header__connection-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-xs);
+  color: var(--green);
+}
+
+.layout-header__connection-badge::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--green);
+}
+
+.layout-header__connection-badge--disconnected {
+  color: var(--red);
+}
+
+.layout-header__connection-badge--disconnected::before {
+  background: var(--red);
+}
+
+.layout-header__spacer {
+  flex: 1;
+}
+
+.layout-header__icon-btn {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: var(--accent-dim);
+  color: var(--text);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  font-size: var(--text-base);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.layout-header__icon-btn:hover {
+  background: var(--accent-glow);
+}

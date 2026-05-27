@@ -1,0 +1,184 @@
+name: Backend CI/CD
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+  workflow_dispatch:
+
+jobs:
+  lint-and-typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Run Prettier check
+        run: npm run format:check
+
+      - name: Run TypeScript type check
+        run: npx tsc --noEmit
+
+  test:
+    runs-on: ubuntu-latest
+    needs: lint-and-typecheck
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests
+        run: npm test -- --testPathIgnorePatterns="tests/integration"
+
+      - name: Run integration tests
+        run: npm test -- --testPathPatterns="tests/integration"
+
+      - name: Run test coverage
+        run: npm run test:coverage
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage/lcov.info
+          fail_ci_if_error: false
+
+  build:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build backend
+        run: npm run build
+
+      - name: Build frontend
+        run: |
+          cd src/frontend
+          npm ci
+          npm run build
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: |
+            dist/**
+            src/frontend/build/**
+
+  deploy-staging:
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    environment:
+      name: staging
+      url: https://staging.jiabaixing.example.com
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts
+          path: |
+
+      - name: Deploy to staging server
+        run: |
+          echo "Deploying to staging server..."
+          # 在这里添加部署到预发布环境的脚本
+          # 例如：scp, rsync, kubectl, docker等
+
+      - name: Run smoke tests
+        run: |
+          echo "Running smoke tests..."
+          # 在这里添加冒烟测试脚本
+          curl -f https://staging.jiabaixing.example.com/api/health || exit 1
+
+      - name: Notify deployment
+        run: |
+          echo "Deployment to staging completed!"
+
+  deploy-production:
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    environment:
+      name: production
+      url: https://jiabaixing.example.com
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts
+          path: |
+
+      - name: Deploy to production server
+        run: |
+          echo "Deploying to production server..."
+          # 在这里添加部署到生产环境的脚本
+          # 例如：scp, rsync, kubectl, docker等
+
+      - name: Run smoke tests
+        run: |
+          echo "Running smoke tests..."
+          # 在这里添加冒烟测试脚本
+          curl -f https://jiabaixing.example.com/api/health || exit 1
+
+      - name: Create deployment tag
+        run: |
+          DEPLOYMENT_TAG="v1.0.0-$(date +%Y%m%d%H%M%S)"
+          git tag $DEPLOYMENT_TAG
+          git push origin $DEPLOYMENT_TAG
+          echo "Created deployment tag: $DEPLOYMENT_TAG"
+
+      - name: Notify deployment
+        run: |
+          echo "Deployment to production completed!"
+
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run npm audit
+        run: npm audit --audit-level=high
+
+      - name: Run Snyk security scan
+        uses: snyk/actions/node@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}

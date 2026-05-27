@@ -1,0 +1,502 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 3800" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
+  <defs>
+    <marker id="arrow-green" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#22c55e"/>
+    </marker>
+    <marker id="arrow-red" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#ef4444"/>
+    </marker>
+    <marker id="arrow-yellow" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#f59e0b"/>
+    </marker>
+    <marker id="arrow-blue" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#3b82f6"/>
+    </marker>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="2" dy="2" stdDeviation="3" flood-opacity="0.15"/>
+    </filter>
+    <linearGradient id="layer-gradient" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#f8fafc;stop-opacity:0.3"/>
+      <stop offset="100%" style="stop-color:#e2e8f0;stop-opacity:0.1"/>
+    </linearGradient>
+    <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
+      <circle cx="10" cy="10" r="0.5" fill="#e2e8f0"/>
+    </pattern>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="3800" fill="#f8fafc"/>
+  <rect width="1200" height="3800" fill="url(#grid)"/>
+
+  <!-- Title -->
+  <rect x="300" y="20" width="600" height="60" rx="10" fill="#1e293b" filter="url(#shadow)"/>
+  <text x="600" y="58" text-anchor="middle" font-size="22" font-weight="bold" fill="#f8fafc">jiabaixing 系统全链路数据流图</text>
+
+  <!-- Legend -->
+  <rect x="50" y="100" width="220" height="180" rx="8" fill="white" stroke="#e2e8f0" stroke-width="1" filter="url(#shadow)"/>
+  <text x="65" y="125" font-size="14" font-weight="bold" fill="#334155">图例说明</text>
+  
+  <rect x="65" y="138" width="14" height="14" rx="3" fill="#22c55e"/>
+  <text x="90" y="150" font-size="12" fill="#475569">正常数据流 (已实现)</text>
+  
+  <rect x="65" y="158" width="14" height="14" rx="3" fill="#ef4444"/>
+  <text x="90" y="170" font-size="12" fill="#475569">断点 (数据中断)</text>
+  
+  <rect x="65" y="178" width="14" height="14" rx="3" fill="#f59e0b"/>
+  <text x="90" y="190" font-size="12" fill="#475569">缺失项 (未注入/未监听)</text>
+  
+  <rect x="65" y="198" width="14" height="14" rx="3" fill="#3b82f6"/>
+  <text x="90" y="210" font-size="12" fill="#475569">存储/持久化</text>
+
+  <rect x="65" y="218" width="14" height="14" rx="3" fill="#a855f7"/>
+  <text x="90" y="230" font-size="12" fill="#475569">转换/处理</text>
+
+  <rect x="65" y="238" width="14" height="14" rx="3" fill="#64748b"/>
+  <text x="90" y="250" font-size="12" fill="#475569">EventBus 事件</text>
+
+  <rect x="65" y="258" width="14" height="14" rx="3" fill="white" stroke="#94a3b8" stroke-width="1"/>
+  <text x="90" y="270" font-size="12" fill="#475569">模块/组件</text>
+
+  <!-- LAYER 7: Frontend -->
+  <rect x="50" y="310" width="1100" height="320" rx="12" fill="url(#layer-gradient)" stroke="#6366f1" stroke-width="2" stroke-dasharray="8 4"/>
+  <rect x="70" y="315" width="180" height="28" rx="4" fill="#6366f1"/>
+  <text x="160" y="334" text-anchor="middle" font-size="13" font-weight="bold" fill="white">L7: 前端表现层</text>
+
+  <!-- Frontend: Chat Interface -->
+  <rect x="80" y="360" width="300" height="100" rx="8" fill="white" stroke="#6366f1" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="230" y="385" text-anchor="middle" font-size="14" font-weight="bold" fill="#4f46e5">React 聊天界面</text>
+  <text x="230" y="405" text-anchor="middle" font-size="11" fill="#64748b">ChatInterface.tsx</text>
+  <text x="230" y="425" text-anchor="middle" font-size="11" fill="#64748b">MessageInput.tsx</text>
+  <text x="230" y="445" text-anchor="middle" font-size="11" fill="#64748b">ChatWindow.tsx</text>
+
+  <!-- Frontend: Dialog State Indicator -->
+  <rect x="420" y="360" width="220" height="100" rx="8" fill="white" stroke="#6366f1" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="530" y="385" text-anchor="middle" font-size="14" font-weight="bold" fill="#4f46e5">对话状态指示器</text>
+  <text x="530" y="405" text-anchor="middle" font-size="11" fill="#64748b">DialogStateIndicator.tsx</text>
+  <text x="530" y="425" text-anchor="middle" font-size="11" fill="#22c55e">🟢 idle → listening</text>
+  <text x="530" y="445" text-anchor="middle" font-size="11" fill="#f59e0b">🟡 缺少 processing/speaking</text>
+
+  <!-- Frontend: useWebSocket -->
+  <rect x="680" y="360" width="220" height="100" rx="8" fill="white" stroke="#6366f1" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="790" y="385" text-anchor="middle" font-size="14" font-weight="bold" fill="#4f46e5">useWebSocket Hook</text>
+  <text x="790" y="405" text-anchor="middle" font-size="11" fill="#64748b">连接: ws://localhost:3001</text>
+  <text x="790" y="425" text-anchor="middle" font-size="11" fill="#22c55e">🟢 接收: asr_result / dialog_state</text>
+  <text x="790" y="445" text-anchor="middle" font-size="11" fill="#ef4444">🔴 缺少: tts_chunk 处理</text>
+
+  <!-- Frontend: Voice Button -->
+  <rect x="940" y="360" width="180" height="100" rx="8" fill="white" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="5 3" filter="url(#shadow)"/>
+  <text x="1030" y="385" text-anchor="middle" font-size="14" font-weight="bold" fill="#d97706">🟡 语音按钮</text>
+  <text x="1030" y="405" text-anchor="middle" font-size="11" fill="#64748b">缺失项</text>
+  <text x="1030" y="425" text-anchor="middle" font-size="11" fill="#ef4444">🔴 无音频录制</text>
+  <text x="1030" y="445" text-anchor="middle" font-size="11" fill="#ef4444">🔴 无 blob 发送到后端</text>
+
+  <!-- Frontend to WS connection -->
+  <line x1="790" y1="460" x2="790" y2="660" stroke="#3b82f6" stroke-width="2" marker-end="url(#arrow-blue)"/>
+  <rect x="640" y="540" width="300" height="50" rx="6" fill="#dbeafe" stroke="#3b82f6" stroke-width="1"/>
+  <text x="790" y="560" text-anchor="middle" font-size="11" font-weight="bold" fill="#1e40af">WebSocket 连接</text>
+  <text x="790" y="578" text-anchor="middle" font-size="10" fill="#1e40af">消息: voice_input | text_input | interrupt</text>
+
+  <!-- LAYER 6: Transport -->
+  <rect x="50" y="680" width="1100" height="200" rx="12" fill="url(#layer-gradient)" stroke="#3b82f6" stroke-width="2" stroke-dasharray="8 4"/>
+  <rect x="70" y="685" width="180" height="28" rx="4" fill="#3b82f6"/>
+  <text x="160" y="704" text-anchor="middle" font-size="13" font-weight="bold" fill="white">L6: 传输层</text>
+
+  <!-- WS Server -->
+  <rect x="100" y="730" width="300" height="120" rx="8" fill="white" stroke="#3b82f6" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="250" y="755" text-anchor="middle" font-size="14" font-weight="bold" fill="#1d4ed8">WebSocket Server (ws)</text>
+  <text x="250" y="775" text-anchor="middle" font-size="11" fill="#22c55e">🟢 接收: voice_input → EventBus</text>
+  <text x="250" y="795" text-anchor="middle" font-size="11" fill="#22c55e">🟢 接收: text_input → EventBus</text>
+  <text x="250" y="815" text-anchor="middle" font-size="11" fill="#22c55e">🟢 接收: interrupt → synthesizer.interrupt()</text>
+  <text x="250" y="835" text-anchor="middle" font-size="11" fill="#ef4444">🔴 未广播: ASR/TTS/DialogState</text>
+
+  <!-- HTTP Server -->
+  <rect x="450" y="730" width="300" height="120" rx="8" fill="white" stroke="#3b82f6" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="600" y="755" text-anchor="middle" font-size="14" font-weight="bold" fill="#1d4ed8">HTTP Server (Express)</text>
+  <text x="600" y="775" text-anchor="middle" font-size="11" fill="#64748b">POST /api/process</text>
+  <text x="600" y="795" text-anchor="middle" font-size="11" fill="#64748b">GET /api/health</text>
+  <text x="600" y="815" text-anchor="middle" font-size="11" fill="#64748b">POST /api/voice/asr</text>
+  <text x="600" y="835" text-anchor="middle" font-size="11" fill="#64748b">POST /api/voice/tts</text>
+
+  <!-- Broadcast Functions -->
+  <rect x="800" y="730" width="320" height="120" rx="8" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="960" y="755" text-anchor="middle" font-size="14" font-weight="bold" fill="#92400e">🟡 WS 广播函数</text>
+  <text x="960" y="775" text-anchor="middle" font-size="11" fill="#ef4444">🔴 broadcastASRResult() 未被调用</text>
+  <text x="960" y="795" text-anchor="middle" font-size="11" fill="#ef4444">🔴 broadcastTTSChunk() 未被调用</text>
+  <text x="960" y="815" text-anchor="middle" font-size="11" fill="#f59e0b">🟡 broadcastDialogState() 部分调用</text>
+  <text x="960" y="835" text-anchor="middle" font-size="11" fill="#64748b">缺少: PROCESSING / SPEAKING 状态</text>
+
+  <!-- WS Server to EventBus -->
+  <line x1="250" y1="850" x2="250" y2="960" stroke="#22c55e" stroke-width="2" marker-end="url(#arrow-green)"/>
+  <text x="270" y="910" font-size="10" fill="#22c55e">emit user_input</text>
+
+  <!-- LAYER 5: EventBus -->
+  <rect x="50" y="980" width="1100" height="150" rx="12" fill="url(#layer-gradient)" stroke="#64748b" stroke-width="2" stroke-dasharray="8 4"/>
+  <rect x="70" y="985" width="180" height="28" rx="4" fill="#64748b"/>
+  <text x="160" y="1004" text-anchor="middle" font-size="13" font-weight="bold" fill="white">L5: 事件总线层 (EventBus)</text>
+
+  <rect x="100" y="1030" width="300" height="80" rx="8" fill="white" stroke="#64748b" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="250" y="1055" text-anchor="middle" font-size="14" font-weight="bold" fill="#475569">EventBus (EventEmitter)</text>
+  <text x="250" y="1075" text-anchor="middle" font-size="11" fill="#64748b">事件: user_input, user_speech</text>
+  <text x="250" y="1095" text-anchor="middle" font-size="11" fill="#64748b">事件: interrupt_detected, conversationEnd</text>
+
+  <rect x="450" y="1030" width="200" height="80" rx="8" fill="white" stroke="#64748b" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="550" y="1055" text-anchor="middle" font-size="14" font-weight="bold" fill="#475569">AppContext</text>
+  <text x="550" y="1075" text-anchor="middle" font-size="11" fill="#64748b">全局模块实例容器</text>
+  <text x="550" y="1095" text-anchor="middle" font-size="11" fill="#22c55e">🟢 security, memory, core, interaction</text>
+
+  <rect x="700" y="1030" width="420" height="80" rx="8" fill="white" stroke="#64748b" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="910" y="1055" text-anchor="middle" font-size="14" font-weight="bold" fill="#475569">EventRoute (setupEventRoutes)</text>
+  <text x="910" y="1075" text-anchor="middle" font-size="11" fill="#22c55e">🟢 user_input → security.validateInput() → core.processInput()</text>
+  <text x="910" y="1095" text-anchor="middle" font-size="11" fill="#22c55e">🟢 → interaction.outputResponse()</text>
+
+  <!-- EventBus to Input Sources -->
+  <line x1="150" y1="1130" x2="150" y2="1240" stroke="#22c55e" stroke-width="2" marker-end="url(#arrow-green)"/>
+  <line x1="450" y1="1130" x2="450" y2="1240" stroke="#f59e0b" stroke-width="2" marker-end="url(#arrow-yellow)" stroke-dasharray="5 3"/>
+  <line x1="750" y1="1130" x2="750" y2="1240" stroke="#f59e0b" stroke-width="2" marker-end="url(#arrow-yellow)" stroke-dasharray="5 3"/>
+
+  <!-- LAYER 0: Input Sources -->
+  <rect x="50" y="1160" width="1100" height="250" rx="12" fill="url(#layer-gradient)" stroke="#22c55e" stroke-width="2" stroke-dasharray="8 4"/>
+  <rect x="70" y="1165" width="180" height="28" rx="4" fill="#22c55e"/>
+  <text x="160" y="1184" text-anchor="middle" font-size="13" font-weight="bold" fill="white">L0: 输入源层 &amp; 主动感知层</text>
+
+  <!-- CLI stdin -->
+  <rect x="80" y="1210" width="200" height="120" rx="8" fill="white" stroke="#22c55e" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="180" y="1235" text-anchor="middle" font-size="14" font-weight="bold" fill="#16a34a">🖥️ CLI 命令行</text>
+  <text x="180" y="1255" text-anchor="middle" font-size="11" fill="#22c55e">🟢 process.stdin.on('data')</text>
+  <text x="180" y="1275" text-anchor="middle" font-size="11" fill="#64748b">source: text</text>
+  <text x="180" y="1295" text-anchor="middle" font-size="11" fill="#64748b">emit → EventBus</text>
+  <text x="180" y="1315" text-anchor="middle" font-size="11" fill="#64748b">全链路畅通</text>
+
+  <!-- Speech Input -->
+  <rect x="330" y="1210" width="300" height="120" rx="8" fill="white" stroke="#ef4444" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="480" y="1235" text-anchor="middle" font-size="14" font-weight="bold" fill="#dc2626">🔴 语音输入链路 (断点)</text>
+  <text x="480" y="1255" text-anchor="middle" font-size="11" fill="#ef4444">🔴 MockRecognizer 返回空结果</text>
+  <text x="480" y="1275" text-anchor="middle" font-size="11" fill="#ef4444">🔴 dialogManager 不调用 recognizer</text>
+  <text x="480" y="1295" text-anchor="middle" font-size="11" fill="#ef4444">🔴 user_speech 事件从未触发</text>
+  <text x="480" y="1315" text-anchor="middle" font-size="11" fill="#f59e0b">🟡 Faster-Whisper 未真正接入</text>
+
+  <!-- ScreenMonitor -->
+  <rect x="680" y="1210" width="200" height="120" rx="8" fill="white" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="5 3" filter="url(#shadow)"/>
+  <text x="780" y="1235" text-anchor="middle" font-size="14" font-weight="bold" fill="#d97706">🟡 ScreenMonitor</text>
+  <text x="780" y="1255" text-anchor="middle" font-size="11" fill="#64748b">监控 IDE 文件编辑行为</text>
+  <text x="780" y="1275" text-anchor="middle" font-size="11" fill="#22c55e">🟢 startMonitoring() 已调用</text>
+  <text x="780" y="1295" text-anchor="middle" font-size="11" fill="#f59e0b">🟡 emit → proactiveSuggestion</text>
+  <text x="780" y="1315" text-anchor="middle" font-size="11" fill="#f59e0b">🟡 无 WS 推送到前端</text>
+
+  <!-- ProactiveCodeAdvisor -->
+  <rect x="920" y="1210" width="200" height="120" rx="8" fill="white" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="5 3" filter="url(#shadow)"/>
+  <text x="1020" y="1235" text-anchor="middle" font-size="14" font-weight="bold" fill="#d97706">🟡 ProactiveCodeAdvisor</text>
+  <text x="1020" y="1255" text-anchor="middle" font-size="11" fill="#64748b">代码质量分析</text>
+  <text x="1020" y="1275" text-anchor="middle" font-size="11" fill="#64748b">生成优化建议</text>
+  <text x="1020" y="1295" text-anchor="middle" font-size="11" fill="#22c55e">🟢 emit → outputResponse</text>
+  <text x="1020" y="1315" text-anchor="middle" font-size="11" fill="#f59e0b">🟡 无桌面通知</text>
+
+  <!-- CLI to Security -->
+  <line x1="180" y1="1330" x2="180" y2="1500" stroke="#22c55e" stroke-width="2" marker-end="url(#arrow-green)"/>
+  <text x="195" y="1420" font-size="10" fill="#22c55e">text 数据流</text>
+
+  <!-- Speech to DialogManager (broken) -->
+  <line x1="480" y1="1330" x2="480" y2="1500" stroke="#ef4444" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrow-red)"/>
+  <rect x="420" y="1400" width="120" height="30" rx="4" fill="#fef2f2" stroke="#ef4444" stroke-width="1"/>
+  <text x="480" y="1420" text-anchor="middle" font-size="10" font-weight="bold" fill="#dc2626">🔴 断点</text>
+
+  <!-- LAYER 4: Decision Layer -->
+  <rect x="50" y="1450" width="1100" height="550" rx="12" fill="url(#layer-gradient)" stroke="#8b5cf6" stroke-width="2" stroke-dasharray="8 4"/>
+  <rect x="70" y="1455" width="200" height="28" rx="4" fill="#8b5cf6"/>
+  <text x="170" y="1474" text-anchor="middle" font-size="13" font-weight="bold" fill="white">L4: 决策编排层</text>
+
+  <!-- SecurityManager -->
+  <rect x="80" y="1500" width="250" height="180" rx="8" fill="white" stroke="#22c55e" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="205" y="1525" text-anchor="middle" font-size="14" font-weight="bold" fill="#16a34a">🛡️ SecurityManager</text>
+  <text x="205" y="1545" text-anchor="middle" font-size="11" fill="#22c55e">🟢 validateInput()</text>
+  <text x="205" y="1565" text-anchor="middle" font-size="11" fill="#64748b">├─ 注入检测</text>
+  <text x="205" y="1585" text-anchor="middle" font-size="11" fill="#64748b">├─ SQL 注入检测</text>
+  <text x="205" y="1605" text-anchor="middle" font-size="11" fill="#64748b">├─ XSS 检测</text>
+  <text x="205" y="1625" text-anchor="middle" font-size="11" fill="#64748b">├─ 敏感词检测</text>
+  <text x="205" y="1645" text-anchor="middle" font-size="11" fill="#64748b">└─ 长度校验</text>
+  <text x="205" y="1665" text-anchor="middle" font-size="11" fill="#64748b">返回: { valid, errors[] }</text>
+
+  <!-- ContinuousDialogManager -->
+  <rect x="370" y="1500" width="250" height="180" rx="8" fill="white" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="5 3" filter="url(#shadow)"/>
+  <text x="495" y="1525" text-anchor="middle" font-size="14" font-weight="bold" fill="#d97706">🟡 ContinuousDialogManager</text>
+  <text x="495" y="1545" text-anchor="middle" font-size="11" fill="#64748b">对话状态/轮次管理</text>
+  <text x="495" y="1565" text-anchor="middle" font-size="11" fill="#22c55e">🟢 initialize() / startListening()</text>
+  <text x="495" y="1585" text-anchor="middle" font-size="11" fill="#22c55e">🟢 沉默超时检测</text>
+  <text x="495" y="1605" text-anchor="middle" font-size="11" fill="#22c55e">🟢 对话结束判断</text>
+  <text x="495" y="1625" text-anchor="middle" font-size="11" fill="#ef4444">🔴 无实际音频采集</text>
+  <text x="495" y="1645" text-anchor="middle" font-size="11" fill="#ef4444">🔴 speechRecognizer 未使用</text>
+  <text x="495" y="1665" text-anchor="middle" font-size="11" fill="#f59e0b">🟡 状态未广播到 WS</text>
+
+  <!-- JiabaixingCore -->
+  <rect x="660" y="1500" width="250" height="180" rx="8" fill="white" stroke="#ef4444" stroke-width="2" filter="url(#shadow)"/>
+  <text x="785" y="1525" text-anchor="middle" font-size="14" font-weight="bold" fill="#dc2626">🔴 JiabaixingCore (核心)</text>
+  <text x="785" y="1545" text-anchor="middle" font-size="11" fill="#64748b">意图识别 / 决策</text>
+  <text x="785" y="1565" text-anchor="middle" font-size="11" fill="#22c55e">🟢 processInput() 已实现</text>
+  <text x="785" y="1585" text-anchor="middle" font-size="11" fill="#22c55e">🟢 意图分类: greeting/command/question</text>
+  <text x="785" y="1605" text-anchor="middle" font-size="11" fill="#ef4444">🔴 未注入 MemoryEngine</text>
+  <text x="785" y="1625" text-anchor="middle" font-size="11" fill="#ef4444">🔴 未注入 ToolManager</text>
+  <text x="785" y="1645" text-anchor="middle" font-size="11" fill="#ef4444">🔴 不调用工具执行</text>
+  <text x="785" y="1665" text-anchor="middle" font-size="11" fill="#ef4444">🔴 无记忆上下文增强</text>
+
+  <!-- MemoryEngine -->
+  <rect x="660" y="1720" width="250" height="160" rx="8" fill="white" stroke="#ef4444" stroke-width="2" filter="url(#shadow)"/>
+  <text x="785" y="1745" text-anchor="middle" font-size="14" font-weight="bold" fill="#dc2626">🔴 MemoryEngine (记忆)</text>
+  <text x="785" y="1765" text-anchor="middle" font-size="11" fill="#64748b">已初始化但未被消费</text>
+  <text x="785" y="1785" text-anchor="middle" font-size="11" fill="#64748b">├─ ShortTermMemory</text>
+  <text x="785" y="1805" text-anchor="middle" font-size="11" fill="#64748b">├─ LongTermMemory</text>
+  <text x="785" y="1825" text-anchor="middle" font-size="11" fill="#64748b">├─ UserProfile</text>
+  <text x="785" y="1845" text-anchor="middle" font-size="11" fill="#64748b">├─ VectorDatabase</text>
+  <text x="785" y="1865" text-anchor="middle" font-size="11" fill="#ef4444">🔴 整条链路断开</text>
+
+  <!-- Memory to Core broken arrow -->
+  <line x1="785" y1="1720" x2="785" y2="1680" stroke="#ef4444" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrow-red)"/>
+  <rect x="710" y="1690" width="150" height="24" rx="4" fill="#fef2f2" stroke="#ef4444" stroke-width="1"/>
+  <text x="785" y="1707" text-anchor="middle" font-size="9" font-weight="bold" fill="#dc2626">🔴 未注入</text>
+
+  <!-- ToolManager -->
+  <rect x="660" y="1900" width="250" height="120" rx="8" fill="white" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="5 3" filter="url(#shadow)"/>
+  <text x="785" y="1925" text-anchor="middle" font-size="14" font-weight="bold" fill="#d97706">🟡 ToolManager (工具)</text>
+  <text x="785" y="1945" text-anchor="middle" font-size="11" fill="#22c55e">🟢 initialize() 已调用</text>
+  <text x="785" y="1965" text-anchor="middle" font-size="11" fill="#22c55e">🟢 MCP / 沙箱 / 模板已注册</text>
+  <text x="785" y="1985" text-anchor="middle" font-size="11" fill="#ef4444">🔴 Core 未调用工具执行</text>
+  <text x="785" y="2005" text-anchor="middle" font-size="11" fill="#64748b">工具执行链路断开</text>
+
+  <!-- Core to Tool broken arrow -->
+  <line x1="785" y1="1680" x2="785" y2="1900" stroke="#ef4444" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrow-red)"/>
+  <rect x="725" y="1780" width="120" height="24" rx="4" fill="#fef2f2" stroke="#ef4444" stroke-width="1"/>
+  <text x="785" y="1797" text-anchor="middle" font-size="9" font-weight="bold" fill="#dc2626">🔴 未调用</text>
+
+  <!-- SpeechRecognizer -->
+  <rect x="370" y="1720" width="250" height="100" rx="8" fill="white" stroke="#ef4444" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="495" y="1745" text-anchor="middle" font-size="14" font-weight="bold" fill="#dc2626">🔴 SpeechRecognizer</text>
+  <text x="495" y="1765" text-anchor="middle" font-size="11" fill="#64748b">MockSpeechRecognizer / Faster-Whisper</text>
+  <text x="495" y="1785" text-anchor="middle" font-size="11" fill="#22c55e">🟢 initialize() 已调用</text>
+  <text x="495" y="1805" text-anchor="middle" font-size="11" fill="#ef4444">🔴 recognizeStreaming() 空实现</text>
+
+  <!-- SpeechSynthesizer -->
+  <rect x="370" y="1840" width="250" height="100" rx="8" fill="white" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="5 3" filter="url(#shadow)"/>
+  <text x="495" y="1865" text-anchor="middle" font-size="14" font-weight="bold" fill="#d97706">🟡 SpeechSynthesizer (TTS)</text>
+  <text x="495" y="1885" text-anchor="middle" font-size="11" fill="#64748b">Coqui TTS / 御姐音</text>
+  <text x="495" y="1905" text-anchor="middle" font-size="11" fill="#22c55e">🟢 speak() / interrupt() 已实现</text>
+  <text x="495" y="1925" text-anchor="middle" font-size="11" fill="#f59e0b">🟡 无 WS TTS chunk 广播</text>
+
+  <!-- Security to Core -->
+  <line x1="330" y1="1590" x2="660" y2="1590" stroke="#22c55e" stroke-width="2" marker-end="url(#arrow-green)"/>
+  <text x="495" y="1580" text-anchor="middle" font-size="10" fill="#22c55e">valid → processInput()</text>
+
+  <!-- Security to Interaction (invalid path) -->
+  <line x1="205" y1="1680" x2="205" y2="2100" stroke="#22c55e" stroke-width="2" marker-end="url(#arrow-green)"/>
+  <text x="160" y="1850" font-size="10" fill="#ef4444">invalid → 拦截输出</text>
+
+  <!-- Core to Interaction -->
+  <line x1="785" y1="1680" x2="970" y2="2100" stroke="#22c55e" stroke-width="2" marker-end="url(#arrow-green)"/>
+  <text x="900" y="1900" font-size="10" fill="#22c55e">response → outputResponse</text>
+
+  <!-- LAYER 3: Interaction -->
+  <rect x="50" y="2050" width="1100" height="200" rx="12" fill="url(#layer-gradient)" stroke="#ec4899" stroke-width="2" stroke-dasharray="8 4"/>
+  <rect x="70" y="2055" width="200" height="28" rx="4" fill="#ec4899"/>
+  <text x="170" y="2074" text-anchor="middle" font-size="13" font-weight="bold" fill="white">L3: 交互输出层</text>
+
+  <!-- InteractionEngine -->
+  <rect x="80" y="2100" width="350" height="130" rx="8" fill="white" stroke="#ec4899" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="255" y="2125" text-anchor="middle" font-size="14" font-weight="bold" fill="#be185d">💝 InteractionEngine</text>
+  <text x="255" y="2145" text-anchor="middle" font-size="11" fill="#22c55e">🟢 outputResponse() 公共方法</text>
+  <text x="255" y="2165" text-anchor="middle" font-size="11" fill="#64748b">├─ Emoji 生成</text>
+  <text x="255" y="2185" text-anchor="middle" font-size="11" fill="#64748b">├─ 控制台输出</text>
+  <text x="255" y="2205" text-anchor="middle" font-size="11" fill="#22c55e">🟢 TTS 播放 (useVoice=true)</text>
+  <text x="255" y="2215" text-anchor="middle" font-size="11" fill="#f59e0b">🟡 proactive 标记支持</text>
+
+  <!-- Interaction detail -->
+  <rect x="480" y="2100" width="300" height="130" rx="8" fill="white" stroke="#ec4899" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="630" y="2125" text-anchor="middle" font-size="14" font-weight="bold" fill="#be185d">输出内容</text>
+  <text x="630" y="2150" text-anchor="middle" font-size="12" fill="#64748b">文本回复 + Emoji + TTS语音</text>
+  <text x="630" y="2175" text-anchor="middle" font-size="11" fill="#64748b">话术风格: 御姐音</text>
+  <text x="630" y="2195" text-anchor="middle" font-size="11" fill="#64748b">情感状态: 根据场景自适应</text>
+  <text x="630" y="2215" text-anchor="middle" font-size="11" fill="#f59e0b">🟡 缺: WS 推送前端展示</text>
+
+  <!-- Storage box -->
+  <rect x="830" y="2100" width="290" height="130" rx="8" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="975" y="2125" text-anchor="middle" font-size="14" font-weight="bold" fill="#1e40af">🔵 持久化存储</text>
+  <text x="975" y="2150" text-anchor="middle" font-size="11" fill="#64748b">├─ ShortTermMemory (JSON)</text>
+  <text x="975" y="2170" text-anchor="middle" font-size="11" fill="#64748b">├─ LongTermMemory (向量库)</text>
+  <text x="975" y="2190" text-anchor="middle" font-size="11" fill="#64748b">├─ UserProfile (JSON)</text>
+  <text x="975" y="2210" text-anchor="middle" font-size="11" fill="#64748b">└─ SecurityAuditLogs</text>
+
+  <!-- Interaction to Storage -->
+  <line x1="430" y1="2165" x2="830" y2="2165" stroke="#3b82f6" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrow-blue)"/>
+  <text x="630" y="2155" text-anchor="middle" font-size="10" fill="#3b82f6">交互历史</text>
+
+  <!-- LAYER 2: Model Layer -->
+  <rect x="50" y="2300" width="1100" height="180" rx="12" fill="url(#layer-gradient)" stroke="#a855f7" stroke-width="2" stroke-dasharray="8 4"/>
+  <rect x="70" y="2305" width="200" height="28" rx="4" fill="#a855f7"/>
+  <text x="170" y="2324" text-anchor="middle" font-size="13" font-weight="bold" fill="white">L2: 模型层 (可选)</text>
+
+  <!-- LLM Provider -->
+  <rect x="80" y="2350" width="300" height="110" rx="8" fill="white" stroke="#a855f7" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="230" y="2375" text-anchor="middle" font-size="14" font-weight="bold" fill="#7c3aed">🟣 LLMProvider</text>
+  <text x="230" y="2395" text-anchor="middle" font-size="11" fill="#64748b">Ollama / OpenAI / Claude</text>
+  <text x="230" y="2415" text-anchor="middle" font-size="11" fill="#f59e0b">🟡 Core 未接入 LLM</text>
+  <text x="230" y="2435" text-anchor="middle" font-size="11" fill="#64748b">当前使用规则模板回复</text>
+  <text x="230" y="2455" text-anchor="middle" font-size="11" fill="#f59e0b">🟡 需注入到 Core 实现智能决策</text>
+
+  <!-- Multimodal -->
+  <rect x="430" y="2350" width="300" height="110" rx="8" fill="white" stroke="#a855f7" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="580" y="2375" text-anchor="middle" font-size="14" font-weight="bold" fill="#7c3aed">🟣 多模态处理</text>
+  <text x="580" y="2395" text-anchor="middle" font-size="11" fill="#64748b">EmotionAnalyzer / SceneRecognizer</text>
+  <text x="580" y="2415" text-anchor="middle" font-size="11" fill="#64748b">MultimodalFusionEngine</text>
+  <text x="580" y="2435" text-anchor="middle" font-size="11" fill="#f59e0b">🟡 未接入数据流</text>
+  <text x="580" y="2455" text-anchor="middle" font-size="11" fill="#64748b">可用于情感化话术增强</text>
+
+  <!-- LAYER 1: Hardware -->
+  <rect x="50" y="2530" width="1100" height="150" rx="12" fill="url(#layer-gradient)" stroke="#64748b" stroke-width="2" stroke-dasharray="8 4"/>
+  <rect x="70" y="2535" width="200" height="28" rx="4" fill="#64748b"/>
+  <text x="170" y="2554" text-anchor="middle" font-size="13" font-weight="bold" fill="white">L1: 硬件设备层</text>
+
+  <rect x="80" y="2580" width="250" height="80" rx="8" fill="white" stroke="#64748b" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="205" y="2605" text-anchor="middle" font-size="14" font-weight="bold" fill="#475569">🎤 音频输入设备</text>
+  <text x="205" y="2625" text-anchor="middle" font-size="11" fill="#64748b">麦克风 → SpeechRecognizer</text>
+  <text x="205" y="2645" text-anchor="middle" font-size="11" fill="#ef4444">🔴 未实际采集</text>
+
+  <rect x="380" y="2580" width="250" height="80" rx="8" fill="white" stroke="#64748b" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="505" y="2605" text-anchor="middle" font-size="14" font-weight="bold" fill="#475569">🔊 音频输出设备</text>
+  <text x="505" y="2625" text-anchor="middle" font-size="11" fill="#64748b">Speaker ← SpeechSynthesizer</text>
+  <text x="505" y="2645" text-anchor="middle" font-size="11" fill="#22c55e">🟢 TTS 播放可用</text>
+
+  <rect x="680" y="2580" width="250" height="80" rx="8" fill="white" stroke="#64748b" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="805" y="2605" text-anchor="middle" font-size="14" font-weight="bold" fill="#475569">🖥️ 显示设备</text>
+  <text x="805" y="2625" text-anchor="middle" font-size="11" fill="#64748b">前端 React App ← WebSocket</text>
+  <text x="805" y="2645" text-anchor="middle" font-size="11" fill="#22c55e">🟢 界面展示正常</text>
+
+  <!-- LAYER 0: Config -->
+  <rect x="50" y="2730" width="1100" height="120" rx="12" fill="url(#layer-gradient)" stroke="#94a3b8" stroke-width="2" stroke-dasharray="8 4"/>
+  <rect x="70" y="2735" width="200" height="28" rx="4" fill="#94a3b8"/>
+  <text x="170" y="2754" text-anchor="middle" font-size="13" font-weight="bold" fill="white">L0: 配置层</text>
+
+  <rect x="80" y="2780" width="500" height="50" rx="8" fill="white" stroke="#94a3b8" stroke-width="1" filter="url(#shadow)"/>
+  <text x="330" y="2800" text-anchor="middle" font-size="11" fill="#64748b">.env: ASR_BACKEND | TTS_BACKEND | ENABLE_VOICE | ENABLE_SCREEN_MONITOR | SMTP_*</text>
+
+  <rect x="630" y="2780" width="500" height="50" rx="8" fill="white" stroke="#94a3b8" stroke-width="1" filter="url(#shadow)"/>
+  <text x="880" y="2800" text-anchor="middle" font-size="11" fill="#64748b">server.config.ts: port | host | rateLimit | cors | security | monitoring</text>
+
+  <!-- Arrow from config to all layers -->
+  <line x1="880" y1="2780" x2="880" y2="2680" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 2"/>
+  <line x1="880" y1="2680" x2="880" y2="2560" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 2"/>
+  <line x1="880" y1="2680" x2="580" y2="2560" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 2"/>
+  <line x1="880" y1="2680" x2="280" y2="2560" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 2"/>
+
+  <!-- SUMMARY: Breakpoints -->
+  <rect x="50" y="2900" width="540" height="450" rx="12" fill="#fef2f2" stroke="#ef4444" stroke-width="2" filter="url(#shadow)"/>
+  <rect x="60" y="2910" width="100" height="28" rx="4" fill="#ef4444"/>
+  <text x="110" y="2929" text-anchor="middle" font-size="13" font-weight="bold" fill="white">🔴 断点清单</text>
+
+  <text x="70" y="2960" font-size="11" font-weight="bold" fill="#991b1b">断点 1 (高严重度):</text>
+  <text x="70" y="2975" font-size="10" fill="#7f1d1d">ContinuousDialogManager.startListening() 只设置 isListening=true，</text>
+  <text x="70" y="2988" font-size="10" fill="#7f1d1d">未启动麦克风音频采集 → 无法传给 recognizer</text>
+
+  <text x="70" y="3010" font-size="11" font-weight="bold" fill="#991b1b">断点 2 (高严重度):</text>
+  <text x="70" y="3025" font-size="10" fill="#7f1d1d">MockSpeechRecognizer.recognizeStreaming() 返回空结果</text>
+  <text x="70" y="3038" font-size="10" fill="#7f1d1d">user_speech 事件从未被触发</text>
+
+  <text x="70" y="3060" font-size="11" font-weight="bold" fill="#991b1b">断点 3 (高严重度):</text>
+  <text x="70" y="3075" font-size="10" fill="#7f1d1d">JiabaixingCore 未注入 MemoryEngine</text>
+  <text x="70" y="3088" font-size="10" fill="#7f1d1d">→ 记忆检索链路完全断开，无法使用历史上下文</text>
+
+  <text x="70" y="3110" font-size="11" font-weight="bold" fill="#991b1b">断点 4 (高严重度):</text>
+  <text x="70" y="3125" font-size="10" fill="#7f1d1d">JiabaixingCore 未调用 ToolManager</text>
+  <text x="70" y="3138" font-size="10" fill="#7f1d1d">→ 工具执行链路断开，无法真正执行文件操作等</text>
+
+  <text x="70" y="3160" font-size="11" font-weight="bold" fill="#991b1b">断点 5 (中严重度):</text>
+  <text x="70" y="3175" font-size="10" fill="#7f1d1d">broadcastASRResult/broadcastTTSChunk/broadcastDialogState</text>
+  <text x="70" y="3188" font-size="10" fill="#7f1d1d">未被调用 → 前端无法实时显示 ASR/TTS/对话状态</text>
+
+  <text x="70" y="3210" font-size="11" font-weight="bold" fill="#991b1b">断点 6 (中严重度):</text>
+  <text x="70" y="3225" font-size="10" fill="#7f1d1d">speechRecognizer 已注入 dialogManager 但从未被使用</text>
+  <text x="70" y="3238" font-size="10" fill="#7f1d1d">dialogManager 没有实际调用 recognizeStreaming()</text>
+
+  <text x="70" y="3260" font-size="11" font-weight="bold" fill="#991b1b">断点 7 (低严重度):</text>
+  <text x="70" y="3275" font-size="10" fill="#7f1d1d">主动提示无 WS 推送 → ProactiveCodeAdvisor 建议不显示在前端</text>
+  <text x="70" y="3288" font-size="10" fill="#7f1d1d">前端无桌面通知 → 用户可能错过主动建议</text>
+
+  <!-- SUMMARY: Missing Items -->
+  <rect x="620" y="2900" width="540" height="450" rx="12" fill="#fffbeb" stroke="#f59e0b" stroke-width="2" filter="url(#shadow)"/>
+  <rect x="630" y="2910" width="120" height="28" rx="4" fill="#f59e0b"/>
+  <text x="690" y="2929" text-anchor="middle" font-size="13" font-weight="bold" fill="white">🟡 缺失项清单</text>
+
+  <text x="640" y="2960" font-size="11" font-weight="bold" fill="#92400e">缺失项 1 (P0):</text>
+  <text x="640" y="2975" font-size="10" fill="#78350f">core.setMemoryEngine(memory) - 注入记忆引擎</text>
+
+  <text x="640" y="2997" font-size="11" font-weight="bold" fill="#92400e">缺失项 2 (P0):</text>
+  <text x="640" y="3012" font-size="10" fill="#78350f">core.setToolManager(tools) - 注入工具管理器</text>
+
+  <text x="640" y="3034" font-size="11" font-weight="bold" fill="#92400e">缺失项 3 (P0):</text>
+  <text x="640" y="3049" font-size="10" fill="#78350f">dialogManager 中启动音频采集 → recognizer.recognizeStreaming()</text>
+
+  <text x="640" y="3071" font-size="11" font-weight="bold" fill="#92400e">缺失项 4 (P1):</text>
+  <text x="640" y="3086" font-size="10" fill="#78350f">SpeechSynthesizer.speak() 中调用 broadcastTTSChunk()</text>
+
+  <text x="640" y="3108" font-size="11" font-weight="bold" fill="#92400e">缺失项 5 (P1):</text>
+  <text x="640" y="3123" font-size="10" fill="#78350f">增加 broadcastDialogState('PROCESSING') 和 ('SPEAKING')</text>
+
+  <text x="640" y="3145" font-size="11" font-weight="bold" fill="#92400e">缺失项 6 (P2):</text>
+  <text x="640" y="3160" font-size="10" fill="#78350f">前端实现麦克风录制 + audio blob 发送到后端</text>
+
+  <text x="640" y="3182" font-size="11" font-weight="bold" fill="#92400e">缺失项 7 (P2):</text>
+  <text x="640" y="3197" font-size="10" fill="#78350f">主动提示通过 WS 推送 + 前端 Notification API</text>
+
+  <text x="640" y="3219" font-size="11" font-weight="bold" fill="#92400e">缺失项 8 (P2):</text>
+  <text x="640" y="3234" font-size="10" fill="#78350f">EventBus 改为严格类型 (当前使用 unknown)</text>
+
+  <text x="640" y="3256" font-size="11" font-weight="bold" fill="#92400e">缺失项 9 (P2):</text>
+  <text x="640" y="3271" font-size="10" fill="#78350f">Core 接入 LLMProvider 替代规则模板回复</text>
+
+  <text x="640" y="3293" font-size="11" font-weight="bold" fill="#92400e">缺失项 10 (P2):</text>
+  <text x="640" y="3308" font-size="10" fill="#78350f">多模态模块接入情感化话术增强</text>
+
+  <!-- Data Flow Summary -->
+  <rect x="50" y="3380" width="1100" height="180" rx="12" fill="white" stroke="#1e293b" stroke-width="2" filter="url(#shadow)"/>
+  <rect x="60" y="3390" width="200" height="28" rx="4" fill="#1e293b"/>
+  <text x="160" y="3409" text-anchor="middle" font-size="13" font-weight="bold" fill="white">📊 数据流状态汇总</text>
+
+  <!-- Status bars -->
+  <rect x="70" y="3435" width="500" height="24" rx="4" fill="#f1f5f9"/>
+  <rect x="70" y="3435" width="300" height="24" rx="4" fill="#22c55e"/>
+  <text x="120" y="3451" font-size="11" font-weight="bold" fill="white">CLI 文本链路 (已通)</text>
+
+  <rect x="70" y="3465" width="500" height="24" rx="4" fill="#f1f5f9"/>
+  <rect x="70" y="3465" width="150" height="24" rx="4" fill="#ef4444"/>
+  <text x="120" y="3481" font-size="11" font-weight="bold" fill="white">语音输入链路 (断)</text>
+
+  <rect x="70" y="3495" width="500" height="24" rx="4" fill="#f1f5f9"/>
+  <rect x="70" y="3495" width="200" height="24" rx="4" fill="#f59e0b"/>
+  <text x="120" y="3511" font-size="11" font-weight="bold" fill="white">WS 前端交互 (部分)</text>
+
+  <rect x="70" y="3525" width="500" height="24" rx="4" fill="#f1f5f9"/>
+  <rect x="70" y="3525" width="180" height="24" rx="4" fill="#f59e0b"/>
+  <text x="120" y="3541" font-size="11" font-weight="bold" fill="white">主动感知链路 (部分)</text>
+
+  <rect x="70" y="3555" width="500" height="24" rx="4" fill="#f1f5f9"/>
+  <rect x="70" y="3555" width="0" height="24" rx="4" fill="#ef4444"/>
+  <text x="120" y="3571" font-size="11" font-weight="bold" fill="#ef4444">记忆增强链路 (完全断开)</text>
+
+  <rect x="70" y="3585" width="500" height="24" rx="4" fill="#f1f5f9"/>
+  <rect x="70" y="3585" width="50" height="24" rx="4" fill="#f59e0b"/>
+  <text x="120" y="3601" font-size="11" font-weight="bold" fill="white">工具执行链路 (未通)</text>
+
+  <!-- Right side stats -->
+  <rect x="600" y="3430" width="520" height="120" rx="8" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="860" y="3455" text-anchor="middle" font-size="14" font-weight="bold" fill="#334155">系统统计</text>
+  <text x="620" y="3480" font-size="12" fill="#475569">总模块数: 15+                          已初始化: 12</text>
+  <text x="620" y="3500" font-size="12" fill="#475569">事件路由: 3 (user_input / user_speech / interrupt)</text>
+  <text x="620" y="3520" font-size="12" fill="#475569">断点: 7 个                                  缺失项: 10 个</text>
+  <text x="620" y="3540" font-size="12" fill="#22c55e">畅通链路: 2/7 (28.6%)</text>
+  <text x="860" y="3540" font-size="12" fill="#ef4444">断开链路: 2/7 (28.6%)</text>
+
+  <text x="620" y="3560" font-size="12" fill="#475569">P0 修复项: 3    P1 修复项: 2    P2 修复项: 5</text>
+  <text x="620" y="3575" font-size="11" fill="#64748b">修复 P0 后可实现: 文本输入 → 安全校验 → 核心决策 → 工具执行 → 输出展示 全闭环</text>
+  <text x="620" y="3590" font-size="11" fill="#64748b">修复 P1 后可实现: 语音输入 → ASR → 安全校验 → TTS → 前端实时展示 全双工</text>
+  <text x="620" y="3605" font-size="11" fill="#64748b">修复 P2 后可实现: 记忆增强 + LLM智能决策 + 主动建议推送 完整体验</text>
+
+  <!-- Footer -->
+  <text x="600" y="3760" text-anchor="middle" font-size="12" fill="#94a3b8">jiabaixing 系统全链路数据流图 | 生成日期: 2025-04-24 | 基于当前代码库状态</text>
+</svg>

@@ -1,0 +1,37 @@
+.typewriter-text {
+  display: inline;
+  cursor: pointer;
+  transition: opacity 0.2s ease;
+}
+
+.typewriter-text.typing {
+  opacity: 1;
+}
+
+.typewriter-text.typing:hover {
+  opacity: 0.8;
+}
+
+.typewriter-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1.2em;
+  background-color: currentColor;
+  margin-left: 2px;
+  animation: cursor-blink 1s step-end infinite;
+  vertical-align: text-bottom;
+}
+
+@keyframes cursor-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+.typewriter-text.complete .typewriter-cursor {
+  display: none;
+}

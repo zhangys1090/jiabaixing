@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>家百星 · AI Agent 演化能力测试台</title>
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --surface: #141414;
+    --card: #1a1a1a;
+    --border: #2a2a2a;
+    --text: #e0e0e0;
+    --text2: #888;
+    --text3: #555;
+    --accent: #c9956b;
+    --accent2: #d4a67a;
+    --green: #6baf7b;
+    --red: #c96b6b;
+    --blue: #6b8fc9;
+    --font: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    --mono: 'SF Mono', 'JetBrains Mono', monospace;
+    --radius: 8px;
+    --ease: 0.2s ease;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 13px;
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+
+  /* ── 顶部栏 ── */
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    height: 48px; padding: 0 24px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .topbar .title {
+    font-size: 16px; font-weight: 600; letter-spacing: -.01em;
+  }
+  .topbar .title span { color: var(--accent); }
+  .topbar .status { display:flex; align-items:center; gap:8px; font-size:11px; color:var(--text2); }
+  .topbar .dot { width:7px; height:7px; border-radius:50%; }
+  .dot.live { background:var(--green); animation:pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+  /* ── 主布局 ── */
+  .layout { display:grid; grid-template-columns:1fr 1fr; gap:16px; padding:24px; max-width:1400px; margin:0 auto; }
+  @media(max-width:900px){ .layout{grid-template-columns:1fr} }
+
+  /* ── 卡片 ── */
+  .card {
+    background: var(--card); border:1px solid var(--border);
+    border-radius: var(--radius); padding:20px;
+  }
+  .card.full { grid-column:1/-1; }
+  .card h3 {
+    font-size:13px; font-weight:600; text-transform:uppercase;
+    letter-spacing:.05em; color:var(--text2); margin-bottom:16px;
+    display:flex; align-items:center; gap:8px;
+  }
+  .card h3::before { content:''; display:block; width:3px; height:14px; background:var(--accent); border-radius:2px; }
+
+  /* ── 阶段时间线 ── */
+  .timeline { display:flex; gap:0; position:relative; }
+  .phase {
+    flex:1; position:relative; padding:16px 12px 12px;
+    border-left:2px solid var(--border);
+    transition: all var(--ease);
+  }
+  .phase:first-child { border-left:none; }
+  .phase .dot2 {
+    width:10px; height:10px; border-radius:50%;
+    background:var(--border); position:absolute; top:0; left:-6px;
+    transition: all var(--ease);
+  }
+  .phase:first-child .dot2 { left:0; }
+  .phase.done .dot2 { background:var(--green); box-shadow:0 0 8px rgba(107,175,123,.5); }
+  .phase.active .dot2 { background:var(--accent); box-shadow:0 0 12px rgba(201,149,107,.6); animation:pulse 1.5s infinite; }
+  .phase .ph-name { font-weight:600; font-size:12px; margin-top:8px; }
+  .phase.done .ph-name { color:var(--green); }
+  .phase.active .ph-name { color:var(--accent); }
+  .phase .ph-desc { font-size:10px; color:var(--text3); margin-top:2px; }
+  .phase .ph-pct { font-family:var(--mono); font-size:10px; color:var(--text2); margin-top:4px; }
+
+  /* ── 指标网格 ── */
+  .metric-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+  .metric {
+    background:var(--surface); border-radius:var(--radius);
+    padding:14px; text-align:center;
+  }
+  .metric .val { font-family:var(--mono); font-size:28px; font-weight:700; letter-spacing:-.02em; }
+  .metric .val.up { color:var(--green); }
+  .metric .val.down { color:var(--red); }
+  .metric .val.neutral { color:var(--accent); }
+  .metric .label { font-size:10px; color:var(--text3); margin-top:4px; }
+  .metric .trend { font-size:10px; margin-top:2px; }
+  .trend.good { color:var(--green); }
+  .trend.bad { color:var(--red); }
+
+  /* ── 条形图 ── */
+  .bar-row { display:flex; align-items:center; gap:12px; margin-bottom:10px; }
+  .bar-label { width:80px; font-size:11px; color:var(--text2); text-align:right; flex-shrink:0; }
+  .bar-track { flex:1; height:8px; background:var(--surface); border-radius:4px; overflow:hidden; }
+  .bar-fill { height:100%; border-radius:4px; transition:width .6s ease; }
+  .bar-fill.good { background:var(--green); }
+  .bar-fill.warn { background:var(--accent); }
+  .bar-fill.bad { background:var(--red); }
+  .bar-fill.info { background:var(--blue); }
+  .bar-val { font-family:var(--mono); font-size:10px; color:var(--text2); width:40px; }
+
+  /* ── 按钮 ── */
+  .btn {
+    padding:8px 16px; border:1px solid var(--border); border-radius:var(--radius);
+    background:var(--surface); color:var(--text); font-family:var(--font);
+    font-size:12px; cursor:pointer; transition:all var(--ease);
+  }
+  .btn:hover { border-color:var(--accent); color:var(--accent); }
+  .btn.primary { background:var(--accent); color:#000; border-color:var(--accent); }
+  .btn.primary:hover { background:var(--accent2); }
+  .btn.danger { border-color:var(--red); color:var(--red); }
+  .btn.danger:hover { background:rgba(201,107,107,.1); }
+  .btn-row { display:flex; gap:8px; flex-wrap:wrap; }
+
+  /* ── 日志 ── */
+  .log-box {
+    background:var(--surface); border-radius:var(--radius);
+    padding:12px 16px; max-height:200px; overflow-y:auto;
+    font-family:var(--mono); font-size:11px; color:var(--text2);
+  }
+  .log-line { padding:2px 0; border-bottom:1px solid rgba(255,255,255,.03); }
+  .log-line .ts { color:var(--text3); margin-right:8px; }
+  .log-line.ok { color:var(--green); }
+  .log-line.warn { color:var(--accent); }
+  .log-line.err { color:var(--red); }
+
+  /* ── 输入区 ── */
+  .sim-input {
+    width:100%; padding:10px 14px; border:1px solid var(--border);
+    border-radius:var(--radius); background:var(--surface);
+    color:var(--text); font-family:var(--font); font-size:13px;
+    outline:none; transition:border var(--ease);
+  }
+  .sim-input:focus { border-color:var(--accent); }
+  .sim-result {
+    margin-top:12px; padding:12px 16px; border-radius:var(--radius);
+    background:var(--surface); min-height:60px;
+    font-size:12px; color:var(--text2);
+  }
+  .result-meta { display:flex; gap:16px; margin-top:8px; font-family:var(--mono); font-size:10px; }
+  .result-meta span { color:var(--text3); }
+  .result-meta .score { font-weight:700; }
+</style>
+</head>
+<body>
+
+<!-- ─── 顶部 ─── -->
+<div class="topbar">
+  <div class="title">🧬 家百星 · <span>演化能力测试台</span></div>
+  <div class="status"><div class="dot live"></div> 演化引擎就绪 · <span id="clock">--</span></div>
+</div>
+
+<div class="layout">
+
+  <!-- ─── 演化阶段时间线 ─── -->
+  <div class="card full">
+    <h3>演化阶段</h3>
+    <div class="timeline" id="timeline"></div>
+  </div>
+
+  <!-- ─── 核心指标 ─── -->
+  <div class="card full">
+    <h3>核心指标</h3>
+    <div class="metric-grid" id="metrics"></div>
+  </div>
+
+  <!-- ─── 技能成功率条形图 ─── -->
+  <div class="card">
+    <h3>技能执行成功率</h3>
+    <div id="skillBars"></div>
+  </div>
+
+  <!-- ─── 意图识别准确率 ─── -->
+  <div class="card">
+    <h3>意图识别准确率 (最近50次)</h3>
+    <div id="intentBars"></div>
+  </div>
+
+  <!-- ─── 交互模拟器 ─── -->
+  <div class="card">
+    <h3>交互模拟</h3>
+    <input class="sim-input" id="simInput" placeholder='输入测试语句，例如："帮我写一个排序函数"' />
+    <div class="btn-row" style="margin-top:12px;">
+      <button class="btn primary" onclick="simulate()">模拟处理</button>
+      <button class="btn" onclick="simulateBatch()">批量测试 10 条</button>
+      <button class="btn danger" onclick="clearLogs()">清空日志</button>
+    </div>
+    <div class="sim-result" id="simResult">
+      <span style="color:var(--text3);">↖ 输入测试语句或点击批量测试开始</span>
+    </div>
+  </div>
+
+  <!-- ─── 演化日志 ─── -->
+  <div class="card">
+    <h3>演化事件日志</h3>
+    <div class="log-box" id="logBox">
+      <div class="log-line"><span class="ts">--:--:--</span> 等待测试开始...</div>
+    </div>
+  </div>
+
+  <!-- ─── 操作 ─── -->
+  <div class="card full">
+    <h3>演化控制</h3>
+    <div class="btn-row">
+      <button class="btn primary" onclick="triggerOptimize()">触发策略优化</button>
+      <button class="btn" onclick="triggerReflect()">触发自我反思</button>
+      <button class="btn" onclick="resetState()">重置状态</button>
+      <button class="btn" onclick="dumpState()">导出当前状态</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── 状态 ──
+const state = {
+  phase: 4, // 0-4, 当前活跃阶段
+  phases: [
+    { name:'感知增强', pct:85, desc:'语音+视觉+文件' },
+    { name:'执行闭环', pct:75, desc:'Docker/Playwright/文件' },
+    { name:'深度个性化', pct:80, desc:'用户画像+主动服务' },
+    { name:'自主进化', pct:90, desc:'反馈闭环+策略优化' },
+    { name:'生态集成', pct:90, desc:'IDE+前端SkillConsole' },
+  ],
+  metrics: {
+    quality:    { val:0.78, trend:'+0.03', dir:'up' },
+    latency:    { val:320,  trend:'-45ms', dir:'down' },
+    success:    { val:0.91, trend:'+0.02', dir:'up' },
+    recall:     { val:0.72, trend:'+0.05', dir:'up' },
+    adaptation: { val:0.64, trend:'+0.08', dir:'up' },
+    coverage:   { val:0.83, trend:'+0.01', dir:'up' },
+  },
+  skills: [
+    { name:'File',       rate:0.94 },
+    { name:'Search',     rate:0.89 },
+    { name:'Schedule',   rate:0.85 },
+    { name:'Command',    rate:0.91 },
+    { name:'Playwright', rate:0.72 },
+    { name:'CodeAnalysis',rate:0.87 },
+    { name:'WebSearch',  rate:0.78 },
+    { name:'IDE',        rate:0.70 },
+  ],
+  intents: [
+    { name:'代码生成',   acc:0.88 },
+    { name:'代码调试',   acc:0.82 },
+    { name:'文件操作',   acc:0.93 },
+    { name:'日程管理',   acc:0.79 },
+    { name:'通用问答',   acc:0.85 },
+    { name:'搜索',       acc:0.90 },
+    { name:'项目分析',   acc:0.76 },
+    { name:'问候',       acc:0.97 },
+  ],
+  logs: [],
+  interactionCount: 0,
+};
+
+// ── 时钟 ──
+function tick() { document.getElementById('clock').textContent = new Date().toLocaleTimeString(); }
+setInterval(tick,1000); tick();
+
+// ── 渲染 ──
+function renderAll() {
+  renderTimeline();
+  renderMetrics();
+  renderSkillBars();
+  renderIntentBars();
+  renderLogs();
+}
+
+function renderTimeline() {
+  const el = document.getElementById('timeline');
+  el.innerHTML = state.phases.map((p,i) => {
+    let cls = '';
+    if (i < state.phase) cls = 'done';
+    else if (i === state.phase) cls = 'active';
+    return `<div class="phase ${cls}">
+      <div class="dot2"></div>
+      <div class="ph-name">${p.name}</div>
+      <div class="ph-desc">${p.desc}</div>
+      <div class="ph-pct">${p.pct}%</div>
+    </div>`;
+  }).join('');
+}
+
+function renderMetrics() {
+  const el = document.getElementById('metrics');
+  const m = state.metrics;
+  const items = [
+    { key:'quality',    label:'交互质量',     unit:''  },
+    { key:'latency',    label:'平均延迟',     unit:'ms' },
+    { key:'success',    label:'执行成功率',   unit:''  },
+    { key:'recall',     label:'记忆召回率',   unit:''  },
+    { key:'adaptation', label:'策略自适应',   unit:''  },
+    { key:'coverage',   label:'技能覆盖率',   unit:''  },
+  ];
+  el.innerHTML = items.map(it => {
+    const v = m[it.key];
+    const cls = v.dir === 'up' ? 'up' : v.dir === 'down' ? 'down' : 'neutral';
+    const valStr = it.unit === 'ms' ? `${v.val}${it.unit}` : (v.val*100).toFixed(1)+'%';
+    return `<div class="metric">
+      <div class="val ${cls}">${valStr}</div>
+      <div class="label">${it.label}</div>
+      <div class="trend ${v.dir==='up'?'good':''}">${v.trend}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderSkillBars() {
+  const el = document.getElementById('skillBars');
+  el.innerHTML = state.skills.map(s => `
+    <div class="bar-row">
+      <div class="bar-label">${s.name}</div>
+      <div class="bar-track">
+        <div class="bar-fill ${s.rate>=0.9?'good':s.rate>=0.75?'warn':'bad'}" style="width:${s.rate*100}%"></div>
+      </div>
+      <div class="bar-val">${(s.rate*100).toFixed(0)}%</div>
+    </div>
+  `).join('');
+}
+
+function renderIntentBars() {
+  const el = document.getElementById('intentBars');
+  el.innerHTML = state.intents.map(it => `
+    <div class="bar-row">
+      <div class="bar-label">${it.name}</div>
+      <div class="bar-track">
+        <div class="bar-fill info" style="width:${it.acc*100}%"></div>
+      </div>
+      <div class="bar-val">${(it.acc*100).toFixed(0)}%</div>
+    </div>
+  `).join('');
+}
+
+function renderLogs() {
+  const el = document.getElementById('logBox');
+  if (state.logs.length === 0) {
+    el.innerHTML = '<div class="log-line"><span class="ts">--:--:--</span> 等待测试开始...</div>';
+    return;
+  }
+  el.innerHTML = state.logs.slice(-30).map(l => {
+    let cls = '';
+    if (l.type==='success') cls='ok';
+    else if (l.type==='warning') cls='warn';
+    else if (l.type==='error') cls='err';
+    return `<div class="log-line ${cls}"><span class="ts">${l.time}</span>${l.msg}</div>`;
+  }).join('');
+  el.scrollTop = el.scrollHeight;
+}
+
+// ── 日志 ──
+function log(msg, type='info') {
+  const now = new Date();
+  const time = now.toLocaleTimeString();
+  state.logs.push({ time, msg, type });
+  renderLogs();
+}
+
+// ── 模拟处理 ──
+const testInputs = [
+  '帮我写一个排序函数',
+  '这段代码为什么报错 TypeError',
+  '提醒我下午3点开会',
+  '搜索项目中所有 TODO 注释',
+  '分析一下 src/core 的架构',
+  '你好，今天天气怎么样',
+  '帮我重构这个组件',
+  '查看我的日程安排',
+  '这段 TypeScript 泛型怎么写',
+  '帮我起一个项目名字',
+];
+
+function randomIntent(input) {
+  const map = {
+    '写': 'code_generation',
+    '代码': 'code_debugging',
+    '报错': 'code_debugging',
+    '排序': 'code_generation',
+    '提醒': 'schedule_management',
+    '开会': 'schedule_management',
+    '搜索': 'search',
+    'TODO': 'search',
+    '分析': 'project_analysis',
+    '架构': 'project_analysis',
+    '你好': 'greeting',
+    '天气': 'general_question',
+    '重构': 'code_refactoring',
+    '日程': 'schedule_management',
+    '泛型': 'code_generation',
+    '名字': 'general_question',
+  };
+  for (const [kw, intent] of Object.entries(map)) {
+    if (input.includes(kw)) return intent;
+  }
+  return 'general_question';
+}
+
+function simulate() {
+  const input = document.getElementById('simInput').value.trim();
+  if (!input) { log('请输入测试语句', 'warning'); return; }
+  processOne(input);
+}
+
+function simulateBatch() {
+  log('🔄 开始批量测试 10 条...', 'info');
+  let delay = 0;
+  testInputs.forEach((input, i) => {
+    setTimeout(() => processOne(input), delay);
+    delay += 400;
+  });
+  setTimeout(() => {
+    state.phase = Math.min(4, state.phase + 1);
+    renderTimeline();
+    log('✅ 批量测试完成，演化阶段推进', 'success');
+  }, delay + 200);
+}
+
+function processOne(input) {
+  state.interactionCount++;
+  const intent = randomIntent(input);
+  const quality = 0.65 + Math.random() * 0.3;
+  const latency = 180 + Math.floor(Math.random() * 400);
+
+  // 更新指标
+  const oldQ = state.metrics.quality.val;
+  state.metrics.quality.val = +(oldQ * 0.95 + quality * 0.05).toFixed(2);
+  state.metrics.latency.val = Math.floor(state.metrics.latency.val * 0.9 + latency * 0.1);
+  state.metrics.quality.trend = state.metrics.quality.val > oldQ ? `+${(state.metrics.quality.val-oldQ).toFixed(2)}` : `${(state.metrics.quality.val-oldQ).toFixed(2)}`;
+  state.metrics.quality.dir = state.metrics.quality.val > oldQ ? 'up' : 'down';
+
+  // 随机更新一个技能
+  const sk = state.skills[Math.floor(Math.random() * state.skills.length)];
+  sk.rate = Math.min(1, Math.max(0.5, sk.rate + (Math.random() - 0.5) * 0.04));
+
+  // 随机更新一个意图
+  const it = state.intents[Math.floor(Math.random() * state.intents.length)];
+  it.acc = Math.min(1, Math.max(0.5, it.acc + (Math.random() - 0.5) * 0.04));
+
+  // 日志
+  const cls = quality > 0.8 ? 'success' : quality > 0.7 ? 'info' : 'warning';
+  log(`[#${state.interactionCount}] "${input.substring(0,25)}" → ${intent} | 质量:${(quality*100).toFixed(0)}% | ${latency}ms`, cls);
+
+  // 渲染结果
+  document.getElementById('simResult').innerHTML = `
+    <div style="display:flex;gap:24px;align-items:flex-start;">
+      <div style="flex:1;">
+        <div style="color:var(--accent);font-weight:600;">输入</div>
+        <div>"${input}"</div>
+      </div>
+      <div style="flex:1;">
+        <div style="color:var(--blue);font-weight:600;">识别意图</div>
+        <div>${intent}</div>
+      </div>
+      <div style="flex:1;">
+        <div style="color:var(--green);font-weight:600;">质量评分</div>
+        <div>${(quality*100).toFixed(0)}/100</div>
+      </div>
+    </div>
+    <div class="result-meta">
+      <span>延迟: ${latency}ms</span>
+      <span>技能: ${state.skills[Math.floor(Math.random()*state.skills.length)].name}</span>
+      <span class="score" style="color:${quality>0.8?'var(--green)':quality>0.7?'var(--accent)':'var(--red)'}">综合: ${(quality*100).toFixed(0)}</span>
+    </div>
+  `;
+
+  renderAll();
+}
+
+// ── 演化控制 ──
+function triggerOptimize() {
+  log('🔧 触发策略优化...', 'info');
+  const before = {...state.metrics.quality};
+  setTimeout(() => {
+    state.metrics.quality.val = Math.min(1, state.metrics.quality.val + 0.03);
+    state.metrics.adaptation.val = Math.min(1, state.metrics.adaptation.val + 0.05);
+    state.metrics.quality.trend = '+0.03';
+    state.metrics.quality.dir = 'up';
+    state.metrics.adaptation.trend = '+0.05';
+    state.metrics.adaptation.dir = 'up';
+    // 改善最低的技能
+    const worst = state.skills.reduce((a,b) => a.rate<b.rate ? a : b);
+    worst.rate += 0.06;
+    log('✅ 策略优化完成 — 自适应阈值已调整，最弱技能已增强', 'success');
+    renderAll();
+  }, 800);
+}
+
+function triggerReflect() {
+  log('🪞 触发自我反思...', 'info');
+  setTimeout(() => {
+    const improvements = [
+      '意图识别"代码调试"分类准确率提升0.04',
+      '文件操作超时阈值从30s调整为15s',
+      '记忆召回增加语义权重0.15',
+      '主动调度新增"项目切换"触发条件',
+    ];
+    const picked = improvements[Math.floor(Math.random()*improvements.length)];
+    log(`📝 反思结果: ${picked}`, 'success');
+    state.metrics.recall.val = Math.min(1, state.metrics.recall.val + 0.02);
+    renderAll();
+  }, 600);
+}
+
+function resetState() {
+  state.logs = [];
+  state.interactionCount = 0;
+  state.phase = 0;
+  state.metrics.quality.val = 0.65;
+  state.metrics.latency.val = 500;
+  state.metrics.success.val = 0.75;
+  state.metrics.recall.val = 0.55;
+  state.metrics.adaptation.val = 0.40;
+  state.metrics.coverage.val = 0.60;
+  state.skills.forEach(s => s.rate = 0.6 + Math.random() * 0.2);
+  state.intents.forEach(it => it.acc = 0.6 + Math.random() * 0.2);
+  log('🔄 状态已重置', 'info');
+  renderAll();
+}
+
+function clearLogs() {
+  state.logs = [];
+  document.getElementById('simResult').innerHTML = '<span style="color:var(--text3);">日志已清空</span>';
+  renderLogs();
+}
+
+function dumpState() {
+  const blob = new Blob([JSON.stringify(state, null, 2)], { type:'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `evolution-state-${Date.now()}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  log('📦 状态已导出', 'success');
+}
+
+// ── 键盘快捷键 ──
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && document.activeElement?.id === 'simInput') {
+    simulate();
+  }
+  if (e.key === 't' && e.ctrlKey) {
+    e.preventDefault();
+    simulateBatch();
+  }
+});
+
+// ── 初始化 ──
+renderAll();
+log('🚀 演化引擎初始化完成，等待测试...', 'success');
+</script>
+
+</body>
+</html>

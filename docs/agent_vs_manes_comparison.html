@@ -1,0 +1,923 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>jiabaixing AGENT vs MANES 框架对比分析</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
+    background: #0a0e27;
+    color: #e0e6ff;
+    min-height: 100vh;
+  }
+  .header {
+    background: linear-gradient(135deg, #0d1137 0%, #1a1f5e 100%);
+    border-bottom: 1px solid rgba(99, 132, 255, 0.3);
+    padding: 24px 40px;
+    text-align: center;
+  }
+  .header h1 {
+    font-size: 24px;
+    font-weight: 700;
+    background: linear-gradient(90deg, #6384ff, #a78bfa, #f472b6);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 8px;
+  }
+  .header p {
+    font-size: 14px;
+    color: #94a3b8;
+  }
+  .container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 30px 20px;
+  }
+  .section {
+    margin-bottom: 36px;
+  }
+  .section-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: #c4b5fd;
+    margin-bottom: 18px;
+    padding-left: 16px;
+    border-left: 4px solid #8b5cf6;
+  }
+  .comparison-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid rgba(99, 132, 255, 0.2);
+  }
+  .comparison-table thead th {
+    background: linear-gradient(135deg, #1a1f5e, #1e2563);
+    padding: 14px 18px;
+    font-size: 14px;
+    font-weight: 600;
+    text-align: left;
+    border-bottom: 2px solid rgba(99, 132, 255, 0.3);
+  }
+  .comparison-table thead th:first-child {
+    width: 160px;
+    color: #94a3b8;
+  }
+  .comparison-table thead th:nth-child(2) {
+    color: #6ee7b7;
+  }
+  .comparison-table thead th:nth-child(3) {
+    color: #fcd34d;
+  }
+  .comparison-table thead th:nth-child(4) {
+    color: #f9a8d4;
+    width: 180px;
+  }
+  .comparison-table tbody td {
+    padding: 12px 18px;
+    font-size: 13px;
+    line-height: 1.7;
+    border-bottom: 1px solid rgba(99, 132, 255, 0.1);
+    vertical-align: top;
+  }
+  .comparison-table tbody tr:hover {
+    background: rgba(99, 132, 255, 0.05);
+  }
+  .comparison-table tbody tr:last-child td {
+    border-bottom: none;
+  }
+  .comparison-table tbody td:first-child {
+    font-weight: 600;
+    color: #a5b4fc;
+    background: rgba(13, 17, 55, 0.5);
+  }
+  .comparison-table tbody td:nth-child(2) {
+    background: rgba(52, 211, 153, 0.03);
+  }
+  .comparison-table tbody td:nth-child(3) {
+    background: rgba(251, 191, 36, 0.03);
+  }
+  .comparison-table tbody td:nth-child(4) {
+    background: rgba(244, 114, 182, 0.03);
+  }
+  .tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    margin: 2px 3px;
+  }
+  .tag-green { background: rgba(52, 211, 153, 0.15); color: #6ee7b7; border: 1px solid rgba(52, 211, 153, 0.3); }
+  .tag-yellow { background: rgba(251, 191, 36, 0.15); color: #fcd34d; border: 1px solid rgba(251, 191, 36, 0.3); }
+  .tag-red { background: rgba(248, 113, 113, 0.15); color: #fca5a5; border: 1px solid rgba(248, 113, 113, 0.3); }
+  .tag-blue { background: rgba(96, 165, 250, 0.15); color: #93c5fd; border: 1px solid rgba(96, 165, 250, 0.3); }
+  .tag-purple { background: rgba(167, 139, 250, 0.15); color: #c4b5fd; border: 1px solid rgba(167, 139, 250, 0.3); }
+  .radar-container {
+    display: flex;
+    justify-content: center;
+    gap: 40px;
+    flex-wrap: wrap;
+    margin-top: 20px;
+  }
+  .radar-box {
+    text-align: center;
+  }
+  .radar-box h3 {
+    font-size: 14px;
+    color: #a5b4fc;
+    margin-bottom: 10px;
+  }
+  .score-bar-container {
+    margin: 16px 0;
+  }
+  .score-row {
+    display: flex;
+    align-items: center;
+    margin-bottom: 10px;
+    gap: 12px;
+  }
+  .score-label {
+    width: 120px;
+    font-size: 12px;
+    color: #94a3b8;
+    text-align: right;
+    flex-shrink: 0;
+  }
+  .score-bar-bg {
+    flex: 1;
+    height: 22px;
+    background: rgba(30, 35, 60, 0.8);
+    border-radius: 6px;
+    overflow: hidden;
+    position: relative;
+    border: 1px solid rgba(99, 132, 255, 0.15);
+  }
+  .score-bar-fill {
+    height: 100%;
+    border-radius: 6px;
+    transition: width 1.5s ease;
+    position: relative;
+  }
+  .score-bar-fill.agent {
+    background: linear-gradient(90deg, #34d399, #6ee7b7);
+  }
+  .score-bar-fill.manes {
+    background: linear-gradient(90deg, #f59e0b, #fcd34d);
+  }
+  .score-value {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 11px;
+    font-weight: 700;
+    color: #0a0e27;
+  }
+  .gap-analysis {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 16px;
+    margin-top: 16px;
+  }
+  .gap-card {
+    background: rgba(13, 17, 55, 0.6);
+    border: 1px solid rgba(99, 132, 255, 0.2);
+    border-radius: 12px;
+    padding: 18px;
+    transition: border-color 0.3s;
+  }
+  .gap-card:hover {
+    border-color: rgba(99, 132, 255, 0.5);
+  }
+  .gap-card.critical {
+    border-color: rgba(248, 113, 113, 0.4);
+  }
+  .gap-card.critical:hover {
+    border-color: rgba(248, 113, 113, 0.7);
+  }
+  .gap-card.important {
+    border-color: rgba(251, 191, 36, 0.4);
+  }
+  .gap-card.important:hover {
+    border-color: rgba(251, 191, 36, 0.7);
+  }
+  .gap-card-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .gap-card-icon {
+    width: 28px; height: 28px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    flex-shrink: 0;
+  }
+  .gap-card.critical .gap-card-icon { background: rgba(248, 113, 113, 0.2); color: #fca5a5; }
+  .gap-card.important .gap-card-icon { background: rgba(251, 191, 36, 0.2); color: #fcd34d; }
+  .gap-card.normal .gap-card-icon { background: rgba(96, 165, 250, 0.2); color: #93c5fd; }
+  .gap-card-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #e0e6ff;
+  }
+  .gap-card-body {
+    font-size: 12px;
+    color: #94a3b8;
+    line-height: 1.7;
+  }
+  .gap-card-body strong {
+    color: #c4b5fd;
+  }
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+    margin-top: 16px;
+  }
+  .summary-card {
+    background: linear-gradient(135deg, rgba(13, 17, 55, 0.8), rgba(26, 31, 94, 0.5));
+    border: 1px solid rgba(99, 132, 255, 0.2);
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+  }
+  .summary-card .number {
+    font-size: 36px;
+    font-weight: 800;
+    margin-bottom: 6px;
+  }
+  .summary-card .label {
+    font-size: 13px;
+    color: #94a3b8;
+  }
+  .summary-card.green .number { color: #6ee7b7; }
+  .summary-card.yellow .number { color: #fcd34d; }
+  .summary-card.red .number { color: #fca5a5; }
+  .summary-card.purple .number { color: #c4b5fd; }
+  .sub-section {
+    margin: 16px 0 8px;
+    font-size: 15px;
+    font-weight: 600;
+    color: #93c5fd;
+    padding-left: 12px;
+    border-left: 3px solid #60a5fa;
+  }
+  .feature-matrix {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-top: 16px;
+  }
+  .feature-col {
+    background: rgba(13, 17, 55, 0.5);
+    border-radius: 12px;
+    padding: 20px;
+    border: 1px solid rgba(99, 132, 255, 0.15);
+  }
+  .feature-col h3 {
+    font-size: 16px;
+    margin-bottom: 14px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(99, 132, 255, 0.15);
+  }
+  .feature-col.agent h3 { color: #6ee7b7; }
+  .feature-col.manes h3 { color: #fcd34d; }
+  .feature-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-bottom: 10px;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  .feature-item .icon {
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .feature-item .icon.check { color: #6ee7b7; }
+  .feature-item .icon.cross { color: #fca5a5; }
+  .feature-item .icon.partial { color: #fcd34d; }
+  .roadmap {
+    margin-top: 16px;
+  }
+  .roadmap-phase {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 16px;
+    align-items: flex-start;
+  }
+  .roadmap-phase-num {
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  .roadmap-phase:nth-child(1) .roadmap-phase-num { background: rgba(248, 113, 113, 0.2); color: #fca5a5; border: 1px solid rgba(248, 113, 113, 0.4); }
+  .roadmap-phase:nth-child(2) .roadmap-phase-num { background: rgba(251, 191, 36, 0.2); color: #fcd34d; border: 1px solid rgba(251, 191, 36, 0.4); }
+  .roadmap-phase:nth-child(3) .roadmap-phase-num { background: rgba(96, 165, 250, 0.2); color: #93c5fd; border: 1px solid rgba(96, 165, 250, 0.4); }
+  .roadmap-phase:nth-child(4) .roadmap-phase-num { background: rgba(52, 211, 153, 0.2); color: #6ee7b7; border: 1px solid rgba(52, 211, 153, 0.4); }
+  .roadmap-content h4 {
+    font-size: 14px;
+    color: #e0e6ff;
+    margin-bottom: 4px;
+  }
+  .roadmap-content p {
+    font-size: 12px;
+    color: #94a3b8;
+    line-height: 1.6;
+  }
+  canvas {
+    display: block;
+    margin: 0 auto;
+  }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>jiabaixing AGENT vs MANES 框架 — 系统性对比分析</h1>
+  <p>基于架构设计、功能特性、性能指标、学习能力及应用场景的五维深度对比</p>
+</div>
+<div class="container">
+
+  <div class="summary-grid">
+    <div class="summary-card green"><div class="number">5</div><div class="label">AGENT 独有优势领域</div></div>
+    <div class="summary-card red"><div class="number">8</div><div class="label">关键差距项</div></div>
+    <div class="summary-card yellow"><div class="number">6</div><div class="label">部分对齐项</div></div>
+    <div class="summary-card purple"><div class="number">4</div><div class="label">进化路线图阶段</div></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">一、架构设计对比</div>
+    <table class="comparison-table">
+      <thead>
+        <tr>
+          <th>对比维度</th>
+          <th>jiabaixing AGENT</th>
+          <th>MANES 框架</th>
+          <th>差距评估</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>系统范式</td>
+          <td>单Agent闭环架构：感知→决策→执行→反馈→进化，单一御姐秘书人格贯穿全流程</td>
+          <td>多Agent协同架构：规划Agent+执行Agent+验证Agent，专业分工协作，拓扑结构可动态演化</td>
+          <td><span class="tag tag-red">范式差距</span>单Agent vs 多Agent，协作粒度差异显著</td>
+        </tr>
+        <tr>
+          <td>核心编排</td>
+          <td>JiabaixingCore统一入口 + AgentLoop 7状态机 + ScenarioAwareScheduler调度</td>
+          <td>Flow-Based有向图工作流 + 黑板协同框架 + 蒙特卡洛树搜索(MCTS)动态调度</td>
+          <td><span class="tag tag-yellow">部分对齐</span>均有状态机，但MANES调度算法更先进</td>
+        </tr>
+        <tr>
+          <td>通信机制</td>
+          <td>EventBus单进程事件总线，50+类型安全事件，SQLite持久化</td>
+          <td>混合通信模型：ZeroMQ高速通道(实时控制) + gRPC低速通道(数据同步)，支持跨进程/跨节点</td>
+          <td><span class="tag tag-red">关键差距</span>单进程事件 vs 分布式混合通信</td>
+        </tr>
+        <tr>
+          <td>执行环境</td>
+          <td>本地Node.js进程内执行，无沙箱隔离</td>
+          <td>Docker沙箱化容器，每个任务独立运行，资源隔离+安全防护，并发能力3.2倍于传统架构</td>
+          <td><span class="tag tag-red">关键差距</span>无隔离 vs 容器化沙箱</td>
+        </tr>
+        <tr>
+          <td>模型策略</td>
+          <td>单一本地LLM(QWEN 2.5 3B)，OpenAI兼容接口</td>
+          <td>多模型动态路由：Claude(推理)+GPT-4(编码)+Gemini(知识)，意图驱动最优模型选择</td>
+          <td><span class="tag tag-red">关键差距</span>单模型 vs 多模型路由</td>
+        </tr>
+        <tr>
+          <td>任务分解</td>
+          <td>TaskComplexityAnalyzer 4级分类 + 意图→技能映射(4种)</td>
+          <td>改进版思维树(ToT)+概率决策图(PDG)，强化学习驱动拆解策略，2000+行业模板库</td>
+          <td><span class="tag tag-red">关键差距</span>规则分类 vs RL驱动智能拆解</td>
+        </tr>
+        <tr>
+          <td>验证机制</td>
+          <td>AgentLoop.verifyPhase()单层结果校验+失败重执行</td>
+          <td>三重验证：语法验证+逻辑验证+事实验证，对抗性训练，虚假信息识别率94.6%</td>
+          <td><span class="tag tag-red">关键差距</span>单层校验 vs 三重验证体系</td>
+        </tr>
+        <tr>
+          <td>容错恢复</td>
+          <td>DAG执行器指数退避重试(3次)+全局超时(60s)</td>
+          <td>异步容错：Checkpoint每15min保存，中断率3.7%，恢复后自动续接，工具自动切换备用</td>
+          <td><span class="tag tag-yellow">部分对齐</span>均有重试，但MANES恢复机制更完善</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="section">
+    <div class="section-title">二、功能特性对比</div>
+    <table class="comparison-table">
+      <thead>
+        <tr>
+          <th>对比维度</th>
+          <th>jiabaixing AGENT</th>
+          <th>MANES 框架</th>
+          <th>差距评估</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>技能/工具数量</td>
+          <td>7个内置技能：file/search/schedule/command/code_generator/code_analysis/project_analyzer</td>
+          <td>327个API工具库：Python执行+Selenium+Stable Diffusion+文件操作+网页交互等</td>
+          <td><span class="tag tag-red">数量差距</span>7 vs 327，工具生态差异巨大</td>
+        </tr>
+        <tr>
+          <td>记忆系统</td>
+          <td>三层记忆(瞬时/短期/长期) + RRF混合检索 + 用户画像 + 情绪记忆</td>
+          <td>分层记忆：用户偏好向量+交互历史DB(ChromaDB)+LRU短期缓存，双轨推理(显性+隐性)</td>
+          <td><span class="tag tag-green">AGENT优势</span>记忆架构更精细，情绪记忆和RRF检索是亮点</td>
+        </tr>
+        <tr>
+          <td>人格系统</td>
+          <td>PersonaCore(28岁御姐秘书)+PersonaEngine(7场景+8情绪)+PersonaRules(语气微调)</td>
+          <td>无人格系统，纯任务导向，无情感计算能力</td>
+          <td><span class="tag tag-green">AGENT独有</span>人格+情感是核心差异化</td>
+        </tr>
+        <tr>
+          <td>主动交互</td>
+          <td>5种介入检测(早安/晚安/深夜/沉默/负面情绪) + 5维记忆上下文构建</td>
+          <td>无主动交互能力，纯被动任务执行</td>
+          <td><span class="tag tag-green">AGENT独有</span>主动秘书行为是核心特色</td>
+        </tr>
+        <tr>
+          <td>多模态输入</td>
+          <td>文本输入为主，语音/图像类型定义存在但无实际pipeline</td>
+          <td>文本+文档+图片多模态输入，NLU解析隐性需求</td>
+          <td><span class="tag tag-yellow">部分对齐</span>类型定义有，实现缺失</td>
+        </tr>
+        <tr>
+          <td>代码执行</td>
+          <td>CommandSkill基础命令执行 + CodeGeneratorSkill(LLM生成)</td>
+          <td>CodeAct范式：可执行Python代码作为动作机制，完整代码运行环境</td>
+          <td><span class="tag tag-red">关键差距</span>命令执行 vs 完整代码运行环境</td>
+        </tr>
+        <tr>
+          <td>网页交互</td>
+          <td>SearchSkill本地文本搜索，无网页交互能力</td>
+          <td>Playwright/Selenium网页自动化，表单填写/数据爬取/页面操作</td>
+          <td><span class="tag tag-red">缺失能力</span>无网页交互能力</td>
+        </tr>
+        <tr>
+          <td>安全约束</td>
+          <td>JWT+bcrypt认证 + Permission权限桩 + SecurityAuditor审计</td>
+          <td>12000+业务规则约束 + 对抗测试规避偏见 + 边缘端敏感数据处理 + 脱敏传输</td>
+          <td><span class="tag tag-yellow">部分对齐</span>基础安全有，业务规则约束缺失</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="section">
+    <div class="section-title">三、性能指标对比</div>
+    <div class="score-bar-container">
+      <div class="score-row">
+        <div class="score-label">任务完成率</div>
+        <div class="score-bar-bg"><div class="score-bar-fill agent" style="width:72%"><span class="score-value">72%</span></div></div>
+        <div class="score-bar-bg"><div class="score-bar-fill manes" style="width:92%"><span class="score-value">92.4%</span></div></div>
+      </div>
+      <div class="score-row">
+        <div class="score-label">工具调用成功率</div>
+        <div class="score-bar-bg"><div class="score-bar-fill agent" style="width:68%"><span class="score-value">~68%</span></div></div>
+        <div class="score-bar-bg"><div class="score-bar-fill manes" style="width:92%"><span class="score-value">92.4%</span></div></div>
+      </div>
+      <div class="score-row">
+        <div class="score-label">并发处理能力</div>
+        <div class="score-bar-bg"><div class="score-bar-fill agent" style="width:30%"><span class="score-value">单进程</span></div></div>
+        <div class="score-bar-bg"><div class="score-bar-fill manes" style="width:90%"><span class="score-value">3.2x传统</span></div></div>
+      </div>
+      <div class="score-row">
+        <div class="score-label">记忆检索精度</div>
+        <div class="score-bar-bg"><div class="score-bar-fill agent" style="width:82%"><span class="score-value">82%</span></div></div>
+        <div class="score-bar-bg"><div class="score-bar-fill manes" style="width:75%"><span class="score-value">75%</span></div></div>
+      </div>
+      <div class="score-row">
+        <div class="score-label">情感理解深度</div>
+        <div class="score-bar-bg"><div class="score-bar-fill agent" style="width:88%"><span class="score-value">88%</span></div></div>
+        <div class="score-bar-bg"><div class="score-bar-fill manes" style="width:20%"><span class="score-value">N/A</span></div></div>
+      </div>
+      <div class="score-row">
+        <div class="score-label">主动交互质量</div>
+        <div class="score-bar-bg"><div class="score-bar-fill agent" style="width:78%"><span class="score-value">78%</span></div></div>
+        <div class="score-bar-bg"><div class="score-bar-fill manes" style="width:15%"><span class="score-value">N/A</span></div></div>
+      </div>
+      <div class="score-row">
+        <div class="score-label">进化学习效率</div>
+        <div class="score-bar-bg"><div class="score-bar-fill agent" style="width:55%"><span class="score-value">55%</span></div></div>
+        <div class="score-bar-bg"><div class="score-bar-fill manes" style="width:85%"><span class="score-value">85%</span></div></div>
+      </div>
+      <div class="score-row">
+        <div class="score-label">部署成本</div>
+        <div class="score-bar-bg"><div class="score-bar-fill agent" style="width:95%"><span class="score-value">极低(本地)</span></div></div>
+        <div class="score-bar-bg"><div class="score-bar-fill manes" style="width:50%"><span class="score-value">~$2/任务</span></div></div>
+      </div>
+    </div>
+    <p style="font-size:12px;color:#64748b;margin-top:8px;text-align:center">■ 绿色 = jiabaixing AGENT &nbsp;&nbsp; ■ 黄色 = MANES 框架 &nbsp;&nbsp;| &nbsp;&nbsp;数据基于代码分析及公开资料估算</p>
+  </div>
+
+  <div class="section">
+    <div class="section-title">四、学习能力对比</div>
+    <table class="comparison-table">
+      <thead>
+        <tr>
+          <th>对比维度</th>
+          <th>jiabaixing AGENT</th>
+          <th>MANES 框架</th>
+          <th>差距评估</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>进化范式</td>
+          <td>反馈驱动参数优化：采集→分析→优化→分发→应用，5环节闭环</td>
+          <td>多Agent协同进化(MASE)：配置空间进化搜索+变异交叉+经验记忆库，O(√T)遗憾界</td>
+          <td><span class="tag tag-red">范式差距</span>参数优化 vs 结构进化</td>
+        </tr>
+        <tr>
+          <td>数据采集</td>
+          <td>EvolutionFeedback缓冲器(10条触发) + PerformanceCollector + ImplicitFeedback</td>
+          <td>执行轨迹反馈(execution traces) + 千万级历史任务数据 + 联邦学习跨节点数据聚合</td>
+          <td><span class="tag tag-red">规模差距</span>本地缓冲 vs 千万级+联邦学习</td>
+        </tr>
+        <tr>
+          <td>优化算法</td>
+          <td>StrategyOptimizer(策略优化) + PatternMiner(模式挖掘) + AnomalyDetector(异常检测)</td>
+          <td>强化学习(PPO/DQN) + 进化算法(变异/交叉) + MCTS动态调度 + 对抗性训练</td>
+          <td><span class="tag tag-red">算法差距</span>规则优化 vs RL+进化+对抗</td>
+        </tr>
+        <tr>
+          <td>优化目标</td>
+          <td>语气参数(temperature/formality) + 技能权重[0.5,2.0] + 工具推荐权重</td>
+          <td>Agent拓扑结构 + 任务拆解策略 + 工具选择策略 + 模型路由策略</td>
+          <td><span class="tag tag-red">范围差距</span>参数微调 vs 结构级优化</td>
+        </tr>
+        <tr>
+          <td>知识沉淀</td>
+          <td>feedback_analysis_report.json文件 + MemoryEngine记忆存储</td>
+          <td>Neo4j任务知识图谱 + FAISS向量检索 + 2000+行业模板库 + 经验记忆库</td>
+          <td><span class="tag tag-red">沉淀差距</span>文件报告 vs 知识图谱+模板库</td>
+        </tr>
+        <tr>
+          <td>理论保障</td>
+          <td>无形式化理论保障，依赖经验调参</td>
+          <td>O(√T)遗憾界理论证明 + 收敛性保证 + 安全三定律约束</td>
+          <td><span class="tag tag-red">理论差距</span>无保障 vs 形式化证明</td>
+        </tr>
+        <tr>
+          <td>自适应速度</td>
+          <td>10条反馈触发 + 24小时周期 + 每日凌晨3点定时</td>
+          <td>实时在线学习 + 每轮迭代优化 + 3500万动态案例积累</td>
+          <td><span class="tag tag-red">速度差距</span>批量延迟 vs 实时在线</td>
+        </tr>
+        <tr>
+          <td>进化安全性</td>
+          <td>无显式安全约束，依赖PersonaRules边界</td>
+          <td>三定律：持久(安全适应)+卓越(性能保持)+进化(自主优化)，显式安全边界</td>
+          <td><span class="tag tag-red">安全差距</span>隐式约束 vs 显式三定律</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="section">
+    <div class="section-title">五、应用场景对比</div>
+    <table class="comparison-table">
+      <thead>
+        <tr>
+          <th>场景类型</th>
+          <th>jiabaixing AGENT</th>
+          <th>MANES 框架</th>
+          <th>适用性评估</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>私人AI伴侣</td>
+          <td>✅ 核心场景：情感陪伴+日程管理+主动关怀+记忆深度</td>
+          <td>❌ 不适用：无人格/无情感/无主动交互</td>
+          <td><span class="tag tag-green">AGENT绝对优势</span></td>
+        </tr>
+        <tr>
+          <td>开发辅助</td>
+          <td>⚠️ 部分支持：文件读写+代码生成+项目分析，但无完整代码执行环境</td>
+          <td>✅ 强支持：CodeAct代码执行+327工具+Docker沙箱</td>
+          <td><span class="tag tag-yellow">MANES更优</span></td>
+        </tr>
+        <tr>
+          <td>数据分析</td>
+          <td>⚠️ 有限支持：本地搜索+基础命令，无数据爬取/可视化能力</td>
+          <td>✅ 强支持：网页爬取+Python分析+图表生成+多源验证</td>
+          <td><span class="tag tag-red">MANES显著领先</span></td>
+        </tr>
+        <tr>
+          <td>自动化办公</td>
+          <td>⚠️ 基础支持：日程管理+提醒，无网页操作能力</td>
+          <td>✅ 强支持：表单填写+邮件处理+文档生成+跨平台操作</td>
+          <td><span class="tag tag-red">MANES显著领先</span></td>
+        </tr>
+        <tr>
+          <td>情感健康监测</td>
+          <td>✅ 核心能力：8情绪检测+情绪趋势+主动关怀+深夜守护</td>
+          <td>❌ 不适用：无情感计算能力</td>
+          <td><span class="tag tag-green">AGENT独有能力</span></td>
+        </tr>
+        <tr>
+          <td>本地隐私场景</td>
+          <td>✅ 核心优势：全本地运行，零数据外泄，SQLite+Chroma本地存储</td>
+          <td>❌ 不适用：依赖云端VM+外部API，数据必然外传</td>
+          <td><span class="tag tag-green">AGENT绝对优势</span></td>
+        </tr>
+        <tr>
+          <td>大规模部署</td>
+          <td>❌ 不支持：单进程架构，无分布式能力</td>
+          <td>✅ 核心优势：分布式架构+弹性扩展+边缘云端协同</td>
+          <td><span class="tag tag-red">MANES绝对优势</span></td>
+        </tr>
+        <tr>
+          <td>实时控制</td>
+          <td>❌ 不支持：无实时通信通道，无硬件控制能力</td>
+          <td>✅ 支持：ZeroMQ高速通道+毫秒级延迟+8设备并行</td>
+          <td><span class="tag tag-red">MANES绝对优势</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="section">
+    <div class="section-title">六、关键差距分析</div>
+    <div class="gap-analysis">
+      <div class="gap-card critical">
+        <div class="gap-card-header">
+          <div class="gap-card-icon">🔴</div>
+          <div class="gap-card-title">多Agent协同架构缺失</div>
+        </div>
+        <div class="gap-card-body">
+          当前为单Agent闭环，无法实现专业分工协作。<strong>MANES的规划-执行-验证三Agent架构</strong>将复杂任务的处理可靠性提升到新水平。建议：在SkillBridge之上引入Agent角色分层，至少拆分为PlanningAgent+ExecutionAgent+ValidationAgent。
+        </div>
+      </div>
+      <div class="gap-card critical">
+        <div class="gap-card-header">
+          <div class="gap-card-icon">🔴</div>
+          <div class="gap-card-title">进化学习停留在参数级</div>
+        </div>
+        <div class="gap-card-body">
+          当前进化仅调整语气参数和技能权重，<strong>无法优化Agent拓扑结构和任务拆解策略</strong>。MANES的配置空间进化搜索+变异交叉机制可实现结构级自进化。建议：引入EvoMAS风格的配置空间进化，支持Agent拓扑和策略的结构化优化。
+        </div>
+      </div>
+      <div class="gap-card critical">
+        <div class="gap-card-header">
+          <div class="gap-card-icon">🔴</div>
+          <div class="gap-card-title">分布式通信能力缺失</div>
+        </div>
+        <div class="gap-card-body">
+          EventBus仅支持单进程内事件传递，<strong>无法跨进程/跨节点通信</strong>。MANES的ZeroMQ+gRPC混合通信模型支持大规模分布式部署。建议：引入ZeroMQ或gRPC通信层，保留EventBus作为进程内总线。
+        </div>
+      </div>
+      <div class="gap-card critical">
+        <div class="gap-card-header">
+          <div class="gap-card-icon">🔴</div>
+          <div class="gap-card-title">执行环境无沙箱隔离</div>
+        </div>
+        <div class="gap-card-body">
+          所有任务在同一Node.js进程内执行，<strong>无资源隔离和安全防护</strong>。MANES的Docker沙箱实现3.2倍并发提升。建议：引入Docker或Node.js worker_threads实现任务隔离执行。
+        </div>
+      </div>
+      <div class="gap-card important">
+        <div class="gap-card-header">
+          <div class="gap-card-icon">🟡</div>
+          <div class="gap-card-title">验证机制过于单薄</div>
+        </div>
+        <div class="gap-card-body">
+          仅有AgentLoop.verifyPhase()单层校验，<strong>缺乏逻辑验证和事实验证</strong>。MANES的三重验证+对抗训练将虚假信息识别率提升至94.6%。建议：在LEARN阶段引入结果验证Agent，增加逻辑一致性检查和事实交叉比对。
+        </div>
+      </div>
+      <div class="gap-card important">
+        <div class="gap-card-header">
+          <div class="gap-card-icon">🟡</div>
+          <div class="gap-card-title">工具生态严重不足</div>
+        </div>
+        <div class="gap-card-body">
+          7个内置技能 vs MANES的327个API工具库。<strong>缺少网页交互、数据可视化、文件格式转换等关键能力</strong>。建议：建立SkillPlugin标准接口，支持第三方技能动态加载，优先补齐网页交互和代码执行沙箱。
+        </div>
+      </div>
+      <div class="gap-card important">
+        <div class="gap-card-header">
+          <div class="gap-card-icon">🟡</div>
+          <div class="gap-card-title">进化缺乏理论保障</div>
+        </div>
+        <div class="gap-card-body">
+          当前进化系统无形式化收敛证明，<strong>优化可能震荡或发散</strong>。MANES有O(√T)遗憾界和进化三定律。建议：引入在线学习理论框架，为StrategyOptimizer添加收敛性约束和安全边界。
+        </div>
+      </div>
+      <div class="gap-card normal">
+        <div class="gap-card-header">
+          <div class="gap-card-icon">🔵</div>
+          <div class="gap-card-title">场景识别双重实现</div>
+        </div>
+        <div class="gap-card-body">
+          JiabaixingCore.recognizeScene()和PersonaEngine.detectScene()各自独立实现，<strong>结果可能不一致</strong>。MANES通过统一NLU管道避免此问题。建议：统一为单一SceneRecognizer，PersonaEngine消费其结果。
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">七、AGENT独有优势（MANES不具备）</div>
+    <div class="feature-matrix">
+      <div class="feature-col agent">
+        <h3>🌟 jiabaixing AGENT 独有优势</h3>
+        <div class="feature-item"><span class="icon check">✓</span><span><strong>人格系统</strong>：28岁御姐秘书，7场景语气矩阵，8情绪自适应，从门卫到语气微调器的范式进化</span></div>
+        <div class="feature-item"><span class="icon check">✓</span><span><strong>主动交互</strong>：5种介入检测+5维记忆上下文，真正的"主动秘书"而非被动工具</span></div>
+        <div class="feature-item"><span class="icon check">✓</span><span><strong>情绪记忆</strong>：情绪趋势追踪+历史情绪模式，支持情绪感知的深度交互</span></div>
+        <div class="feature-item"><span class="icon check">✓</span><span><strong>本地隐私</strong>：全本地运行，零数据外泄，SQLite+Chroma本地存储，隐私优先架构</span></div>
+        <div class="feature-item"><span class="icon check">✓</span><span><strong>RRF混合检索</strong>：BM25+向量+多维权重的融合检索，记忆召回精度优于MANES</span></div>
+        <div class="feature-item"><span class="icon check">✓</span><span><strong>关系思维</strong>：记忆深度>功能计数，用户画像+关系状态，长期陪伴导向</span></div>
+      </div>
+      <div class="feature-col manes">
+        <h3>⚡ MANES 框架独有优势</h3>
+        <div class="feature-item"><span class="icon check">✓</span><span><strong>多Agent协同</strong>：规划-执行-验证三Agent分工，专业化和可靠性远超单Agent</span></div>
+        <div class="feature-item"><span class="icon check">✓</span><span><strong>结构级进化</strong>：配置空间进化搜索，可优化Agent拓扑和策略结构</span></div>
+        <div class="feature-item"><span class="icon check">✓</span><span><strong>分布式架构</strong>：ZeroMQ+gRPC混合通信，跨节点部署，弹性扩展</span></div>
+        <div class="feature-item"><span class="icon check">✓</span><span><strong>丰富工具链</strong>：327个API工具，CodeAct代码执行，网页自动化</span></div>
+        <div class="feature-item"><span class="icon check">✓</span><span><strong>理论保障</strong>：O(√T)遗憾界，收敛性证明，进化三定律安全约束</span></div>
+        <div class="feature-item"><span class="icon check">✓</span><span><strong>三重验证</strong>：语法+逻辑+事实验证，对抗训练，94.6%虚假信息识别率</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">八、弥合差距的进化路线图</div>
+    <div class="roadmap">
+      <div class="roadmap-phase">
+        <div class="roadmap-phase-num">P1</div>
+        <div class="roadmap-content">
+          <h4>基础加固（0-3月）— 解决关键架构缺陷</h4>
+          <p>引入Docker沙箱执行环境 → 统一SceneRecognizer消除双重实现 → 为EvolutionEngine添加收敛性约束和安全边界 → 补齐网页交互技能(Playwright)和代码执行沙箱</p>
+        </div>
+      </div>
+      <div class="roadmap-phase">
+        <div class="roadmap-phase-num">P2</div>
+        <div class="roadmap-content">
+          <h4>多Agent演进（3-6月）— 从单Agent到多Agent协同</h4>
+          <p>在SkillBridge之上引入Agent角色分层(PlanningAgent+ExecutionAgent+ValidationAgent) → 实现三重验证机制 → 建立SkillPlugin标准接口支持第三方技能动态加载 → 引入ZeroMQ/gRPC通信层</p>
+        </div>
+      </div>
+      <div class="roadmap-phase">
+        <div class="roadmap-phase-num">P3</div>
+        <div class="roadmap-content">
+          <h4>智能进化（6-9月）— 从参数优化到结构进化</h4>
+          <p>引入EvoMAS风格配置空间进化搜索 → 强化学习驱动任务拆解策略 → 构建任务知识图谱(Neo4j)和行业模板库 → 实现在线学习替代批量延迟优化</p>
+        </div>
+      </div>
+      <div class="roadmap-phase">
+        <div class="roadmap-phase-num">P4</div>
+        <div class="roadmap-content">
+          <h4>生态融合（9-12月）— 保持差异化优势的同时对齐MANES能力</h4>
+          <p>多模型动态路由(保留本地LLM作为隐私模式) → 分布式部署能力(保留单机模式) → 工具生态扩展至100+ → 形式化进化理论保障 → 保持人格+情感+主动交互的独有优势</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section" style="padding-bottom:40px">
+    <div class="section-title">九、综合评估雷达图</div>
+    <canvas id="radarChart" width="700" height="420"></canvas>
+  </div>
+
+</div>
+
+<script>
+const canvas = document.getElementById('radarChart');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+const cx = W / 2, cy = H / 2 + 10;
+const R = 160;
+
+const dimensions = [
+  { label: '架构设计', agent: 55, manes: 90 },
+  { label: '功能丰富度', agent: 40, manes: 88 },
+  { label: '性能指标', agent: 50, manes: 85 },
+  { label: '学习能力', agent: 45, manes: 82 },
+  { label: '人格情感', agent: 92, manes: 10 },
+  { label: '主动交互', agent: 85, manes: 5 },
+  { label: '隐私安全', agent: 95, manes: 45 },
+  { label: '记忆深度', agent: 82, manes: 70 },
+  { label: '可扩展性', agent: 35, manes: 90 },
+  { label: '理论保障', agent: 20, manes: 80 },
+];
+
+const n = dimensions.length;
+const angleStep = (2 * Math.PI) / n;
+const startAngle = -Math.PI / 2;
+
+function getPoint(i, value) {
+  const angle = startAngle + i * angleStep;
+  const r = (value / 100) * R;
+  return { x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) };
+}
+
+ctx.clearRect(0, 0, W, H);
+
+for (let level = 20; level <= 100; level += 20) {
+  ctx.beginPath();
+  for (let i = 0; i <= n; i++) {
+    const p = getPoint(i % n, level);
+    if (i === 0) ctx.moveTo(p.x, p.y);
+    else ctx.lineTo(p.x, p.y);
+  }
+  ctx.closePath();
+  ctx.strokeStyle = 'rgba(99, 132, 255, 0.15)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+}
+
+for (let i = 0; i < n; i++) {
+  const p = getPoint(i, 100);
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.lineTo(p.x, p.y);
+  ctx.strokeStyle = 'rgba(99, 132, 255, 0.1)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+}
+
+function drawArea(data, fillColor, strokeColor) {
+  ctx.beginPath();
+  for (let i = 0; i <= n; i++) {
+    const idx = i % n;
+    const p = getPoint(idx, data[idx]);
+    if (i === 0) ctx.moveTo(p.x, p.y);
+    else ctx.lineTo(p.x, p.y);
+  }
+  ctx.closePath();
+  ctx.fillStyle = fillColor;
+  ctx.fill();
+  ctx.strokeStyle = strokeColor;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  for (let i = 0; i < n; i++) {
+    const p = getPoint(i, data[i]);
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+    ctx.fillStyle = strokeColor;
+    ctx.fill();
+  }
+}
+
+const agentData = dimensions.map(d => d.agent);
+const manesData = dimensions.map(d => d.manes);
+
+drawArea(manesData, 'rgba(251, 191, 36, 0.1)', 'rgba(251, 191, 36, 0.7)');
+drawArea(agentData, 'rgba(52, 211, 153, 0.15)', 'rgba(52, 211, 153, 0.8)');
+
+for (let i = 0; i < n; i++) {
+  const p = getPoint(i, 115);
+  const angle = startAngle + i * angleStep;
+  ctx.save();
+  ctx.translate(p.x, p.y);
+  let textAngle = angle;
+  if (textAngle > Math.PI / 2 && textAngle < 3 * Math.PI / 2) {
+    textAngle += Math.PI;
+    ctx.rotate(textAngle);
+    ctx.textAlign = 'right';
+  } else {
+    ctx.rotate(textAngle);
+    ctx.textAlign = 'left';
+  }
+  ctx.fillStyle = '#c4b5fd';
+  ctx.font = '12px Microsoft YaHei';
+  ctx.fillText(dimensions[i].label, 0, 4);
+  ctx.restore();
+}
+
+ctx.fillStyle = '#6ee7b7';
+ctx.font = '13px Microsoft YaHei';
+ctx.textAlign = 'left';
+ctx.fillRect(40, H - 40, 14, 14);
+ctx.fillText('jiabaixing AGENT', 60, H - 28);
+
+ctx.fillStyle = '#fcd34d';
+ctx.fillRect(220, H - 40, 14, 14);
+ctx.fillText('MANES 框架', 240, H - 28);
+</script>
+</body>
+</html>

@@ -1,0 +1,62 @@
+# Snyk 配置文件
+# 用于配置安全扫描选项
+
+# 项目名称
+projectName: "jiabaixing"
+
+# 项目版本
+projectVersion: "1.0.0"
+
+# 忽略的漏洞
+# 格式: "漏洞ID": { "reason": "忽略原因" }
+ignore:
+  # 示例：忽略某些低风险漏洞
+  # "npm:lodash:20190228":
+  #   reason: "低风险漏洞，计划在下次依赖更新时修复"
+  #   expires: "2026-12-31"
+
+# 监控设置
+monitor:
+  # 监控频率（天）
+  frequency: 7
+  # 分支监控
+  branches: ["main", "develop"]
+
+# 测试设置
+test:
+  # 深度扫描
+  deep: true
+  # 显示所有漏洞
+  all-projects: true
+  # 失败阈值
+  fail-on:
+    # 严重性级别: low, medium, high, critical
+    severity: "high"
+
+# 依赖更新设置
+patch:
+  # 自动应用补丁
+  auto: true
+  # 应用所有补丁
+  all: true
+
+# 代码安全设置
+code:
+  # 启用代码安全扫描
+  enabled: true
+  # 排除的路径
+  exclude:
+    - "node_modules/**"
+    - "dist/**"
+    - "build/**"
+    - "coverage/**"
+
+# 容器安全设置
+container:
+  # 启用容器安全扫描
+  enabled: false
+
+# 基础设施即代码安全设置
+iac:
+  # 启用 IaC 安全扫描
+  enabled: false

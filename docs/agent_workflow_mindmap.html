@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>jiabaixing AGENT 全流程流转思维导图</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
+    background: #0a0e27;
+    color: #e0e6ff;
+    overflow: hidden;
+    height: 100vh;
+  }
+  #header {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 56px;
+    background: linear-gradient(135deg, #0d1137 0%, #1a1f5e 100%);
+    border-bottom: 1px solid rgba(99, 132, 255, 0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    backdrop-filter: blur(10px);
+  }
+  #header h1 {
+    font-size: 20px;
+    font-weight: 600;
+    background: linear-gradient(90deg, #6384ff, #a78bfa, #f472b6);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    letter-spacing: 2px;
+  }
+  #canvas-container {
+    position: fixed;
+    top: 56px; left: 0; right: 0; bottom: 0;
+    overflow: hidden;
+    cursor: grab;
+  }
+  #canvas-container:active { cursor: grabbing; }
+  #mindmap {
+    position: absolute;
+    transform-origin: 0 0;
+  }
+  .node {
+    position: absolute;
+    border-radius: 12px;
+    padding: 10px 18px;
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+    z-index: 10;
+    user-select: none;
+  }
+  .node:hover {
+    transform: scale(1.08);
+    z-index: 20;
+  }
+  .node.root {
+    background: linear-gradient(135deg, #6366f1, #8b5cf6);
+    color: #fff;
+    font-size: 18px;
+    font-weight: 700;
+    padding: 16px 28px;
+    border-radius: 20px;
+    box-shadow: 0 0 40px rgba(99, 102, 241, 0.5), 0 0 80px rgba(139, 92, 246, 0.2);
+    border: 2px solid rgba(255,255,255,0.2);
+  }
+  .node.l1 {
+    background: linear-gradient(135deg, #1e3a5f, #1a2744);
+    color: #93c5fd;
+    font-size: 15px;
+    font-weight: 600;
+    padding: 12px 22px;
+    border: 1.5px solid rgba(96, 165, 250, 0.4);
+    box-shadow: 0 0 20px rgba(96, 165, 250, 0.15);
+  }
+  .node.l2 {
+    background: linear-gradient(135deg, #1a1f3a, #151932);
+    color: #c4b5fd;
+    font-size: 13px;
+    padding: 8px 16px;
+    border: 1px solid rgba(167, 139, 250, 0.3);
+    box-shadow: 0 0 12px rgba(167, 139, 250, 0.1);
+  }
+  .node.l3 {
+    background: rgba(30, 35, 60, 0.8);
+    color: #a5b4fc;
+    font-size: 12px;
+    padding: 6px 14px;
+    border: 1px solid rgba(165, 180, 252, 0.2);
+  }
+  .node.l4 {
+    background: rgba(20, 24, 48, 0.7);
+    color: #94a3b8;
+    font-size: 11px;
+    padding: 5px 12px;
+    border: 1px solid rgba(148, 163, 184, 0.15);
+  }
+  .node.perception { border-color: rgba(52, 211, 153, 0.5); color: #6ee7b7; }
+  .node.decision { border-color: rgba(96, 165, 250, 0.5); color: #93c5fd; }
+  .node.execution { border-color: rgba(251, 191, 36, 0.5); color: #fcd34d; }
+  .node.memory { border-color: rgba(244, 114, 182, 0.5); color: #f9a8d4; }
+  .node.evolution { border-color: rgba(167, 139, 250, 0.5); color: #c4b5fd; }
+  .node.output { border-color: rgba(248, 113, 113, 0.5); color: #fca5a5; }
+  svg.lines {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+    z-index: 1;
+  }
+  .line-path {
+    fill: none;
+    stroke-width: 2;
+    opacity: 0.6;
+  }
+  .line-root { stroke: #6366f1; stroke-width: 3; opacity: 0.5; }
+  .line-l1 { stroke: #60a5fa; stroke-width: 2; opacity: 0.4; }
+  .line-l2 { stroke: #a78bfa; stroke-width: 1.5; opacity: 0.35; }
+  .line-l3 { stroke: #94a3b8; stroke-width: 1; opacity: 0.3; }
+  .line-flow {
+    fill: none;
+    stroke-width: 2.5;
+    stroke-dasharray: 8 4;
+    opacity: 0.7;
+  }
+  @keyframes flowDash {
+    to { stroke-dashoffset: -24; }
+  }
+  .line-flow { animation: flowDash 1.5s linear infinite; }
+  .legend {
+    position: fixed;
+    bottom: 20px;
+    left: 20px;
+    background: rgba(13, 17, 55, 0.9);
+    border: 1px solid rgba(99, 132, 255, 0.3);
+    border-radius: 12px;
+    padding: 16px 20px;
+    z-index: 50;
+    backdrop-filter: blur(10px);
+    font-size: 12px;
+  }
+  .legend h3 {
+    font-size: 13px;
+    margin-bottom: 10px;
+    color: #e0e6ff;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .legend-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+  }
+  .controls {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    z-index: 50;
+  }
+  .ctrl-btn {
+    width: 40px; height: 40px;
+    border-radius: 10px;
+    background: rgba(13, 17, 55, 0.9);
+    border: 1px solid rgba(99, 132, 255, 0.3);
+    color: #93c5fd;
+    font-size: 18px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s;
+  }
+  .ctrl-btn:hover { background: rgba(30, 40, 80, 0.9); }
+  .tooltip {
+    position: fixed;
+    background: rgba(13, 17, 55, 0.95);
+    border: 1px solid rgba(99, 132, 255, 0.4);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 12px;
+    color: #c4b5fd;
+    max-width: 320px;
+    z-index: 200;
+    pointer-events: none;
+    display: none;
+    line-height: 1.6;
+    backdrop-filter: blur(10px);
+  }
+  .flow-label {
+    position: absolute;
+    font-size: 10px;
+    color: rgba(167, 139, 250, 0.7);
+    pointer-events: none;
+    z-index: 5;
+    white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+<div id="header">
+  <h1>jiabaixing AGENT 全流程流转思维导图</h1>
+</div>
+<div id="canvas-container">
+  <div id="mindmap"></div>
+</div>
+<div class="legend">
+  <h3>模块图例</h3>
+  <div class="legend-item"><div class="legend-dot" style="background:#6ee7b7"></div>感知模块</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#93c5fd"></div>决策模块</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#fcd34d"></div>执行模块</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#f9a8d4"></div>记忆模块</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#c4b5fd"></div>进化学习</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#fca5a5"></div>输出交互</div>
+</div>
+<div class="controls">
+  <button class="ctrl-btn" onclick="zoomIn()">+</button>
+  <button class="ctrl-btn" onclick="zoomOut()">−</button>
+  <button class="ctrl-btn" onclick="resetView()">⟲</button>
+</div>
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+const MINDMAP_DATA = {
+  id: 'root',
+  label: 'jiabaixing AGENT 系统',
+  type: 'root',
+  desc: '御姐秘书AI伴侣 — 感知→决策→执行→反馈→进化的闭环智能体',
+  children: [
+    {
+      id: 'workflow', label: '一、完整工作流程', type: 'l1', category: 'decision',
+      desc: '从任务接收到结果反馈的全链路闭环',
+      children: [
+        {
+          id: 'receive', label: '1. 任务接收', type: 'l2', category: 'perception',
+          desc: 'WebSocket接收用户输入 → EventBus分发user_input事件 → ScenarioAwareScheduler接收调度',
+          children: [
+            { id: 'ws', label: 'WebSocket接入', type: 'l3', category: 'perception', desc: '端口3111，实时双向通信' },
+            { id: 'eventbus-in', label: 'EventBus分发', type: 'l3', category: 'perception', desc: '类型安全事件总线，50+事件类型，SQLite持久化' },
+            { id: 'scheduler-recv', label: 'Scheduler接收', type: 'l3', category: 'decision', desc: 'ScenarioAwareScheduler统一调度入口' }
+          ]
+        },
+        {
+          id: 'analyze', label: '2. 场景分析', type: 'l2', category: 'perception',
+          desc: '场景识别 + 情绪检测 + 记忆召回 → 构建上下文',
+          children: [
+            { id: 'scene-recog', label: '场景识别', type: 'l3', category: 'perception', desc: 'PersonaEngine 7场景检测：development/work/comfort/greeting/briefing/celebration/error' },
+            { id: 'emotion-detect', label: '情绪检测', type: 'l3', category: 'perception', desc: '8种情绪状态：平静/开心/疲惫/焦虑/烦躁/悲伤/兴奋/困惑，含强度与置信度' },
+            { id: 'memory-recall', label: '记忆召回', type: 'l3', category: 'memory', desc: 'BM25+向量RRF融合检索 → 时间/场景/情绪权重 → Top10' },
+            { id: 'context-build', label: '上下文构建', type: 'l3', category: 'perception', desc: '5维度：语义检索+用户画像+情绪记忆+近期反馈+任务记忆' }
+          ]
+        },
+        {
+          id: 'decide', label: '3. 决策规划', type: 'l2', category: 'decision',
+          desc: '复杂度判断 → 路径选择 → 执行计划编排',
+          children: [
+            { id: 'complexity', label: '复杂度分析', type: 'l3', category: 'decision', desc: 'TaskComplexityAnalyzer 4级：simple/medium/complex/very_complex' },
+            { id: 'path-select', label: '路径选择', type: 'l3', category: 'decision', desc: '复杂→AgentLoop 7状态闭环 | 简单→DialogueGenerator直接生成' },
+            { id: 'priority', label: '优先级仲裁', type: 'l3', category: 'decision', desc: 'PriorityArbiter P0(情感)/P1(开发)/P2(生活)，P0支持资源抢占' },
+            { id: 'intent-map', label: '意图→技能映射', type: 'l3', category: 'decision', desc: 'development→file | search→search | schedule→schedule | command→command' }
+          ]
+        },
+        {
+          id: 'execute', label: '4. 任务执行', type: 'l2', category: 'execution',
+          desc: 'AgentLoop状态机驱动 / SkillBridge双通道执行',
+          children: [
+            { id: 'agentloop', label: 'AgentLoop状态机', type: 'l3', category: 'execution', desc: 'IDLE→PERCEIVE→PLAN→EXECUTE→VERIFY→OUTPUT→LEARN→IDLE' },
+            { id: 'skillbridge', label: 'SkillBridge桥接', type: 'l3', category: 'execution', desc: 'SkillRegistry优先 → ToolExecutor降级回退，含权重优化' },
+            { id: 'dag-exec', label: 'DAG编排执行', type: 'l3', category: 'execution', desc: '全局超时60s + 死锁检测 + 指数退避重试3次 + 最大并行4' },
+            { id: 'verify', label: '结果校验', type: 'l3', category: 'execution', desc: '执行结果验证 + 失败重执行机制' }
+          ]
+        },
+        {
+          id: 'output', label: '5. 结果输出', type: 'l2', category: 'output',
+          desc: '拟人化处理 → 人格微调 → 事件分发',
+          children: [
+            { id: 'persona-format', label: 'PersonaEngine拟人化', type: 'l3', category: 'output', desc: '场景感知+情感适配+动态话术，LLM优先/模板降级' },
+            { id: 'tone-adjust', label: 'PersonaRules语气微调', type: 'l3', category: 'output', desc: '过滤幼化词、强制称呼、场景温度调节' },
+            { id: 'eventbus-out', label: 'EventBus输出', type: 'l3', category: 'output', desc: 'response_ready事件 → WebSocket推送用户' }
+          ]
+        },
+        {
+          id: 'feedback', label: '6. 反馈学习', type: 'l2', category: 'evolution',
+          desc: '反馈记录 → 记忆更新 → 进化触发',
+          children: [
+            { id: 'learn-phase', label: 'AgentLoop.learnPhase', type: 'l3', category: 'evolution', desc: '反馈记录 + 记忆更新 + EvolutionFeedback触发' },
+            { id: 'user-correction', label: '用户纠错反馈', type: 'l3', category: 'evolution', desc: '实时调整工具权重 + 存储反馈信号到记忆引擎' },
+            { id: 'proactive-loop', label: '主动交互循环', type: 'l3', category: 'evolution', desc: 'Scheduler每10min扫描：日程/情绪/行为模式 → 主动介入' }
+          ]
+        }
+      ]
+    },
+    {
+      id: 'evolution', label: '二、进化学习循环', type: 'l1', category: 'evolution',
+      desc: '采集→分析→优化→分发→应用的完整闭环，系统自我进化核心',
+      children: [
+        {
+          id: 'collect', label: '数据采集层', type: 'l2', category: 'evolution',
+          desc: '多源反馈采集，缓冲区满(10条)自动触发分析',
+          children: [
+            { id: 'evo-feedback', label: 'EvolutionFeedback', type: 'l3', category: 'evolution', desc: '单例缓冲器，记录任务执行反馈，阈值触发自动分析' },
+            { id: 'perf-collector', label: 'PerformanceCollector', type: 'l3', category: 'evolution', desc: '性能指标采集：响应时间/成功率/用户满意度' },
+            { id: 'implicit-fb', label: 'ImplicitFeedback', type: 'l3', category: 'evolution', desc: '隐式反馈：停留时间/重试次数/话题切换' }
+          ]
+        },
+        {
+          id: 'analyze-opt', label: '分析优化层', type: 'l2', category: 'evolution',
+          desc: '策略优化 + 模式挖掘 + 异常检测',
+          children: [
+            { id: 'strategy-opt', label: 'StrategyOptimizer', type: 'l3', category: 'evolution', desc: '基于反馈数据的策略优化，调整语气/权重/推荐参数' },
+            { id: 'pattern-miner', label: 'PatternMiner', type: 'l3', category: 'evolution', desc: '用户行为模式挖掘，识别高频场景和偏好' },
+            { id: 'anomaly-detect', label: 'AnomalyDetector', type: 'l3', category: 'evolution', desc: '异常检测：性能退化/响应偏移/用户满意度下降' },
+            { id: 'report-gen', label: 'ReportGenerator', type: 'l3', category: 'evolution', desc: '生成优化报告 → feedback_analysis_report.json' }
+          ]
+        },
+        {
+          id: 'dispatch', label: '分发应用层', type: 'l2', category: 'evolution',
+          desc: '优化结果路由到所有消费者，完成闭环',
+          children: [
+            { id: 'opt-dispatcher', label: 'OptimizationResultDispatcher', type: 'l3', category: 'evolution', desc: '单例分发器，将OptimizationSnapshot路由到所有消费者' },
+            { id: 'persona-consumer', label: '→ PersonaCore', type: 'l3', category: 'output', desc: '接收语气参数调整：temperature/formality/verbosity/emojiFrequency' },
+            { id: 'skill-consumer', label: '→ SkillBridge', type: 'l3', category: 'execution', desc: '接收技能权重调整，权重范围[0.5, 2.0]' },
+            { id: 'tool-consumer', label: '→ ToolRecommender', type: 'l3', category: 'execution', desc: '接收工具推荐权重调整' }
+          ]
+        },
+        {
+          id: 'trigger-modes', label: '触发机制', type: 'l2', category: 'evolution',
+          desc: '5种触发方式确保进化持续运行',
+          children: [
+            { id: 'auto-trigger', label: '缓冲区满自动触发', type: 'l3', category: 'evolution', desc: 'EvolutionFeedback缓冲区达10条 → 自动触发分析' },
+            { id: 'scheduled', label: '定时触发', type: 'l3', category: 'evolution', desc: 'EvolutionEngine每日凌晨3点自动运行分析' },
+            { id: 'periodic', label: '24小时周期', type: 'l3', category: 'evolution', desc: 'JiabaixingCore每24小时执行applyOptimizationsFromReport()' },
+            { id: 'manual', label: '用户手动触发', type: 'l3', category: 'evolution', desc: '用户说"你最近回复有点冷" → 手动触发优化' },
+            { id: 'hot-reload', label: '文件热加载', type: 'l3', category: 'evolution', desc: 'feedback_analysis_report.json变更 → 自动热加载' }
+          ]
+        }
+      ]
+    },
+    {
+      id: 'modules', label: '三、功能模块集成', type: 'l1', category: 'decision',
+      desc: '感知/决策/执行/记忆/输出五大模块的集成方式与交互关系',
+      children: [
+        {
+          id: 'perception-mod', label: '感知模块', type: 'l2', category: 'perception',
+          desc: '理解世界的入口：场景识别+情绪检测+记忆召回',
+          children: [
+            { id: 'scene-recognizer', label: 'SceneRecognizer', type: 'l3', category: 'perception', desc: '基于关键词的降级场景识别，7种场景类型' },
+            { id: 'emotion-analyzer', label: 'EmotionAnalyzer', type: 'l3', category: 'perception', desc: '8种情绪状态检测，含intensity/confidence/source' },
+            { id: 'memory-engine-perc', label: 'MemoryEngine(感知)', type: 'l3', category: 'memory', desc: '三层记忆：瞬时(1h)/短期(会话)/长期(永久)，RRF混合检索' }
+          ]
+        },
+        {
+          id: 'decision-mod', label: '决策模块', type: 'l2', category: 'decision',
+          desc: '任务复杂度判断+路径选择+执行计划编排',
+          children: [
+            { id: 'agentloop-dec', label: 'AgentLoop状态机', type: 'l3', category: 'decision', desc: '7状态闭环：IDLE→PERCEIVE→PLAN→EXECUTE→VERIFY→OUTPUT→LEARN' },
+            { id: 'complexity-analyzer', label: 'TaskComplexityAnalyzer', type: 'l3', category: 'decision', desc: '4级复杂度：simple/medium/complex/very_complex' },
+            { id: 'priority-arbiter', label: 'PriorityArbiter', type: 'l3', category: 'decision', desc: 'P0(情感)/P1(开发)/P2(生活)，P0支持资源抢占' },
+            { id: 'core-reasoning', label: 'CoreReasoningEngine', type: 'l3', category: 'decision', desc: '推理引擎，含DAGExecutor+DAGTask，8步执行循环' }
+          ]
+        },
+        {
+          id: 'execution-mod', label: '执行模块', type: 'l2', category: 'execution',
+          desc: '技能调度+工具执行+DAG编排',
+          children: [
+            { id: 'skill-bridge', label: 'SkillBridge', type: 'l3', category: 'execution', desc: '双通道执行：SkillRegistry优先 + ToolExecutor降级' },
+            { id: 'skill-registry', label: 'SkillRegistry', type: 'l3', category: 'execution', desc: '单例技能管理器：注册/发现/执行，多维意图匹配' },
+            { id: 'skills-list', label: '7大技能', type: 'l3', category: 'execution', desc: 'file/search/schedule/command/code_generator/code_analysis/project_analyzer' },
+            { id: 'dag-executor', label: 'DAGExecutor', type: 'l3', category: 'execution', desc: '复杂任务DAG编排：超时保护+死锁检测+退避重试' }
+          ]
+        },
+        {
+          id: 'memory-mod', label: '记忆模块', type: 'l2', category: 'memory',
+          desc: '系统灵魂：三层记忆+混合检索+用户画像',
+          children: [
+            { id: 'instant-mem', label: '瞬时记忆(HOT)', type: 'l3', category: 'memory', desc: '内存存储，<1小时，高频访问' },
+            { id: 'short-mem', label: '短期记忆(WARM)', type: 'l3', category: 'memory', desc: '内存+SQLite，当前会话，中频访问' },
+            { id: 'long-mem', label: '长期记忆(COLD)', type: 'l3', category: 'memory', desc: 'SQLite+向量DB，永久存储，低频访问' },
+            { id: 'user-profile', label: '用户画像', type: 'l3', category: 'memory', desc: '偏好/习惯/工作模式/情感趋势/关系状态' },
+            { id: 'rrf-retrieval', label: 'RRF混合检索', type: 'l3', category: 'memory', desc: 'BM25关键词 + 向量相似度 → RRF融合 → 多维权重 → Top10' }
+          ]
+        },
+        {
+          id: 'output-mod', label: '输出交互模块', type: 'l2', category: 'output',
+          desc: '拟人化输出+人格一致性+多模态交互',
+          children: [
+            { id: 'persona-engine', label: 'PersonaEngine', type: 'l3', category: 'output', desc: '场景感知+情感适配+动态话术，LLM优先/模板降级' },
+            { id: 'persona-core', label: 'PersonaCore', type: 'l3', category: 'output', desc: '御姐秘书档案：28岁/成熟干练/场景语气矩阵' },
+            { id: 'persona-rules', label: 'PersonaRules', type: 'l3', category: 'output', desc: '人设规则：语气微调器，从硬门卫→场景感知语气适配' },
+            { id: 'interaction-engine', label: 'InteractionEngine', type: 'l3', category: 'output', desc: '输出总协调：PersonaRules+PersonaEngine+语音+表情+连续对话' }
+          ]
+        }
+      ]
+    },
+    {
+      id: 'integration', label: '四、模块交互关系', type: 'l1', category: 'evolution',
+      desc: 'EventBus事件驱动 + 依赖注入 + 进化闭环的集成架构',
+      children: [
+        {
+          id: 'eventbus', label: 'EventBus神经中枢', type: 'l2', category: 'evolution',
+          desc: '类型安全事件总线，50+事件类型，SQLite持久化+批量写入',
+          children: [
+            { id: 'evt-input', label: 'user_input', type: 'l3', category: 'perception', desc: 'WebSocket→Scheduler，用户输入分发' },
+            { id: 'evt-response', label: 'response_ready', type: 'l3', category: 'output', desc: 'Core→WebSocket，回复输出' },
+            { id: 'evt-task', label: 'task_completed', type: 'l3', category: 'execution', desc: 'AgentLoop/Scheduler→EventBus，任务完成通知' },
+            { id: 'evt-correction', label: 'user_correction', type: 'l3', category: 'evolution', desc: '外部→Core，用户纠错实时反馈' },
+            { id: 'evt-proactive', label: 'proactive_*', type: 'l3', category: 'evolution', desc: 'Scheduler→main.ts，主动交互/日程/简报/关怀' }
+          ]
+        },
+        {
+          id: 'dep-chain', label: '核心依赖链', type: 'l2', category: 'decision',
+          desc: 'JiabaixingCore(大脑) → AgentLoop/Scheduler/PersonaRules → SkillBridge/MemoryEngine',
+          children: [
+            { id: 'core-hub', label: 'JiabaixingCore', type: 'l3', category: 'decision', desc: '大脑/协调器，持有所有核心模块引用' },
+            { id: 'agentloop-dep', label: 'AgentLoop', type: 'l3', category: 'decision', desc: '依赖SkillBridge+MemoryEngine+InteractionEngine' },
+            { id: 'scheduler-dep', label: 'Scheduler', type: 'l3', category: 'decision', desc: '持有PriorityArbiter+SceneRecognizer+EmotionAnalyzer' },
+            { id: 'evo-dep', label: 'EvolutionEngine', type: 'l3', category: 'evolution', desc: '独立运行，持有FeedbackCollector+StrategyOptimizer' }
+          ]
+        },
+        {
+          id: 'proactive-sys', label: '主动交互系统', type: 'l2', category: 'evolution',
+          desc: '双层主动检查：交互调度器 + 主动检查循环',
+          children: [
+            { id: 'sched-interact', label: '交互调度器', type: 'l3', category: 'evolution', desc: 'scheduleNextInteraction()，基于场景权重的定时交互' },
+            { id: 'proactive-loop', label: '主动检查循环', type: 'l3', category: 'evolution', desc: 'startProactiveLoop()，每10min扫描日程/情绪/行为' },
+            { id: 'insight-detect', label: '介入机会检测', type: 'l3', category: 'evolution', desc: '5种触发：早安/晚安/深夜/长沉默/负面情绪趋势' },
+            { id: 'rich-context', label: '5维记忆上下文', type: 'l3', category: 'memory', desc: '语义检索+用户画像+情绪记忆+近期反馈+任务记忆' }
+          ]
+        }
+      ]
+    }
+  ]
+};
+
+const FLOW_ARROWS = [
+  { from: 'receive', to: 'analyze', label: '输入传递', color: '#6ee7b7' },
+  { from: 'analyze', to: 'decide', label: '上下文', color: '#93c5fd' },
+  { from: 'decide', to: 'execute', label: '执行计划', color: '#fcd34d' },
+  { from: 'execute', to: 'output', label: '执行结果', color: '#fca5a5' },
+  { from: 'output', to: 'feedback', label: '用户反馈', color: '#c4b5fd' },
+  { from: 'feedback', to: 'receive', label: '进化优化', color: '#f9a8d4' },
+];
+
+let scale = 0.75;
+let panX = 0, panY = 0;
+let isDragging = false, dragStartX, dragStartY;
+const nodePositions = {};
+const container = document.getElementById('canvas-container');
+const mindmap = document.getElementById('mindmap');
+const tooltip = document.getElementById('tooltip');
+
+function layoutTree(node, x, y, angle, spread, depth, parentAngle) {
+  const widths = { root: 220, l1: 180, l2: 140, l3: 120, l4: 100 };
+  const w = widths[node.type] || 120;
+  const h = node.type === 'root' ? 50 : (node.type === 'l1' ? 40 : 32);
+  nodePositions[node.id] = { x, y, w, h, node };
+
+  if (!node.children || node.children.length === 0) return;
+
+  const childCount = node.children.length;
+  const baseSpread = depth === 0 ? 360 : (depth === 1 ? 120 : 80);
+  const distance = depth === 0 ? 320 : (depth === 1 ? 240 : (depth === 2 ? 190 : 150));
+  const startAngle = angle - baseSpread / 2;
+  const step = childCount > 1 ? baseSpread / (childCount - 1) : 0;
+
+  node.children.forEach((child, i) => {
+    const childAngle = childCount > 1 ? startAngle + step * i : angle;
+    const rad = (childAngle * Math.PI) / 180;
+    const cx = x + Math.cos(rad) * distance;
+    const cy = y + Math.sin(rad) * distance;
+    layoutTree(child, cx, cy, childAngle, baseSpread * 0.6, depth + 1, childAngle);
+  });
+}
+
+function renderTree(node, svgEl) {
+  const pos = nodePositions[node.id];
+  if (!pos) return;
+
+  const div = document.createElement('div');
+  div.className = `node ${node.type} ${node.category || ''}`;
+  div.textContent = node.label;
+  div.style.left = (pos.x - pos.w / 2) + 'px';
+  div.style.top = (pos.y - pos.h / 2) + 'px';
+  div.style.width = pos.w + 'px';
+  div.style.height = pos.h + 'px';
+  div.style.display = 'flex';
+  div.style.alignItems = 'center';
+  div.style.justifyContent = 'center';
+  div.style.textAlign = 'center';
+  div.dataset.id = node.id;
+  div.dataset.desc = node.desc || '';
+
+  div.addEventListener('mouseenter', (e) => {
+    if (div.dataset.desc) {
+      tooltip.textContent = div.dataset.desc;
+      tooltip.style.display = 'block';
+      tooltip.style.left = (e.clientX + 15) + 'px';
+      tooltip.style.top = (e.clientY + 15) + 'px';
+    }
+  });
+  div.addEventListener('mousemove', (e) => {
+    tooltip.style.left = (e.clientX + 15) + 'px';
+    tooltip.style.top = (e.clientY + 15) + 'px';
+  });
+  div.addEventListener('mouseleave', () => {
+    tooltip.style.display = 'none';
+  });
+
+  mindmap.appendChild(div);
+
+  if (node.children) {
+    node.children.forEach(child => {
+      const childPos = nodePositions[child.id];
+      if (!childPos) return;
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      const mx = (pos.x + childPos.x) / 2;
+      const my = (pos.y + childPos.y) / 2;
+      const dx = childPos.x - pos.x;
+      const dy = childPos.y - pos.y;
+      const cx1 = pos.x + dx * 0.4;
+      const cy1 = pos.y + dy * 0.1;
+      const cx2 = pos.x + dx * 0.6;
+      const cy2 = pos.y + dy * 0.9;
+      path.setAttribute('d', `M${pos.x},${pos.y} C${cx1},${cy1} ${cx2},${cy2} ${childPos.x},${childPos.y}`);
+      const lineClass = node.type === 'root' ? 'line-root' : (node.type === 'l1' ? 'line-l1' : (node.type === 'l2' ? 'line-l2' : 'line-l3'));
+      path.setAttribute('class', `line-path ${lineClass}`);
+      svgEl.appendChild(path);
+      renderTree(child, svgEl);
+    });
+  }
+}
+
+function renderFlowArrows(svgEl) {
+  FLOW_ARROWS.forEach(arrow => {
+    const fromPos = nodePositions[arrow.from];
+    const toPos = nodePositions[arrow.to];
+    if (!fromPos || !toPos) return;
+
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    const dx = toPos.x - fromPos.x;
+    const dy = toPos.y - fromPos.y;
+    const cx1 = fromPos.x + dx * 0.3;
+    const cy1 = fromPos.y + dy * 0.5 - 60;
+    const cx2 = fromPos.x + dx * 0.7;
+    const cy2 = fromPos.y + dy * 0.5 + 60;
+    path.setAttribute('d', `M${fromPos.x},${fromPos.y} C${cx1},${cy1} ${cx2},${cy2} ${toPos.x},${toPos.y}`);
+    path.setAttribute('class', 'line-flow');
+    path.setAttribute('stroke', arrow.color);
+    svgEl.appendChild(path);
+
+    const labelDiv = document.createElement('div');
+    labelDiv.className = 'flow-label';
+    labelDiv.textContent = arrow.label;
+    labelDiv.style.left = ((fromPos.x + toPos.x) / 2 - 20) + 'px';
+    labelDiv.style.top = ((fromPos.y + toPos.y) / 2 - 30) + 'px';
+    labelDiv.style.color = arrow.color;
+    mindmap.appendChild(labelDiv);
+  });
+}
+
+function init() {
+  const svgEl = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svgEl.setAttribute('class', 'lines');
+  svgEl.setAttribute('width', '4000');
+  svgEl.setAttribute('height', '4000');
+  mindmap.appendChild(svgEl);
+
+  layoutTree(MINDMAP_DATA, 2000, 2000, -90, 360, 0, -90);
+  renderTree(MINDMAP_DATA, svgEl);
+  renderFlowArrows(svgEl);
+
+  panX = container.clientWidth / 2 - 2000 * scale;
+  panY = container.clientHeight / 2 - 2000 * scale;
+  updateTransform();
+}
+
+function updateTransform() {
+  mindmap.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+}
+
+function zoomIn() { scale = Math.min(2, scale * 1.2); updateTransform(); }
+function zoomOut() { scale = Math.max(0.3, scale / 1.2); updateTransform(); }
+function resetView() {
+  scale = 0.75;
+  panX = container.clientWidth / 2 - 2000 * scale;
+  panY = container.clientHeight / 2 - 2000 * scale;
+  updateTransform();
+}
+
+container.addEventListener('mousedown', (e) => {
+  if (e.target.closest('.node')) return;
+  isDragging = true;
+  dragStartX = e.clientX - panX;
+  dragStartY = e.clientY - panY;
+});
+container.addEventListener('mousemove', (e) => {
+  if (!isDragging) return;
+  panX = e.clientX - dragStartX;
+  panY = e.clientY - dragStartY;
+  updateTransform();
+});
+container.addEventListener('mouseup', () => { isDragging = false; });
+container.addEventListener('mouseleave', () => { isDragging = false; });
+container.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const delta = e.deltaY > 0 ? 0.9 : 1.1;
+  const newScale = Math.max(0.3, Math.min(2, scale * delta));
+  const rect = container.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+  panX = mx - (mx - panX) * (newScale / scale);
+  panY = my - (my - panY) * (newScale / scale);
+  scale = newScale;
+  updateTransform();
+}, { passive: false });
+
+init();
+</script>
+</body>
+</html>

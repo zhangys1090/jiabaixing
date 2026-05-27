@@ -1,0 +1,258 @@
+.agent-execution-panel {
+  background: var(--surface-color);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  padding: 8px 12px;
+  margin: var(--spacing-sm) 0;
+}
+
+.agent-execution-panel.collapsed .steps-container {
+  display: none;
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.panel-icon {
+  font-size: 14px;
+}
+
+.panel-header h4 {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.marquee-container {
+  overflow: hidden;
+  width: 120px;
+  margin-left: 8px;
+}
+
+.marquee-content {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  animation: marquee 3s linear infinite;
+  white-space: nowrap;
+}
+
+@keyframes marquee {
+  0% {
+    transform: translateX(0);
+  }
+  50% {
+    transform: translateX(10px);
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+.current-step {
+  font-size: 12px;
+  color: var(--primary-color);
+  font-weight: 600;
+}
+
+.step-separator {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.step-progress {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: monospace;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.expand-toggle {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px 6px;
+  font-size: 10px;
+}
+
+.stop-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--error-color);
+  background: rgba(239, 68, 68, 0.08);
+  color: var(--error-color);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.2s;
+}
+
+.stop-button:hover {
+  background: rgba(239, 68, 68, 0.15);
+}
+
+.steps-container {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-color);
+}
+
+.agent-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  transition: all 0.2s;
+}
+
+.agent-step.pending {
+  color: var(--text-muted);
+  opacity: 0.4;
+}
+
+.agent-step.in-progress {
+  color: var(--text-primary);
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.agent-step.completed {
+  color: var(--success-color);
+}
+
+.agent-step.failed {
+  color: var(--error-color);
+  background: rgba(239, 68, 68, 0.06);
+}
+
+.step-icon {
+  width: 16px;
+  text-align: center;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.step-name {
+  flex: 1;
+  font-weight: 500;
+}
+
+.step-duration {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: monospace;
+}
+
+@media (max-width: 768px) {
+  .agent-execution-panel {
+    padding: var(--spacing-sm) var(--spacing-md);
+  }
+
+  .marquee-container {
+    width: 80px;
+  }
+}
+
+.panel-content {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-color);
+}
+
+.tab-bar {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.tab-btn {
+  flex: 1;
+  padding: 4px 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.tab-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-secondary);
+}
+
+.tab-btn.active {
+  background: var(--primary-color);
+  color: white;
+  font-weight: 500;
+}
+
+.learning-container,
+.status-container {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.metric-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 6px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 4px;
+}
+
+.metric-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.metric-value {
+  font-size: 12px;
+  color: var(--text-primary);
+  font-weight: 500;
+  font-family: monospace;
+}
+
+.metric-value.small {
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.metric-value.success {
+  color: var(--success-color);
+}
+
+.metric-value.error {
+  color: var(--error-color);
+}

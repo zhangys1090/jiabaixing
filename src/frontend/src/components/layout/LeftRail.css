@@ -1,0 +1,72 @@
+.layout-left-rail {
+  width: 48px;
+  height: 100%;
+  background: var(--bg-raised);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--s-2) 0;
+  border-right: 1px solid var(--gray-4);
+  flex-shrink: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.layout-left-rail__nav-btn {
+  width: 36px;
+  height: 36px;
+  border: none;
+  background: transparent;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  font-size: var(--text-lg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: var(--s-1);
+  transition: background var(--ease);
+  position: relative;
+}
+
+.layout-left-rail__nav-btn:hover {
+  background: var(--bg-hover);
+}
+
+.layout-left-rail__nav-btn--active {
+  background: var(--accent-dim);
+}
+
+.layout-left-rail__nav-btn--active:hover {
+  background: var(--accent-dim);
+}
+
+.layout-left-rail__nav-btn::after {
+  content: attr(data-label);
+  position: absolute;
+  left: 48px;
+  background: var(--gray-3);
+  color: var(--text);
+  padding: var(--s-1) var(--s-2);
+  border-radius: var(--r-sm);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--ease);
+  z-index: 100;
+}
+
+.layout-left-rail__nav-btn:hover::after {
+  opacity: 1;
+}
+
+.layout-left-rail__active-indicator {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 20px;
+  background: var(--accent);
+  border-radius: 0 2px 2px 0;
+}

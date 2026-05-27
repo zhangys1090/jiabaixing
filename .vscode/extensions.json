@@ -1,0 +1,38 @@
+{
+  "recommendations": [
+    // ========== 核心调试插件 ==========
+    "msjsdiag.debugger-for-chrome",
+    "ms-vscode.js-debug",
+    "ms-vscode.js-debug-companion",
+    
+    // ========== 代码质量插件 ==========
+    "dbaeumer.vscode-eslint",
+    "esbenp.prettier-vscode",
+    
+    // ========== API 测试插件 ==========
+    "humao.rest-client",
+    "rangav.vscode-thunder-client",
+    
+    // ========== TypeScript/JavaScript 增强 ==========
+    "visualstudioexptteam.vscodeintellicode",
+    "christian-kohler.npm-intellisense",
+    "steoates.autoimport",
+    
+    // ========== Git 集成 ==========
+    "github.vscode-pull-request-github",
+    "eamodio.gitlens",
+    
+    // ========== 数据库工具 ==========
+    "alexcvzz.vscode-sqlite",
+    
+    // ========== Docker 支持 ==========
+    "ms-azuretools.vscode-docker",
+    
+    // ========== 其他实用工具 ==========
+    "formulahendry.auto-close-tag",
+    "formulahendry.auto-rename-tag",
+    "CoenraadS.bracket-pair-colorizer-2",
+    "gruntfuggly.todo-tree",
+    "wayou.vscode-todo-highlight"
+  ]
+}
