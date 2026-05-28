@@ -364,7 +364,7 @@ async function handleMemoryCommand(): Promise<void> {
 async function handleEvolutionCommand(): Promise<void> {
   try {
     const resp = await fetch(`${backendUrl}/api/evolution/status`);
-    const data = await resp.json() as { orchestrator?: { totalInteractions?: number; totalOptimizations?: number; averageQualityScore?: number; qualityTrend?: string; failureRate?: number; cyclesToday?: number; totalCycles?: number }; enginesActive?: string[] };
+    const data = await resp.json() as { orchestrator?: { totalInteractions?: number; totalOptimizations?: number; averageQualityScore?: number; qualityTrend?: string; failureRate?: number; cyclesToday?: number; totalCycles?: number; userProfileConfidence?: number; lastCycleTime?: number }; enginesActive?: string[] };
     console.log(`\n  ${COLORS.bold}进化数据${COLORS.reset}\n`);
     if (data.orchestrator) {
       const o = data.orchestrator;
@@ -375,12 +375,35 @@ async function handleEvolutionCommand(): Promise<void> {
       console.log(`  失败率: ${((o.failureRate || 0) * 100).toFixed(1)}%`);
       console.log(`  今日周期: ${o.cyclesToday || 0}`);
       console.log(`  总周期: ${o.totalCycles || 0}`);
+      if (o.lastCycleTime) {
+        const ago = Math.round((Date.now() - o.lastCycleTime) / 60000);
+        console.log(`  上次优化: ${ago} 分钟前`);
+      }
+      if (o.userProfileConfidence) {
+        console.log(`  画像置信度: ${(o.userProfileConfidence * 100).toFixed(0)}%`);
+      }
     } else {
       console.log(`  ${COLORS.dim}进化引擎未启动${COLORS.reset}`);
     }
     if (data.enginesActive?.length) {
       console.log(`  活跃引擎: ${data.enginesActive.join(', ')}`);
     }
+
+    // 额外获取优化结果详情
+    try {
+      const metricsResp = await fetch(`${backendUrl}/api/evolution/metrics`);
+      const metricsData = await metricsResp.json() as { data?: { optimizationHistory?: Array<{ id: string; reason: string; toneAdjustments: Array<unknown>; skillAdjustments: Array<unknown>; promptExamples: Array<unknown> }> } };
+      const history = metricsData.data?.optimizationHistory;
+      if (history && history.length > 0) {
+        console.log(`\n  ${COLORS.dim}最近优化:${COLORS.reset}`);
+        for (const h of history.slice(-3)) {
+          const tone = h.toneAdjustments?.length || 0;
+          const skill = h.skillAdjustments?.length || 0;
+          const prompt = h.promptExamples?.length || 0;
+          console.log(`    ${COLORS.cyan}●${COLORS.reset} ${h.reason.substring(0, 40)} → 语气${tone} 技能${skill} 示例${prompt}`);
+        }
+      }
+    } catch { /* ignore */ }
   } catch {
     console.log(`  ${c(COLORS.red, '❌ 获取进化数据失败')}`);
   }

@@ -57,7 +57,7 @@ export class StrategyOptimizer {
   private promptExamples: PromptExample[] = [];
   private optimizationHistory: OptimizationLog[] = [];
   private feedbackBuffer: FeedbackRecord[] = [];
-  private readonly autoTriggerThreshold = 50;
+  private readonly autoTriggerThreshold = 8; // 积累8条反馈即触发优化（原50）
 
   constructor() {
     // 默认技能权重
@@ -79,6 +79,12 @@ export class StrategyOptimizer {
       `📥 反馈加入缓冲区: ${this.feedbackBuffer.length}/${this.autoTriggerThreshold}`,
       'StrategyOptimizer'
     );
+    // 达到阈值自动触发优化
+    if (this.feedbackBuffer.length >= this.autoTriggerThreshold) {
+      setImmediate(() => {
+        this.runOptimization('auto', `积累 ${this.feedbackBuffer.length} 条反馈`).catch(() => {});
+      });
+    }
   }
 
   /**
@@ -131,13 +137,32 @@ export class StrategyOptimizer {
     reason: string
   ): Promise<OptimizationLog> {
     Logger.info(
-      `🧬 开始策略优化: ${triggeredBy} - ${reason}`,
+      `🧬 开始策略优化: ${triggeredBy} - ${reason} (缓冲区=${this.feedbackBuffer.length}条)`,
       'StrategyOptimizer'
     );
 
     const toneAdjustments = this.learnTonePreference();
     const skillAdjustments = this.learnSkillPreference();
     const promptExamples = this.learnDecompositionStrategy();
+
+    Logger.info(
+      `📊 优化产出: 语气=${toneAdjustments.length} 技能=${skillAdjustments.length} 示例=${promptExamples.length} (基于${this.feedbackBuffer.length}条反馈)`,
+      'StrategyOptimizer'
+    );
+
+    // 调试：输出反馈的满意度分布
+    if (toneAdjustments.length === 0 && this.feedbackBuffer.length > 0) {
+      const scenes = new Map<string, { pos: number; neg: number; total: number }>();
+      for (const r of this.feedbackBuffer) {
+        const s = r.scene || 'daily';
+        if (!scenes.has(s)) scenes.set(s, { pos: 0, neg: 0, total: 0 });
+        const d = scenes.get(s)!;
+        d.total++;
+        if (r.inferredSatisfaction > 0.6) d.pos++;
+        if (r.inferredSatisfaction < 0.4) d.neg++;
+      }
+      Logger.info(`📋 反馈分布: ${JSON.stringify([...scenes.entries()].map(([k,v]) => `${k}:${v.total}条(pos=${v.pos}/neg=${v.neg})`))}`, 'StrategyOptimizer');
+    }
 
     const log: OptimizationLog = {
       id: `opt_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,

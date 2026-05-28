@@ -45,7 +45,7 @@ export async function initEvolution(
       }
     );
 
-    const OPTIMIZATION_INTERVAL_MS = 5 * 60 * 1000;
+    const OPTIMIZATION_INTERVAL_MS = 3 * 60 * 1000; // 每3分钟
     setInterval(() => {
       if (optimizationFeedbackLoop) {
         const metrics = orchestrator.getUnifiedMetrics();
@@ -55,28 +55,14 @@ export async function initEvolution(
             ? recentScores.reduce((a, b) => a + b, 0) / recentScores.length
             : 0;
 
-        if (metrics.summary.totalInteractions > 0 && avgScore < 0.6) {
+        // 有交互就触发优化，不只看质量分。质量好也优化以持续改进
+        if (metrics.summary.totalInteractions > 0) {
           Logger.info(
-            `🔄 定时优化检查触发 | 平均质量=${(avgScore * 100).toFixed(1)} | 交互次数=${metrics.summary.totalInteractions}`,
+            `🔄 定时优化触发 | 质量=${(avgScore * 100).toFixed(1)} | 交互=${metrics.summary.totalInteractions}`,
             'Bootstrap'
           );
 
-          void optimizationFeedbackLoop.evaluateAndOptimize({
-            stepParams: [],
-            evalInput: {
-              userInput: '定时优化检查',
-              conversationHistory: [],
-              currentOutput: `平均质量评分: ${(avgScore * 100).toFixed(1)}`,
-            },
-            scorerMetadata: {
-              duration: metrics.performance.averageResponseTime,
-              retries: 0,
-              errors: Math.floor(
-                metrics.quality.failureRate * metrics.summary.totalInteractions
-              ),
-              context: '定时优化检查',
-            },
-          });
+          void orchestrator.triggerOptimizationCycleWithVerification('定时优化检查');
         }
       }
     }, OPTIMIZATION_INTERVAL_MS);
