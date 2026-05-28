@@ -373,6 +373,33 @@ export function setupEventBus(
     });
   });
 
+  registerOnce('proactive_message', (data: unknown) => {
+    const payload = data as { message?: string; reason?: string };
+    broadcast({
+      type: 'proactive_message',
+      data: {
+        message: payload.message || payload.reason || '',
+        timestamp: new Date().toISOString(),
+      },
+    });
+  });
+
+  registerOnce('environment_update', (data: unknown) => {
+    const payload = data as {
+      timestamp?: string;
+      activeEnv?: string;
+      foregroundWindow?: { title: string; process: string };
+    };
+    broadcast({
+      type: 'environment_update',
+      data: {
+        timestamp: payload.timestamp || new Date().toISOString(),
+        activeEnv: payload.activeEnv || 'unknown',
+        foregroundWindow: payload.foregroundWindow || null,
+      },
+    });
+  });
+
   Logger.on('log', (entry) => {
     if (entry.level === 'error' || entry.level === 'fatal') {
       broadcast({

@@ -44,6 +44,7 @@ ${COLORS.bold}  可用命令:${COLORS.reset}
   ${COLORS.cyan}/skills${COLORS.reset}      查看技能列表
   ${COLORS.cyan}/memory${COLORS.reset}      查看记忆统计
   ${COLORS.cyan}/evolution${COLORS.reset}   查看进化数据
+  ${COLORS.cyan}/env${COLORS.reset}        查看桌面环境
   ${COLORS.cyan}/chat${COLORS.reset}        进入聊天模式（默认）
   ${COLORS.cyan}/gateway${COLORS.reset}     网关配置（微信/QQ/飞书/钉钉）
   ${COLORS.cyan}/schedule${COLORS.reset}    定时任务与自动化管理
@@ -65,6 +66,7 @@ const COMMANDS = [
   '/skills',
   '/memory',
   '/evolution',
+  '/env',
   '/chat',
   '/gateway',
   '/schedule',
@@ -426,6 +428,55 @@ async function handleGatewayStatus(): Promise<void> {
     }
   }
   console.log(`\n  输入 ${COLORS.cyan}/gateway menu${COLORS.reset} 进入配置菜单`);
+  console.log();
+}
+
+async function handleEnvCommand(): Promise<void> {
+  try {
+    const resp = await fetch(`${backendUrl}/api/health`);
+    const health = await resp.json();
+    console.log(`\n  ${COLORS.bold}桌面环境${COLORS.reset}\n`);
+    console.log(`  后端: ${health.status}`);
+    console.log(`  模型: ${health.model}`);
+    console.log(`  运行: ${Math.floor(health.uptime / 60)} 分钟\n`);
+
+    // 尝试获取前台窗口信息（通过 PowerShell）
+    try {
+      const { execSync } = require('child_process');
+      const psCmd = `powershell -Command "Add-Type @\\\"using System;using System.Runtime.InteropServices;using System.Text;public class W { [DllImport(\\\"user32.dll\\\")]public static extern IntPtr GetForegroundWindow();[DllImport(\\\"user32.dll\\\")]public static extern int GetWindowText(IntPtr hWnd,StringBuilder lpString,int nMaxCount);[DllImport(\\\"user32.dll\\\")]public static extern uint GetWindowThreadProcessId(IntPtr hWnd,out uint lpdwProcessId);} \\\";$h=[W]::GetForegroundWindow();$s=New-Object Text.StringBuilder 256;[W]::GetWindowText($h,$s,256)|Out-Null;$p=0;[W]::GetWindowThreadProcessId($h,[ref]$p)|Out-Null;$t=$s.ToString();$n=(Get-Process -Id $p -ErrorAction SilentlyContinue).ProcessName;Write-Output \\\"$n|$t\\\""`;
+      const result = execSync(psCmd, { timeout: 5000, encoding: 'utf-8' }).toString().trim();
+      const parts = result.split('|');
+      if (parts.length >= 2 && parts[0]) {
+        const proc = parts[0];
+        const title = parts.slice(1).join('|');
+        console.log(`  前台窗口:`);
+        console.log(`    ${COLORS.cyan}进程:${COLORS.reset} ${proc}`);
+        console.log(`    ${COLORS.cyan}标题:${COLORS.reset} ${title.substring(0, 80)}`);
+
+        const envType = (() => {
+          const t = title.toLowerCase();
+          const p = proc.toLowerCase();
+          if (t.includes('code') || t.includes('vscode') || p.includes('code') ||
+              t.includes('terminal') || p.includes('terminal') || p.includes('cmd') ||
+              p.includes('powershell') || p.includes('bash') || t.includes('cursor')) {
+            return c(COLORS.green, '💻 编程');
+          }
+          if (p.includes('chrome') || p.includes('edge') || p.includes('firefox') ||
+              p.includes('explorer')) {
+            return c(COLORS.yellow, '🌐 浏览');
+          }
+          return c(COLORS.dim, '其他');
+        })();
+        console.log(`  环境: ${envType}`);
+      } else {
+        console.log(`  ${COLORS.dim}未检测到前台窗口${COLORS.reset}`);
+      }
+    } catch {
+      console.log(`  ${COLORS.dim}环境检测不可用${COLORS.reset}`);
+    }
+  } catch {
+    console.log(`  ${c(COLORS.red, '❌ 获取环境状态失败')}`);
+  }
   console.log();
 }
 
@@ -916,6 +967,9 @@ async function replLoop(
           continue;
         case '/evolution':
           await handleEvolutionCommand();
+          continue;
+        case '/env':
+          await handleEnvCommand();
           continue;
         case '/chat':
           console.log(

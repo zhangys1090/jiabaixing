@@ -55,6 +55,7 @@ export interface CoreEvents {
 export interface SchedulerEvents {
   scheduler_started: [payload: { timestamp: string }];
   scheduler_stopped: [payload: { timestamp: string }];
+  environment_update: [payload: { timestamp?: string; activeEnv?: string; foregroundWindow?: { title: string; process: string } | null }];
   proactive_trigger: [
     payload: {
       type: string;
