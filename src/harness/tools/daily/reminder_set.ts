@@ -87,7 +87,8 @@ function formatReminderList(reminders: ReminderEntry[]): string {
   if (reminders.length === 0) return '暂无提醒';
   return reminders
     .map((r) => {
-      const icon = r.status === 'pending' ? '🔔' : r.status === 'triggered' ? '✅' : '❌';
+      const icon =
+        r.status === 'pending' ? '🔔' : r.status === 'triggered' ? '✅' : '❌';
       const repeat = r.repeat !== 'none' ? ` 🔄${r.repeat}` : '';
       return `${icon} [${r.id}] ${r.message} ⏰${r.triggerTime}${repeat}`;
     })
@@ -107,7 +108,13 @@ export function createReminderSetExecutor(deps: ReminderSetDeps) {
           const message = String(params.message || '');
           const triggerTime = String(params.trigger_time || '');
           if (!message || !triggerTime) {
-            return { success: false, output: null, error: '设置提醒需要提供message和trigger_time', duration: 0, validated: false };
+            return {
+              success: false,
+              output: null,
+              error: '设置提醒需要提供message和trigger_time',
+              duration: 0,
+              validated: false,
+            };
           }
           const reminder: ReminderEntry = {
             id: generateId(),
@@ -121,34 +128,73 @@ export function createReminderSetExecutor(deps: ReminderSetDeps) {
           if (deps.scheduleTrigger) {
             deps.scheduleTrigger(reminder);
           }
-          return { success: true, output: `提醒已设置: [${reminder.id}] ${reminder.message} ⏰${reminder.triggerTime}`, duration: 0, validated: false };
+          return {
+            success: true,
+            output: `提醒已设置: [${reminder.id}] ${reminder.message} ⏰${reminder.triggerTime}`,
+            duration: 0,
+            validated: false,
+          };
         }
 
         case 'list': {
           const reminders = await deps.reminderStore.getReminders();
-          return { success: true, output: formatReminderList(reminders), duration: 0, validated: false };
+          return {
+            success: true,
+            output: formatReminderList(reminders),
+            duration: 0,
+            validated: false,
+          };
         }
 
         case 'cancel': {
           const reminderId = String(params.reminder_id || '');
           if (!reminderId) {
-            return { success: false, output: null, error: '取消提醒需要提供reminder_id', duration: 0, validated: false };
+            return {
+              success: false,
+              output: null,
+              error: '取消提醒需要提供reminder_id',
+              duration: 0,
+              validated: false,
+            };
           }
           const reminders = await deps.reminderStore.getReminders();
           const reminder = reminders.find((r) => r.id === reminderId);
           if (!reminder) {
-            return { success: false, output: null, error: `提醒不存在: ${reminderId}`, duration: 0, validated: false };
+            return {
+              success: false,
+              output: null,
+              error: `提醒不存在: ${reminderId}`,
+              duration: 0,
+              validated: false,
+            };
           }
           reminder.status = 'cancelled';
           await deps.reminderStore.saveReminder(reminder);
-          return { success: true, output: `提醒已取消: [${reminder.id}] ${reminder.message}`, duration: 0, validated: false };
+          return {
+            success: true,
+            output: `提醒已取消: [${reminder.id}] ${reminder.message}`,
+            duration: 0,
+            validated: false,
+          };
         }
 
         default:
-          return { success: false, output: null, error: `未知操作: ${action}`, duration: 0, validated: false };
+          return {
+            success: false,
+            output: null,
+            error: `未知操作: ${action}`,
+            duration: 0,
+            validated: false,
+          };
       }
     } catch (err) {
-      return { success: false, output: null, error: `提醒操作失败: ${(err as Error).message}`, duration: 0, validated: false };
+      return {
+        success: false,
+        output: null,
+        error: `提醒操作失败: ${(err as Error).message}`,
+        duration: 0,
+        validated: false,
+      };
     }
   };
 }

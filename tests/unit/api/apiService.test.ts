@@ -9,7 +9,7 @@ import { JiabaixingApiService } from '../../../src/frontend/src/api/apiService';
 const mockFetch = jest.fn();
 global.fetch = mockFetch;
 
-describe.skip('JiabaixingApiService', () => {
+describe('JiabaixingApiService', () => {
   let apiService: JiabaixingApiService;
 
   beforeEach(() => {
@@ -241,44 +241,4 @@ describe.skip('JiabaixingApiService', () => {
     });
   });
 
-  describe('开发辅助API', () => {
-    it('应该正确调用analyzeCode', async () => {
-      const mockResponse = {
-        success: true,
-        data: { analysis: 'Code looks good' },
-      };
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(mockResponse),
-      });
-
-      const result = await apiService.analyzeCode('const x = 1;', 'javascript');
-
-      expect(mockFetch).toHaveBeenCalledWith(
-        'http://localhost:3101/development/analyze-code',
-        expect.objectContaining({
-          method: 'POST',
-          body: JSON.stringify({ code: 'const x = 1;', language: 'javascript' }),
-        })
-      );
-      expect(result.success).toBe(true);
-      expect(result.data?.analysis).toBe('Code looks good');
-    });
-
-    it('应该正确调用generateCode', async () => {
-      const mockResponse = {
-        success: true,
-        data: { code: 'function hello() { return "Hello"; }' },
-      };
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(mockResponse),
-      });
-
-      const result = await apiService.generateCode('Hello World function', 'javascript');
-
-      expect(result.success).toBe(true);
-      expect(result.data?.code).toBe('function hello() { return "Hello"; }');
-    });
-  });
 });

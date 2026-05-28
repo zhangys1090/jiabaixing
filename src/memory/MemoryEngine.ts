@@ -17,22 +17,23 @@
 import { EmotionTag, SceneTag } from '../interfaces';
 import { MultimodalInput } from '../multimodal/MultimodalInput';
 import Logger from '../utils/Logger';
+import { perf } from '../utils/PerformanceMonitor';
 import { ConversationCompressor } from './ConversationCompressor';
 import { MemoryDatabase, MemoryRecord } from './Database';
 import { KnowledgeGraphBuilder } from './KnowledgeGraphBuilder';
 import { LongTermMemory } from './LongTermMemory';
 import { MemoryEncryption } from './MemoryEncryption';
 import {
-    LLMEmbeddingModel,
-    MemoryRetriever,
-    SemanticEmbeddingModel,
+  LLMEmbeddingModel,
+  MemoryRetriever,
+  SemanticEmbeddingModel,
 } from './MemoryRetriever';
 import { MemoryTracker } from './MemoryTracker';
 import { ShortTermMemory } from './ShortTermMemory';
 import { UserProfile } from './UserProfile';
 import {
-    VectorDatabase as CloseableVectorDatabase,
-    VectorDatabaseFactory,
+  VectorDatabase as CloseableVectorDatabase,
+  VectorDatabaseFactory,
 } from './VectorDatabaseFactory';
 
 // ==================== 类型导出 ====================
@@ -207,29 +208,38 @@ export class MemoryEngine {
     scene?: string,
     emotion?: string
   ): Promise<MemoryItem> {
-    const memoryItem: MemoryItem = {
-      id: `short_term_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`,
-      type: MemoryType.SHORT_TERM,
-      content,
-      timestamp: new Date(),
-      scene,
-      emotion,
-    };
+    return perf.measure(
+      'memory.storeShortTerm',
+      async () => {
+        const memoryItem: MemoryItem = {
+          id: `short_term_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`,
+          type: MemoryType.SHORT_TERM,
+          content,
+          timestamp: new Date(),
+          scene,
+          emotion,
+        };
 
-    const contentStr =
-      typeof content === 'string' ? content : JSON.stringify(content);
-    this.memoryDatabase.add(contentStr, 'short_term', 'core', 0.6);
+        const contentStr =
+          typeof content === 'string' ? content : JSON.stringify(content);
+        this.memoryDatabase.add(contentStr, 'short_term', 'core', 0.6);
 
-    try {
-      await this.shortTermMemory.store(content, scene, emotion);
-    } catch (error) {
-      Logger.warn('短期记忆直接存储失败，回退到写入队列: ' + (error as Error).message, 'MemoryEngine');
-      this.enqueueWrite({ type: 'short_term', content, scene, emotion });
-    }
+        try {
+          await this.shortTermMemory.store(content, scene, emotion);
+        } catch (error) {
+          Logger.warn(
+            '短期记忆直接存储失败，回退到写入队列: ' + (error as Error).message,
+            'MemoryEngine'
+          );
+          this.enqueueWrite({ type: 'short_term', content, scene, emotion });
+        }
 
-    void this.memoryRetriever.scheduleEmbeddingGeneration(memoryItem);
+        void this.memoryRetriever.scheduleEmbeddingGeneration(memoryItem);
 
-    return memoryItem;
+        return memoryItem;
+      },
+      'memory'
+    );
   }
 
   public async storeLongTermMemory(
@@ -237,46 +247,52 @@ export class MemoryEngine {
     scene?: string,
     emotion?: string
   ): Promise<MemoryItem> {
-    const memoryItem: MemoryItem = {
-      id: `long_term_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`,
-      type: MemoryType.LONG_TERM,
-      content,
-      timestamp: new Date(),
-      scene,
-      emotion,
-    };
-
-    const contentStr =
-      typeof content === 'string' ? content : JSON.stringify(content);
-    const importance = this.shouldStoreToLongTerm(
-      content,
-      undefined,
-      emotion || 'neutral'
-    )
-      ? 0.8
-      : 0.5;
-
-    try {
-      const encryptedContent =
-        await this.memoryEncryption.storeEncryptedLongTermMemory({
+    return perf.measure(
+      'memory.storeLongTerm',
+      async () => {
+        const memoryItem: MemoryItem = {
+          id: `long_term_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`,
+          type: MemoryType.LONG_TERM,
           content,
+          timestamp: new Date(),
           scene,
           emotion,
-        });
-      this.memoryDatabase.add(
-        encryptedContent,
-        'long_term_encrypted',
-        'core',
-        importance
-      );
-    } catch {
-      this.memoryDatabase.add(contentStr, 'long_term', 'core', importance);
-    }
+        };
 
-    this.enqueueWrite({ type: 'long_term', content, scene, emotion });
-    void this.memoryRetriever.scheduleEmbeddingGeneration(memoryItem);
+        const contentStr =
+          typeof content === 'string' ? content : JSON.stringify(content);
+        const importance = this.shouldStoreToLongTerm(
+          content,
+          undefined,
+          emotion || 'neutral'
+        )
+          ? 0.8
+          : 0.5;
 
-    return memoryItem;
+        try {
+          const encryptedContent =
+            await this.memoryEncryption.storeEncryptedLongTermMemory({
+              content,
+              scene,
+              emotion,
+            });
+          this.memoryDatabase.add(
+            encryptedContent,
+            'long_term_encrypted',
+            'core',
+            importance
+          );
+        } catch {
+          this.memoryDatabase.add(contentStr, 'long_term', 'core', importance);
+        }
+
+        this.enqueueWrite({ type: 'long_term', content, scene, emotion });
+        void this.memoryRetriever.scheduleEmbeddingGeneration(memoryItem);
+
+        return memoryItem;
+      },
+      'memory'
+    );
   }
 
   public async storeInstantMemory(
@@ -284,23 +300,29 @@ export class MemoryEngine {
     scene?: string,
     emotion?: string
   ): Promise<MemoryItem> {
-    const memoryItem: MemoryItem = {
-      id: `instant_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`,
-      type: MemoryType.INSTANT,
-      content,
-      timestamp: new Date(),
-      scene,
-      emotion,
-    };
+    return perf.measure(
+      'memory.storeInstant',
+      async () => {
+        const memoryItem: MemoryItem = {
+          id: `instant_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`,
+          type: MemoryType.INSTANT,
+          content,
+          timestamp: new Date(),
+          scene,
+          emotion,
+        };
 
-    this.instantMemory.push(memoryItem);
-    const contentStr =
-      typeof content === 'string' ? content : JSON.stringify(content);
-    this.memoryDatabase.add(contentStr, 'instant', 'core', 0.3);
-    void this.memoryRetriever.scheduleEmbeddingGeneration(memoryItem);
-    this.cleanupInstantMemory();
+        this.instantMemory.push(memoryItem);
+        const contentStr =
+          typeof content === 'string' ? content : JSON.stringify(content);
+        this.memoryDatabase.add(contentStr, 'instant', 'core', 0.3);
+        void this.memoryRetriever.scheduleEmbeddingGeneration(memoryItem);
+        this.cleanupInstantMemory();
 
-    return memoryItem;
+        return memoryItem;
+      },
+      'memory'
+    );
   }
 
   public async storeFeedbackSignal(data: {
@@ -341,13 +363,19 @@ export class MemoryEngine {
     emotion?: string,
     topK: number = 10
   ): Promise<MemoryItem[]> {
-    return this.memoryRetriever.preciseHybridRetrieval(
-      query,
-      scene,
-      emotion,
-      topK,
-      this.shortTermMemory,
-      this.longTermMemory
+    return perf.measure(
+      'memory.recall',
+      async () => {
+        return this.memoryRetriever.preciseHybridRetrieval(
+          query,
+          scene,
+          emotion,
+          topK,
+          this.shortTermMemory,
+          this.longTermMemory
+        );
+      },
+      'memory'
     );
   }
 

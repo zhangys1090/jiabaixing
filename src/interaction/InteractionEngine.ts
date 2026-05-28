@@ -588,10 +588,7 @@ export class InteractionEngine {
 
       const base64 = imageBuffer.toString('base64');
 
-      Logger.info(
-        `🖼️ 图像处理完成: ${mimeType}`,
-        'InteractionEngine'
-      );
+      Logger.info(`🖼️ 图像处理完成: ${mimeType}`, 'InteractionEngine');
 
       return {
         description: `图像 (${mimeType})`,
@@ -617,10 +614,7 @@ export class InteractionEngine {
       const content = fileBuffer.toString('utf-8');
       const summary = `${fileName} (${mimeType})`;
 
-      Logger.info(
-        `📄 文件分析完成: ${fileName}`,
-        'InteractionEngine'
-      );
+      Logger.info(`📄 文件分析完成: ${fileName}`, 'InteractionEngine');
 
       return {
         content,

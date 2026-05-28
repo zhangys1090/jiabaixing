@@ -6,9 +6,8 @@
  */
 
 import { Logger } from '../../../utils/Logger';
-import {
-  ToolCategory,
-} from '../../types';
+import { perf } from '../../../utils/PerformanceMonitor';
+import { ToolCategory } from '../../types';
 import type {
   ToolDefinition,
   ToolParameterDef,
@@ -149,10 +148,15 @@ export class ToolRegistry {
       );
 
       // 超时控制
-      const result = await Promise.race([
-        tool.execute(params, context),
-        this.createTimeoutPromise(tool.definition.timeout, name),
-      ]);
+      const result = await perf.measure(
+        `tool.${name}`,
+        () =>
+          Promise.race([
+            tool.execute(params, context),
+            this.createTimeoutPromise(tool.definition.timeout, name),
+          ]),
+        'tool'
+      );
 
       const finalResult: ToolResult = {
         ...result,
@@ -160,7 +164,12 @@ export class ToolRegistry {
         validated: result.validated ?? false,
       };
 
-      this.reliabilityTracker.recordCall(name, finalResult.success, finalResult.duration, finalResult.error);
+      this.reliabilityTracker.recordCall(
+        name,
+        finalResult.success,
+        finalResult.duration,
+        finalResult.error
+      );
 
       return finalResult;
     } catch (err) {
@@ -172,7 +181,12 @@ export class ToolRegistry {
         validated: false,
       };
 
-      this.reliabilityTracker.recordCall(name, false, errorResult.duration, errorResult.error);
+      this.reliabilityTracker.recordCall(
+        name,
+        false,
+        errorResult.duration,
+        errorResult.error
+      );
 
       return errorResult;
     }
@@ -225,14 +239,24 @@ export class ToolRegistry {
       const bi = categoryOrder.indexOf(b.definition.category);
       if (ai !== bi) return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
 
-      const scoreA = this.reliabilityTracker.getCompositeScore(a.definition.name);
-      const scoreB = this.reliabilityTracker.getCompositeScore(b.definition.name);
+      const scoreA = this.reliabilityTracker.getCompositeScore(
+        a.definition.name
+      );
+      const scoreB = this.reliabilityTracker.getCompositeScore(
+        b.definition.name
+      );
       return scoreB - scoreA;
     });
 
-    const avgCompositeScore = sorted.length > 0
-      ? sorted.reduce((sum, t) => sum + this.reliabilityTracker.getCompositeScore(t.definition.name), 0) / sorted.length
-      : 1.0;
+    const avgCompositeScore =
+      sorted.length > 0
+        ? sorted.reduce(
+            (sum, t) =>
+              sum +
+              this.reliabilityTracker.getCompositeScore(t.definition.name),
+            0
+          ) / sorted.length
+        : 1.0;
 
     for (const tool of sorted) {
       const properties: Record<string, unknown> = {};
@@ -242,8 +266,12 @@ export class ToolRegistry {
         properties[paramName] = this.parameterDefToOpenAI(paramDef);
       }
 
-      const compositeScore = this.reliabilityTracker.getCompositeScore(tool.definition.name);
-      const evolutionWeight = this.reliabilityTracker.getEvolutionWeight(tool.definition.name);
+      const compositeScore = this.reliabilityTracker.getCompositeScore(
+        tool.definition.name
+      );
+      const evolutionWeight = this.reliabilityTracker.getEvolutionWeight(
+        tool.definition.name
+      );
       let description = tool.definition.description;
 
       if (evolutionWeight !== 1.0 || compositeScore < avgCompositeScore * 0.8) {
@@ -278,7 +306,9 @@ export class ToolRegistry {
   /**
    * 将 ToolParameterDef 转换为 OpenAI Schema 格式
    */
-  private parameterDefToOpenAI(param: ToolParameterDef): Record<string, unknown> {
+  private parameterDefToOpenAI(
+    param: ToolParameterDef
+  ): Record<string, unknown> {
     const schema: Record<string, unknown> = {
       type: param.type,
       description: param.description,
@@ -339,7 +369,15 @@ export class ToolRegistry {
 }
 
 export class ToolReliabilityTracker {
-  private stats: Map<string, { calls: number; successes: number; totalDuration: number; lastError?: string }> = new Map();
+  private stats: Map<
+    string,
+    {
+      calls: number;
+      successes: number;
+      totalDuration: number;
+      lastError?: string;
+    }
+  > = new Map();
   private evolutionWeights: Map<string, number> = new Map();
 
   /**
@@ -386,7 +424,12 @@ export class ToolReliabilityTracker {
    * @param duration - 执行时长(ms)
    * @param error - 错误信息
    */
-  recordCall(toolName: string, success: boolean, duration: number, error?: string): void {
+  recordCall(
+    toolName: string,
+    success: boolean,
+    duration: number,
+    error?: string
+  ): void {
     const existing = this.stats.get(toolName);
     if (existing) {
       existing.calls++;
@@ -445,7 +488,13 @@ export class ToolReliabilityTracker {
    * @param toolName - 工具名称
    * @returns 统计信息或null
    */
-  getStats(toolName: string): { calls: number; successes: number; successRate: number; avgDuration: number; lastError?: string } | null {
+  getStats(toolName: string): {
+    calls: number;
+    successes: number;
+    successRate: number;
+    avgDuration: number;
+    lastError?: string;
+  } | null {
     const stat = this.stats.get(toolName);
     if (!stat) return null;
     return {
@@ -461,8 +510,26 @@ export class ToolReliabilityTracker {
    * 获取所有工具统计信息
    * @returns 所有工具统计信息映射
    */
-  getAllStats(): Map<string, { calls: number; successes: number; successRate: number; avgDuration: number; lastError?: string }> {
-    const result = new Map<string, { calls: number; successes: number; successRate: number; avgDuration: number; lastError?: string }>();
+  getAllStats(): Map<
+    string,
+    {
+      calls: number;
+      successes: number;
+      successRate: number;
+      avgDuration: number;
+      lastError?: string;
+    }
+  > {
+    const result = new Map<
+      string,
+      {
+        calls: number;
+        successes: number;
+        successRate: number;
+        avgDuration: number;
+        lastError?: string;
+      }
+    >();
     for (const [toolName, stat] of this.stats) {
       result.set(toolName, {
         calls: stat.calls,

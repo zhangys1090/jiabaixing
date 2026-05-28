@@ -2,7 +2,7 @@
  * 安全路由 - security logs / events / report / validate / audit
  */
 
-import express, { Request, Response } from 'express';
+import express from 'express';
 
 import { JiabaixingCore } from '../../core/JiabaixingCore';
 import { Logger } from '../../utils/Logger';
@@ -23,10 +23,18 @@ export function registerSecurityRoutes(
   core: JiabaixingCore | null
 ): void {
   const securityAuditor = {
-    queryLogs: (filter: { level?: string; category?: string; limit?: number }) => {
+    queryLogs: (filter: {
+      level?: string;
+      category?: string;
+      limit?: number;
+    }) => {
       return { logs: [], total: 0, filter };
     },
-    queryEvents: (filter: { eventType?: string; severity?: string; limit?: number }) => {
+    queryEvents: (filter: {
+      eventType?: string;
+      severity?: string;
+      limit?: number;
+    }) => {
       return { events: [], total: 0, filter };
     },
     generateReport: (timeWindowHours: number) => {
@@ -59,8 +67,8 @@ export function registerSecurityRoutes(
         | 'user_action'
         | undefined;
       const limit = parseInt(req.query.limit as string) || 100;
-      const logs = securityAuditor.queryLogs({ level, category, limit });
-      res.json({ success: true, data: logs });
+      const result = securityAuditor.queryLogs({ level, category, limit });
+      res.json({ success: true, data: result.logs });
     } catch (error) {
       res.status(500).json({ success: false, error: (error as Error).message });
     }
@@ -88,7 +96,11 @@ export function registerSecurityRoutes(
         | 'critical'
         | undefined;
       const limit = parseInt(req.query.limit as string) || 50;
-      const events = securityAuditor.queryEvents({ eventType, severity, limit });
+      const events = securityAuditor.queryEvents({
+        eventType,
+        severity,
+        limit,
+      });
       res.json({ success: true, data: events });
     } catch (error) {
       res.status(500).json({ success: false, error: (error as Error).message });

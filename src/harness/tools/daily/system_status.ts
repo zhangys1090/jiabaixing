@@ -33,8 +33,14 @@ export const SYSTEM_STATUS_DEF: ToolDefinition = {
 
 export interface SystemStatusDeps {
   getMemoryStats: () => Record<string, unknown>;
-  getToolStats: () => { registered: number; byCategory: Record<string, number> };
-  getHarnessStats: () => { initialized: boolean; config: Record<string, boolean> };
+  getToolStats: () => {
+    registered: number;
+    byCategory: Record<string, number>;
+  };
+  getHarnessStats: () => {
+    initialized: boolean;
+    config: Record<string, boolean>;
+  };
   getEvolutionStats: () => Record<string, unknown>;
   getSchedulerStats: () => Record<string, unknown>;
 }
@@ -43,7 +49,10 @@ function statusIcon(ok: boolean): string {
   return ok ? '✅' : '⚠️';
 }
 
-function formatMemoryStats(stats: Record<string, unknown>, detailed: boolean): string {
+function formatMemoryStats(
+  stats: Record<string, unknown>,
+  detailed: boolean
+): string {
   const count = typeof stats.count === 'number' ? stats.count : 0;
   const line = `${statusIcon(true)} 记忆条目: ${count}`;
   if (!detailed) return line;
@@ -54,7 +63,10 @@ function formatMemoryStats(stats: Record<string, unknown>, detailed: boolean): s
   return line + (entries ? '\n' + entries : '');
 }
 
-function formatToolStats(stats: { registered: number; byCategory: Record<string, number> }, detailed: boolean): string {
+function formatToolStats(
+  stats: { registered: number; byCategory: Record<string, number> },
+  detailed: boolean
+): string {
   const line = `${statusIcon(true)} 已注册工具: ${stats.registered}`;
   if (!detailed) return line;
   const cats = Object.entries(stats.byCategory)
@@ -63,7 +75,10 @@ function formatToolStats(stats: { registered: number; byCategory: Record<string,
   return line + (cats ? '\n' + cats : '');
 }
 
-function formatHarnessStats(stats: { initialized: boolean; config: Record<string, boolean> }, detailed: boolean): string {
+function formatHarnessStats(
+  stats: { initialized: boolean; config: Record<string, boolean> },
+  detailed: boolean
+): string {
   const icon = statusIcon(stats.initialized);
   const line = `${icon} Harness: ${stats.initialized ? '已初始化' : '未初始化'}`;
   if (!detailed) return line;
@@ -73,7 +88,11 @@ function formatHarnessStats(stats: { initialized: boolean; config: Record<string
   return line + (cfg ? '\n' + cfg : '');
 }
 
-function formatGenericStats(name: string, stats: Record<string, unknown>, detailed: boolean): string {
+function formatGenericStats(
+  name: string,
+  stats: Record<string, unknown>,
+  detailed: boolean
+): string {
   const hasData = Object.keys(stats).length > 0;
   const line = `${statusIcon(hasData)} ${name}: ${hasData ? '正常' : '无数据'}`;
   if (!detailed) return line;
@@ -104,15 +123,30 @@ export function createSystemStatusExecutor(deps: SystemStatusDeps) {
         lines.push(formatHarnessStats(deps.getHarnessStats(), detailed));
       }
       if (component === 'all' || component === 'evolution') {
-        lines.push(formatGenericStats('进化系统', deps.getEvolutionStats(), detailed));
+        lines.push(
+          formatGenericStats('进化系统', deps.getEvolutionStats(), detailed)
+        );
       }
       if (component === 'all' || component === 'scheduler') {
-        lines.push(formatGenericStats('调度器', deps.getSchedulerStats(), detailed));
+        lines.push(
+          formatGenericStats('调度器', deps.getSchedulerStats(), detailed)
+        );
       }
 
-      return { success: true, output: lines.join('\n'), duration: 0, validated: false };
+      return {
+        success: true,
+        output: lines.join('\n'),
+        duration: 0,
+        validated: false,
+      };
     } catch (err) {
-      return { success: false, output: null, error: `状态查询失败: ${(err as Error).message}`, duration: 0, validated: false };
+      return {
+        success: false,
+        output: null,
+        error: `状态查询失败: ${(err as Error).message}`,
+        duration: 0,
+        validated: false,
+      };
     }
   };
 }

@@ -22,7 +22,7 @@
     "zustand": "^5.0.13"
   },
   "main": "electron/main.js",
-  "homepage": "./",
+  "homepage": "/",
   "scripts": {
     "start": "set NODE_OPTIONS=--no-deprecation && craco start",
     "build": "set NODE_OPTIONS=--no-deprecation && craco build",

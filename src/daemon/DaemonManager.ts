@@ -40,7 +40,10 @@ const PROJECT_ROOT = path.resolve(process.cwd());
 const DAEMON_DIR = path.join(PROJECT_ROOT, '.jiabaixing');
 const DAEMON_FILE = path.join(DAEMON_DIR, 'daemon.json');
 const DEFAULT_LOG_FILE = path.join(DAEMON_DIR, 'daemon.log');
-const DEFAULT_PORT = parseInt(process.env.API_PORT || process.env.PORT || '3111', 10);
+const DEFAULT_PORT = parseInt(
+  process.env.API_PORT || process.env.PORT || '3111',
+  10
+);
 
 // ============ DaemonManager ============
 
@@ -114,14 +117,20 @@ export class DaemonManager {
   async stop(): Promise<{ success: boolean; message: string }> {
     const state = this.readState();
     if (!state) {
-      return { success: false, message: '未找到运行中的守护进程（daemon.json 不存在）' };
+      return {
+        success: false,
+        message: '未找到运行中的守护进程（daemon.json 不存在）',
+      };
     }
 
     const alive = this.isProcessAlive(state.pid);
     if (!alive) {
       // PID 文件存在但进程已死 — 清理
       this.cleanup();
-      return { success: true, message: `守护进程记录已清理 (PID ${state.pid} 已不存在)` };
+      return {
+        success: true,
+        message: `守护进程记录已清理 (PID ${state.pid} 已不存在)`,
+      };
     }
 
     try {
@@ -252,39 +261,36 @@ export class DaemonManager {
       let child;
       if (devMode) {
         // ts-node 开发模式
-        const tsNodePath = path.join(PROJECT_ROOT, 'node_modules', '.bin', 'ts-node');
-        child = spawn(
-          'node',
-          [tsNodePath, '--transpileOnly', entryPoint],
-          {
-            cwd: PROJECT_ROOT,
-            detached: true,
-            stdio: ['ignore', logFd, logFd],
-            env: {
-              ...process.env,
-              API_PORT: String(this.port),
-              CONSOLE_LOG_LEVEL: 'warn',
-            },
-            shell: true,
-          }
+        const tsNodePath = path.join(
+          PROJECT_ROOT,
+          'node_modules',
+          '.bin',
+          'ts-node'
         );
+        child = spawn('node', [tsNodePath, '--transpileOnly', entryPoint], {
+          cwd: PROJECT_ROOT,
+          detached: true,
+          stdio: ['ignore', logFd, logFd],
+          env: {
+            ...process.env,
+            API_PORT: String(this.port),
+            CONSOLE_LOG_LEVEL: 'warn',
+          },
+          shell: true,
+        });
       } else {
         // 编译后的 JS 生产模式
-        child = spawn(
-          'node',
-          [entryPoint],
-          {
-            cwd: PROJECT_ROOT,
-            detached: true,
-            stdio: ['ignore', logFd, logFd],
-            env: {
-              ...process.env,
-              API_PORT: String(this.port),
-              NODE_ENV: 'production',
-            },
-            shell: true,
-          }
-        );
+        child = spawn('node', [entryPoint], {
+          cwd: PROJECT_ROOT,
+          detached: true,
+          stdio: ['ignore', logFd, logFd],
+          env: {
+            ...process.env,
+            API_PORT: String(this.port),
+            NODE_ENV: 'production',
+          },
+          shell: true,
+        });
       }
 
       fs.closeSync(logFd);
@@ -353,16 +359,20 @@ export class DaemonManager {
         const match = output.match(/"([^"]+)","([^"]+)","([^"]+)"/);
         if (match) {
           const memKB = parseInt(match[3].replace(/[^0-9]/g, ''), 10);
-          return memKB >= 1024 ? `${(memKB / 1024).toFixed(1)} MB` : `${memKB} KB`;
+          return memKB >= 1024
+            ? `${(memKB / 1024).toFixed(1)} MB`
+            : `${memKB} KB`;
         }
       } else {
-        const output = execSync(
-          `ps -o rss= -p ${pid} 2>/dev/null`,
-          { encoding: 'utf-8', timeout: 3000 }
-        ).trim();
+        const output = execSync(`ps -o rss= -p ${pid} 2>/dev/null`, {
+          encoding: 'utf-8',
+          timeout: 3000,
+        }).trim();
         const memKB = parseInt(output, 10);
         if (memKB > 0) {
-          return memKB >= 1024 ? `${(memKB / 1024).toFixed(1)} MB` : `${memKB} KB`;
+          return memKB >= 1024
+            ? `${(memKB / 1024).toFixed(1)} MB`
+            : `${memKB} KB`;
         }
       }
     } catch {

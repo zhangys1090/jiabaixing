@@ -1,6 +1,5 @@
 import { BaseIntegrationAdapter } from './BaseIntegrationAdapter';
 import {
-  IntegrationPlatform,
   PlatformConfig,
   SendMessageResponse,
   IncomingMessageEvent,
@@ -52,8 +51,7 @@ export class QQAdapter extends BaseIntegrationAdapter {
       this.reconnectAttempts = 0;
       this.shouldAutoReconnect = true;
 
-      this.httpBaseUrl =
-        `http://${config.miraiHttpHost || 'localhost'}:${config.miraiHttpPort || '8080'}`;
+      this.httpBaseUrl = `http://${config.miraiHttpHost || 'localhost'}:${config.miraiHttpPort || '8080'}`;
       this.qqAccount = config.qqAccount;
       this.miraiVerifyKey = config.miraiVerifyKey;
 
@@ -67,7 +65,9 @@ export class QQAdapter extends BaseIntegrationAdapter {
           3: '未绑定 QQ 账号',
           4: ' mirai-api-http 版本不兼容',
         };
-        throw new Error(errorMap[session.code] || `连接失败 (code: ${session.code})`);
+        throw new Error(
+          errorMap[session.code] || `连接失败 (code: ${session.code})`
+        );
       }
 
       this.sessionKey = session.sessionKey;
@@ -207,7 +207,7 @@ export class QQAdapter extends BaseIntegrationAdapter {
   }
 
   async handleWebhook(
-    payload: Record<string, unknown>
+    _payload: Record<string, unknown>
   ): Promise<{ success: boolean; response?: unknown }> {
     return { success: true, response: { handled: false } };
   }
@@ -283,7 +283,8 @@ export class QQAdapter extends BaseIntegrationAdapter {
           type: hasImage ? 'image' : 'text',
           content: textContent,
           from: String(msg.sender.id),
-          fromName: msg.sender.nickname || msg.sender.remark || String(msg.sender.id),
+          fromName:
+            msg.sender.nickname || msg.sender.remark || String(msg.sender.id),
           timestamp: new Date().toISOString(),
           rawData: msg as unknown as Record<string, unknown>,
         };
@@ -298,7 +299,7 @@ export class QQAdapter extends BaseIntegrationAdapter {
   private startPolling(): void {
     this.stopPolling();
     this.pollingTimer = setInterval(() => {
-      this.fetchNewMessages();
+      void this.fetchNewMessages();
     }, POLL_INTERVAL_MS);
     Logger.info('QQ 消息轮询已启动', 'QQAdapter');
   }

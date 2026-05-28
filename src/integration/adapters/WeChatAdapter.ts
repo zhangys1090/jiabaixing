@@ -47,8 +47,8 @@ export class WeChatAdapter extends BaseIntegrationAdapter {
   async sendMessage(
     message: string,
     to?: string,
-    imageUrls?: string[],
-    mentions?: string[]
+    _imageUrls?: string[],
+    _mentions?: string[]
   ): Promise<SendMessageResponse> {
     if (!this.status.connected) {
       return { success: false, error: '未连接到微信' };
@@ -59,7 +59,7 @@ export class WeChatAdapter extends BaseIntegrationAdapter {
       Logger.info('正在发送消息到微信', 'WeChatAdapter', { to, message });
 
       // 模拟 API 调用
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await new Promise((resolve) => setTimeout(resolve, 200));
 
       return {
         success: true,

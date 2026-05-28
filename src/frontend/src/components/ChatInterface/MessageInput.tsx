@@ -71,7 +71,7 @@ const MessageInput: React.FC<MessageInputProps> = ({ inputText, setInputText, is
       ? '对方正在输入...'
       : previewImages.length > 0
         ? `已选择 ${previewImages.length} 张图片，输入问题后发送...`
-        : '输入消息... Enter 发送，Shift+Enter 换行';
+        : '输入消息... /help 查看命令';
 
   return (
     <div className="chat-input-area">

@@ -42,8 +42,8 @@ export class DingTalkAdapter extends BaseIntegrationAdapter {
   async sendMessage(
     message: string,
     to?: string,
-    imageUrls?: string[],
-    mentions?: string[]
+    _imageUrls?: string[],
+    _mentions?: string[]
   ): Promise<SendMessageResponse> {
     if (!this.status.connected) {
       return { success: false, error: '未连接到钉钉' };
@@ -51,7 +51,7 @@ export class DingTalkAdapter extends BaseIntegrationAdapter {
 
     try {
       Logger.info('正在发送消息到钉钉', 'DingTalkAdapter', { to, message });
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await new Promise((resolve) => setTimeout(resolve, 200));
 
       return {
         success: true,
@@ -77,14 +77,13 @@ export class DingTalkAdapter extends BaseIntegrationAdapter {
 
       if (msgType === 'text') {
         const text = payload.text as Record<string, string>;
-        const conversationType = payload.conversationType as string;
         const senderNick = payload.senderNick as string;
 
         const incomingMessage: IncomingMessageEvent = {
           platform: 'dingtalk',
           type: 'text',
           content: text.content || '',
-          from: payload.senderStaffId as string || '',
+          from: (payload.senderStaffId as string) || '',
           fromName: senderNick,
           timestamp: new Date().toISOString(),
           rawData: payload,

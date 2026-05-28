@@ -44,12 +44,15 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 export const SecurityPanel: React.FC = () => {
-  const { logs, validationResult, setLogs, setValidationResult, setOverallStatus } = useSecurityStore();
+  const { logs: storeLogs, validationResult, setLogs, setValidationResult, setOverallStatus } = useSecurityStore();
+
+  // 确保logs始终是数组
+  const logs = Array.isArray(storeLogs) ? storeLogs : [];
 
   const [testInput, setTestInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<SecurityStatus>(DEFAULT_STATUS);
-  const [sovereignty, setSovereignty] = useState<SovereigntyData>(DEFAULT_SOVEREIGNTY);
+  const [sovereignty, _setSovereignty] = useState<SovereigntyData>(DEFAULT_SOVEREIGNTY);
 
   const loadSecurityData = useCallback(async () => {
     setLoading(true);
@@ -59,7 +62,11 @@ export const SecurityPanel: React.FC = () => {
         apiService.getSecurityAudit(),
       ]);
       if (logsResult.success && logsResult.data) {
-        setLogs(logsResult.data as Array<Record<string, unknown>>);
+        // 确保设置的是数组
+        const logData = Array.isArray(logsResult.data) ? (logsResult.data as Record<string, unknown>[]) : [];
+        setLogs(logData);
+      } else {
+        setLogs([]);
       }
       if (statusResult.success && statusResult.data) {
         const data = statusResult.data as Record<string, unknown>;
@@ -74,7 +81,8 @@ export const SecurityPanel: React.FC = () => {
         setOverallStatus(newStatus.overall);
       }
     } catch {
-      /* ignore */
+      // 出错时设置空数组
+      setLogs([]);
     }
     setLoading(false);
   }, [setLogs, setOverallStatus]);

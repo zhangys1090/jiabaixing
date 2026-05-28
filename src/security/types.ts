@@ -171,9 +171,13 @@ export interface AuditLogEntry {
   userId: string;
   action: string;
   resource: string;
+  actor?: string;
+  target?: string;
+  category?: string;
   ipAddress?: string;
   deviceId?: string;
-  result: 'success' | 'failure';
+  userAgent?: string;
+  result: 'success' | 'failure' | 'warning';
   details?: Record<string, unknown>;
   error?: string;
 }

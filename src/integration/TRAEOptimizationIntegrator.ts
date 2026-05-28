@@ -141,12 +141,12 @@ export class TRAEOptimizationIntegrator extends EventEmitter {
     if (this.configLoader) {
       const mcpServers = this.configLoader.getConfig()?.mcpServers || {};
       Object.entries(mcpServers).forEach(
-        ([name, serverConfig]: [string, any]) => {
+        ([name, serverConfig]: [string, Record<string, unknown>]) => {
           this.mcpManager?.registerServer({
             name,
-            command: serverConfig._command,
-            args: serverConfig._args,
-            description: serverConfig._description,
+            command: serverConfig.command as string,
+            args: serverConfig.args as string[],
+            description: serverConfig.description as string | undefined,
             enabled: true,
           });
         }
@@ -198,14 +198,17 @@ export class TRAEOptimizationIntegrator extends EventEmitter {
   }
 
   private async registerOptimizedSkills(): Promise<void> {
-    Logger.info('🎯 优化技能已由 Harness ToolRegistry 统一管理', 'TRAEOptimizationIntegrator');
+    Logger.info(
+      '🎯 优化技能已由 Harness ToolRegistry 统一管理',
+      'TRAEOptimizationIntegrator'
+    );
   }
 
   private async startHealthChecks(): Promise<void> {
     Logger.info('🏥 启动健康检查...', 'TRAEOptimizationIntegrator');
 
     this.healthCheckInterval = setInterval(() => {
-      this.performHealthCheck();
+      void this.performHealthCheck();
     }, 120000);
 
     Logger.info('✅ 健康检查已启动 (每2分钟)', 'TRAEOptimizationIntegrator');
@@ -220,7 +223,7 @@ export class TRAEOptimizationIntegrator extends EventEmitter {
     Logger.info('⚡ 启动自动优化...', 'TRAEOptimizationIntegrator');
 
     this.optimizationInterval = setInterval(() => {
-      this.performAutoOptimization();
+      void this.performAutoOptimization();
     }, this.config.autoOptimizationInterval);
 
     Logger.info(

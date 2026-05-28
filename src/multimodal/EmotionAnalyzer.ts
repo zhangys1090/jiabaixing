@@ -26,7 +26,11 @@ class EmotionAnalysisService {
     trend: 'increasing' | 'decreasing' | 'stable';
     averageIntensity: number;
   } {
-    return { dominantEmotion: 'neutral', trend: 'stable', averageIntensity: 0.5 };
+    return {
+      dominantEmotion: 'neutral',
+      trend: 'stable',
+      averageIntensity: 0.5,
+    };
   }
 
   cleanup(): void {

@@ -16,6 +16,8 @@ export interface ToneAdjustment {
   temperatureDelta: number;
   formalityDelta: number;
   verbosityDelta: number;
+  emojiFrequencyDelta: number;
+  proactiveDelta: number;
   confidence: number;
 }
 
@@ -189,7 +191,7 @@ export class StrategyOptimizer {
     }
 
     for (const [scene, stats] of sceneFeedback) {
-      if (stats.total < 5) continue;
+      if (stats.total < 3) continue;
 
       const positiveRatio = stats.positive / stats.total;
       const negativeRatio = stats.negative / stats.total;
@@ -201,6 +203,8 @@ export class StrategyOptimizer {
           temperatureDelta: 0.05,
           formalityDelta: -0.03,
           verbosityDelta: 0.02,
+          emojiFrequencyDelta: 0.01,
+          proactiveDelta: 0.02,
           confidence,
         });
       } else if (negativeRatio > 0.5) {
@@ -209,6 +213,8 @@ export class StrategyOptimizer {
           temperatureDelta: -0.05,
           formalityDelta: 0.03,
           verbosityDelta: -0.02,
+          emojiFrequencyDelta: -0.01,
+          proactiveDelta: -0.02,
           confidence,
         });
       }

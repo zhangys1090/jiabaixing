@@ -36,6 +36,7 @@ interface ChatState {
   perceptionUpdates: PerceptionUpdate[];
   skillExecutionUpdates: SkillExecutionUpdate[];
   evolutionEvents: EvolutionEvent[];
+  currentTraceId: string | null;
 }
 
 type ChatAction =
@@ -61,7 +62,10 @@ type ChatAction =
   | { type: 'ADD_PERCEPTION_UPDATE'; payload: PerceptionUpdate }
   | { type: 'ADD_SKILL_EXECUTION_UPDATE'; payload: SkillExecutionUpdate }
   | { type: 'ADD_EVOLUTION_EVENT'; payload: EvolutionEvent }
-  | { type: 'CLEAR_EXECUTION_UPDATES' };
+  | { type: 'CLEAR_EXECUTION_UPDATES' }
+  | { type: 'MARK_SENDING_AS_SENT' }
+  | { type: 'CLEAR_PROGRESS_MESSAGES' }
+  | { type: 'SET_CURRENT_TRACE_ID'; payload: string | null };
 
 interface ChatContextValue {
   state: ChatState;
@@ -177,6 +181,21 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
         brainStageUpdates: [],
         perceptionUpdates: [],
         skillExecutionUpdates: [],
+      };
+    case 'MARK_SENDING_AS_SENT':
+      return {
+        ...state,
+        messages: state.messages.map((m) => (m.status === 'sending' ? { ...m, status: 'sent' as const } : m)),
+      };
+    case 'CLEAR_PROGRESS_MESSAGES':
+      return {
+        ...state,
+        messages: state.messages.filter((m) => m.status !== 'progress'),
+      };
+    case 'SET_CURRENT_TRACE_ID':
+      return {
+        ...state,
+        currentTraceId: action.payload,
       };
     default:
       return state;
@@ -295,6 +314,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     perceptionUpdates: [],
     skillExecutionUpdates: [],
     evolutionEvents: [],
+    currentTraceId: null,
   });
 
   useEffect(() => {

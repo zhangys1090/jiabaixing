@@ -6,7 +6,9 @@
  */
 
 import { Logger } from '../../utils/Logger';
+import { perf } from '../../utils/PerformanceMonitor';
 import { LoopState, LifecycleEvent } from '../types';
+import { EventBus } from '../../shared/EventBus';
 import type {
   ChatMessage,
   UserInput,
@@ -21,7 +23,6 @@ import type {
   HookContext,
   HookResult,
 } from '../types';
-import type { ConstraintsService } from '../constraints/ConstraintsService';
 import type { VerificationService } from '../verification/VerificationService';
 import type { PersistenceService } from '../persistence/PersistenceService';
 import type { TrajectoryDatabase } from '../persistence/TrajectoryDatabase';
@@ -34,17 +35,11 @@ export interface LoopControllerDeps {
   };
   /** 执行器 */
   executor: {
-    execute(
-      plan: ExecutionPlan,
-      context: LoopContext
-    ): Promise<ExecutorOutput>;
+    execute(plan: ExecutionPlan, context: LoopContext): Promise<ExecutorOutput>;
   };
   /** 评估器 */
   evaluator: {
-    evaluate(
-      input: UserInput,
-      context: LoopContext
-    ): Promise<EvaluatorOutput>;
+    evaluate(input: UserInput, context: LoopContext): Promise<EvaluatorOutput>;
   };
   /** 报告器 */
   reporter: {
@@ -53,7 +48,10 @@ export interface LoopControllerDeps {
   /** 约束服务 */
   constraintsService?: {
     checkBudget(state: BudgetState): BudgetCheckResult;
-    executeHooks(event: LifecycleEvent, context: HookContext): Promise<HookResult>;
+    executeHooks(
+      event: LifecycleEvent,
+      context: HookContext
+    ): Promise<HookResult>;
   };
   /** 验证服务 */
   verificationService?: VerificationService;
@@ -110,7 +108,10 @@ export class LoopController {
   /**
    * 运行 Plan-Execute-Evaluate 循环 (支持多轮迭代)
    */
-  async run(input: UserInput, initialMessages: ChatMessage[]): Promise<AgentResult> {
+  async run(
+    input: UserInput,
+    initialMessages: ChatMessage[]
+  ): Promise<AgentResult> {
     this.aborted = false;
     const traceId = input.traceId || `loop-${Date.now()}`;
 
@@ -128,7 +129,10 @@ export class LoopController {
           updated_at: Date.now(),
         });
       } catch (err) {
-        Logger.warn(`⚠️ 轨迹记录失败: ${(err as Error).message}`, 'LoopController');
+        Logger.warn(
+          `⚠️ 轨迹记录失败: ${(err as Error).message}`,
+          'LoopController'
+        );
       }
     }
 
@@ -197,18 +201,34 @@ export class LoopController {
 
         // ─── Phase 1: PLANNING (仅首次或需要 replan 时) ───
         if (!plan || replanNeeded) {
-          const currentReplanCount = (context.metadata.replanCount as number) || 0;
+          const currentReplanCount =
+            (context.metadata.replanCount as number) || 0;
           if (replanNeeded && currentReplanCount >= MAX_REPLAN_COUNT) {
-            Logger.warn('⚠️ 重新规划次数已达上限，强制结束循环', 'LoopController');
+            Logger.warn(
+              '⚠️ 重新规划次数已达上限，强制结束循环',
+              'LoopController'
+            );
             shouldContinueLoop = false;
             break;
           }
 
           this.transition(LoopState.PLANNING, context);
-          plan = await this.deps.planner.plan(input, context);
+          plan = await perf.measure(
+            'planner.plan',
+            () => this.deps.planner.plan(input, context),
+            'loop'
+          );
           context.plan = plan;
-          context.metadata.replanCount = currentReplanCount + (replanNeeded ? 1 : 0);
+          context.metadata.toolCallMode = plan.toolCallMode;
+          context.metadata.replanCount =
+            currentReplanCount + (replanNeeded ? 1 : 0);
           replanNeeded = false;
+
+          this.recordSnapshot(context, 'planning', context.budget.roundsUsed, {
+            planReasoning: plan.planReasoning?.substring(0, 500),
+            stepsCount: plan.steps.length,
+            isSimple: plan.simple,
+          });
 
           if (plan.simple) {
             Logger.info('📋 简单任务，跳过规划直接执行', 'LoopController');
@@ -229,25 +249,63 @@ export class LoopController {
 
         // ─── Phase 2: EXECUTING ───
         this.transition(LoopState.EXECUTING, context);
-        const executorOutput = await this.deps.executor.execute(plan, context);
+        Logger.info(
+          `🏃 Phase 2: 开始执行 (轮次=${context.budget.roundsUsed + 1})`,
+          'LoopController'
+        );
+        const executorOutput = await perf.measure(
+          'executor.execute',
+          () => this.deps.executor.execute(plan!, context),
+          'loop'
+        );
+        Logger.info(
+          `✅ Phase 2: 执行完成 (工具调用=${executorOutput.toolCallsCount}次, 消息数=${executorOutput.messages.length})`,
+          'LoopController'
+        );
+
+        if (
+          !executorOutput.completedNaturally &&
+          executorOutput.toolCallsCount === 0
+        ) {
+          throw new Error('LLM 调用失败，无法生成响应');
+        }
+
+        this.recordSnapshot(context, 'executing', context.budget.roundsUsed, {
+          toolCallsCount: executorOutput.toolCallsCount,
+          toolDuration: executorOutput.toolDuration,
+          completedNaturally: executorOutput.completedNaturally,
+          newMessagesCount: executorOutput.messages.length,
+        });
 
         // 验证工具结果
         if (this.deps.verificationService) {
-          const toolMessages = executorOutput.messages.filter(m => m.role === 'tool' && m.name);
+          const toolMessages = executorOutput.messages.filter(
+            (m) => m.role === 'tool' && m.name
+          );
           for (const toolMsg of toolMessages) {
             const toolName = toolMsg.name as string;
             const toolResult = {
               success: !(toolMsg.content as string).startsWith('错误:'),
               output: toolMsg.content,
               duration: 0,
-              validated: false
+              validated: false,
             };
-            const validation = this.deps.verificationService.validateToolResult(toolName, toolResult);
+            const validation = this.deps.verificationService.validateToolResult(
+              toolName,
+              toolResult
+            );
             if (validation.warnings.length > 0) {
-              Logger.warn(`⚠️ 工具 ${toolName} 验证警告: ${validation.warnings.join('; ')}`, 'LoopController');
+              Logger.warn(
+                `⚠️ 工具 ${toolName} 验证警告: ${validation.warnings.join('; ')}`,
+                'LoopController'
+              );
             }
             if (validation.errors.length > 0) {
-              Logger.error(`❌ 工具 ${toolName} 验证错误: ${validation.errors.join('; ')}`, new Error(validation.errors.join('; ')), 'LoopController');
+              Logger.error(
+                `❌ 工具 ${toolName} 验证错误: ${validation.errors.join('; ')}`,
+                new Error(validation.errors.join('; ')),
+                'LoopController'
+              );
             }
           }
         }
@@ -260,7 +318,17 @@ export class LoopController {
 
         // ─── Phase 3: EVALUATING ───
         this.transition(LoopState.EVALUATING, context);
-        evalResult = await this.deps.evaluator.evaluate(input, context);
+        evalResult = await perf.measure(
+          'evaluator.evaluate',
+          () => this.deps.evaluator.evaluate(input, context),
+          'loop'
+        );
+
+        this.recordSnapshot(context, 'evaluating', context.budget.roundsUsed, {
+          goalProgress: evalResult.goalProgress,
+          suggestedAction: evalResult.suggestedAction,
+          reason: evalResult.reason,
+        });
 
         Logger.info(
           `📊 第 ${context.budget.roundsUsed} 轮: 进度=${(evalResult.goalProgress * 100).toFixed(0)}% 动作=${evalResult.suggestedAction}`,
@@ -275,12 +343,17 @@ export class LoopController {
               // 目标基本达成，结束循环
               shouldContinueLoop = false;
               Logger.info('✅ 目标已基本达成，结束循环', 'LoopController');
-            } else if (context.budget.roundsUsed >= context.budget.softRoundLimit) {
+            } else if (
+              context.budget.roundsUsed >= context.budget.softRoundLimit
+            ) {
               // 接近软限制，检查是否还有显著进展
               if (evalResult.goalProgress < 0.3) {
                 // 进展缓慢且接近限制，强制结束
                 shouldContinueLoop = false;
-                Logger.info('⚠️ 进展缓慢且接近轮次限制，强制结束', 'LoopController');
+                Logger.info(
+                  '⚠️ 进展缓慢且接近轮次限制，强制结束',
+                  'LoopController'
+                );
               }
             }
             break;
@@ -288,7 +361,8 @@ export class LoopController {
           case 'replan':
             if (this.wasLastFailureRetryable(context)) {
               const lastStepResult = this.getLastFailedStepResult(context);
-              const retryCount = (lastStepResult?.metadata?.retryCount as number) || 0;
+              const retryCount =
+                (lastStepResult?.metadata?.retryCount as number) || 0;
               const maxRetries = 2;
               if (retryCount < maxRetries) {
                 Logger.info(
@@ -297,7 +371,10 @@ export class LoopController {
                 );
               } else {
                 replanNeeded = true;
-                Logger.info('🔄 可重试错误已达最大重试次数，重新规划', 'LoopController');
+                Logger.info(
+                  '🔄 可重试错误已达最大重试次数，重新规划',
+                  'LoopController'
+                );
               }
             } else {
               replanNeeded = true;
@@ -314,7 +391,10 @@ export class LoopController {
           default:
             // 未知动作，保守处理
             shouldContinueLoop = false;
-            Logger.warn(`⚠️ 未知评估动作: ${evalResult.suggestedAction}`, 'LoopController');
+            Logger.warn(
+              `⚠️ 未知评估动作: ${evalResult.suggestedAction}`,
+              'LoopController'
+            );
         }
 
         // ON_STEP_COMPLETED 钩子
@@ -331,7 +411,16 @@ export class LoopController {
 
       // ─── Phase 4: REPORTING ───
       this.transition(LoopState.REPORTING, context);
-      const report = await this.deps.reporter.report(context);
+      const report = await perf.measure(
+        'reporter.report',
+        () => this.deps.reporter.report(context),
+        'loop'
+      );
+
+      this.recordSnapshot(context, 'reporting', context.budget.roundsUsed, {
+        responseLength: report.response.length,
+        qualityOverall: report.quality.overall,
+      });
 
       // 结合验证服务评估质量
       let finalQuality = report.quality;
@@ -341,17 +430,22 @@ export class LoopController {
           totalToolCalls: context.trace.totalToolCalls,
           totalToolDuration: 0,
           totalDuration: Date.now() - context.budget.startTime,
-          completedSuccessfully: true
+          completedSuccessfully: true,
         });
-        
+
         // 合并质量评分，取平均值
         finalQuality = {
           overall: (report.quality.overall + verificationQuality.overall) / 2,
-          accuracy: (report.quality.accuracy + verificationQuality.accuracy) / 2,
-          usefulness: (report.quality.usefulness + verificationQuality.usefulness) / 2,
-          friendliness: (report.quality.friendliness + verificationQuality.friendliness) / 2,
-          efficiency: (report.quality.efficiency + verificationQuality.efficiency) / 2,
-          details: `${report.quality.details} | ${verificationQuality.details}`
+          accuracy:
+            (report.quality.accuracy + verificationQuality.accuracy) / 2,
+          usefulness:
+            (report.quality.usefulness + verificationQuality.usefulness) / 2,
+          friendliness:
+            (report.quality.friendliness + verificationQuality.friendliness) /
+            2,
+          efficiency:
+            (report.quality.efficiency + verificationQuality.efficiency) / 2,
+          details: `${report.quality.details} | ${verificationQuality.details}`,
         };
       }
 
@@ -361,13 +455,20 @@ export class LoopController {
 
       // 更新任务状态为 completed
       if (this.deps.persistenceService) {
-        await this.deps.persistenceService.updateTaskStatus(traceId, 'completed');
+        await this.deps.persistenceService.updateTaskStatus(
+          traceId,
+          'completed'
+        );
       }
 
       // 轨迹数据库更新
       if (this.deps.trajectoryDatabase) {
         try {
-          this.deps.trajectoryDatabase.updateExecutionStatus(traceId, 'success', report.response);
+          this.deps.trajectoryDatabase.updateExecutionStatus(
+            traceId,
+            'success',
+            report.response
+          );
           const exec = this.deps.trajectoryDatabase.getExecution(traceId);
           if (exec) {
             exec.loop_rounds = context.budget.roundsUsed;
@@ -377,7 +478,10 @@ export class LoopController {
             this.deps.trajectoryDatabase.recordExecution(exec);
           }
         } catch (err) {
-          Logger.warn(`⚠️ 轨迹更新失败: ${(err as Error).message}`, 'LoopController');
+          Logger.warn(
+            `⚠️ 轨迹更新失败: ${(err as Error).message}`,
+            'LoopController'
+          );
         }
       }
 
@@ -409,7 +513,11 @@ export class LoopController {
       Logger.error('LoopController 失败', err as Error, 'LoopController');
 
       if (this.deps.persistenceService) {
-        await this.deps.persistenceService.updateTaskStatus(traceId, 'failed', (err as Error).message);
+        await this.deps.persistenceService.updateTaskStatus(
+          traceId,
+          'failed',
+          (err as Error).message
+        );
       }
 
       const lastAssistantMsg = this.getLastAssistantMessage(context);
@@ -417,7 +525,14 @@ export class LoopController {
         Logger.info('⚠️ 返回部分响应（含质量警告）', 'LoopController');
         return {
           response: lastAssistantMsg,
-          quality: { overall: 0.4, accuracy: 0.3, usefulness: 0.5, friendliness: 0.6, efficiency: 0.2, details: '部分响应（执行异常降级）' },
+          quality: {
+            overall: 0.4,
+            accuracy: 0.3,
+            usefulness: 0.5,
+            friendliness: 0.6,
+            efficiency: 0.2,
+            details: '部分响应（执行异常降级）',
+          },
           trace: context.trace,
           metadata: { error: (err as Error).message, degraded: true },
         };
@@ -425,7 +540,14 @@ export class LoopController {
 
       return {
         response: `抱歉，处理过程中出现了问题：${(err as Error).message}`,
-        quality: { overall: 0.1, accuracy: 0, usefulness: 0, friendliness: 0.5, efficiency: 0, details: '执行失败' },
+        quality: {
+          overall: 0.1,
+          accuracy: 0,
+          usefulness: 0,
+          friendliness: 0.5,
+          efficiency: 0,
+          details: '执行失败',
+        },
         trace: context.trace,
         metadata: { error: (err as Error).message },
       };
@@ -466,6 +588,51 @@ export class LoopController {
       timestamp: Date.now(),
     });
 
+    const phaseMap: Record<LoopState, string> = {
+      [LoopState.PLANNING]: 'planning',
+      [LoopState.EXECUTING]: 'executing',
+      [LoopState.EVALUATING]: 'evaluating',
+      [LoopState.REPORTING]: 'reporting',
+      [LoopState.COMPLETED]: 'completed',
+      [LoopState.FAILED]: 'failed',
+      [LoopState.ABORTED]: 'aborted',
+      [LoopState.BUDGET_EXCEEDED]: 'budget_exceeded',
+    };
+
+    const phaseName = phaseMap[newState] || 'unknown';
+    const statusMap: Record<LoopState, string> = {
+      [LoopState.PLANNING]: 'started',
+      [LoopState.EXECUTING]: 'in_progress',
+      [LoopState.EVALUATING]: 'in_progress',
+      [LoopState.REPORTING]: 'in_progress',
+      [LoopState.COMPLETED]: 'completed',
+      [LoopState.FAILED]: 'failed',
+      [LoopState.ABORTED]: 'aborted',
+      [LoopState.BUDGET_EXCEEDED]: 'exceeded',
+    };
+
+    const progressMessages: Record<LoopState, string> = {
+      [LoopState.PLANNING]: '正在分析任务，制定执行计划...',
+      [LoopState.EXECUTING]: `正在执行任务，已完成 ${context.budget.roundsUsed} 轮...`,
+      [LoopState.EVALUATING]: '正在验证执行结果...',
+      [LoopState.REPORTING]: '正在整理结果，生成回复...',
+      [LoopState.COMPLETED]: '任务执行完成',
+      [LoopState.FAILED]: '任务执行失败',
+      [LoopState.ABORTED]: '任务已中止',
+      [LoopState.BUDGET_EXCEEDED]: '资源配额已用尽',
+    };
+
+    void EventBus.emit('agent_execution_update', {
+      traceId: context.trace.traceId,
+      phase: phaseName,
+      status: statusMap[newState] || 'unknown',
+      roundsUsed: context.budget.roundsUsed,
+      toolCallsUsed: context.budget.toolCallsUsed,
+      elapsedMs: Date.now() - context.budget.startTime,
+      timestamp: new Date().toISOString(),
+      message: progressMessages[newState],
+    });
+
     if (this.deps.trajectoryDatabase) {
       try {
         this.deps.trajectoryDatabase.recordStateTransition({
@@ -475,11 +642,102 @@ export class LoopController {
           created_at: Date.now(),
         });
       } catch (err) {
-        Logger.warn(`⚠️ 状态转换记录失败: ${(err as Error).message}`, 'LoopController');
+        Logger.warn(
+          `⚠️ 状态转换记录失败: ${(err as Error).message}`,
+          'LoopController'
+        );
       }
     }
 
     Logger.debug(`🔄 状态转换: ${prev} → ${newState}`, 'LoopController');
+  }
+
+  /**
+   * 记录上下文快照到轨迹数据库
+   * P0: 全轨迹审计增强 — 每步完整上下文快照
+   */
+  private recordSnapshot(
+    context: LoopContext,
+    phase:
+      | 'planning'
+      | 'executing'
+      | 'evaluating'
+      | 'reporting'
+      | 'tool_call'
+      | 'tool_result'
+      | 'llm_call',
+    stepIndex: number,
+    extra: Record<string, unknown> = {}
+  ): void {
+    if (!this.deps.trajectoryDatabase) return;
+
+    try {
+      const messagesSnapshot = context.messages.map((m) => ({
+        role: m.role,
+        content:
+          typeof m.content === 'string' ? m.content.substring(0, 2000) : null,
+        tool_calls: m.tool_calls
+          ? (m.tool_calls as Array<Record<string, unknown>>).map((tc) => ({
+              id: (tc as { id?: string }).id,
+              type: (tc as { type?: string }).type,
+              function: {
+                name:
+                  ((tc as { function?: Record<string, unknown> }).function
+                    ?.name as string) || 'unknown',
+                arguments:
+                  typeof (tc as { function?: Record<string, unknown> }).function
+                    ?.arguments === 'string'
+                    ? (
+                        (tc as { function?: Record<string, unknown> }).function
+                          ?.arguments as string
+                      ).substring(0, 500)
+                    : undefined,
+              },
+            }))
+          : undefined,
+      }));
+
+      const snapshot = {
+        phase,
+        stepIndex,
+        budget: {
+          roundsUsed: context.budget.roundsUsed,
+          tokensUsed: context.budget.tokensUsed,
+          toolCallsUsed: context.budget.toolCallsUsed,
+          elapsedMs: Date.now() - context.budget.startTime,
+        },
+        messagesCount: context.messages.length,
+        messagesSnapshot,
+        planSteps:
+          context.plan?.steps?.map((s) => ({
+            id: s.id,
+            description: s.description,
+            toolName: s.toolName,
+          })) || null,
+        stepResultsSummary: Object.fromEntries(
+          Array.from(context.stepResults.entries()).map(([k, v]) => [
+            k,
+            { success: v.success, toolName: v.toolName, error: v.error },
+          ])
+        ),
+        ...extra,
+      };
+
+      this.deps.trajectoryDatabase.recordContextSnapshot({
+        execution_id: context.trace.traceId,
+        phase,
+        step_index: stepIndex,
+        snapshot_json: JSON.stringify(snapshot),
+        token_count: context.budget.tokensUsed,
+        duration_ms: Date.now() - context.budget.startTime,
+        created_at: Date.now(),
+      });
+    } catch (err) {
+      Logger.warn(
+        `⚠️ 上下文快照记录失败: ${(err as Error).message}`,
+        'LoopController'
+      );
+    }
   }
 
   /**
@@ -491,7 +749,8 @@ export class LoopController {
     const lastStepResult = this.getLastFailedStepResult(context);
     if (!lastStepResult) return false;
     const errorMsg = lastStepResult.error || '';
-    const retryablePattern = /timeout|network|ECONNREFUSED|ETIMEDOUT|503|429|超时|网络/i;
+    const retryablePattern =
+      /timeout|network|ECONNREFUSED|ETIMEDOUT|503|429|超时|网络/i;
     return retryablePattern.test(errorMsg);
   }
 
@@ -604,7 +863,10 @@ export class LoopController {
    * F0-02: 将 Planner 的决策注入共享上下文
    * 确保 Executor 的 LLM 能看到完整的规划推理，而不是只看到步骤列表
    */
-  private injectPlanIntoContext(plan: ExecutionPlan, context: LoopContext): void {
+  private injectPlanIntoContext(
+    plan: ExecutionPlan,
+    context: LoopContext
+  ): void {
     if (plan.simple || plan.steps.length === 0) return;
 
     const hasExistingPlanMsg = context.messages.some(
@@ -613,7 +875,10 @@ export class LoopController {
     if (hasExistingPlanMsg) return;
 
     const steps = plan.steps
-      .map((s, i) => `${i + 1}. ${s.description}${s.toolName ? ` (使用 ${s.toolName})` : ''}`)
+      .map(
+        (s, i) =>
+          `${i + 1}. ${s.description}${s.toolName ? ` (使用 ${s.toolName})` : ''}`
+      )
       .join('\n');
 
     const parts: string[] = [];

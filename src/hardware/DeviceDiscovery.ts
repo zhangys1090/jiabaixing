@@ -2,10 +2,7 @@ import { Logger } from '../utils/Logger';
 import { AudioVideoDeviceAccess } from './AudioVideoDeviceAccess';
 import { DeviceType } from './DeviceTypes';
 import { LocalDeviceAccess } from './LocalDeviceAccess';
-import {
-  Device,
-  DeviceDiscoveryOptions,
-} from './types';
+import { Device, DeviceDiscoveryOptions } from './types';
 
 export class DeviceDiscovery {
   private static _instance: DeviceDiscovery | null = null;
@@ -39,13 +36,17 @@ export class DeviceDiscovery {
     this.localDeviceAccess = access;
   }
 
-  public setAudioVideoDeviceAccess(access: AudioVideoDeviceAccess | null): void {
+  public setAudioVideoDeviceAccess(
+    access: AudioVideoDeviceAccess | null
+  ): void {
     this.audioVideoDeviceAccess = access;
   }
 
-  public startDeviceDiscovery(onDiscover: (options?: DeviceDiscoveryOptions) => Promise<Device[]>): void {
+  public startDeviceDiscovery(
+    onDiscover: (options?: DeviceDiscoveryOptions) => Promise<Device[]>
+  ): void {
     this.discoveryInterval = setInterval(() => {
-      onDiscover({ timeout: 5000 });
+      void onDiscover({ timeout: 5000 });
     }, 60000);
   }
 
@@ -164,7 +165,7 @@ export class DeviceDiscovery {
   }
 
   private async discoverWifiDevices(
-    options?: DeviceDiscoveryOptions['wifiOptions']
+    _options?: DeviceDiscoveryOptions['wifiOptions']
   ): Promise<Device[]> {
     return [
       {
@@ -210,7 +211,7 @@ export class DeviceDiscovery {
   }
 
   private async discoverBluetoothDevices(
-    options?: DeviceDiscoveryOptions['bluetoothOptions']
+    _options?: DeviceDiscoveryOptions['bluetoothOptions']
   ): Promise<Device[]> {
     return [
       {
@@ -235,7 +236,7 @@ export class DeviceDiscovery {
   }
 
   private async discoverZigbeeDevices(
-    options?: DeviceDiscoveryOptions['zigbeeOptions']
+    _options?: DeviceDiscoveryOptions['zigbeeOptions']
   ): Promise<Device[]> {
     return [
       {
@@ -277,7 +278,7 @@ export class DeviceDiscovery {
   }
 
   private async discoverZwaveDevices(
-    options?: DeviceDiscoveryOptions['zwaveOptions']
+    _options?: DeviceDiscoveryOptions['zwaveOptions']
   ): Promise<Device[]> {
     return [
       {

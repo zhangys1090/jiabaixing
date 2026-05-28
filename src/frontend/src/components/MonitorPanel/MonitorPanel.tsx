@@ -38,7 +38,7 @@ export const MonitorPanel: React.FC = () => {
 
   const [activeTab, setActiveTab] = useState<MonitorTab>('resources');
   const [logFilter, setLogFilter] = useState<string>('all');
-  const [loading, setLoading] = useState(false);
+  const [_loading, setLoading] = useState(false);
   const [resources, setResources] = useState<SystemResourcesResponse | null>(null);
   const [llmPerf, setLlmPerf] = useState<LlmPerf>({
     calls: 0,

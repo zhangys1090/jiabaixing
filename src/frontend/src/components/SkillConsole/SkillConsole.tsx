@@ -79,6 +79,7 @@ const SkillConsole: React.FC = () => {
   const [isVisible, setIsVisible] = useState(false);
   const wsListenerRef = useRef<(() => void) | null>(null);
 
+  /* eslint-disable react-hooks/exhaustive-deps */
   useEffect(() => {
     fetchSkills();
     setupWebSocketListener();
@@ -99,6 +100,7 @@ const SkillConsole: React.FC = () => {
       }
     };
   }, []);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });

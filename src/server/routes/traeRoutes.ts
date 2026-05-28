@@ -2,7 +2,7 @@
  * TRAE优化系统路由 - health / performance / mcp status / skills status / execute / security audit / testing generate
  */
 
-import express, { Request, Response } from 'express';
+import express from 'express';
 
 import { JiabaixingCore } from '../../core/JiabaixingCore';
 

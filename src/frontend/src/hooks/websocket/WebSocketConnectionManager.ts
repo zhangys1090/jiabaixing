@@ -39,6 +39,8 @@ import {
   FileRollback,
   MultiFileModified,
   UserCorrection,
+  TaskCancelled,
+  TaskCancelledListener,
 } from './types';
 
 type ServerLogListener = (entry: ServerLogEntry) => void;
@@ -73,16 +75,27 @@ class WebSocketConnectionManager {
   private fileRollbackListeners = new Set<FileRollbackListener>();
   private multiFileModifiedListeners = new Set<MultiFileModifiedListener>();
   private userCorrectionListeners = new Set<UserCorrectionListener>();
+  private taskCancelledListeners = new Set<TaskCancelledListener>();
+  private processingStatusListeners = new Set<(data: { status: string; message: string; traceId?: string }) => void>();
 
   private currentDialogState: DialogStateValue = 'idle';
   private currentConnected = false;
   private currentConnectionStatus: ConnectionStatus = 'disconnected';
+  private pendingMessages: Array<Record<string, unknown>> = [];
+  private static readonly MAX_PENDING_MESSAGES = 20;
 
   initialize(config: ConnectionConfig): void {
+    const urlChanged = this.config?.url !== config.url;
     this.config = config;
     this.isActive = true;
 
     if (!this.ws || this.ws.readyState === WebSocket.CLOSED) {
+      this.reconnectAttempts = 0;
+      this.connect();
+    } else if (urlChanged) {
+      this.reconnectAttempts = 0;
+      this.cleanupSocket();
+      this.ws = null;
       this.connect();
     }
   }
@@ -113,6 +126,7 @@ class WebSocketConnectionManager {
         this.updateConnectionState(true);
         this.updateConnectionStatus('connected');
         this.reconnectAttempts = 0;
+        this.flushPendingMessages();
       };
 
       ws.onclose = (event) => {
@@ -150,8 +164,25 @@ class WebSocketConnectionManager {
         }
       };
 
-      ws.onerror = () => {
-        // WebSocket连接错误，静默处理
+      ws.onerror = (_error: Event) => {
+        console.error('❌ WebSocket连接错误', {
+          wasConnected: this.currentConnected,
+          reconnectAttempts: this.reconnectAttempts,
+          url: this.config?.url,
+        });
+        this.updateConnectionState(false);
+        this.updateConnectionStatus('disconnected');
+        // 通知 error 监听器
+        this.errorListeners.forEach((listener) => {
+          try {
+            listener({
+              message: `WebSocket连接失败: ${this.config?.url || '未知'}`,
+              traceId: '',
+            });
+          } catch {
+            // 静默
+          }
+        });
       };
     } catch {
       this.updateConnectionState(false);
@@ -164,11 +195,20 @@ class WebSocketConnectionManager {
     const timestamp = new Date().toISOString();
     console.log(`📨 [${timestamp}] 收到WebSocket消息: ${message.type}${traceTag}`);
 
+    if (message.type === 'response_ready') {
+      const data = message.data as Record<string, unknown> | undefined;
+      const responsePreview =
+        typeof data?.response === 'string'
+          ? data.response.substring(0, 80)
+          : JSON.stringify(data?.response)?.substring(0, 80);
+      console.log(`💬 [WS] response_ready: "${responsePreview}..."${traceTag}`);
+    }
+
     this.messageListeners.forEach((listener) => {
       try {
         listener(message);
-      } catch {
-        // 消息监听器处理失败，静默处理
+      } catch (err) {
+        console.error(`❌ [WS] 消息监听器处理失败: ${message.type}`, err);
       }
     });
 
@@ -296,8 +336,8 @@ class WebSocketConnectionManager {
         this.serverLogListeners.forEach((listener) => {
           try {
             listener(logData);
-          } catch {
-            // 静默处理
+          } catch (err) {
+            console.error(`❌ [WS] server_log监听器处理失败`, err);
           }
         });
         break;
@@ -315,6 +355,18 @@ class WebSocketConnectionManager {
       case 'response':
         this.updateDialogState('speaking');
         break;
+      case 'processing_status': {
+        const statusData = message.data as unknown as { status: string; message: string; traceId?: string };
+        console.log('⏳ 收到处理状态更新:', statusData.message);
+        this.processingStatusListeners.forEach((listener) => {
+          try {
+            listener(statusData);
+          } catch {
+            // 静默处理
+          }
+        });
+        break;
+      }
       case 'connected':
         console.log('📨 WebSocket连接已确认');
         break;
@@ -388,6 +440,18 @@ class WebSocketConnectionManager {
         });
         break;
       }
+      case 'task_cancelled': {
+        const cancelledData = message.data as unknown as TaskCancelled;
+        console.log('🚫 任务已取消:', cancelledData.traceId ?? cancelledData.taskId ?? 'unknown');
+        this.taskCancelledListeners.forEach((listener) => {
+          try {
+            listener(cancelledData);
+          } catch {
+            // 静默处理
+          }
+        });
+        break;
+      }
       default:
         console.warn(`⚠️ 未知的WebSocket消息类型: ${message.type}`);
         break;
@@ -416,9 +480,23 @@ class WebSocketConnectionManager {
         traceId: data.traceId || `trace_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 9)}`,
         timestamp: data._timestamp || Date.now(),
       };
+      console.log(`📤 [WS] 发送消息: type=${data.type}, traceId=${message.traceId}`);
       this.ws.send(JSON.stringify(message));
       return true;
     }
+
+    if (data.type === 'user_input' && this.pendingMessages.length < WebSocketConnectionManager.MAX_PENDING_MESSAGES) {
+      const queuedMessage = {
+        ...data,
+        traceId: data.traceId || `trace_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 9)}`,
+        timestamp: Date.now(),
+      };
+      this.pendingMessages.push(queuedMessage);
+      console.warn(`📤 [WS] WebSocket未连接，消息已缓存 (队列:${this.pendingMessages.length}), type=${data.type}`);
+      return true;
+    }
+
+    console.warn(`📤 [WS] 发送失败: WebSocket未连接 (readyState=${this.ws?.readyState})`);
     return false;
   }
 
@@ -607,6 +685,22 @@ class WebSocketConnectionManager {
     this.userCorrectionListeners.delete(listener);
   }
 
+  onTaskCancelled(listener: TaskCancelledListener): void {
+    this.taskCancelledListeners.add(listener);
+  }
+
+  offTaskCancelled(listener: TaskCancelledListener): void {
+    this.taskCancelledListeners.delete(listener);
+  }
+
+  onProcessingStatus(listener: (data: { status: string; message: string; traceId?: string }) => void): void {
+    this.processingStatusListeners.add(listener);
+  }
+
+  offProcessingStatus(listener: (data: { status: string; message: string; traceId?: string }) => void): void {
+    this.processingStatusListeners.delete(listener);
+  }
+
   on(event: string, listener: (data: unknown) => void): () => void {
     const wrapper = (message: WebSocketMessage) => {
       if (message.type === event) {
@@ -635,6 +729,17 @@ class WebSocketConnectionManager {
     return this.isActive && this.currentConnected;
   }
 
+  reconnect(): void {
+    this.reconnectAttempts = 0;
+    this.clearReconnectTimer();
+    this.cleanupSocket();
+    this.ws = null;
+    this.updateConnectionState(false);
+    if (this.config && this.isActive) {
+      this.connect();
+    }
+  }
+
   getConnectionStatus(): ConnectionStatus {
     return this.currentConnectionStatus;
   }
@@ -643,6 +748,23 @@ class WebSocketConnectionManager {
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
+    }
+  }
+
+  private flushPendingMessages(): void {
+    if (this.pendingMessages.length === 0) return;
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+
+    const messages = [...this.pendingMessages];
+    this.pendingMessages = [];
+
+    for (const msg of messages) {
+      try {
+        this.ws.send(JSON.stringify(msg));
+        console.log(`📤 [WS] 发送缓存消息: type=${msg.type}, traceId=${msg.traceId}`);
+      } catch (err) {
+        console.error('❌ [WS] 缓存消息发送失败', err);
+      }
     }
   }
 

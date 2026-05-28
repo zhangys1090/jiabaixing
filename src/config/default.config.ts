@@ -41,7 +41,7 @@ export const defaultConfig = {
   },
 
   model: {
-    defaultModel: 'qwen2.5:3b',
+    defaultModel: 'deepseek-chat',
     baseUrl: 'http://127.0.0.1:8001/v1',
     apiKey: 'not-needed',
     timeout: 60000,

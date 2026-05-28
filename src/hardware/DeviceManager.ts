@@ -61,7 +61,9 @@ export class DeviceManager {
       await this.audioVideoDeviceAccess.initialize();
 
       this.deviceDiscovery.setLocalDeviceAccess(this.localDeviceAccess);
-      this.deviceDiscovery.setAudioVideoDeviceAccess(this.audioVideoDeviceAccess);
+      this.deviceDiscovery.setAudioVideoDeviceAccess(
+        this.audioVideoDeviceAccess
+      );
 
       this.initialized = true;
       this.deviceDiscovery.startDeviceDiscovery(async (options) => {
@@ -88,7 +90,8 @@ export class DeviceManager {
     this.ensureInitialized();
 
     try {
-      const discoveredDevices = await this.deviceDiscovery.discoverDevices(options);
+      const discoveredDevices =
+        await this.deviceDiscovery.discoverDevices(options);
 
       for (const device of discoveredDevices) {
         const existingDevice = this.devices.get(device.id);
@@ -185,7 +188,7 @@ export class DeviceManager {
 
     this.deviceCommands.set(newCommand.id, newCommand);
 
-    this.executeCommand(newCommand.id);
+    void this.executeCommand(newCommand.id);
 
     return newCommand;
   }
@@ -558,7 +561,7 @@ export class DeviceManager {
     Logger.info('🔄 设备管理器：开始监控设备状态', 'DeviceManager');
   }
 
-  private simulateDeviceStatus(device: Device): Device['status'] {
+  private simulateDeviceStatus(_device: Device): Device['status'] {
     const random = Math.random();
     if (random < 0.1) {
       return 'offline';
@@ -754,7 +757,7 @@ export class DeviceManager {
     this.reconnectionTimers.set(deviceId, timer);
   }
 
-  private simulateReconnection(device: Device): boolean {
+  private simulateReconnection(_device: Device): boolean {
     return Math.random() < 0.5;
   }
 
@@ -804,7 +807,7 @@ export class DeviceManager {
       clearInterval(this.monitoringInterval);
     }
 
-    for (const [deviceId, timer] of this.reconnectionTimers) {
+    for (const [, timer] of this.reconnectionTimers) {
       clearInterval(timer);
     }
     this.reconnectionTimers.clear();

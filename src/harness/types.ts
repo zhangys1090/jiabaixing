@@ -60,6 +60,7 @@ export enum LoopState {
   REPORTING = 'reporting',
   COMPLETED = 'completed',
   FAILED = 'failed',
+  ABORTED = 'aborted',
   BUDGET_EXCEEDED = 'budget_exceeded',
 }
 
@@ -73,6 +74,10 @@ export interface ExecutionPlan {
   simple?: boolean;
   /** Planner 的 LLM 推理过程 — 确保数据流从 Planner → Executor 不断裂 */
   planReasoning?: string;
+  /** 工具调用模式：required=必须调用工具，auto=自动选择，none=不调工具 */
+  toolCallMode: 'required' | 'auto' | 'none';
+  /** Planner 推荐的工具名列表，Executor 据此筛选工具 */
+  recommendedTools: string[];
 }
 
 /** 计划步骤 */
@@ -337,9 +342,7 @@ export enum LifecycleEvent {
 }
 
 /** 生命周期钩子 */
-export type LifecycleHook = (
-  context: HookContext
-) => Promise<HookResult>;
+export type LifecycleHook = (context: HookContext) => Promise<HookResult>;
 
 /** 钩子上下文 */
 export interface HookContext {

@@ -120,7 +120,7 @@ export class EnvironmentManager {
           'http://127.0.0.1:8001/v1'
         ),
         OPENAI_API_KEY: this.getString('_OPENAI_API_KEY', 'not-needed'),
-        LLM_MODEL: this.getString('_LLM_MODEL', 'qwen2.5-vl'),
+        LLM_MODEL: this.getString('_LLM_MODEL', 'deepseek-chat'),
         EMBEDDING_MODEL: this.getString(
           'EMBEDDING_MODEL',
           'text-embedding-3-small'

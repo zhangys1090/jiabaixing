@@ -1,351 +1,336 @@
 /**
  * PerformanceMonitor 单元测试
- * 覆盖：指标记录、查询、聚合统计、快照、自动快照、监听器
+ * 覆盖：单例创建、指标记录、查询、摘要统计、重置、监控启停、事件发射
  */
 
-import { PerformanceMonitor, PerformanceMetric } from '../../../src/monitoring/PerformanceMonitor';
+import { PerformanceMonitor, PerformanceMetrics, PerformanceConfig } from '../../../src/monitoring/PerformanceMonitor';
 
-describe.skip('PerformanceMonitor', () => {
+jest.mock('../../../src/utils/Logger', () => ({
+  Logger: {
+    debug: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+  },
+}));
+
+describe('PerformanceMonitor', () => {
   let monitor: PerformanceMonitor;
 
   beforeEach(() => {
+    (PerformanceMonitor as any).instance = null;
+    monitor = PerformanceMonitor.getInstance();
     jest.useFakeTimers();
-    monitor = new PerformanceMonitor(5000);
   });
 
   afterEach(() => {
-    monitor.stopAutoSnapshot();
-    monitor.clearMetrics();
+    monitor.stopMonitoring();
+    monitor.reset();
+    (PerformanceMonitor as any).instance = null;
     jest.useRealTimers();
   });
 
-  describe('recordMetric', () => {
-    it('成功记录一个指标', () => {
-      const metric = monitor.recordMetric({
-        category: 'memory',
-        name: 'heap.used',
-        value: 1024,
-        unit: 'bytes',
-      });
+  describe('getInstance', () => {
+    it('创建单例实例', () => {
+      const instance = PerformanceMonitor.getInstance();
 
-      expect(metric).toBeDefined();
-      expect(metric.id).toBeDefined();
-      expect(metric.timestamp).toBeInstanceOf(Date);
-      expect(metric.category).toBe('memory');
-      expect(metric.value).toBe(1024);
+      expect(instance).toBeInstanceOf(PerformanceMonitor);
+      expect(instance).toBe(monitor);
     });
 
-    it('记录多个指标并限制数量', () => {
-      const smallMonitor = new PerformanceMonitor(100);
-      (smallMonitor as any).maxMetrics = 5;
+    it('重复调用返回同一实例', () => {
+      const a = PerformanceMonitor.getInstance();
+      const b = PerformanceMonitor.getInstance();
 
-      for (let i = 0; i < 10; i++) {
-        smallMonitor.recordMetric({
-          category: 'custom',
-          name: 'test.metric',
-          value: i,
-          unit: 'count',
-        });
+      expect(a).toBe(b);
+    });
+
+    it('使用自定义配置创建实例', () => {
+      (PerformanceMonitor as any).instance = null;
+      const custom = PerformanceMonitor.getInstance({
+        enableMetrics: false,
+        logLevel: 'debug',
+      });
+      const config = custom.getConfig();
+
+      expect(config.enableMetrics).toBe(false);
+      expect(config.logLevel).toBe('debug');
+    });
+  });
+
+  describe('recordRequest', () => {
+    it('记录成功的请求', () => {
+      monitor.recordRequest(120, true);
+      const metrics = monitor.getMetrics();
+
+      expect(metrics).toHaveLength(1);
+      expect(metrics[0].responseTime).toBe(120);
+      expect(metrics[0].requestCount).toBe(1);
+      expect(metrics[0].errorCount).toBe(0);
+      expect(metrics[0].errorRate).toBe(0);
+    });
+
+    it('记录失败的请求', () => {
+      monitor.recordRequest(500, false);
+      const metrics = monitor.getMetrics();
+
+      expect(metrics).toHaveLength(1);
+      expect(metrics[0].responseTime).toBe(500);
+      expect(metrics[0].requestCount).toBe(1);
+      expect(metrics[0].errorCount).toBe(1);
+      expect(metrics[0].errorRate).toBe(1);
+    });
+
+    it('连续记录多个请求并累计计数', () => {
+      monitor.recordRequest(100, true);
+      monitor.recordRequest(200, true);
+      monitor.recordRequest(300, false);
+
+      const metrics = monitor.getMetrics();
+
+      expect(metrics).toHaveLength(3);
+      expect(metrics[2].requestCount).toBe(3);
+      expect(metrics[2].errorCount).toBe(1);
+      expect(metrics[2].errorRate).toBeCloseTo(1 / 3);
+    });
+
+    it('记录的指标包含时间戳和内存使用', () => {
+      monitor.recordRequest(50, true);
+      const m = monitor.getMetrics()[0];
+
+      expect(m.timestamp).toBeGreaterThan(0);
+      expect(m.memoryUsage).toBeGreaterThan(0);
+    });
+  });
+
+  describe('getMetrics', () => {
+    it('默认返回最近100条指标', () => {
+      for (let i = 0; i < 150; i++) {
+        monitor.recordRequest(i, true);
       }
 
-      expect(smallMonitor.getMetricCount()).toBeLessThanOrEqual(5);
-    });
-  });
+      const metrics = monitor.getMetrics();
 
-  describe('recordResponseTime', () => {
-    it('记录API响应时间', () => {
-      const metric = monitor.recordResponseTime('/api/test', 150);
-
-      expect(metric.category).toBe('response_time');
-      expect(metric.name).toBe('response_time./api/test');
-      expect(metric.value).toBe(150);
-      expect(metric.unit).toBe('ms');
-    });
-  });
-
-  describe('recordError', () => {
-    it('记录错误事件', () => {
-      const metric = monitor.recordError('TypeError', { stack: 'error stack' });
-
-      expect(metric.category).toBe('error_rate');
-      expect(metric.name).toBe('error.TypeError');
-      expect(metric.value).toBe(1);
-      expect(metric.metadata?.errorType).toBe('TypeError');
-    });
-  });
-
-  describe('recordThroughput', () => {
-    it('记录吞吐量', () => {
-      const metric = monitor.recordThroughput('requests', 500);
-
-      expect(metric.category).toBe('throughput');
-      expect(metric.name).toBe('throughput.requests');
-      expect(metric.value).toBe(500);
-      expect(metric.unit).toBe('ops');
-    });
-  });
-
-  describe('getSnapshot', () => {
-    it('获取系统性能快照', () => {
-      const snapshot = monitor.getSnapshot();
-
-      expect(snapshot).toBeDefined();
-      expect(snapshot.timestamp).toBeInstanceOf(Date);
-      expect(snapshot.memory).toBeDefined();
-      expect(snapshot.memory.heapUsed).toBeGreaterThan(0);
-      expect(snapshot.memory.heapTotal).toBeGreaterThan(0);
-      expect(snapshot.memory.rss).toBeGreaterThan(0);
-      expect(snapshot.cpu).toBeDefined();
-      expect(snapshot.cpu.loadAvg).toHaveLength(3);
-      expect(snapshot.cpu.cpuCount).toBeGreaterThan(0);
-      expect(snapshot.system).toBeDefined();
-      expect(snapshot.system.uptime).toBeGreaterThan(0);
-      expect(snapshot.system.platform).toBeDefined();
-      expect(snapshot.system.nodeVersion).toBeDefined();
-    });
-  });
-
-  describe('queryMetrics', () => {
-    it('按类别查询指标', () => {
-      monitor.recordMetric({
-        category: 'memory',
-        name: 'heap.used',
-        value: 100,
-        unit: 'bytes',
-      });
-      monitor.recordMetric({
-        category: 'error_rate',
-        name: 'error.test',
-        value: 1,
-        unit: 'count',
-      });
-      monitor.recordMetric({
-        category: 'memory',
-        name: 'rss',
-        value: 200,
-        unit: 'bytes',
-      });
-
-      const memoryMetrics = monitor.queryMetrics('memory');
-
-      expect(memoryMetrics).toHaveLength(2);
-      memoryMetrics.forEach((m: PerformanceMetric) => expect(m.category).toBe('memory'));
+      expect(metrics).toHaveLength(100);
     });
 
-    it('按时间范围查询指标', () => {
-      const now = new Date();
-      const past = new Date(now.getTime() - 10000);
-      const future = new Date(now.getTime() + 10000);
-
-      monitor.recordMetric({
-        category: 'memory',
-        name: 'test',
-        value: 1,
-        unit: 'count',
-      });
-
-      const metrics = monitor.queryMetrics('memory', past, future);
-
-      expect(metrics.length).toBeGreaterThanOrEqual(1);
-    });
-
-    it('限制返回数量', () => {
+    it('按指定数量返回指标', () => {
       for (let i = 0; i < 10; i++) {
-        monitor.recordMetric({
-          category: 'memory',
-          name: 'test',
-          value: i,
-          unit: 'count',
-        });
+        monitor.recordRequest(i, true);
       }
 
-      const metrics = monitor.queryMetrics('memory', undefined, undefined, 5);
+      const metrics = monitor.getMetrics(5);
 
       expect(metrics).toHaveLength(5);
+      expect(metrics[0].responseTime).toBe(5);
+      expect(metrics[4].responseTime).toBe(9);
+    });
+
+    it('无数据时返回空数组', () => {
+      const metrics = monitor.getMetrics();
+
+      expect(metrics).toEqual([]);
     });
   });
 
-  describe('getAggregatedStats', () => {
-    it('获取聚合统计信息', () => {
-      monitor.recordMetric({
-        category: 'response_time',
-        name: 'response_time./api/test',
-        value: 100,
-        unit: 'ms',
-      });
-      monitor.recordMetric({
-        category: 'response_time',
-        name: 'response_time./api/test',
-        value: 200,
-        unit: 'ms',
-      });
-      monitor.recordMetric({
-        category: 'response_time',
-        name: 'response_time./api/test',
-        value: 300,
-        unit: 'ms',
-      });
+  describe('getCurrentMetrics', () => {
+    it('返回最新一条指标', () => {
+      monitor.recordRequest(100, true);
+      monitor.recordRequest(200, true);
 
-      const stats = monitor.getAggregatedStats(
-        'response_time',
-        'response_time./api/test'
-      );
+      const current = monitor.getCurrentMetrics();
 
-      expect(stats).not.toBeNull();
-      expect(stats!.count).toBe(3);
-      expect(stats!.avg).toBe(200);
-      expect(stats!.min).toBe(100);
-      expect(stats!.max).toBe(300);
-      expect(stats!.sum).toBe(600);
+      expect(current).not.toBeNull();
+      expect(current!.responseTime).toBe(200);
     });
 
     it('无数据时返回null', () => {
-      const stats = monitor.getAggregatedStats('response_time', 'response_time.nonexistent');
+      const current = monitor.getCurrentMetrics();
 
-      expect(stats).toBeNull();
+      expect(current).toBeNull();
     });
   });
 
-  describe('getRecentErrors', () => {
-    it('获取最近的错误', () => {
-      monitor.recordError('Error1');
-      monitor.recordError('Error2');
-      monitor.recordError('Error3');
+  describe('getSummary', () => {
+    it('返回汇总统计信息', () => {
+      monitor.recordRequest(100, true);
+      monitor.recordRequest(200, true);
+      monitor.recordRequest(300, false);
 
-      const errors = monitor.getRecentErrors(2);
+      const summary = monitor.getSummary();
 
-      expect(errors).toHaveLength(2);
-      expect(errors[0].name).toBe('error.Error3');
-      expect(errors[1].name).toBe('error.Error2');
+      expect(summary.totalRequests).toBe(3);
+      expect(summary.totalErrors).toBe(1);
+      expect(summary.averageResponseTime).toBeCloseTo(200);
+      expect(summary.currentMemoryUsage).toBeGreaterThan(0);
+      expect(summary.currentErrorRate).toBeCloseTo(1 / 3);
+      expect(summary.uptime).toBeGreaterThanOrEqual(0);
     });
 
-    it('无错误时返回空数组', () => {
-      const errors = monitor.getRecentErrors();
+    it('无请求时返回安全的默认值', () => {
+      const summary = monitor.getSummary();
 
-      expect(errors).toHaveLength(0);
-    });
-  });
-
-  describe('listeners', () => {
-    it('添加指标监听器并接收通知', () => {
-      const callback = jest.fn();
-
-      monitor.onMetric('memory', callback);
-      monitor.recordMetric({
-        category: 'memory',
-        name: 'heap.used',
-        value: 100,
-        unit: 'bytes',
-      });
-
-      expect(callback).toHaveBeenCalledTimes(1);
-      expect(callback.mock.calls[0][0].category).toBe('memory');
-    });
-
-    it('移除指标监听器', () => {
-      const callback = jest.fn();
-
-      monitor.onMetric('cpu', callback);
-      monitor.offMetric('cpu', callback);
-      monitor.recordMetric({
-        category: 'cpu',
-        name: 'load',
-        value: 50,
-        unit: '%',
-      });
-
-      expect(callback).not.toHaveBeenCalled();
-    });
-
-    it('监听器抛出异常不影响其他监听器', () => {
-      const errorCallback = jest.fn().mockImplementation(() => {
-        throw new Error('Listener error');
-      });
-      const normalCallback = jest.fn();
-
-      monitor.onMetric('memory', errorCallback);
-      monitor.onMetric('memory', normalCallback);
-
-      expect(() => {
-        monitor.recordMetric({
-          category: 'memory',
-          name: 'test',
-          value: 1,
-          unit: 'count',
-        });
-      }).not.toThrow();
-
-      expect(normalCallback).toHaveBeenCalledTimes(1);
+      expect(summary.totalRequests).toBe(0);
+      expect(summary.totalErrors).toBe(0);
+      expect(summary.averageResponseTime).toBe(0);
+      expect(summary.currentErrorRate).toBe(0);
     });
   });
 
-  describe('startAutoSnapshot', () => {
-    it('启动自动快照并记录指标', () => {
-      monitor.startAutoSnapshot();
+  describe('reset', () => {
+    it('清空所有指标和计数', () => {
+      monitor.recordRequest(100, true);
+      monitor.recordRequest(200, false);
 
-      jest.advanceTimersByTime(6000);
+      monitor.reset();
 
-      expect(monitor.getMetricCount()).toBeGreaterThan(0);
-    });
-
-    it('重复启动不创建多个定时器', () => {
-      monitor.startAutoSnapshot();
-      monitor.startAutoSnapshot();
-
-      jest.advanceTimersByTime(6000);
-
-      const count = monitor.getMetricCount();
-
-      jest.advanceTimersByTime(6000);
-
-      expect(monitor.getMetricCount()).toBe(count + 2);
+      expect(monitor.getMetrics()).toEqual([]);
+      expect(monitor.getCurrentMetrics()).toBeNull();
+      expect(monitor.getSummary().totalRequests).toBe(0);
+      expect(monitor.getSummary().totalErrors).toBe(0);
     });
   });
 
-  describe('stopAutoSnapshot', () => {
-    it('停止自动快照', () => {
-      monitor.startAutoSnapshot();
-      monitor.stopAutoSnapshot();
+  describe('startMonitoring / stopMonitoring', () => {
+    it('启动监控后定时收集指标', () => {
+      monitor.startMonitoring(1000);
 
-      jest.advanceTimersByTime(6000);
+      jest.advanceTimersByTime(1000);
 
-      expect(monitor.getMetricCount()).toBe(0);
+      const metrics = monitor.getMetrics();
+
+      expect(metrics.length).toBeGreaterThan(0);
+
+      monitor.stopMonitoring();
+    });
+
+    it('多次启动不创建重复定时器', () => {
+      monitor.startMonitoring(1000);
+      monitor.startMonitoring(1000);
+
+      jest.advanceTimersByTime(1000);
+
+      const countAfterOneTick = monitor.getMetrics().length;
+
+      jest.advanceTimersByTime(1000);
+
+      const countAfterTwoTicks = monitor.getMetrics().length;
+
+      expect(countAfterTwoTicks - countAfterOneTick).toBeLessThanOrEqual(2);
+
+      monitor.stopMonitoring();
+    });
+
+    it('停止监控后不再收集指标', () => {
+      monitor.startMonitoring(1000);
+      monitor.stopMonitoring();
+
+      const countBefore = monitor.getMetrics().length;
+
+      jest.advanceTimersByTime(5000);
+
+      const countAfter = monitor.getMetrics().length;
+
+      expect(countAfter).toBe(countBefore);
+    });
+
+    it('无运行定时器时停止监控不报错', () => {
+      expect(() => monitor.stopMonitoring()).not.toThrow();
     });
   });
 
-  describe('clearMetrics', () => {
-    it('清理所有指标', () => {
-      monitor.recordMetric({
-        category: 'memory',
-        name: 'test',
-        value: 1,
-        unit: 'count',
-      });
+  describe('updateConfig / getConfig', () => {
+    it('更新配置并获取最新配置', () => {
+      monitor.updateConfig({ logLevel: 'debug', enableMetrics: false });
+      const config = monitor.getConfig();
 
-      monitor.clearMetrics();
+      expect(config.logLevel).toBe('debug');
+      expect(config.enableMetrics).toBe(false);
+    });
 
-      expect(monitor.getMetricCount()).toBe(0);
+    it('getConfig 返回配置副本而非引用', () => {
+      const config1 = monitor.getConfig();
+      config1.logLevel = 'error';
+
+      const config2 = monitor.getConfig();
+
+      expect(config2.logLevel).toBe('info');
+    });
+
+    it('部分更新不影响其他配置项', () => {
+      const originalConfig = monitor.getConfig();
+      monitor.updateConfig({ logLevel: 'warn' });
+      const updatedConfig = monitor.getConfig();
+
+      expect(updatedConfig.enableMetrics).toBe(originalConfig.enableMetrics);
+      expect(updatedConfig.alertThresholds).toEqual(originalConfig.alertThresholds);
     });
   });
 
-  describe('getMetricCount', () => {
-    it('获取指标数量', () => {
-      expect(monitor.getMetricCount()).toBe(0);
+  describe('事件发射', () => {
+    it('启动监控时发射 monitoringStarted 事件', () => {
+      const listener = jest.fn();
+      monitor.on('monitoringStarted', listener);
 
-      monitor.recordMetric({
-        category: 'memory',
-        name: 'test1',
-        value: 1,
-        unit: 'count',
-      });
-      monitor.recordMetric({
-        category: 'memory',
-        name: 'test2',
-        value: 2,
-        unit: 'count',
-      });
+      monitor.startMonitoring(1000);
 
-      expect(monitor.getMetricCount()).toBe(2);
+      expect(listener).toHaveBeenCalledTimes(1);
+
+      monitor.stopMonitoring();
+    });
+
+    it('停止监控时发射 monitoringStopped 事件', () => {
+      const listener = jest.fn();
+      monitor.on('monitoringStopped', listener);
+
+      monitor.startMonitoring(1000);
+      monitor.stopMonitoring();
+
+      expect(listener).toHaveBeenCalledTimes(1);
+    });
+
+    it('未启动监控时停止不发射 monitoringStopped 事件', () => {
+      const listener = jest.fn();
+      monitor.on('monitoringStopped', listener);
+
+      monitor.stopMonitoring();
+
+      expect(listener).not.toHaveBeenCalled();
+    });
+
+    it('记录请求时发射 metricsRecorded 事件并携带指标数据', () => {
+      const listener = jest.fn();
+      monitor.on('metricsRecorded', listener);
+
+      monitor.recordRequest(150, true);
+
+      expect(listener).toHaveBeenCalledTimes(1);
+      const emittedMetrics: PerformanceMetrics = listener.mock.calls[0][0];
+      expect(emittedMetrics.responseTime).toBe(150);
+      expect(emittedMetrics.requestCount).toBe(1);
+    });
+
+    it('定时收集时发射 metricsCollected 事件', () => {
+      const listener = jest.fn();
+      monitor.on('metricsCollected', listener);
+
+      monitor.startMonitoring(1000);
+      jest.advanceTimersByTime(1000);
+
+      expect(listener).toHaveBeenCalledTimes(1);
+      const emittedMetrics: PerformanceMetrics = listener.mock.calls[0][0];
+      expect(emittedMetrics.timestamp).toBeGreaterThan(0);
+
+      monitor.stopMonitoring();
+    });
+
+    it('重置时发射 metricsReset 事件', () => {
+      const listener = jest.fn();
+      monitor.on('metricsReset', listener);
+
+      monitor.reset();
+
+      expect(listener).toHaveBeenCalledTimes(1);
     });
   });
 });

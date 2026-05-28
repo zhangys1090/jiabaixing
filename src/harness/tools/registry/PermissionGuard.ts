@@ -165,10 +165,7 @@ export class PermissionGuard {
         const pending = this.pendingConfirmations.get(confirmationId);
         if (pending) {
           this.pendingConfirmations.delete(confirmationId);
-          Logger.warn(
-            `⏰ 确认超时: ${toolName}，自动拒绝`,
-            'PermissionGuard'
-          );
+          Logger.warn(`⏰ 确认超时: ${toolName}，自动拒绝`, 'PermissionGuard');
           resolve(false);
         }
       }, timeoutMs);

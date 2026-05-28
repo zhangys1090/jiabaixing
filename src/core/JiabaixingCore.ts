@@ -8,22 +8,23 @@ import { PersonaRules } from '../persona/PersonaRules';
 import { EventBus } from '../shared/EventBus';
 import { Logger } from '../utils/Logger';
 import {
-    ConstitutionPromptBuilder,
-    type PromptBuilderDependencies,
+  IEvolutionEngine,
+  ITRAEOptimizationIntegrator,
+} from '../server/init/types';
+import {
+  ConstitutionPromptBuilder,
+  type PromptBuilderDependencies,
 } from './ConstitutionPromptBuilder';
 import {
-    ConversationEntry,
-    ConversationHistoryManager,
+  ConversationEntry,
+  ConversationHistoryManager,
 } from './ConversationHistoryManager';
 import { MemoryAssistant } from './MemoryAssistant';
 import {
-    OptimizationDependencies,
-    OptimizationScheduler,
+  OptimizationDependencies,
+  OptimizationScheduler,
 } from './OptimizationScheduler';
-import {
-    ScenarioAwareScheduler,
-    ScheduledTask,
-} from './ScenarioAwareScheduler';
+import { ScenarioAwareScheduler } from './ScenarioAwareScheduler';
 
 /**
  * 记忆引擎接口（避免循环依赖）
@@ -96,7 +97,7 @@ export interface TrackedProcessResult {
 
 /**
  * JiabaixingCore 核心引擎
- * 
+ *
  * V5.0 统一架构：
  * - 完全委托给 AgentHarness 处理
  * - 保留必要的集成组件（记忆、调度、进化）
@@ -110,8 +111,8 @@ export class JiabaixingCore {
   private memoryEngine: IMemoryEngine | null = null;
   private performanceMonitor: PerformanceMonitor;
   private securityAuditor: SecurityAuditor;
-  private evolutionEngine: unknown = null;
-  private traeOptimizationIntegrator: unknown = null;
+  private evolutionEngine: IEvolutionEngine | null = null;
+  private traeOptimizationIntegrator: ITRAEOptimizationIntegrator | null = null;
   private optimizationSchedulerManager!: OptimizationScheduler;
   private scenarioScheduler: ScenarioAwareScheduler | null = null;
 
@@ -126,7 +127,7 @@ export class JiabaixingCore {
   constructor() {
     this.personaCore = new PersonaCore();
     this.personaGuard = new PersonaRules(this.personaCore);
-    this.llm = new LLMProvider(process.env.LLM_MODEL || 'qwen2.5-vl');
+    this.llm = new LLMProvider(process.env.LLM_MODEL || 'deepseek-chat');
     this.performanceMonitor = PerformanceMonitor.getInstance();
     this.securityAuditor = new SecurityAuditor({
       logFilePath: path.join(
@@ -167,7 +168,10 @@ export class JiabaixingCore {
 
     Logger.info('🧠 初始化 JiabaixingCore (V5.0 统一架构)', 'JiabaixingCore');
 
-    Logger.info('✅ 步骤5：SkillRegistry 核心技能由 AgentHarness 双写兼容注册', 'JiabaixingCore');
+    Logger.info(
+      '✅ 步骤5：SkillRegistry 核心技能由 AgentHarness 双写兼容注册',
+      'JiabaixingCore'
+    );
 
     // 模型初始化 + 健康检查
     try {
@@ -185,7 +189,7 @@ export class JiabaixingCore {
           'JiabaixingCore'
         );
         Logger.info(
-          `   LLM模型: ${process.env.MODEL_NAME || 'qwen2.5:3b'}`,
+          `   LLM模型: ${process.env.LLM_MODEL || 'deepseek-chat'}`,
           'JiabaixingCore'
         );
       }
@@ -246,9 +250,30 @@ export class JiabaixingCore {
   }
 
   /**
+   * 获取宪法 Prompt 构建器
+   */
+  getConstitutionPromptBuilder(): ConstitutionPromptBuilder {
+    return this.constitutionPromptBuilder;
+  }
+
+  /**
+   * 获取对话历史管理器
+   */
+  getConversationHistoryManager(): ConversationHistoryManager {
+    return this.conversationHistoryManager;
+  }
+
+  /**
+   * 获取进化引擎
+   */
+  getEvolutionEngineInternal(): IEvolutionEngine | null {
+    return this.evolutionEngine;
+  }
+
+  /**
    * 设置进化引擎
    */
-  setEvolutionEngine(engine: unknown): void {
+  setEvolutionEngine(engine: IEvolutionEngine): void {
     this.evolutionEngine = engine;
   }
 
@@ -276,7 +301,7 @@ export class JiabaixingCore {
   /**
    * 设置TRAE优化系统集成器
    */
-  setTRAEOptimizationIntegrator(integrator: unknown): void {
+  setTRAEOptimizationIntegrator(integrator: ITRAEOptimizationIntegrator): void {
     this.traeOptimizationIntegrator = integrator;
     Logger.info('✅ TRAE优化系统集成器已注入', 'JiabaixingCore');
   }
@@ -284,7 +309,7 @@ export class JiabaixingCore {
   /**
    * 获取TRAE优化系统集成器
    */
-  getTRAEOptimizationIntegrator(): unknown {
+  getTRAEOptimizationIntegrator(): ITRAEOptimizationIntegrator | null {
     return this.traeOptimizationIntegrator;
   }
 
@@ -316,7 +341,7 @@ export class JiabaixingCore {
 
   /**
    * V5.0 统一 processInput
-   * 
+   *
    * 完全委托给 AgentHarness 处理，保留降级路径
    */
   async processInput(
@@ -334,6 +359,14 @@ export class JiabaixingCore {
       `🚀 开始处理用户输入: ${input.substring(0, 50)}${input.length > 50 ? '...' : ''}`,
       'JiabaixingCore'
     );
+
+    // 立即发送处理开始的信号，让前端知道后端已开始处理
+    void EventBus.emit('agent_execution_update', {
+      traceId: finalTraceId,
+      phase: 'processing_start',
+      status: 'started',
+      timestamp: new Date().toISOString(),
+    });
 
     const startTime = Date.now();
 
@@ -356,10 +389,7 @@ export class JiabaixingCore {
       // V5.0: Harness Agent Framework (统一架构)
       // ═══════════════════════════════════════════════════════════════
       if (this.harness && this.harness.getConfig().useHarnessLoop) {
-        Logger.info(
-          '🏗️ V5.0 Harness 统一处理',
-          'JiabaixingCore'
-        );
+        Logger.info('🏗️ V5.0 Harness 统一处理', 'JiabaixingCore');
 
         const harnessResult = await this.harness.processInput({
           text: input,
@@ -390,6 +420,14 @@ export class JiabaixingCore {
         setImmediate(() => {
           try {
             const orchestrator = EvolutionOrchestrator.getInstance();
+            // 从轨迹中提取工具调用详情
+            const toolCalls = (harnessResult.trace.trajectory || [])
+              .filter((s: { type: string }) => s.type === 'tool_call')
+              .map((s: { toolName?: string; duration?: number }) => ({
+                toolName: s.toolName || 'unknown',
+                success: true,
+                executionTime: s.duration || 0,
+              }));
             orchestrator.recordInteraction({
               traceId: finalTraceId,
               input,
@@ -397,7 +435,7 @@ export class JiabaixingCore {
               success: qualityScore >= 0.5,
               qualityScore,
               executionDuration: harnessResult.trace.totalDuration,
-              toolCalls: [],
+              toolCalls,
               scene: 'general',
               userId: userId || 'default',
             });
@@ -414,6 +452,16 @@ export class JiabaixingCore {
           traceId: finalTraceId,
           success: true,
         });
+        Logger.info(
+          `✅ response_ready已发射: traceId=${finalTraceId}, 响应长度=${safeResponse.length}, 质量=${qualityScore.toFixed(2)}`,
+          'JiabaixingCore'
+        );
+
+        await this.conversationHistoryManager.saveState();
+        Logger.info(
+          `💾 对话历史已保存，当前 ${this.conversationHistoryManager.getLength()} 条`,
+          'JiabaixingCore'
+        );
 
         return {
           response: safeResponse,
@@ -425,10 +473,7 @@ export class JiabaixingCore {
       // ═══════════════════════════════════════════════════════════════
       // 降级：如果 Harness 不可用
       // ═══════════════════════════════════════════════════════════════
-      Logger.warn(
-        '⚠️ Harness 不可用，使用简单回复',
-        'JiabaixingCore'
-      );
+      Logger.warn('⚠️ Harness 不可用，使用简单回复', 'JiabaixingCore');
       const fallbackResponse = `抱歉，当前系统配置不完整，请检查环境变量设置。`;
 
       this.conversationHistoryManager.addUserMessage(input);
@@ -439,6 +484,16 @@ export class JiabaixingCore {
         traceId: finalTraceId,
         success: false,
       });
+      Logger.warn(
+        `⚠️ response_ready已发射(降级): traceId=${finalTraceId}`,
+        'JiabaixingCore'
+      );
+
+      await this.conversationHistoryManager.saveState();
+      Logger.info(
+        `💾 对话历史已保存，当前 ${this.conversationHistoryManager.getLength()} 条`,
+        'JiabaixingCore'
+      );
 
       return {
         response: fallbackResponse,
@@ -449,11 +504,25 @@ export class JiabaixingCore {
       Logger.error('❌ 处理用户输入失败', error as Error, 'JiabaixingCore');
       const fallbackResponse = `抱歉，处理过程中出现了问题：${(error as Error).message}`;
 
+      this.conversationHistoryManager.addUserMessage(input);
+      this.conversationHistoryManager.addAssistantMessage(fallbackResponse);
+
       void EventBus.emit('response_ready', {
         response: fallbackResponse,
         traceId: finalTraceId,
         success: false,
       });
+      Logger.error(
+        `❌ response_ready已发射(错误): traceId=${finalTraceId}, error=${(error as Error).message}`,
+        error as Error,
+        'JiabaixingCore'
+      );
+
+      await this.conversationHistoryManager.saveState();
+      Logger.info(
+        `💾 对话历史已保存，当前 ${this.conversationHistoryManager.getLength()} 条`,
+        'JiabaixingCore'
+      );
 
       return {
         response: fallbackResponse,
@@ -549,7 +618,11 @@ export class JiabaixingCore {
   }
 
   public getLastToolResults(): Array<{
-    toolCall: { id: string; type: string; function: { name: string; arguments: string } };
+    toolCall: {
+      id: string;
+      type: string;
+      function: { name: string; arguments: string };
+    };
     validated: { valid: boolean; sanitizedOutput: string; warning?: string };
     duration: number;
   }> {

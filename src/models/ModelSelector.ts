@@ -1,9 +1,5 @@
 import { ModelInput } from '../core/ModelInterface';
-import {
-  RegisteredModel,
-  RoutingResult,
-  RoutingStrategy,
-} from './types';
+import { RegisteredModel, RoutingResult, RoutingStrategy } from './types';
 
 export class ModelSelector {
   private static instance: ModelSelector | null = null;

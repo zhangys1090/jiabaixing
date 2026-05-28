@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useState } from 'react';
 import { useUIStore } from '../stores/useUIStore';
 
 // 断点配置
@@ -10,6 +10,11 @@ export const BREAKPOINTS = {
 
 export const useResponsive = () => {
   const { setDeviceType } = useUIStore();
+  const [deviceType, setDeviceTypeLocal] = useState({
+    isMobile: false,
+    isTablet: false,
+    isDesktop: true,
+  });
 
   const checkDeviceType = useCallback(() => {
     const width = window.innerWidth;
@@ -18,21 +23,23 @@ export const useResponsive = () => {
     const isTablet = width >= BREAKPOINTS.mobile && width < BREAKPOINTS.desktop;
     const isDesktop = width >= BREAKPOINTS.desktop;
 
-    setDeviceType(isMobile, isTablet, isDesktop);
-
     return { isMobile, isTablet, isDesktop };
-  }, [setDeviceType]);
+  }, []);
 
   useEffect(() => {
     // 初始检查
-    checkDeviceType();
+    const initialDeviceType = checkDeviceType();
+    setDeviceTypeLocal(initialDeviceType);
+    setDeviceType(initialDeviceType.isMobile, initialDeviceType.isTablet, initialDeviceType.isDesktop);
 
     // 监听窗口大小变化
     let resizeTimer: NodeJS.Timeout;
     const handleResize = () => {
       clearTimeout(resizeTimer);
       resizeTimer = setTimeout(() => {
-        checkDeviceType();
+        const newDeviceType = checkDeviceType();
+        setDeviceTypeLocal(newDeviceType);
+        setDeviceType(newDeviceType.isMobile, newDeviceType.isTablet, newDeviceType.isDesktop);
       }, 100);
     };
 
@@ -42,9 +49,9 @@ export const useResponsive = () => {
       window.removeEventListener('resize', handleResize);
       clearTimeout(resizeTimer);
     };
-  }, [checkDeviceType]);
+  }, [checkDeviceType, setDeviceType]);
 
-  return checkDeviceType();
+  return deviceType;
 };
 
 // 响应式CSS工具类

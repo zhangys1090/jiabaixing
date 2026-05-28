@@ -3,12 +3,13 @@
  * 提供7个新API端点，暴露系统真实内部状态
  */
 
-import { Router } from 'express';
+import { Router, json } from 'express';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { EvolutionStats, JiabaixingCorePublicAPI } from '../../interfaces';
+import { JiabaixingCorePublicAPI } from '../../interfaces';
 import { SkillRegistry } from '../../skills/SkillRegistry';
+import { EvolutionOrchestrator } from '../../evolution/EvolutionOrchestrator';
 import { Logger } from '../../utils/Logger';
 
 const router = Router();
@@ -32,7 +33,9 @@ function queryAsNumber(value: unknown, fallback: number = 100): number {
 
 function getAssistantAPI(): JiabaixingCorePublicAPI {
   if (!_core) {
-    throw new Error('systemStateRoutes: 核心实例未注入，请在 main.ts 中调用 setSystemStateCore()');
+    throw new Error(
+      'systemStateRoutes: 核心实例未注入，请在 main.ts 中调用 setSystemStateCore()'
+    );
   }
   return _core;
 }
@@ -484,37 +487,25 @@ router.get('/api/config', (_req, res) => {
 
 router.get('/api/evolution/status', async (_req, res) => {
   try {
-    const assistant = getAssistantAPI();
-    const orchestrator = assistant.orchestrator;
-
-    const healingHistory = orchestrator?.getHealingHistory?.() || [];
-    const refactorHistory = orchestrator?.getRefactorHistory?.() || [];
+    const orchestrator = EvolutionOrchestrator.getInstance();
+    const metrics = orchestrator.getUnifiedMetrics();
 
     res.json({
-      healing: {
-        total: healingHistory.length,
-        success: healingHistory.filter((h) => h.success).length,
-        recent: healingHistory.slice(-5).map((h) => ({
-          ...h,
-          timestamp: new Date().toISOString(),
-        })),
+      orchestrator: {
+        totalInteractions: metrics.summary.totalInteractions,
+        totalOptimizations: metrics.summary.totalOptimizations,
+        averageQualityScore: metrics.summary.averageQualityScore,
+        qualityTrend: metrics.quality.trend,
+        failureRate: metrics.quality.failureRate,
+        cyclesToday: metrics.optimization.cyclesToday,
+        totalCycles: metrics.optimization.totalCycles,
+        lastCycleTime: metrics.optimization.lastCycleTime,
+        cycleSuccessRate: metrics.optimization.successRate,
+        userProfileConfidence: metrics.engines.userProfileConfidence,
+        taskAdjustmentCount: metrics.engines.taskAdjustmentCount,
       },
-      refactor: {
-        total: refactorHistory.length,
-        success: refactorHistory.filter((r) => r.success).length,
-        recent: refactorHistory.slice(-5).map((r) => ({
-          ...r,
-          timestamp: new Date().toISOString(),
-        })),
-      },
-      enhancement: {
-        total: 0,
-        success: 0,
-        recent: [],
-      },
-      lastCycleTime:
-        healingHistory.length > 0 ? new Date().toISOString() : null,
-      nextCycleTime: null,
+      verification: metrics.verification.recentResults,
+      enginesActive: metrics.summary.enginesActive,
     });
   } catch (error) {
     Logger.error('获取进化状态失败', error as Error, 'SystemState');
@@ -526,158 +517,11 @@ router.get('/api/evolution/status', async (_req, res) => {
   }
 });
 
-// ── 7. 进化触发 ──
+// ── 已移除重复的进化触发端点 (/api/evolution/trigger 已在 evolutionRoutes 中定义)
+// ── 已移除重复的进化指标端点 (/api/evolution/metrics 已在 evolutionRoutes 中定义)
 
-router.post('/api/evolution/trigger', async (req, res) => {
-  try {
-    const { reason } = req.body;
-
-    Logger.info(`手动触发进化: ${reason || '无原因'}`, 'Evolution');
-
-    const assistant = getAssistantAPI();
-    const evolutionEngine = assistant.evolutionEngine;
-
-    if (!evolutionEngine) {
-      return res.json({
-        success: false,
-        error: '进化引擎未初始化',
-      });
-    }
-
-    if (evolutionEngine.triggerOptimization) {
-      await evolutionEngine.triggerOptimization(reason || '手动触发');
-    }
-
-    res.json({
-      success: true,
-      message: '进化触发成功',
-      timestamp: new Date().toISOString(),
-    });
-  } catch (error) {
-    Logger.error('进化触发失败', error as Error, 'Evolution');
-    res.status(500).json({
-      success: false,
-      error: '进化触发失败',
-      details: (error as Error).message,
-    });
-  }
-});
-
-// ── 8. 进化指标 ──
-
-router.get('/api/evolution/metrics', async (_req, res) => {
-  try {
-    const assistant = getAssistantAPI();
-    const evolutionEngine = assistant.evolutionEngine;
-
-    if (!evolutionEngine) {
-      return res.json({
-        success: true,
-        data: {
-          totalOptimizations: 0,
-          successRate: 0,
-          averageImprovement: 0,
-          lastUpdate: new Date().toISOString(),
-        },
-      });
-    }
-
-    const stats: EvolutionStats = evolutionEngine.getStats
-      ? await evolutionEngine.getStats()
-      : {};
-
-    res.json({
-      success: true,
-      data: {
-        totalOptimizations: stats._optimizationCount || 0,
-        successRate: stats._successRate || 0,
-        averageImprovement: stats._averageImprovement || 0,
-        lastUpdate: stats._lastOptimization || new Date().toISOString(),
-      },
-    });
-  } catch (error) {
-    Logger.error('获取进化指标失败', error as Error, 'Evolution');
-    res.status(500).json({
-      success: false,
-      error: '获取进化指标失败',
-      details: (error as Error).message,
-    });
-  }
-});
-
-// ── 9. 用户纠正 ──
-
-router.post('/api/correct', async (req, res) => {
-  try {
-    const { toolId, correctionType, reason } = req.body;
-
-    Logger.info(
-      `用户纠正: 工具=${toolId}, 类型=${correctionType}, 原因=${reason}`,
-      'UserCorrection'
-    );
-
-    if (!toolId || !correctionType) {
-      return res.status(400).json({
-        success: false,
-        error: '缺少必要参数: toolId, correctionType',
-      });
-    }
-
-    const assistant = getAssistantAPI();
-
-    Logger.info(
-      `用户纠正已记录: 工具=${toolId}, 类型=${correctionType}, 原因=${reason}`,
-      'UserCorrection'
-    );
-
-    res.json({
-      success: true,
-      message: '用户纠正已记录',
-      timestamp: new Date().toISOString(),
-    });
-  } catch (error) {
-    Logger.error('用户纠正失败', error as Error, 'UserCorrection');
-    res.status(500).json({
-      success: false,
-      error: '用户纠正失败',
-      details: (error as Error).message,
-    });
-  }
-});
-
-// ── 10. 安全日志 ──
-
-router.get('/api/security/logs', async (req, res) => {
-  try {
-    const limit = queryAsNumber(req.query.limit, 10);
-
-    const assistant = getAssistantAPI();
-    const securityAuditor = assistant.securityAuditor;
-
-    if (!securityAuditor || !securityAuditor.getRecentLogs) {
-      return res.json({
-        success: true,
-        data: [],
-        message: '安全审计器未初始化',
-      });
-    }
-
-    const logs = await securityAuditor.getRecentLogs(limit);
-
-    res.json({
-      success: true,
-      data: logs,
-      count: logs.length,
-    });
-  } catch (error) {
-    Logger.error('获取安全日志失败', error as Error, 'Security');
-    res.status(500).json({
-      success: false,
-      error: '获取安全日志失败',
-      details: (error as Error).message,
-    });
-  }
-});
+// ── 已移除重复的用户纠正端点 (/api/correct 已在 coreRoutes 中定义)
+// ── 已移除重复的安全日志端点 (/api/security/logs 已在 securityRoutes 中定义)
 
 // ── 7. 系统完整性检查 ──
 
@@ -824,5 +668,206 @@ router.get('/api/system/integrity', async (_req, res) => {
   }
 });
 
-export { router as systemStateRoutes };
+// ── 11. 错误监控 ──
 
+router.post('/api/error/monitoring', json({ limit: '1mb' }), (req, res) => {
+  try {
+    const errorData = req.body;
+    Logger.error('前端错误监控', errorData as Error, 'ErrorMonitoring');
+
+    res.json({
+      success: true,
+      status: 'received',
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: (error as Error).message,
+    });
+  }
+});
+
+// ── 12. 对话列表 ──
+
+router.get('/api/conversations', (req, res) => {
+  try {
+    const limit = queryAsNumber(req.query.limit, 50);
+
+    const fs = require('fs');
+    const path = require('path');
+
+    const dataDir = path.join(process.cwd(), 'data', 'conversations');
+    let conversations: Array<{
+      id: string;
+      timestamp: string;
+      content: unknown;
+      scene?: string;
+      emotion?: string;
+    }> = [];
+
+    try {
+      if (fs.existsSync(dataDir)) {
+        const files = fs.readdirSync(dataDir).filter((f: string) => f.endsWith('.json'));
+        files.sort().reverse();
+
+        for (const file of files.slice(0, limit)) {
+          try {
+            const raw = fs.readFileSync(path.join(dataDir, file), 'utf8');
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+              conversations = conversations.concat(parsed);
+            } else if (parsed && typeof parsed === 'object') {
+              conversations.push(parsed);
+            }
+          } catch {
+            continue;
+          }
+        }
+      }
+    } catch (err) {
+      Logger.warn(`⚠️ 读取对话历史失败: ${(err as Error).message}`, 'SystemStateRoutes');
+    }
+
+    res.json({
+      success: true,
+      data: conversations,
+      total: conversations.length,
+      limit,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: (error as Error).message,
+    });
+  }
+});
+
+// ── 13. 用户行为事件 ──
+
+const userBehaviorEvents: Array<{
+  type: string;
+  data: unknown;
+  timestamp: string;
+}> = [];
+
+router.post('/api/user-behavior/events', json({ limit: '1mb' }), (req, res) => {
+  try {
+    const events = Array.isArray(req.body) ? req.body : [req.body];
+
+    for (const event of events) {
+      userBehaviorEvents.push({
+        type: event.type || 'unknown',
+        data: event.data || event,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    // 保留最近1000条
+    if (userBehaviorEvents.length > 1000) {
+      userBehaviorEvents.splice(0, userBehaviorEvents.length - 1000);
+    }
+
+    res.json({
+      success: true,
+      status: 'received',
+      count: events.length,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: (error as Error).message,
+    });
+  }
+});
+
+// ── 14. 推荐系统 ──
+
+router.get('/api/recommendations', (req, res) => {
+  try {
+    const userId = req.query.userId as string;
+    const limit = queryAsNumber(req.query.limit, 5);
+
+    const recommendations: Array<{
+      type: string;
+      title: string;
+      description: string;
+      priority: number;
+    }> = [];
+
+    res.json({
+      success: true,
+      data: {
+        recommendations,
+        evaluation: {
+          userId,
+          generatedAt: new Date().toISOString(),
+        },
+      },
+      total: recommendations.length,
+      limit,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: (error as Error).message,
+    });
+  }
+});
+
+// ── 15. 优化处理与历史 ──
+
+const optimizationHistory: Array<{
+  id: string;
+  planId: string;
+  action: string;
+  status: string;
+  timestamp: string;
+}> = [];
+
+router.post('/api/optimization/process', json({ limit: '1mb' }), (req, res) => {
+  try {
+    const { planId, action } = req.body;
+
+    const record = {
+      id: `opt_${Date.now()}`,
+      planId: planId || 'unknown',
+      action: action || 'process',
+      status: 'started',
+      timestamp: new Date().toISOString(),
+    };
+
+    optimizationHistory.push(record);
+
+    res.json({
+      success: true,
+      data: record,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: (error as Error).message,
+    });
+  }
+});
+
+router.get('/api/optimization/history', (req, res) => {
+  try {
+    const limit = queryAsNumber(req.query.limit, 50);
+
+    res.json({
+      success: true,
+      data: optimizationHistory.slice(-limit).reverse(),
+      total: optimizationHistory.length,
+      limit,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: (error as Error).message,
+    });
+  }
+});
+
+export { router as systemStateRoutes };

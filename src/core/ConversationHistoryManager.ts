@@ -67,7 +67,9 @@ export class ConversationHistoryManager {
     });
 
     if (this.history.length > ConversationHistoryManager.MAX_HISTORY) {
-      this.history = this.history.slice(-ConversationHistoryManager.MAX_HISTORY);
+      this.history = this.history.slice(
+        -ConversationHistoryManager.MAX_HISTORY
+      );
     }
   }
 
@@ -107,9 +109,10 @@ export class ConversationHistoryManager {
       const state: ConversationState = {
         history: this.history.map((entry) => ({
           ...entry,
-          timestamp: entry.timestamp instanceof Date 
-            ? entry.timestamp 
-            : new Date(entry.timestamp),
+          timestamp:
+            entry.timestamp instanceof Date
+              ? entry.timestamp
+              : new Date(entry.timestamp),
         })),
         lastUpdated: new Date().toISOString(),
         userId: this.userId,
@@ -121,7 +124,10 @@ export class ConversationHistoryManager {
         'utf-8'
       );
     } catch (error) {
-      Logger.debug(`对话状态保存失败（非关键）: ${(error as Error).message}`, 'ConversationHistoryManager');
+      Logger.debug(
+        `对话状态保存失败（非关键）: ${(error as Error).message}`,
+        'ConversationHistoryManager'
+      );
     }
   }
 
@@ -130,7 +136,7 @@ export class ConversationHistoryManager {
       if (fs.existsSync(this.stateFilePath)) {
         const raw = await fs.promises.readFile(this.stateFilePath, 'utf-8');
         const state: ConversationState = JSON.parse(raw);
-        
+
         this.history = (state.history || []).map((entry) => ({
           ...entry,
           timestamp: new Date(entry.timestamp),
@@ -143,7 +149,10 @@ export class ConversationHistoryManager {
         );
       }
     } catch (error) {
-      Logger.debug(`对话状态恢复失败（非关键）: ${(error as Error).message}`, 'ConversationHistoryManager');
+      Logger.debug(
+        `对话状态恢复失败（非关键）: ${(error as Error).message}`,
+        'ConversationHistoryManager'
+      );
     }
   }
 

@@ -1,0 +1,53 @@
+﻿src/harness/AgentHarness.ts(318,9): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+src/harness/AgentHarness.ts(336,11): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+src/harness/loop/LoopController.ts(530,50): error TS2345: Argument of type 'Record<string, unknown>' is not assignable to parameter of type '{ traceId: string; phase: string; status: string; result?: unknown; timestamp: string; }'.
+  Type 'Record<string, unknown>' is missing the following properties from type '{ traceId: string; phase: string; status: string; result?: unknown; timestamp: string; }': traceId, phase, status, timestamp
+src/integration/adapters/DingTalkAdapter.ts(82,32): error TS2552: Cannot find name 'IncomingMessageEvent'. Did you mean 'MIDIMessageEvent'?
+src/integration/adapters/WeChatQRAdapter.ts(64,29): error TS2571: Object is of type 'unknown'.
+src/integration/adapters/WeChatQRAdapter.ts(73,13): error TS2571: Object is of type 'unknown'.
+src/integration/adapters/WeChatQRAdapter.ts(81,13): error TS2571: Object is of type 'unknown'.
+src/integration/adapters/WeChatQRAdapter.ts(130,25): error TS2339: Property 'evaluate' does not exist on type '{}'.
+src/integration/adapters/WeChatQRAdapter.ts(166,37): error TS2339: Property '$' does not exist on type '{}'.
+src/integration/adapters/WeChatQRAdapter.ts(209,44): error TS2339: Property 'evaluate' does not exist on type '{}'.
+src/integration/adapters/WeChatQRAdapter.ts(223,44): error TS2339: Property 'evaluate' does not exist on type '{}'.
+src/integration/adapters/WeChatQRAdapter.ts(226,35): error TS2339: Property 'uin' does not exist on type '{}'.
+src/integration/adapters/WeChatQRAdapter.ts(228,31): error TS2339: Property 'nickName' does not exist on type '{}'.
+src/integration/adapters/WeChatQRAdapter.ts(266,42): error TS2339: Property 'evaluate' does not exist on type '{}'.
+src/integration/adapters/WeChatQRAdapter.ts(308,25): error TS2339: Property 'close' does not exist on type '{}'.
+src/integration/adapters/WeChatQRAdapter.ts(314,28): error TS2339: Property 'close' does not exist on type '{}'.
+src/integration/TRAEOptimizationIntegrator.ts(147,13): error TS2322: Type 'unknown' is not assignable to type 'string'.
+src/integration/TRAEOptimizationIntegrator.ts(148,13): error TS2322: Type 'unknown' is not assignable to type 'string[]'.
+src/integration/TRAEOptimizationIntegrator.ts(149,13): error TS2322: Type 'unknown' is not assignable to type 'string | undefined'.
+src/routes/orchestrate.ts(32,29): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Argument of type '(req: Request, res: Response) => Promise<void>' is not assignable to parameter of type 'Application<Record<string, any>>'.
+      Type '(req: Request, res: Response) => Promise<void>' is missing the following properties from type 'Application<Record<string, any>>': init, defaultConfiguration, engine, set, and 63 more.
+src/routes/orchestrate.ts(40,11): error TS2349: This expression is not callable.
+  Type 'Number' has no call signatures.
+src/routes/orchestrate.ts(102,9): error TS2339: Property 'setHeader' does not exist on type 'Response'.
+src/routes/orchestrate.ts(103,14): error TS2554: Expected 0 arguments, but got 1.
+src/routes/orchestrate.ts(114,9): error TS2349: This expression is not callable.
+  Type 'Number' has no call signatures.
+src/routes/orchestrate.ts(119,26): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Argument of type '(req: Request, res: Response) => Promise<void>' is not assignable to parameter of type 'Application<Record<string, any>>'.
+      Type '(req: Request, res: Response) => Promise<void>' is missing the following properties from type 'Application<Record<string, any>>': init, defaultConfiguration, engine, set, and 63 more.
+src/routes/orchestrate.ts(161,9): error TS2339: Property 'setHeader' does not exist on type 'Response'.
+src/routes/orchestrate.ts(162,14): error TS2554: Expected 0 arguments, but got 1.
+src/routes/orchestrate.ts(175,9): error TS2349: This expression is not callable.
+  Type 'Number' has no call signatures.
+src/security/AuditLogger.ts(253,22): error TS2352: Conversion of type 'AuditLogEntry' to type 'Record<string, unknown>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Index signature for type 'string' is missing in type 'AuditLogEntry'.
+src/security/AuditLogger.ts(254,22): error TS2352: Conversion of type 'AuditLogEntry' to type 'Record<string, unknown>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Index signature for type 'string' is missing in type 'AuditLogEntry'.
+src/server/eventBusSetup.ts(37,17): error TS2345: Argument of type 'string' is not assignable to parameter of type 'keyof EventMap'.
+src/server/routes/coreRoutes.ts(82,37): error TS2339: Property 'get' does not exist on type '{}'.
+src/server/routes/memoryRoutes.ts(20,46): error TS2339: Property '_tags' does not exist on type '{ content?: string | undefined; userId?: string | undefined; importance?: string | undefined; tags?: string[] | undefined; emotion?: unknown; scene?: unknown; }'.
+src/server/routes/memoryRoutes.ts(20,53): error TS2339: Property '_emotion' does not exist on type '{ content?: string | undefined; userId?: string | undefined; importance?: string | undefined; tags?: string[] | undefined; emotion?: unknown; scene?: unknown; }'.
+src/server/routes/memoryRoutes.ts(113,15): error TS18046: 'mem.relevance' is of type 'unknown'.
+src/server/routes/memoryRoutes.ts(115,19): error TS18046: 'mem.relevance' is of type 'unknown'.
+src/server/routes/performanceRoutes.ts(69,37): error TS2339: Property 'get' does not exist on type '{}'.
+src/server/websocket.ts(184,15): error TS2353: Object literal may only specify known properties, and 'message' does not exist in type '{ traceId: string; phase: string; status: string; result?: unknown; timestamp: string; }'.
+src/server/websocket.ts(304,11): error TS2353: Object literal may only specify known properties, and 'message' does not exist in type '{ traceId: string; phase: string; status: string; result?: unknown; timestamp: string; }'.

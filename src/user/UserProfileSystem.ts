@@ -1,5 +1,10 @@
 import { Logger } from '../utils/Logger';
-import { UserProfile, UserBehavior, ProfileUpdateOptions, MemoryDepth } from './types';
+import {
+  UserProfile,
+  UserBehavior,
+  ProfileUpdateOptions,
+  MemoryDepth,
+} from './types';
 import { ProfileTrendAnalyzer } from './ProfileTrendAnalyzer';
 
 export { UserProfile, UserBehavior, ProfileUpdateOptions, MemoryDepth };
@@ -10,7 +15,8 @@ export class UserProfileSystem {
   private maxBehaviorHistory = 10000;
   private profileUpdateInterval = 5 * 60 * 1000;
   private updateTimer: NodeJS.Timeout | null = null;
-  private trendAnalyzer: ProfileTrendAnalyzer = ProfileTrendAnalyzer.getInstance();
+  private trendAnalyzer: ProfileTrendAnalyzer =
+    ProfileTrendAnalyzer.getInstance();
 
   initialize(): void {
     Logger.info('👤 用户画像系统：初始化完成', 'UserProfileSystem');

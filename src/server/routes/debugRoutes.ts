@@ -2,7 +2,7 @@
  * 调试路由 - debug weights / recentHistory / simulate_task
  */
 
-import express, { Request, Response } from 'express';
+import express from 'express';
 
 import { JiabaixingCore } from '../../core/JiabaixingCore';
 import { EventBus } from '../../shared/EventBus';
@@ -51,28 +51,40 @@ export function registerDebugRoutes(
         return;
       }
 
-      const toolExecutor = (core as unknown as { toolExecutor?: { getExecutionStats?: () => unknown; getToolCallLogs?: () => unknown; getTools?: () => unknown } }).toolExecutor;
+      const toolExecutor = (
+        core as unknown as {
+          toolExecutor?: {
+            getExecutionStats?: () => unknown;
+            getToolCallLogs?: () => unknown;
+            getTools?: () => unknown;
+          };
+        }
+      ).toolExecutor;
 
       if (!toolExecutor) {
         res.json({ success: false, error: '工具执行器未初始化' });
         return;
       }
 
-      const stats = toolExecutor.getExecutionStats ? toolExecutor.getExecutionStats() : {};
-      const logs = toolExecutor.getToolCallLogs ? toolExecutor.getToolCallLogs() : [];
+      const stats = toolExecutor.getExecutionStats
+        ? toolExecutor.getExecutionStats()
+        : {};
+      const logs = toolExecutor.getToolCallLogs
+        ? toolExecutor.getToolCallLogs()
+        : [];
       const tools = toolExecutor.getTools ? toolExecutor.getTools() : [];
 
       res.json({
         success: true,
         data: {
           totalTools: Array.isArray(tools) ? tools.length : 0,
-          tools: Array.isArray(tools) ? tools.map((t: { name: string; description: string }) => ({
-            name: t.name,
-            description: t.description,
-          })) : [],
-          stats: stats instanceof Map
-            ? Object.fromEntries(stats)
-            : stats,
+          tools: Array.isArray(tools)
+            ? tools.map((t: { name: string; description: string }) => ({
+                name: t.name,
+                description: t.description,
+              }))
+            : [],
+          stats: stats instanceof Map ? Object.fromEntries(stats) : stats,
           recentLogs: Array.isArray(logs) ? logs.slice(-20) : [],
           totalLogs: Array.isArray(logs) ? logs.length : 0,
         },

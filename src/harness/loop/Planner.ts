@@ -6,12 +6,7 @@
  */
 
 import { Logger } from '../../utils/Logger';
-import type {
-  UserInput,
-  LoopContext,
-  ExecutionPlan,
-  PlanStep,
-} from '../types';
+import type { UserInput, LoopContext, ExecutionPlan, PlanStep } from '../types';
 
 /** Planner 依赖 */
 export interface PlannerDeps {
@@ -30,15 +25,26 @@ export interface PlannerDeps {
   };
 }
 
-/** 简单任务关键词 — 直接执行不需要规划 */
+/** 简单任务关键词 — 直接执行不需要规划，但需要工具调用 */
+const ACTION_SIMPLE_PATTERNS: Array<{ pattern: RegExp; tools: string[] }> = [
+  { pattern: /^(读|查|查看|打开|显示).*(文件|目录|内容)/, tools: ['file_list', 'file_search'] },
+  { pattern: /^(搜索|查找|找).*(文件|内容|代码)/, tools: ['file_search'] },
+  { pattern: /^(写|创建|新建|添加).*(文件|代码)/, tools: ['incremental_edit'] },
+  { pattern: /^(运行|执行).*(命令|脚本|程序)/, tools: ['system_status', 'file_list'] },
+  { pattern: /^(帮我|请|能不能|可以)/, tools: ['file_list', 'file_search', 'incremental_edit'] },
+  { pattern: /^(分析|检查).*(代码|文件)/, tools: ['code_analyze', 'file_list', 'file_search'] },
+];
+
 const SIMPLE_TASK_PATTERNS = [
   /^(你好|hi|hello|嗨|早上好|晚上好|下午好)/i,
   /^(谢谢|感谢|thanks)/i,
   /^(再见|拜拜|bye)/i,
-  /^(帮我|请|能不能|可以)/,
   /^(什么是|什么是|解释|说明|定义)/,
-  /^(读|查看|打开|显示).*(文件|目录|内容)/,
-  /^(搜索|查找|找).*(文件|内容|代码)/,
+];
+
+const ALL_SIMPLE_PATTERNS = [
+  ...SIMPLE_TASK_PATTERNS,
+  ...ACTION_SIMPLE_PATTERNS.map(a => a.pattern),
 ];
 
 /** 复杂任务关键词 — 需要规划 */
@@ -58,7 +64,8 @@ const COMPLEX_TASK_PATTERNS = [
 
 export class Planner {
   private deps: PlannerDeps;
-  private budgetAccuracyHistory: Array<{ estimated: number; actual: number }> = [];
+  private budgetAccuracyHistory: Array<{ estimated: number; actual: number }> =
+    [];
   private replanCount = 0;
   private totalPlans = 0;
 
@@ -93,6 +100,8 @@ export class Planner {
           maxDurationMs: 30000,
         },
         simple: true,
+        toolCallMode: this.resolveToolCallMode(text),
+        recommendedTools: this.resolveRecommendedTools(text),
       };
     }
 
@@ -124,6 +133,8 @@ export class Planner {
             maxDurationMs: 30000,
           },
           simple: true,
+          toolCallMode: this.resolveToolCallMode(text),
+          recommendedTools: this.resolveRecommendedTools(text),
         };
       }
     } catch {
@@ -146,6 +157,8 @@ export class Planner {
           maxDurationMs: 45000,
         },
         simple: true,
+        toolCallMode: this.resolveToolCallMode(text),
+        recommendedTools: this.resolveRecommendedTools(text),
       };
     }
 
@@ -157,7 +170,25 @@ export class Planner {
    * 判断是否为简单任务
    */
   private isSimpleTask(text: string): boolean {
-    return SIMPLE_TASK_PATTERNS.some((p) => p.test(text));
+    return ALL_SIMPLE_PATTERNS.some((p) => p.test(text));
+  }
+
+  private isActionTask(text: string): boolean {
+    return ACTION_SIMPLE_PATTERNS.some((a) => a.pattern.test(text));
+  }
+
+  private resolveRecommendedTools(text: string): string[] {
+    for (const action of ACTION_SIMPLE_PATTERNS) {
+      if (action.pattern.test(text)) {
+        return action.tools;
+      }
+    }
+    return [];
+  }
+
+  private resolveToolCallMode(text: string): 'required' | 'auto' | 'none' {
+    if (this.isActionTask(text)) return 'required';
+    return 'auto';
   }
 
   /**
@@ -241,9 +272,12 @@ export class Planner {
           const topExamples = examples
             .sort((a, b) => b.frequency - a.frequency)
             .slice(0, 3);
-          evolutionHint = `\n\n【进化纠错提示】以下模式曾导致用户纠正，请避免：\n${
-            topExamples.map((e, i) => `${i + 1}. 避免: ${e.trigger} → 正确做法: ${e.correction}`).join('\n')
-          }`;
+          evolutionHint = `\n\n【进化纠错提示】以下模式曾导致用户纠正，请避免：\n${topExamples
+            .map(
+              (e, i) =>
+                `${i + 1}. 避免: ${e.trigger} → 正确做法: ${e.correction}`
+            )
+            .join('\n')}`;
         }
       }
 
@@ -274,7 +308,10 @@ ${evolutionHint}
 
       const parsed = JSON.parse(jsonMatch[0]);
       const steps: PlanStep[] = (parsed.steps || []).map(
-        (s: { id?: string; description?: string; toolName?: string }, i: number) => ({
+        (
+          s: { id?: string; description?: string; toolName?: string },
+          i: number
+        ) => ({
           id: s.id || `step${i + 1}`,
           description: s.description || '',
           toolName: s.toolName,
@@ -293,6 +330,9 @@ ${evolutionHint}
       const multiplier = this.getAdjustedBudgetMultiplier();
 
       const planReasoning = response.trim();
+      const recommendedTools = steps
+        .map((s) => s.toolName)
+        .filter((t): t is string => !!t);
 
       return {
         steps,
@@ -305,6 +345,8 @@ ${evolutionHint}
         },
         fallbackStrategy: 'replan',
         planReasoning,
+        toolCallMode: steps.length > 0 ? 'required' : 'auto',
+        recommendedTools,
       };
     } catch (err) {
       Logger.warn(
@@ -328,6 +370,8 @@ ${evolutionHint}
           maxDurationMs: 45000,
         },
         simple: true,
+        toolCallMode: this.resolveToolCallMode(input.text),
+        recommendedTools: this.resolveRecommendedTools(input.text),
       };
     }
   }

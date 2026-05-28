@@ -83,6 +83,12 @@ QQ_ENABLED=false
 | **PersistenceService** | `src/harness/persistence/PersistenceService.ts` | 任务持久化到 `data/persistence/` |
 | **VerificationService** | `src/harness/verification/VerificationService.ts` | 输出安全 + 敏感信息检测 |
 | **ConstraintsService** | `src/harness/constraints/ConstraintsService.ts` | 预算控制 + 行为约束 |
+| **OrchestratorAgent** | `src/harness/orchestration/OrchestratorAgent.ts` | Phase 10: 多Agent编排协调 |
+| **TaskDispatcher** | `src/harness/orchestration/TaskDispatcher.ts` | Phase 10: DAG任务分发 |
+| **ResultAggregator** | `src/harness/orchestration/ResultAggregator.ts` | Phase 10: 并行结果聚合 |
+| **EvaluationPipeline** | `src/harness/evaluation/EvaluationPipeline.ts` | Phase 11: 自动评估管道 |
+| **QualityScorer** | `src/harness/evaluation/QualityScorer.ts` | Phase 11: 五维质量评分 |
+| **OptimizationFeedbackLoop** | `src/harness/evaluation/OptimizationFeedbackLoop.ts` | Phase 11: 优化闭环反馈 |
 
 ### 工具链
 
@@ -454,7 +460,9 @@ jiabaixing/
 │   │   ├── context/          # Layer 3: 上下文层
 │   │   ├── persistence/      # Layer 4: 持久化层
 │   │   ├── verification/     # Layer 5: 验证层
-│   │   └── constraints/      # Layer 6: 约束层
+│   │   ├── constraints/      # Layer 6: 约束层
+│   │   ├── orchestration/    # Phase 10: 多Agent编排
+│   │   └── evaluation/       # Phase 11: 自评估与优化
 │   ├── skills/               # 技能系统
 │   │   └── SkillRegistry.ts  # 技能注册中心
 │   ├── core/                 # 核心模块
@@ -527,5 +535,5 @@ npm run build:fast  # 快速构建（跳过类型检查）
 ---
 
 **版本**: 5.0.0
-**更新日期**: 2026-05-25
-**架构**: Harness Agent Framework 六维管控
+**更新日期**: 2026-05-27
+**架构**: Harness Agent Framework 六维管控 + 多Agent编排 + 自评估

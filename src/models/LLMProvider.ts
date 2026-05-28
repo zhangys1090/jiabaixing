@@ -45,7 +45,7 @@ export class LLMProvider {
       this.modelName = modelName || 'external';
       Logger.info('🔌 使用外部注入的模型实例', 'LLMProvider');
     } else {
-      this.modelName = modelName || process.env.LLM_MODEL || 'deepseek-v4-flash';
+      this.modelName = modelName || process.env.LLM_MODEL || 'deepseek-chat';
       Logger.info('🔌 使用 OpenAI 兼容模式', 'LLMProvider');
       this.model = new OpenAICompatibleModel({
         baseUrl:
@@ -55,14 +55,20 @@ export class LLMProvider {
         apiKey:
           process.env.OPENAI_API_KEY || process.env.LLM_API_KEY || 'not-needed',
         modelName: this.modelName,
-        thinkingMode: (process.env.DEEPSEEK_THINKING_MODE as 'enabled' | 'disabled') || 'disabled',
-        reasoningEffort: process.env.DEEPSEEK_REASONING_EFFORT as 'high' | 'max' | undefined,
+        thinkingMode:
+          (process.env.DEEPSEEK_THINKING_MODE as 'enabled' | 'disabled') ||
+          'disabled',
+        reasoningEffort: process.env.DEEPSEEK_REASONING_EFFORT as
+          | 'high'
+          | 'max'
+          | undefined,
       });
 
       if (process.env.ZHIPU_API_KEY) {
         this.zhipuModel = new OpenAICompatibleModel({
           baseUrl:
-            process.env.ZHIPU_BASE_URL || 'https://open.bigmodel.cn/api/paas/v4',
+            process.env.ZHIPU_BASE_URL ||
+            'https://open.bigmodel.cn/api/paas/v4',
           apiKey: process.env.ZHIPU_API_KEY,
           modelName: process.env.ZHIPU_MODEL || 'glm-4.5-air',
           timeout: 60000,
@@ -72,7 +78,10 @@ export class LLMProvider {
           'LLMProvider'
         );
       } else {
-        Logger.info('ℹ️ 未配置 ZHIPU_API_KEY，不加载智谱降级模型', 'LLMProvider');
+        Logger.info(
+          'ℹ️ 未配置 ZHIPU_API_KEY，不加载智谱降级模型',
+          'LLMProvider'
+        );
       }
     }
 
@@ -106,20 +115,27 @@ export class LLMProvider {
 
   async healthCheck(): Promise<{ available: boolean; message: string }> {
     try {
-      const baseUrl = process.env.OPENAI_API_BASE || 'http://127.0.0.1:8001/v1';
-      const apiKey = process.env.OPENAI_API_KEY || process.env.LLM_API_KEY || 'not-needed';
+      const baseUrl =
+        process.env.OPENAI_API_BASE ||
+        process.env.LLM_BASE_URL ||
+        'https://api.deepseek.com';
+      const apiKey =
+        process.env.OPENAI_API_KEY || process.env.LLM_API_KEY || 'not-needed';
+
+      Logger.info(`🔍 执行健康检查: baseUrl=${baseUrl}`, 'LLMProvider');
       const response = await fetch(`${baseUrl}/models`, {
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${apiKey}`,
+          Authorization: `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
         },
-        signal: AbortSignal.timeout(3000),
+        signal: AbortSignal.timeout(10000),
       } as RequestInit);
 
       if (response.ok) {
         this.serviceAvailable = true;
         this.localUnavailable = false;
+        Logger.info(`✅ 健康检查通过: ${baseUrl}`, 'LLMProvider');
         return {
           available: true,
           message: `LLM 服务可用，模型 ${this.modelName}`,
@@ -206,7 +222,8 @@ export class LLMProvider {
       throw new Error('本地模型已标记不可用');
     }
 
-    const systemPrompt = injectPreferences(`你是家百星，28岁私人秘书。成熟、专业、从容。
+    const systemPrompt =
+      injectPreferences(`你是家百星，28岁私人秘书。成熟、专业、从容。
 回复要求：
 1. 语气成熟自然，像有经验的专业人士
 2. 简洁高效，不啰嗦，不堆砌空洞的关心
@@ -273,7 +290,8 @@ export class LLMProvider {
     images: string[],
     filePath?: string
   ): Promise<string> {
-    const systemPrompt = injectPreferences(`你是家百星，28岁私人秘书。成熟、专业、从容。
+    const systemPrompt =
+      injectPreferences(`你是家百星，28岁私人秘书。成熟、专业、从容。
 请根据用户提供的图片（可能包含代码截图或界面截图）和问题进行分析。
 回复要求：
 1. 语气成熟自然，专业但不生硬
@@ -318,7 +336,8 @@ export class LLMProvider {
     content: string,
     userQuery: string
   ): Promise<string> {
-    const systemPrompt = injectPreferences(`你是家百星，28岁私人秘书。成熟、专业、从容。
+    const systemPrompt =
+      injectPreferences(`你是家百星，28岁私人秘书。成熟、专业、从容。
 请根据用户的问题分析以下代码文件。
 回复要求：
 1. 语气专业但友善，不卖萌不啰嗦
@@ -366,7 +385,8 @@ ${content}
     content: string,
     userQuery: string
   ): Promise<string> {
-    const systemPrompt = injectPreferences(`你是家百星，28岁私人秘书。用户要求修改代码文件。请生成一个具体的修改方案，包括：
+    const systemPrompt =
+      injectPreferences(`你是家百星，28岁私人秘书。用户要求修改代码文件。请生成一个具体的修改方案，包括：
 1. 需要修改的位置（行号或函数名）
 2. 具体改动内容
 3. 改动后的代码片段（如需要）
@@ -413,7 +433,8 @@ ${content}
     userRequest: string,
     fileExists: boolean
   ): Promise<string> {
-    const systemPrompt = injectPreferences(`你是家百星，28岁私人秘书。专业、严谨。
+    const systemPrompt =
+      injectPreferences(`你是家百星，28岁私人秘书。专业、严谨。
 用户要求修改代码文件${fileExists ? '' : '（文件当前不存在）'}。
 请根据用户需求生成修改后的完整文件内容。
 要求：
@@ -478,7 +499,10 @@ ${content}
     const humanPrompt = `${historyPrompt}\n\n用户: ${message}`;
     const optimizedPrompt = PromptOptimizer.optimizePrompt(humanPrompt, 2000);
 
-    const cacheKey = this.responseCache.generateKey(optimizedPrompt, systemPrompt);
+    const cacheKey = this.responseCache.generateKey(
+      optimizedPrompt,
+      systemPrompt
+    );
     const cached = this.responseCache.get(cacheKey);
     if (cached) {
       return cached;
@@ -591,7 +615,8 @@ ${content}
       name?: string;
     }>,
     tools: Array<Record<string, unknown>>,
-    maxTokens: number = 4096
+    maxTokens: number = 4096,
+    toolChoice: 'none' | 'auto' | 'required' = 'auto'
   ): Promise<{
     content: string;
     toolCalls?: Array<{
@@ -600,14 +625,12 @@ ${content}
       function: { name: string; arguments: string };
     }>;
   }> {
-    // 优先使用本地模型（支持 Function Calling），智谱模型作为降级备选
     const targetModel = this.model;
 
     if (!targetModel) {
       throw new Error('没有可用的 LLM 模型');
     }
 
-    // v3 修复：合并多条 system 消息为一条（OpenAI/智谱 API 要求）
     const sanitizedMessages = this.sanitizeMessagesForAPI(messages);
 
     try {
@@ -616,6 +639,7 @@ ${content}
         tools,
         maxTokens,
         temperature: 0.8,
+        toolChoice,
       } as ModelInput);
 
       return {
@@ -638,11 +662,13 @@ ${content}
    * F0-04: 规范化 tool_calls，确保所有必需字段存在
    * 防止 DeepSeek 等模型返回格式异常的 tool_calls 导致下游崩溃
    */
-  private normalizeToolCalls(toolCalls: Array<{
-    id?: string;
-    type?: string;
-    function?: { name?: string; arguments?: string };
-  }>): Array<{
+  private normalizeToolCalls(
+    toolCalls: Array<{
+      id?: string;
+      type?: string;
+      function?: { name?: string; arguments?: string };
+    }>
+  ): Array<{
     id: string;
     type: string;
     function: { name: string; arguments: string };
@@ -699,6 +725,16 @@ ${content}
             continue; // 跳过空 assistant 消息
           }
         } else if (msg.role === 'tool') {
+          // tool 消息前面必须有 assistant+tool_calls，否则 DeepSeek 等 API 会报错
+          // 检查上一条非 tool 消息是否为 assistant+tool_calls
+          const lastNonTool = [...nonSystemMessages].reverse().find(m => m.role !== 'tool');
+          if (lastNonTool?.role !== 'assistant' || !lastNonTool?.tool_calls) {
+            Logger.warn(
+              `⚠️ tool 消息前无 assistant+tool_calls，跳过（tool_call_id=${msg.tool_call_id?.substring(0, 20)}）`,
+              'LLMProvider'
+            );
+            continue;
+          }
           // tool 消息必须有 tool_call_id 和 content
           sanitized.tool_call_id = msg.tool_call_id || '';
           sanitized.content = msg.content || '';

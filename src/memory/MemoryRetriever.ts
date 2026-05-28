@@ -79,7 +79,10 @@ export class MemoryRetriever {
   private embeddingModel: SemanticEmbeddingModel;
   private memoryVectors: Map<string, number[]>;
   private hotMemoryCache: Map<string, MemoryItem>;
-  private queryVectorCache: Map<string, { vector: number[]; timestamp: number }>;
+  private queryVectorCache: Map<
+    string,
+    { vector: number[]; timestamp: number }
+  >;
   private memoryAccessCount: Map<string, number>;
   private memoryLastAccess: Map<string, number>;
   private memoryTierMap: Map<string, MemoryTier>;
@@ -292,14 +295,18 @@ export class MemoryRetriever {
     const ltm = longTermMemory || this.longTermMemoryHack;
 
     const stmMemories = stm
-      ? ('retrieve' in stm
-        ? await (stm as ShortTermMemory).retrieve(query, []).catch(() => [] as MemoryItem[])
-        : (stm as MemoryStoreWithGetAll).getAll())
+      ? 'retrieve' in stm
+        ? await (stm as ShortTermMemory)
+            .retrieve(query, [])
+            .catch(() => [] as MemoryItem[])
+        : (stm as MemoryStoreWithGetAll).getAll()
       : [];
     const ltmMemories = ltm
-      ? ('retrieve' in ltm
-        ? await (ltm as LongTermMemory).retrieve(query, []).catch(() => [] as MemoryItem[])
-        : (ltm as MemoryStoreWithGetAll).getAll())
+      ? 'retrieve' in ltm
+        ? await (ltm as LongTermMemory)
+            .retrieve(query, [])
+            .catch(() => [] as MemoryItem[])
+        : (ltm as MemoryStoreWithGetAll).getAll()
       : [];
 
     const allMemories = [
@@ -407,14 +414,18 @@ export class MemoryRetriever {
     const ltm = longTermMemory || this.longTermMemoryHack;
 
     const stmMemories = stm
-      ? ('retrieve' in stm
-        ? await (stm as ShortTermMemory).retrieve('', []).catch(() => [] as MemoryItem[])
-        : (stm as MemoryStoreWithGetAll).getAll())
+      ? 'retrieve' in stm
+        ? await (stm as ShortTermMemory)
+            .retrieve('', [])
+            .catch(() => [] as MemoryItem[])
+        : (stm as MemoryStoreWithGetAll).getAll()
       : [];
     const ltmMemories = ltm
-      ? ('retrieve' in ltm
-        ? await (ltm as LongTermMemory).retrieve('', []).catch(() => [] as MemoryItem[])
-        : (ltm as MemoryStoreWithGetAll).getAll())
+      ? 'retrieve' in ltm
+        ? await (ltm as LongTermMemory)
+            .retrieve('', [])
+            .catch(() => [] as MemoryItem[])
+        : (ltm as MemoryStoreWithGetAll).getAll()
       : [];
 
     const allMemories = [
@@ -595,11 +606,12 @@ export class MemoryRetriever {
   // ==================== 权重计算 ====================
 
   private calculateTimeWeight(timestamp: Date | string | number): number {
-    const ts = typeof timestamp === 'number'
-      ? timestamp
-      : timestamp instanceof Date
-        ? timestamp.getTime()
-        : new Date(timestamp).getTime();
+    const ts =
+      typeof timestamp === 'number'
+        ? timestamp
+        : timestamp instanceof Date
+          ? timestamp.getTime()
+          : new Date(timestamp).getTime();
     const ageInHours = (Date.now() - ts) / (1000 * 60 * 60);
     if (ageInHours < 1) return 1.0;
     if (ageInHours < 24) return 0.8;
@@ -650,11 +662,12 @@ export class MemoryRetriever {
   }
 
   private assignMemoryTier(memoryItem: MemoryItem): void {
-    const ts = typeof memoryItem.timestamp === 'number'
-      ? memoryItem.timestamp
-      : memoryItem.timestamp instanceof Date
-        ? memoryItem.timestamp.getTime()
-        : new Date(memoryItem.timestamp).getTime();
+    const ts =
+      typeof memoryItem.timestamp === 'number'
+        ? memoryItem.timestamp
+        : memoryItem.timestamp instanceof Date
+          ? memoryItem.timestamp.getTime()
+          : new Date(memoryItem.timestamp).getTime();
     const ageSeconds = (Date.now() - ts) / 1000;
     if (ageSeconds < this.tierThresholds.hot) {
       this.memoryTierMap.set(memoryItem.id, MemoryTier.HOT);

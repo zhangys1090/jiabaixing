@@ -7,7 +7,10 @@ export {
   type MultimodalInput,
   type OpenAICompatibleConfig,
 } from './OpenAICompatibleModel';
-export { MultiModelLLMProvider, RoutingStrategy } from './MultiModelLLMProvider';
+export {
+  MultiModelLLMProvider,
+  RoutingStrategy,
+} from './MultiModelLLMProvider';
 export type {
   ModelCapabilityProfile,
   ModelHealthStatus,

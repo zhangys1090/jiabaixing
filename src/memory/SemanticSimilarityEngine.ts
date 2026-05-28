@@ -58,7 +58,7 @@ export class SemanticSimilarityEngine {
       // this.model = await loadModel('sentence-transformers/all-MiniLM-L6-v2');
 
       // 模拟模型加载
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, 1000));
 
       this.usePreTrainedModel = true;
       console.log('✅ 语义相似度引擎：初始化完成');
@@ -116,8 +116,8 @@ export class SemanticSimilarityEngine {
         text,
         scene: memory.scene,
         emotion: memory.emotion,
-        tags: this.extractTags(memory)
-      }
+        tags: this.extractTags(memory),
+      },
     };
 
     this.vectors.set(memory.id, semanticVector);
@@ -136,7 +136,10 @@ export class SemanticSimilarityEngine {
   /**
    * 计算查询与记忆的相似度
    */
-  async computeSimilarity(query: string, memories: MemoryItem[]): Promise<SimilarityResult[]> {
+  async computeSimilarity(
+    query: string,
+    memories: MemoryItem[]
+  ): Promise<SimilarityResult[]> {
     const queryVector = await this.generateVector(query);
     const queryWords = this.tokenize(query);
     const queryScenes = this.extractScenesFromText(query);
@@ -172,12 +175,19 @@ export class SemanticSimilarityEngine {
 
       // 综合分数
       const combinedScore = this.calculateCombinedScore(
-        semanticScore, keywordScore, contextualScore, recencyScore
+        semanticScore,
+        keywordScore,
+        contextualScore,
+        recencyScore
       );
 
       // 生成解释
       const explanation = this.generateExplanation(
-        semanticScore, keywordScore, contextualScore, recencyScore, memory
+        semanticScore,
+        keywordScore,
+        contextualScore,
+        recencyScore,
+        memory
       );
 
       results.push({
@@ -187,7 +197,7 @@ export class SemanticSimilarityEngine {
         keywordScore,
         contextualScore,
         combinedScore,
-        explanation
+        explanation,
       });
     }
 
@@ -208,25 +218,27 @@ export class SemanticSimilarityEngine {
       threshold = 0.3,
       memoryTypes,
       scenes,
-      emotions
+      emotions,
     } = options;
 
     // 过滤记忆
     let filteredMemories = memories;
 
     if (memoryTypes && memoryTypes.length > 0) {
-      filteredMemories = filteredMemories.filter(m => memoryTypes.includes(m.type));
+      filteredMemories = filteredMemories.filter((m) =>
+        memoryTypes.includes(m.type)
+      );
     }
 
     if (scenes && scenes.length > 0) {
-      filteredMemories = filteredMemories.filter(m =>
-        m.scene && scenes.includes(m.scene)
+      filteredMemories = filteredMemories.filter(
+        (m) => m.scene && scenes.includes(m.scene)
       );
     }
 
     if (emotions && emotions.length > 0) {
-      filteredMemories = filteredMemories.filter(m =>
-        m.emotion && emotions.includes(m.emotion)
+      filteredMemories = filteredMemories.filter(
+        (m) => m.emotion && emotions.includes(m.emotion)
       );
     }
 
@@ -235,9 +247,9 @@ export class SemanticSimilarityEngine {
 
     // 过滤并返回结果
     return results
-      .filter(result => result.combinedScore >= threshold)
+      .filter((result) => result.combinedScore >= threshold)
       .slice(0, topK)
-      .map(result => result.memory);
+      .map((result) => result.memory);
   }
 
   /**
@@ -267,13 +279,16 @@ export class SemanticSimilarityEngine {
    */
   private normalizeVector(vector: number[]): number[] {
     const magnitude = Math.sqrt(vector.reduce((sum, v) => sum + v * v, 0));
-    return magnitude === 0 ? vector : vector.map(v => v / magnitude);
+    return magnitude === 0 ? vector : vector.map((v) => v / magnitude);
   }
 
   /**
    * 计算关键词匹配分数
    */
-  private calculateKeywordScore(queryWords: string[], memory: MemoryItem): number {
+  private calculateKeywordScore(
+    queryWords: string[],
+    memory: MemoryItem
+  ): number {
     const memoryText = this.extractMemoryText(memory);
     const memoryWords = this.tokenize(memoryText);
 
@@ -282,7 +297,9 @@ export class SemanticSimilarityEngine {
     // Jaccard相似度
     const querySet = new Set(queryWords);
     const memorySet = new Set(memoryWords);
-    const intersection = new Set([...querySet].filter(word => memorySet.has(word)));
+    const intersection = new Set(
+      [...querySet].filter((word) => memorySet.has(word))
+    );
     const union = new Set([...querySet, ...memorySet]);
 
     return union.size === 0 ? 0 : intersection.size / union.size;
@@ -299,18 +316,20 @@ export class SemanticSimilarityEngine {
 
     // 场景匹配
     if (queryContext.scenes.length > 0 && memory.scene) {
-      const sceneMatch = queryContext.scenes.some(scene =>
-        memory.scene!.toLowerCase().includes(scene.toLowerCase()) ||
-        scene.toLowerCase().includes(memory.scene!.toLowerCase())
+      const sceneMatch = queryContext.scenes.some(
+        (scene) =>
+          memory.scene!.toLowerCase().includes(scene.toLowerCase()) ||
+          scene.toLowerCase().includes(memory.scene!.toLowerCase())
       );
       if (sceneMatch) score += 0.3;
     }
 
     // 情绪匹配
     if (queryContext.emotions.length > 0 && memory.emotion) {
-      const emotionMatch = queryContext.emotions.some(emotion =>
-        memory.emotion!.toLowerCase().includes(emotion.toLowerCase()) ||
-        emotion.toLowerCase().includes(memory.emotion!.toLowerCase())
+      const emotionMatch = queryContext.emotions.some(
+        (emotion) =>
+          memory.emotion!.toLowerCase().includes(emotion.toLowerCase()) ||
+          emotion.toLowerCase().includes(memory.emotion!.toLowerCase())
       );
       if (emotionMatch) score += 0.2;
     }
@@ -324,7 +343,8 @@ export class SemanticSimilarityEngine {
   private calculateRecencyScore(memory: MemoryItem): number {
     const now = new Date();
     const memoryTime = memory.timestamp;
-    const ageInHours = (now.getTime() - memoryTime.getTime()) / (1000 * 60 * 60);
+    const ageInHours =
+      (now.getTime() - memoryTime.getTime()) / (1000 * 60 * 60);
 
     // 时间衰减函数
     if (ageInHours < 1) return 1; // 1小时内
@@ -366,7 +386,7 @@ export class SemanticSimilarityEngine {
     keywordScore: number,
     contextualScore: number,
     recencyScore: number,
-    memory: MemoryItem
+    _memory: MemoryItem
   ): string[] {
     const explanations: string[] = [];
 
@@ -408,20 +428,32 @@ export class SemanticSimilarityEngine {
    * 分词
    */
   private tokenize(text: string): string[] {
-    return text.toLowerCase()
+    return text
+      .toLowerCase()
       .replace(/[^\w\s\u4e00-\u9fa5]/g, ' ')
       .split(/\s+/)
-      .filter(word => word.length > 1);
+      .filter((word) => word.length > 1);
   }
 
   /**
    * 从文本中提取场景
    */
   private extractScenesFromText(text: string): string[] {
-    const sceneKeywords = ['工作', '学习', '娱乐', '休息', '运动', '购物', '社交', '家庭', '旅行', '会议'];
+    const sceneKeywords = [
+      '工作',
+      '学习',
+      '娱乐',
+      '休息',
+      '运动',
+      '购物',
+      '社交',
+      '家庭',
+      '旅行',
+      '会议',
+    ];
     const lowerText = text.toLowerCase();
 
-    return sceneKeywords.filter(keyword =>
+    return sceneKeywords.filter((keyword) =>
       lowerText.includes(keyword.toLowerCase())
     );
   }
@@ -430,10 +462,21 @@ export class SemanticSimilarityEngine {
    * 从文本中提取情绪
    */
   private extractEmotionsFromText(text: string): string[] {
-    const emotionKeywords = ['开心', '高兴', '快乐', '悲伤', '难过', '愤怒', '生气', '平静', '紧张', '焦虑'];
+    const emotionKeywords = [
+      '开心',
+      '高兴',
+      '快乐',
+      '悲伤',
+      '难过',
+      '愤怒',
+      '生气',
+      '平静',
+      '紧张',
+      '焦虑',
+    ];
     const lowerText = text.toLowerCase();
 
-    return emotionKeywords.filter(keyword =>
+    return emotionKeywords.filter((keyword) =>
       lowerText.includes(keyword.toLowerCase())
     );
   }
@@ -453,7 +496,7 @@ export class SemanticSimilarityEngine {
 
     // 提取高频词作为标签
     const wordCount = new Map<string, number>();
-    contentWords.forEach(word => {
+    contentWords.forEach((word) => {
       wordCount.set(word, (wordCount.get(word) || 0) + 1);
     });
 
@@ -489,7 +532,7 @@ export class SemanticSimilarityEngine {
     for (let i = 0; i < vector.length; i++) {
       const wordIndex = i % words.length;
       const word = words[wordIndex] || '';
-      vector[i] = word.charCodeAt(0) / 255 * Math.sin(i * 0.1);
+      vector[i] = (word.charCodeAt(0) / 255) * Math.sin(i * 0.1);
     }
 
     return vector;
@@ -533,7 +576,7 @@ export class SemanticSimilarityEngine {
   } {
     const memoryTypeDistribution: { [key: string]: number } = {};
 
-    this.vectors.forEach(vector => {
+    this.vectors.forEach((vector) => {
       const type = vector.memoryType;
       memoryTypeDistribution[type] = (memoryTypeDistribution[type] || 0) + 1;
     });
@@ -541,7 +584,7 @@ export class SemanticSimilarityEngine {
     return {
       totalVectors: this.vectors.size,
       cacheSize: this.embeddingCache.size,
-      memoryTypeDistribution
+      memoryTypeDistribution,
     };
   }
 }

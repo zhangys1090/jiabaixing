@@ -75,14 +75,7 @@ export class EmojiManager {
   public async generateEmoji(options: EmojiOptions): Promise<string> {
     this.ensureInitialized();
 
-    const {
-      emotion = '平静',
-      scene = 'general',
-      intensity = 3,
-      context = '',
-      style = 'static',
-      service = 'local',
-    } = options;
+    const { service = 'local' } = options;
 
     try {
       switch (service) {
@@ -107,13 +100,7 @@ export class EmojiManager {
       // 简化实现：实际应用中应该调用表情生成API
       Logger.info('表情管理器：使用API生成表情', 'EmojiManager');
 
-      const {
-        emotion = '平静',
-        scene = 'general',
-        intensity = 3,
-        context = '',
-        style = 'static',
-      } = options;
+      const { emotion = '平静', style = 'static' } = options;
 
       // 模拟API响应
       if (style === 'animated') {

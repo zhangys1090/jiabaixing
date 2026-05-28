@@ -1,18 +1,16 @@
 /**
  * Harness Layer 1: Loop - Evaluator 节点
  *
- * 使用独立评估服务的适配器
- * 保持向后兼容的接口，内部委托给 IndependentEvaluationService
+ * 纯适配器模式：完全委托给 IndependentEvaluationService
+ * 不再直接依赖 StepEvaluator，所有评估逻辑统一走独立评估服务
  *
  * P0 核心功能：Evaluator 独立化完成
  */
 
-import { Logger } from '../../utils/Logger';
-import { StepEvaluator } from '../evaluation/StepEvaluator';
-import { 
+import {
   IndependentEvaluationService,
   type EvaluationInput,
-  type IndependentEvaluationResult
+  type IndependentEvaluationResult,
 } from '../evaluation/IndependentEvaluationService';
 import type { UserInput, LoopContext, LoopTrace, ChatMessage } from '../types';
 import type { EvaluatorOutput } from './LoopController';
@@ -57,14 +55,12 @@ export interface EvaluatorDeps {
 
 export class Evaluator {
   private deps: EvaluatorDeps;
-  private stepEvaluator: StepEvaluator;
   private independentEvaluationService: IndependentEvaluationService;
   private replanCount = 0;
   private readonly MAX_REPLAN = 1;
 
   constructor(deps: EvaluatorDeps) {
     this.deps = deps;
-    this.stepEvaluator = new StepEvaluator();
     this.independentEvaluationService = new IndependentEvaluationService({
       llm: deps.llm,
       enableLLMEvaluation: deps.enableLLMEvaluation ?? false,
@@ -74,10 +70,12 @@ export class Evaluator {
   /**
    * 评估目标达成度（原有接口，保持向后兼容）
    */
-  async evaluate(input: UserInput, context: LoopContext): Promise<EvaluatorOutput> {
+  async evaluate(
+    input: UserInput,
+    context: LoopContext
+  ): Promise<EvaluatorOutput> {
     const budget = context.budget;
 
-    // 预算硬限制检查（保留原有快速检查）
     if (budget.roundsUsed >= budget.hardRoundLimit) {
       return {
         goalProgress: 0.5,
@@ -94,9 +92,16 @@ export class Evaluator {
       };
     }
 
-    // 检查最终回复
     const lastAssistantMsg = this.findLastAssistantMessage(context.messages);
     if (lastAssistantMsg && !lastAssistantMsg.tool_calls?.length) {
+      const wasRequired = context.metadata.toolCallMode === 'required';
+      if (wasRequired) {
+        return {
+          goalProgress: 0.2,
+          suggestedAction: 'replan',
+          reason: '需要工具调用但 LLM 未调任何工具',
+        };
+      }
       return {
         goalProgress: 1.0,
         suggestedAction: 'continue',
@@ -104,23 +109,22 @@ export class Evaluator {
       };
     }
 
-    // Step evaluation（保留）
     if (context.stepResults.size > 0) {
-      const stepEvalResult = this.evaluateSteps(context);
-      if (stepEvalResult.goalProgress === 0) {
+      const stepSummary = this.summarizeStepResults(context);
+      if (stepSummary.allFailed) {
         return {
           goalProgress: 0,
           suggestedAction: 'abort',
-          reason: `所有工具调用失败: ${stepEvalResult.failedSteps} 个失败步骤`,
+          reason: `所有工具调用失败: ${stepSummary.failedCount} 个失败步骤`,
         };
       }
-      if (stepEvalResult.goalProgress === 0.5) {
+      if (stepSummary.hasFailures) {
         if (this.replanCount < this.MAX_REPLAN) {
           this.replanCount++;
           return {
             goalProgress: 0.5,
             suggestedAction: 'replan',
-            reason: `部分工具调用失败: ${stepEvalResult.failedSteps}/${stepEvalResult.totalSteps} 失败`,
+            reason: `部分工具调用失败: ${stepSummary.failedCount}/${stepSummary.totalCount} 失败`,
           };
         } else {
           return {
@@ -132,8 +136,11 @@ export class Evaluator {
       }
     }
 
-    // 使用新的独立评估服务
-    const fullEval = await this.evaluateFull(input.text, context.messages, context.trace);
+    const fullEval = await this.evaluateFull(
+      input.text,
+      context.messages,
+      context.trace
+    );
     return {
       goalProgress: fullEval.overall.goalProgress,
       suggestedAction: fullEval.overall.suggestedAction,
@@ -149,7 +156,24 @@ export class Evaluator {
     messages: ChatMessage[],
     trace: LoopTrace
   ): Promise<FullEvaluationResult> {
-    // 构建评估输入
+    const stepResults: Array<{
+      toolName: string;
+      success: boolean;
+      output?: unknown;
+      error?: string;
+    }> = [];
+    // trace.trajectory 中提取工具结果
+    for (const step of trace.trajectory) {
+      if (step.type === 'tool_result' && step.toolResult) {
+        stepResults.push({
+          toolName: step.toolName || 'unknown',
+          success: step.toolResult.success,
+          output: step.toolResult.output,
+          error: step.toolResult.error,
+        });
+      }
+    }
+
     const evalInput: EvaluationInput = {
       userInput,
       conversationHistory: messages,
@@ -157,13 +181,12 @@ export class Evaluator {
         totalToolCalls: trace.totalToolCalls,
         totalDuration: trace.totalDuration,
         loopRounds: trace.budgetState?.roundsUsed || 0,
+        toolResults: stepResults,
       },
     };
 
-    // 委托给独立评估服务
     const result = await this.independentEvaluationService.evaluate(evalInput);
 
-    // 转换为向后兼容的格式
     return this.adaptToLegacyFormat(result);
   }
 
@@ -186,53 +209,47 @@ export class Evaluator {
   }
 
   /**
-   * 评估步骤（保留用于快速检查）
+   * 汇总步骤结果（替代直接依赖 StepEvaluator）
    */
-  private evaluateSteps(context: LoopContext): { goalProgress: number; totalSteps: number; failedSteps: number } {
-    let totalSteps = 0;
-    let failedSteps = 0;
+  private summarizeStepResults(context: LoopContext): {
+    allFailed: boolean;
+    hasFailures: boolean;
+    failedCount: number;
+    totalCount: number;
+  } {
+    let totalCount = 0;
+    let failedCount = 0;
 
-    for (const [stepId, stepResult] of context.stepResults) {
-      const evalResult = this.stepEvaluator.evaluateStep({
-        stepId,
-        toolName: stepResult.toolName || 'unknown',
-        args: {},
-        result: {
-          success: stepResult.success,
-          output: stepResult.output,
-          error: stepResult.error,
-        },
-        timestamp: Date.now(),
-      });
-
-      totalSteps++;
-      if (!evalResult.passed) {
-        failedSteps++;
-        Logger.debug(
-          `步骤 ${stepId} 评估失败: score=${evalResult.score} issues=${evalResult.issues.map(i => i.type).join(', ')}`,
-          'Evaluator'
-        );
+    for (const [, stepResult] of context.stepResults) {
+      totalCount++;
+      if (!stepResult.success) {
+        failedCount++;
       }
     }
 
-    let goalProgress: number;
-    if (failedSteps === 0) {
-      goalProgress = 1.0;
-    } else if (failedSteps < totalSteps * 0.5) {
-      goalProgress = 0.5;
-    } else {
-      goalProgress = 0;
-    }
+    const majorityFailed = totalCount > 0 && failedCount > totalCount * 0.5;
 
-    return { goalProgress, totalSteps, failedSteps };
+    return {
+      allFailed:
+        majorityFailed || (failedCount === totalCount && totalCount > 0),
+      hasFailures: failedCount > 0,
+      failedCount,
+      totalCount,
+    };
   }
 
   /**
    * 查找最后一条 assistant 消息
    */
   private findLastAssistantMessage(
-    messages: Array<{ role: string; content?: string | null; tool_calls?: unknown[] }>
-  ): { role: string; content?: string | null; tool_calls?: unknown[] } | undefined {
+    messages: Array<{
+      role: string;
+      content?: string | null;
+      tool_calls?: unknown[];
+    }>
+  ):
+    | { role: string; content?: string | null; tool_calls?: unknown[] }
+    | undefined {
     for (let i = messages.length - 1; i >= 0; i--) {
       if (messages[i].role === 'assistant') {
         return messages[i];

@@ -39,7 +39,10 @@ class RealTimeFeedbackLoop {
     improvementPercentage: number;
     verifiedAt: number;
   }> = [];
-  private pendingVerifications: Map<string, { beforeScore: number; timestamp: number }> = new Map();
+  private pendingVerifications: Map<
+    string,
+    { beforeScore: number; timestamp: number }
+  > = new Map();
   private strategyOptimizer: StrategyOptimizer | null;
 
   constructor(strategyOptimizer?: StrategyOptimizer) {
@@ -75,7 +78,8 @@ class RealTimeFeedbackLoop {
 
     score = Math.max(0, Math.min(1, score));
 
-    const needsOptimization = !success || score < 0.4 || this.consecutiveLowCount >= 3;
+    const needsOptimization =
+      !success || score < 0.4 || this.consecutiveLowCount >= 3;
 
     if (score < 0.4) {
       this.consecutiveLowCount++;
@@ -96,14 +100,20 @@ class RealTimeFeedbackLoop {
       this.assessments = this.assessments.slice(-this.maxAssessments);
     }
 
-    if (needsOptimization && this.consecutiveLowCount >= 3 && this.strategyOptimizer) {
+    if (
+      needsOptimization &&
+      this.consecutiveLowCount >= 3 &&
+      this.strategyOptimizer
+    ) {
       Logger.info(
         `🔄 连续 ${this.consecutiveLowCount} 次低质量，触发自动优化`,
         'RealTimeFeedbackLoop'
       );
-      this.strategyOptimizer.triggerManualOptimization(
-        `连续${this.consecutiveLowCount}次低质量评估 [场景:${scene || 'unknown'}]`
-      ).catch(() => {});
+      this.strategyOptimizer
+        .triggerManualOptimization(
+          `连续${this.consecutiveLowCount}次低质量评估 [场景:${scene || 'unknown'}]`
+        )
+        .catch(() => {});
       this.totalOptimizations++;
     }
 
@@ -116,9 +126,10 @@ class RealTimeFeedbackLoop {
     consecutiveLowCount: number;
   } {
     const recent = this.assessments.slice(-50);
-    const averageScore = recent.length > 0
-      ? recent.reduce((s, a) => s + a.score, 0) / recent.length
-      : 0.5;
+    const averageScore =
+      recent.length > 0
+        ? recent.reduce((s, a) => s + a.score, 0) / recent.length
+        : 0.5;
 
     return {
       totalOptimizations: this.totalOptimizations,
@@ -138,13 +149,16 @@ class RealTimeFeedbackLoop {
     averageScore: number;
     trend: 'improving' | 'stable' | 'worsening';
   }> {
-    const sceneStats = new Map<string, {
-      failures: number;
-      totalScore: number;
-      count: number;
-      factorCounts: Map<string, number>;
-      recentScores: number[];
-    }>();
+    const sceneStats = new Map<
+      string,
+      {
+        failures: number;
+        totalScore: number;
+        count: number;
+        factorCounts: Map<string, number>;
+        recentScores: number[];
+      }
+    >();
 
     for (const a of this.assessments) {
       if (!sceneStats.has(a.scene)) {
@@ -169,7 +183,10 @@ class RealTimeFeedbackLoop {
       }
 
       for (const factor of a.factors) {
-        stats.factorCounts.set(factor, (stats.factorCounts.get(factor) || 0) + 1);
+        stats.factorCounts.set(
+          factor,
+          (stats.factorCounts.get(factor) || 0) + 1
+        );
       }
     }
 
@@ -195,8 +212,10 @@ class RealTimeFeedbackLoop {
         const half = Math.floor(scores.length / 2);
         const firstHalf = scores.slice(0, half);
         const secondHalf = scores.slice(half);
-        const avgFirst = firstHalf.reduce((s, v) => s + v, 0) / firstHalf.length;
-        const avgSecond = secondHalf.reduce((s, v) => s + v, 0) / secondHalf.length;
+        const avgFirst =
+          firstHalf.reduce((s, v) => s + v, 0) / firstHalf.length;
+        const avgSecond =
+          secondHalf.reduce((s, v) => s + v, 0) / secondHalf.length;
         const diff = avgSecond - avgFirst;
         if (diff > 0.05) trend = 'improving';
         else if (diff < -0.05) trend = 'worsening';
@@ -227,15 +246,24 @@ class RealTimeFeedbackLoop {
 
   verifyOptimizationEffect(optimizationId: string): void {
     const recent = this.assessments.slice(-20);
-    const beforeScore = recent.length > 0
-      ? recent.slice(0, Math.floor(recent.length / 2)).reduce((s, a) => s + a.score, 0) / Math.max(1, Math.floor(recent.length / 2))
-      : 0.5;
-    const afterScore = recent.length > 0
-      ? recent.slice(Math.floor(recent.length / 2)).reduce((s, a) => s + a.score, 0) / Math.max(1, recent.length - Math.floor(recent.length / 2))
-      : 0.5;
+    const beforeScore =
+      recent.length > 0
+        ? recent
+            .slice(0, Math.floor(recent.length / 2))
+            .reduce((s, a) => s + a.score, 0) /
+          Math.max(1, Math.floor(recent.length / 2))
+        : 0.5;
+    const afterScore =
+      recent.length > 0
+        ? recent
+            .slice(Math.floor(recent.length / 2))
+            .reduce((s, a) => s + a.score, 0) /
+          Math.max(1, recent.length - Math.floor(recent.length / 2))
+        : 0.5;
 
     const improvement = afterScore - beforeScore;
-    const improvementPercentage = beforeScore > 0 ? (improvement / beforeScore) * 100 : 0;
+    const improvementPercentage =
+      beforeScore > 0 ? (improvement / beforeScore) * 100 : 0;
 
     this.optimizationVerifications.push({
       optimizationId,
@@ -247,7 +275,8 @@ class RealTimeFeedbackLoop {
     });
 
     if (this.optimizationVerifications.length > 50) {
-      this.optimizationVerifications = this.optimizationVerifications.slice(-50);
+      this.optimizationVerifications =
+        this.optimizationVerifications.slice(-50);
     }
 
     Logger.info(
@@ -412,6 +441,13 @@ export class EvolutionEngine {
     scene?: string
   ): void {
     this.feedbackCollector.collect(input, response, executionResult, scene);
+
+    // 关键桥接：将 FeedbackCollector 的数据同步到 StrategyOptimizer
+    // 让 learnTonePreference / learnSkillPreference 有真实数据可用
+    const recentFeedback = this.feedbackCollector.getRecent(1);
+    if (recentFeedback.length > 0) {
+      this.strategyOptimizer.addFeedback(recentFeedback[0]);
+    }
 
     this.interactionTimestamps.push(Date.now());
     if (this.interactionTimestamps.length > 100) {

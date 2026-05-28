@@ -25,4 +25,5 @@ export type {
   FileRollback,
   MultiFileModified,
   UserCorrection,
+  TaskCancelled,
 } from './websocket';

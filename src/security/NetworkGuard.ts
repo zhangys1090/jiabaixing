@@ -282,4 +282,3 @@ class NetworkGuardInner {
 const networkGuard = new NetworkGuardInner();
 
 export { networkGuard as NetworkGuard };
-

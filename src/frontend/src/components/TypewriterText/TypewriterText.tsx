@@ -101,7 +101,7 @@ const TypewriterText: React.FC<TypewriterTextProps> = ({
     return () => {
       clearTypingInterval();
     };
-  }, [text, speed, completeTyping, onCharacterTyped, clearTypingInterval]);
+  }, [text, speed, completeTyping, onCharacterTyped, clearTypingInterval, onComplete]);
 
   // 用户发送新消息时自动完成当前打字
   useEffect(() => {
@@ -115,7 +115,7 @@ const TypewriterText: React.FC<TypewriterTextProps> = ({
     return () => {
       window.removeEventListener('jiabaixing:new-message', handleNewMessage);
     };
-  }, [isComplete, handleSkip]);
+  }, [isComplete, handleSkip, onComplete]);
 
   return (
     <span

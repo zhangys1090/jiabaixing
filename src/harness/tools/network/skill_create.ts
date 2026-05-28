@@ -26,7 +26,8 @@ export const SKILL_CREATE_DEF: ToolDefinition = {
     },
     variables: {
       type: 'object',
-      description: '变量默认值 { name: { description: string, default: string } }',
+      description:
+        '变量默认值 { name: { description: string, default: string } }',
       properties: {
         description: { type: 'string', description: '变量描述' },
         default: { type: 'string', description: '默认值' },
@@ -64,13 +65,21 @@ export interface SkillCreateDeps {
     deleteSkill(name: string): Promise<void>;
   };
   llm?: {
-    chat(prompt: string, history: unknown[], systemPrompt?: string): Promise<string>;
+    chat(
+      prompt: string,
+      history: unknown[],
+      systemPrompt?: string
+    ): Promise<string>;
   };
 }
 
 const SKILL_NAME_REGEX = /^[a-zA-Z0-9_]+$/;
 
-function renderTemplate(template: string, variables: Record<string, { description: string; default: string }>, params: Record<string, unknown>): string {
+function renderTemplate(
+  template: string,
+  variables: Record<string, { description: string; default: string }>,
+  params: Record<string, unknown>
+): string {
   let rendered = template;
   for (const [key, varDef] of Object.entries(variables)) {
     const value = params[key] != null ? String(params[key]) : varDef.default;
@@ -91,47 +100,100 @@ export function createSkillCreateExecutor(deps: SkillCreateDeps) {
         case 'create': {
           const skillName = String(params.skill_name || '');
           if (!skillName) {
-            return { success: false, output: null, error: '技能名称不能为空', duration: 0, validated: false };
+            return {
+              success: false,
+              output: null,
+              error: '技能名称不能为空',
+              duration: 0,
+              validated: false,
+            };
           }
           if (!SKILL_NAME_REGEX.test(skillName)) {
-            return { success: false, output: null, error: '技能名称仅支持英文字母、数字和下划线', duration: 0, validated: false };
+            return {
+              success: false,
+              output: null,
+              error: '技能名称仅支持英文字母、数字和下划线',
+              duration: 0,
+              validated: false,
+            };
           }
           const existing = await deps.skillStore.getSkills();
           if (existing.some((s) => s.name === skillName)) {
-            return { success: false, output: null, error: `技能已存在: ${skillName}`, duration: 0, validated: false };
+            return {
+              success: false,
+              output: null,
+              error: `技能已存在: ${skillName}`,
+              duration: 0,
+              validated: false,
+            };
           }
           const skill: UserSkill = {
             name: skillName,
             description: String(params.description || ''),
             template: String(params.template || ''),
-            variables: (params.variables as Record<string, { description: string; default: string }>) || {},
+            variables:
+              (params.variables as Record<
+                string,
+                { description: string; default: string }
+              >) || {},
             createdAt: Date.now(),
             updatedAt: Date.now(),
             usageCount: 0,
           };
           await deps.skillStore.saveSkill(skill);
-          return { success: true, output: `技能已创建: ${skillName}`, duration: 0, validated: false };
+          return {
+            success: true,
+            output: `技能已创建: ${skillName}`,
+            duration: 0,
+            validated: false,
+          };
         }
 
         case 'list': {
           const skills = await deps.skillStore.getSkills();
-          if (skills.length === 0) return { success: true, output: '暂无自定义技能', duration: 0, validated: false };
-          const output = skills.map((s) => `• ${s.name} - ${s.description} (使用${s.usageCount}次)`).join('\n');
+          if (skills.length === 0)
+            return {
+              success: true,
+              output: '暂无自定义技能',
+              duration: 0,
+              validated: false,
+            };
+          const output = skills
+            .map(
+              (s) => `• ${s.name} - ${s.description} (使用${s.usageCount}次)`
+            )
+            .join('\n');
           return { success: true, output, duration: 0, validated: false };
         }
 
         case 'execute': {
           const skillName = String(params.skill_name || '');
           if (!skillName) {
-            return { success: false, output: null, error: '执行技能需要提供skill_name', duration: 0, validated: false };
+            return {
+              success: false,
+              output: null,
+              error: '执行技能需要提供skill_name',
+              duration: 0,
+              validated: false,
+            };
           }
           const skills = await deps.skillStore.getSkills();
           const skill = skills.find((s) => s.name === skillName);
           if (!skill) {
-            return { success: false, output: null, error: `技能不存在: ${skillName}`, duration: 0, validated: false };
+            return {
+              success: false,
+              output: null,
+              error: `技能不存在: ${skillName}`,
+              duration: 0,
+              validated: false,
+            };
           }
           const execParams = (params.params as Record<string, unknown>) || {};
-          const rendered = renderTemplate(skill.template, skill.variables, execParams);
+          const rendered = renderTemplate(
+            skill.template,
+            skill.variables,
+            execParams
+          );
 
           let result: string;
           if (deps.llm) {
@@ -144,41 +206,91 @@ export function createSkillCreateExecutor(deps: SkillCreateDeps) {
           skill.updatedAt = Date.now();
           await deps.skillStore.saveSkill(skill);
 
-          return { success: true, output: result, duration: 0, validated: false };
+          return {
+            success: true,
+            output: result,
+            duration: 0,
+            validated: false,
+          };
         }
 
         case 'delete': {
           const skillName = String(params.skill_name || '');
           if (!skillName) {
-            return { success: false, output: null, error: '删除技能需要提供skill_name', duration: 0, validated: false };
+            return {
+              success: false,
+              output: null,
+              error: '删除技能需要提供skill_name',
+              duration: 0,
+              validated: false,
+            };
           }
           await deps.skillStore.deleteSkill(skillName);
-          return { success: true, output: `技能已删除: ${skillName}`, duration: 0, validated: false };
+          return {
+            success: true,
+            output: `技能已删除: ${skillName}`,
+            duration: 0,
+            validated: false,
+          };
         }
 
         case 'update': {
           const skillName = String(params.skill_name || '');
           if (!skillName) {
-            return { success: false, output: null, error: '更新技能需要提供skill_name', duration: 0, validated: false };
+            return {
+              success: false,
+              output: null,
+              error: '更新技能需要提供skill_name',
+              duration: 0,
+              validated: false,
+            };
           }
           const skills = await deps.skillStore.getSkills();
           const skill = skills.find((s) => s.name === skillName);
           if (!skill) {
-            return { success: false, output: null, error: `技能不存在: ${skillName}`, duration: 0, validated: false };
+            return {
+              success: false,
+              output: null,
+              error: `技能不存在: ${skillName}`,
+              duration: 0,
+              validated: false,
+            };
           }
-          if (params.description) skill.description = String(params.description);
+          if (params.description)
+            skill.description = String(params.description);
           if (params.template) skill.template = String(params.template);
-          if (params.variables) skill.variables = params.variables as Record<string, { description: string; default: string }>;
+          if (params.variables)
+            skill.variables = params.variables as Record<
+              string,
+              { description: string; default: string }
+            >;
           skill.updatedAt = Date.now();
           await deps.skillStore.saveSkill(skill);
-          return { success: true, output: `技能已更新: ${skillName}`, duration: 0, validated: false };
+          return {
+            success: true,
+            output: `技能已更新: ${skillName}`,
+            duration: 0,
+            validated: false,
+          };
         }
 
         default:
-          return { success: false, output: null, error: `未知操作: ${action}`, duration: 0, validated: false };
+          return {
+            success: false,
+            output: null,
+            error: `未知操作: ${action}`,
+            duration: 0,
+            validated: false,
+          };
       }
     } catch (err) {
-      return { success: false, output: null, error: `技能操作失败: ${(err as Error).message}`, duration: 0, validated: false };
+      return {
+        success: false,
+        output: null,
+        error: `技能操作失败: ${(err as Error).message}`,
+        duration: 0,
+        validated: false,
+      };
     }
   };
 }

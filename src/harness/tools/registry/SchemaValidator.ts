@@ -103,10 +103,7 @@ export class SchemaValidator {
     // 检查未知参数（仅警告，不阻止执行）
     for (const paramName of Object.keys(params)) {
       if (!(paramName in parameterDefs)) {
-        Logger.debug(
-          `未知参数: ${paramName}（已忽略）`,
-          'SchemaValidator'
-        );
+        Logger.debug(`未知参数: ${paramName}（已忽略）`, 'SchemaValidator');
         sanitizedParams[paramName] = params[paramName];
       }
     }

@@ -66,7 +66,12 @@ export function createCodeGenerateExecutor(deps: CodeGenerateDeps) {
     const complexity = (params.complexity as string) || 'medium';
 
     if (!deps.generateCode) {
-      const template = generateCodeTemplate(requirements, language, framework, complexity);
+      const template = generateCodeTemplate(
+        requirements,
+        language,
+        framework,
+        complexity
+      );
       return {
         success: true,
         output: `代码骨架生成完成（LLM不可用，仅生成模板）：\n\n\`\`\`${language}\n${template}\n\`\`\``,
@@ -135,14 +140,19 @@ function generateCodeTemplate(
 }
 
 function extractIdentifierName(requirements: string): string {
-  const match = requirements.match(/(?:实现|创建|编写|生成|开发|implement|create|build|write)\s+(?:一个\s+)?(\S+)/);
+  const match = requirements.match(
+    /(?:实现|创建|编写|生成|开发|implement|create|build|write)\s+(?:一个\s+)?(\S+)/
+  );
   if (match) {
     let name = match[1];
     name = name.replace(/[的之]/g, '');
     return name.charAt(0).toUpperCase() + name.slice(1);
   }
   const words = requirements.split(/\s+/).filter(Boolean);
-  return words.slice(0, 2).map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join('');
+  return words
+    .slice(0, 2)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join('');
 }
 
 function generateTsTemplate(

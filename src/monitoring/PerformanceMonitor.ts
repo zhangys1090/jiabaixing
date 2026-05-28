@@ -71,7 +71,7 @@ export class PerformanceMonitor extends EventEmitter {
 
   public startMonitoring(intervalMs: number = 60000): void {
     if (this.monitoringInterval) {
-      Logger.warn('性能监控已在运行', 'PerformanceMonitor');
+      Logger.debug('性能监控已在运行，跳过重复启动', 'PerformanceMonitor');
       return;
     }
 

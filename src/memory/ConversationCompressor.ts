@@ -115,7 +115,11 @@ export class ConversationCompressor {
         await shortTermMemory.store(conv.content, conv.scene, conv.emotion);
       }
     } catch (error) {
-      Logger.error('对话历史压缩失败', error as Error, 'ConversationCompressor');
+      Logger.error(
+        '对话历史压缩失败',
+        error as Error,
+        'ConversationCompressor'
+      );
     }
   }
 
@@ -147,8 +151,7 @@ export class ConversationCompressor {
         return [];
       }
 
-      const conversations =
-        await shortTermMemory.getRecentConversations(50);
+      const conversations = await shortTermMemory.getRecentConversations(50);
 
       const scored: Array<{
         conversation: (typeof conversations)[0];
@@ -198,7 +201,11 @@ export class ConversationCompressor {
         emotion: conversation.emotion,
       }));
     } catch (error) {
-      Logger.error('检索相关对话失败', error as Error, 'ConversationCompressor');
+      Logger.error(
+        '检索相关对话失败',
+        error as Error,
+        'ConversationCompressor'
+      );
       return [];
     }
   }

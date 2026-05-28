@@ -1,11 +1,7 @@
 import { IntegrationManager } from './IntegrationManager';
 import { Logger } from '../utils/Logger';
 import { EventBus } from '../shared/EventBus';
-import type {
-  IntegrationPlatform,
-  PlatformConfig,
-  IncomingMessageEvent,
-} from '../shared/contracts';
+import type { IntegrationPlatform, PlatformConfig } from '../shared/contracts';
 
 interface IpcMessage {
   id: string;
@@ -37,7 +33,11 @@ function handleMessage(msg: IpcMessage): void {
       };
       im.connectPlatform(platform, config)
         .then((success) => {
-          send({ id: msg.id, success, data: { platform, status: success ? 'connected' : 'failed' } });
+          send({
+            id: msg.id,
+            success,
+            data: { platform, status: success ? 'connected' : 'failed' },
+          });
         })
         .catch((err: Error) => {
           send({ id: msg.id, success: false, error: err.message });
@@ -103,21 +103,40 @@ function handleMessage(msg: IpcMessage): void {
       break;
     }
     case 'ping': {
-      send({ id: msg.id, success: true, data: { status: 'alive', pid: process.pid } });
+      send({
+        id: msg.id,
+        success: true,
+        data: { status: 'alive', pid: process.pid },
+      });
       break;
     }
     default:
-      send({ id: msg.id, success: false, error: `Unknown message type: ${msg.type}` });
+      send({
+        id: msg.id,
+        success: false,
+        error: `Unknown message type: ${msg.type}`,
+      });
   }
 }
 
-EventBus.on('integration_message', (message: { platform: string; type: string; content: string; from?: string; fromName?: string; timestamp: string; rawData?: unknown }) => {
-  send({
-    id: `evt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-    success: true,
-    data: { type: 'incoming_message', payload: message },
-  });
-});
+EventBus.on(
+  'integration_message',
+  (message: {
+    platform: string;
+    type: string;
+    content: string;
+    from?: string;
+    fromName?: string;
+    timestamp: string;
+    rawData?: unknown;
+  }) => {
+    send({
+      id: `evt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      success: true,
+      data: { type: 'incoming_message', payload: message },
+    });
+  }
+);
 
 process.on('message', (msg: IpcMessage) => {
   handleMessage(msg);
@@ -133,7 +152,11 @@ process.on('uncaughtException', (error: Error) => {
 });
 
 process.on('unhandledRejection', (reason: unknown) => {
-  Logger.error('Gateway Worker 未处理的 Promise 拒绝', reason as Error, 'GatewayWorker');
+  Logger.error(
+    'Gateway Worker 未处理的 Promise 拒绝',
+    reason as Error,
+    'GatewayWorker'
+  );
   send({
     id: `err_${Date.now()}`,
     success: false,

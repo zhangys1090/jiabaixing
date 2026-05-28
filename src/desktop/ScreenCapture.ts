@@ -53,7 +53,6 @@ export class ScreenCapture {
   public async captureFullScreen(
     options: ScreenshotOptions = {}
   ): Promise<ScreenshotResult> {
-    const startTime = Date.now();
     try {
       const buffer = await screenshot({
         format: options.format || 'png',

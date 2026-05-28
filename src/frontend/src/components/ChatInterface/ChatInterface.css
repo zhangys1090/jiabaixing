@@ -483,6 +483,13 @@
   backdrop-filter: blur(8px);
 }
 
+.message-bubble.progress {
+  background: rgba(201, 149, 107, 0.08);
+  color: var(--accent);
+  border: 1px dashed rgba(201, 149, 107, 0.3);
+  font-style: italic;
+}
+
 .message-bubble.error {
   background: rgba(220, 80, 80, 0.08);
   color: var(--red);

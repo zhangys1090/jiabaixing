@@ -42,7 +42,10 @@ export class OptimizationScheduler {
       'feedback_analysis_report.json'
     );
 
-    Logger.info('🤖 自动优化调度：开始扫描优化报告...', 'OptimizationScheduler');
+    Logger.info(
+      '🤖 自动优化调度：开始扫描优化报告...',
+      'OptimizationScheduler'
+    );
 
     if (!fs.existsSync(reportPath)) {
       Logger.info(
@@ -103,7 +106,10 @@ export class OptimizationScheduler {
 
     fs.watchFile(reportPath, { interval: 10000 }, async (curr, prev) => {
       if (curr.mtimeMs !== prev.mtimeMs) {
-        Logger.info('📡 检测到优化报告更新，正在热加载...', 'OptimizationScheduler');
+        Logger.info(
+          '📡 检测到优化报告更新，正在热加载...',
+          'OptimizationScheduler'
+        );
         await this.applyOptimizationsFromReport();
         Logger.info('✅ 优化报告已热加载', 'OptimizationScheduler');
       }
@@ -116,11 +122,17 @@ export class OptimizationScheduler {
     const INTERVAL_24H = 24 * 60 * 60 * 1000;
 
     this.optimizationScheduler = setInterval(async () => {
-      Logger.info('⏰ 定时调度触发：开始执行自动优化...', 'OptimizationScheduler');
+      Logger.info(
+        '⏰ 定时调度触发：开始执行自动优化...',
+        'OptimizationScheduler'
+      );
       await this.applyOptimizationsFromReport();
     }, INTERVAL_24H);
 
-    Logger.info(`⏰ 自动优化定时调度已启动，间隔: 24小时`, 'OptimizationScheduler');
+    Logger.info(
+      `⏰ 自动优化定时调度已启动，间隔: 24小时`,
+      'OptimizationScheduler'
+    );
   }
 
   setupUserCorrectionHandler(): void {
@@ -139,7 +151,10 @@ export class OptimizationScheduler {
           | undefined;
 
         if (!toolId) {
-          Logger.warn('⚠️ user_correction事件缺少toolId', 'OptimizationScheduler');
+          Logger.warn(
+            '⚠️ user_correction事件缺少toolId',
+            'OptimizationScheduler'
+          );
           return;
         }
 

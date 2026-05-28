@@ -174,15 +174,17 @@ export class PersonaCore implements OptimizationConsumer {
           0,
           Math.min(1, currentTone.verbosity + adjustment.verbosityDelta)
         ),
-        // TODO: ToneAdjustment 接口暂未包含 emojiFrequencyDelta/proactiveDelta，
-        // 待 StrategyOptimizer 扩展后启用动态调整
-        emojiFrequency: currentTone.emojiFrequency,
-        proactive: currentTone.proactive,
+        emojiFrequency:
+          currentTone.emojiFrequency + (adjustment.emojiFrequencyDelta || 0),
+        proactive:
+          (adjustment.proactiveDelta ?? 0) > 0 ? true : currentTone.proactive,
       };
 
       this.profile.sceneToneMatrix[scene] = newTone;
       this.appliedOptimizations.push(`tone:${scene}:${snapshot.id}`);
-      if (this.appliedOptimizations.length > PersonaCore.MAX_APPLIED_OPTIMIZATIONS) {
+      if (
+        this.appliedOptimizations.length > PersonaCore.MAX_APPLIED_OPTIMIZATIONS
+      ) {
         this.appliedOptimizations = this.appliedOptimizations.slice(
           -PersonaCore.MAX_APPLIED_OPTIMIZATIONS
         );
@@ -245,7 +247,11 @@ export class PersonaCore implements OptimizationConsumer {
       fs.mkdirSync(dir, { recursive: true });
     }
 
-    await fs.promises.writeFile(savePath, JSON.stringify(this.profile, null, 2), 'utf-8');
+    await fs.promises.writeFile(
+      savePath,
+      JSON.stringify(this.profile, null, 2),
+      'utf-8'
+    );
     Logger.info(`💾 人格配置已保存: ${savePath}`, 'PersonaCore');
   }
 

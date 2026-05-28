@@ -230,9 +230,7 @@ export class SnapshotStorage {
     return expired.length;
   }
 
-  public async getSnapshotFileSize(
-    filePath: string
-  ): Promise<number> {
+  public async getSnapshotFileSize(filePath: string): Promise<number> {
     const info = await fileSystem.getFileInfo(filePath);
     return info.size;
   }

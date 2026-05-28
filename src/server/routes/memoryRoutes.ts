@@ -2,7 +2,7 @@
  * 记忆系统路由 - memory store / search / profile / preferences
  */
 
-import express, { Request, Response } from 'express';
+import express from 'express';
 import { UserProfile } from '../../memory/UserProfile';
 
 import { JiabaixingCore } from '../../core/JiabaixingCore';
@@ -17,15 +17,14 @@ export function registerMemoryRoutes(
     express.json({ limit: '1mb' }),
     async (req, res) => {
       try {
-        const { content, userId, importance, tags, emotion, scene } =
-          req.body as {
-            content?: string;
-            userId?: string;
-            importance?: string;
-            tags?: string[];
-            emotion?: unknown;
-            scene?: unknown;
-          };
+        const { content, userId, importance, scene } = req.body as {
+          content?: string;
+          userId?: string;
+          importance?: string;
+          tags?: string[];
+          emotion?: unknown;
+          scene?: unknown;
+        };
 
         if (!content) {
           return res
@@ -105,18 +104,15 @@ export function registerMemoryRoutes(
       if (memoryEngine.retrieveContext) {
         const context = await memoryEngine.retrieveContext(query, userId);
         results = context.memories.map((m: unknown, index: number) => {
-          const mem = m as any;
+          const mem = m as Record<string, unknown>;
+          const relevance = mem.relevance as number;
           return {
             id: `memory_${index}`,
             content: mem.content,
             importance:
-              mem.relevance > 0.7
-                ? 'high'
-                : mem.relevance > 0.4
-                  ? 'medium'
-                  : 'low',
+              relevance > 0.7 ? 'high' : relevance > 0.4 ? 'medium' : 'low',
             timestamp: new Date().toISOString(),
-            similarity: mem.relevance,
+            similarity: relevance,
           };
         });
       }
@@ -137,8 +133,6 @@ export function registerMemoryRoutes(
 
   app.get('/api/memory/profile', async (req, res) => {
     try {
-      const { userId } = req.query as { userId?: string };
-
       if (!core) {
         return res
           .status(503)
@@ -152,7 +146,9 @@ export function registerMemoryRoutes(
           .json({ success: false, error: '记忆引擎未初始化' });
       }
 
-      const userProfile = memoryEngine.getUserProfile?.() as UserProfile | undefined;
+      const userProfile = memoryEngine.getUserProfile?.() as
+        | UserProfile
+        | undefined;
 
       if (!userProfile) {
         return res
@@ -204,7 +200,9 @@ export function registerMemoryRoutes(
             .json({ success: false, error: '记忆引擎未初始化' });
         }
 
-        const userProfile = memoryEngine.getUserProfile?.() as UserProfile | undefined;
+        const userProfile = memoryEngine.getUserProfile?.() as
+          | UserProfile
+          | undefined;
 
         if (!userProfile) {
           return res

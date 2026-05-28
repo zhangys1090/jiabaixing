@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import './MemoryPanel.css';
 import { apiService } from '../../api/apiService';
-import { useMemoryStore } from '../../stores/useMemoryStore';
 import type { MemorySearchResponse, MemoryProfileResponse, MemoryStatsResponse } from '@shared/contracts';
 
 type MemoryTab = 'short' | 'long' | 'search' | 'profile' | 'stats';

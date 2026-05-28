@@ -1,5 +1,3 @@
-import { Logger } from '../utils/Logger';
-
 export class RequestQueue {
   private queue: Array<{
     execute: () => Promise<string>;
@@ -27,9 +25,7 @@ export class RequestQueue {
   }
 
   private processQueue(): void {
-    while (
-      this.queue.length > 0 && this.activeRequests < this.maxConcurrent
-    ) {
+    while (this.queue.length > 0 && this.activeRequests < this.maxConcurrent) {
       const request = this.queue.shift();
       if (request) {
         this.activeRequests++;

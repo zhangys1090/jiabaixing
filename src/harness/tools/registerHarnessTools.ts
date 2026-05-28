@@ -85,7 +85,10 @@ import {
   createFileSearchExecutor,
   type FileSearchDeps,
 } from './file/file_search';
-import { createGetActiveFileExecutor, type GetActiveFileDeps } from './file/get_active_file';
+import {
+  createGetActiveFileExecutor,
+  type GetActiveFileDeps,
+} from './file/get_active_file';
 import {
   createIncrementalEditExecutor,
   type IncrementalEditDeps,
@@ -115,13 +118,28 @@ import {
 
 // === 日常管理工具执行器工厂 ===
 import { createNoteTakeExecutor, type NoteTakeDeps } from './daily/note_take';
-import { createReminderSetExecutor, type ReminderSetDeps } from './daily/reminder_set';
-import { createSystemStatusExecutor, type SystemStatusDeps } from './daily/system_status';
-import { createTaskManageExecutor, type TaskManageDeps } from './daily/task_manage';
+import {
+  createReminderSetExecutor,
+  type ReminderSetDeps,
+} from './daily/reminder_set';
+import {
+  createSystemStatusExecutor,
+  type SystemStatusDeps,
+} from './daily/system_status';
+import {
+  createTaskManageExecutor,
+  type TaskManageDeps,
+} from './daily/task_manage';
 
 // === 网络工具执行器工厂 ===
-import { createWebSearchExecutor, type WebSearchDeps } from './network/web_search';
-import { createSkillCreateExecutor, type SkillCreateDeps } from './network/skill_create';
+import {
+  createWebSearchExecutor,
+  type WebSearchDeps,
+} from './network/web_search';
+import {
+  createSkillCreateExecutor,
+  type SkillCreateDeps,
+} from './network/skill_create';
 
 /** 所有工具依赖的聚合接口 */
 export interface HarnessToolDeps
@@ -261,13 +279,14 @@ export function syncToLegacySkillRegistry(
       ),
       execute: async (args, context) => {
         const userPerms = context?.sessionData?.permissions;
-        const permissions = Array.isArray(userPerms) && userPerms.length > 0
-          ? new Set<Permission>(userPerms as Permission[])
-          : new Set<Permission>([
-              Permission.MEMORY_READ,
-              Permission.MEMORY_WRITE,
-              Permission.FILE_READ,
-            ]);
+        const permissions =
+          Array.isArray(userPerms) && userPerms.length > 0
+            ? new Set<Permission>(userPerms as Permission[])
+            : new Set<Permission>([
+                Permission.MEMORY_READ,
+                Permission.MEMORY_WRITE,
+                Permission.FILE_READ,
+              ]);
         const toolContext: import('../types').ToolContext = {
           userId: context?.userId,
           traceId: context?.traceId,

@@ -305,7 +305,7 @@ export class AudioVideoDeviceAccess {
   public async sendCommand(
     deviceId: string,
     command: AudioVideoDeviceCommand
-  ): Promise<any> {
+  ): Promise<Record<string, unknown>> {
     this.ensureInitialized();
 
     const device = this.devices.get(deviceId);
@@ -342,7 +342,7 @@ export class AudioVideoDeviceAccess {
   private async executeMicrophoneCommand(
     device: AudioVideoDevice,
     command: AudioVideoDeviceCommand
-  ): Promise<any> {
+  ): Promise<Record<string, unknown>> {
     switch (command.command) {
       case 'record':
         return await this.recordAudio(device, command.parameters);
@@ -363,7 +363,7 @@ export class AudioVideoDeviceAccess {
   private async executeCameraCommand(
     device: AudioVideoDevice,
     command: AudioVideoDeviceCommand
-  ): Promise<any> {
+  ): Promise<Record<string, unknown>> {
     switch (command.command) {
       case 'capture':
         return await this.captureImage(device, command.parameters);
@@ -384,7 +384,7 @@ export class AudioVideoDeviceAccess {
   private async executeSpeakerCommand(
     device: AudioVideoDevice,
     command: AudioVideoDeviceCommand
-  ): Promise<any> {
+  ): Promise<Record<string, unknown>> {
     switch (command.command) {
       case 'play':
         return await this.playAudio(device, command.parameters);
@@ -403,7 +403,7 @@ export class AudioVideoDeviceAccess {
   private async executeScreenCommand(
     device: AudioVideoDevice,
     command: AudioVideoDeviceCommand
-  ): Promise<any> {
+  ): Promise<Record<string, unknown>> {
     switch (command.command) {
       case 'capture':
         return await this.captureScreen(device, command.parameters);
@@ -422,9 +422,9 @@ export class AudioVideoDeviceAccess {
    * 录制音频
    */
   private async recordAudio(
-    device: AudioVideoDevice,
+    _device: AudioVideoDevice,
     _parameters: Record<string, unknown>
-  ): Promise<any> {
+  ): Promise<Record<string, unknown>> {
     return {
       success: true,
       message: '音频录制成功',
@@ -434,9 +434,9 @@ export class AudioVideoDeviceAccess {
   }
 
   private async adjustMicrophoneVolume(
-    device: AudioVideoDevice,
+    _device: AudioVideoDevice,
     _parameters: Record<string, unknown>
-  ): Promise<any> {
+  ): Promise<Record<string, unknown>> {
     return {
       success: true,
       message: '麦克风音量调整成功',
@@ -445,9 +445,9 @@ export class AudioVideoDeviceAccess {
   }
 
   private async muteMicrophone(
-    device: AudioVideoDevice,
+    _device: AudioVideoDevice,
     _parameters: Record<string, unknown>
-  ): Promise<any> {
+  ): Promise<Record<string, unknown>> {
     return {
       success: true,
       message: '麦克风静音成功',
@@ -459,9 +459,9 @@ export class AudioVideoDeviceAccess {
    * 语音识别
    */
   private async recognizeSpeech(
-    device: AudioVideoDevice,
+    _device: AudioVideoDevice,
     parameters: Record<string, unknown>
-  ): Promise<any> {
+  ): Promise<Record<string, unknown>> {
     // 语音识别实现
 
     try {
@@ -504,9 +504,9 @@ export class AudioVideoDeviceAccess {
    * 捕获图像
    */
   private async captureImage(
-    device: AudioVideoDevice,
+    _device: AudioVideoDevice,
     _parameters: Record<string, unknown>
-  ): Promise<any> {
+  ): Promise<Record<string, unknown>> {
     Logger.info('📷 音视频外设接入：捕获图像', 'AudioVideoDeviceAccess');
     return {
       success: true,
@@ -517,9 +517,9 @@ export class AudioVideoDeviceAccess {
   }
 
   private async streamVideo(
-    device: AudioVideoDevice,
+    _device: AudioVideoDevice,
     _parameters: Record<string, unknown>
-  ): Promise<any> {
+  ): Promise<Record<string, unknown>> {
     return {
       success: true,
       message: '视频流启动成功',
@@ -529,9 +529,9 @@ export class AudioVideoDeviceAccess {
   }
 
   private async adjustCameraResolution(
-    device: AudioVideoDevice,
+    _device: AudioVideoDevice,
     _parameters: Record<string, unknown>
-  ): Promise<any> {
+  ): Promise<Record<string, unknown>> {
     return {
       success: true,
       message: '摄像头分辨率调整成功',
@@ -540,9 +540,9 @@ export class AudioVideoDeviceAccess {
   }
 
   private async adjustCameraFrameRate(
-    device: AudioVideoDevice,
+    _device: AudioVideoDevice,
     _parameters: Record<string, unknown>
-  ): Promise<any> {
+  ): Promise<Record<string, unknown>> {
     return {
       success: true,
       message: '摄像头帧率调整成功',
@@ -551,9 +551,9 @@ export class AudioVideoDeviceAccess {
   }
 
   private async playAudio(
-    device: AudioVideoDevice,
+    _device: AudioVideoDevice,
     _parameters: Record<string, unknown>
-  ): Promise<any> {
+  ): Promise<Record<string, unknown>> {
     return {
       success: true,
       message: '音频播放成功',
@@ -562,9 +562,9 @@ export class AudioVideoDeviceAccess {
   }
 
   private async adjustSpeakerVolume(
-    device: AudioVideoDevice,
+    _device: AudioVideoDevice,
     _parameters: Record<string, unknown>
-  ): Promise<any> {
+  ): Promise<Record<string, unknown>> {
     return {
       success: true,
       message: '音响音量调整成功',
@@ -573,9 +573,9 @@ export class AudioVideoDeviceAccess {
   }
 
   private async muteSpeaker(
-    device: AudioVideoDevice,
+    _device: AudioVideoDevice,
     _parameters: Record<string, unknown>
-  ): Promise<any> {
+  ): Promise<Record<string, unknown>> {
     return {
       success: true,
       message: '音响静音成功',
@@ -584,9 +584,9 @@ export class AudioVideoDeviceAccess {
   }
 
   private async captureScreen(
-    device: AudioVideoDevice,
+    _device: AudioVideoDevice,
     _parameters: Record<string, unknown>
-  ): Promise<any> {
+  ): Promise<Record<string, unknown>> {
     return {
       success: true,
       message: '屏幕捕获成功',
@@ -596,9 +596,9 @@ export class AudioVideoDeviceAccess {
   }
 
   private async recordScreen(
-    device: AudioVideoDevice,
+    _device: AudioVideoDevice,
     _parameters: Record<string, unknown>
-  ): Promise<any> {
+  ): Promise<Record<string, unknown>> {
     return {
       success: true,
       message: '屏幕录制成功',
@@ -608,9 +608,9 @@ export class AudioVideoDeviceAccess {
   }
 
   private async adjustScreenBrightness(
-    device: AudioVideoDevice,
+    _device: AudioVideoDevice,
     _parameters: Record<string, unknown>
-  ): Promise<any> {
+  ): Promise<Record<string, unknown>> {
     Logger.info('🔆 音视频外设接入：调整屏幕亮度', 'AudioVideoDeviceAccess');
     return {
       success: true,
@@ -620,9 +620,9 @@ export class AudioVideoDeviceAccess {
   }
 
   private async adjustScreenResolution(
-    device: AudioVideoDevice,
+    _device: AudioVideoDevice,
     _parameters: Record<string, unknown>
-  ): Promise<any> {
+  ): Promise<Record<string, unknown>> {
     return {
       success: true,
       message: '屏幕分辨率调整成功',

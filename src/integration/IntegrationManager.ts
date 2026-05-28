@@ -17,7 +17,10 @@ import { QQAdapter } from './adapters/QQAdapter';
 import { EventBus } from '../shared/EventBus';
 import type { JiabaixingCore } from '../core/JiabaixingCore';
 
-const PLATFORM_INFO: Record<IntegrationPlatform, Omit<IntegrationPlatformInfo, 'status' | 'available'>> = {
+const PLATFORM_INFO: Record<
+  IntegrationPlatform,
+  Omit<IntegrationPlatformInfo, 'status' | 'available'>
+> = {
   wechat: {
     id: 'wechat',
     name: '微信',
@@ -67,7 +70,10 @@ export class IntegrationManager {
 
   setCore(core: JiabaixingCore): void {
     this.core = core;
-    Logger.info('✅ JiabaixingCore 已注入到 IntegrationManager', 'IntegrationManager');
+    Logger.info(
+      '✅ JiabaixingCore 已注入到 IntegrationManager',
+      'IntegrationManager'
+    );
   }
 
   private initializeAdapters(): void {
@@ -80,7 +86,7 @@ export class IntegrationManager {
     // 为每个适配器注册消息处理
     for (const adapter of this.adapters.values()) {
       adapter.onMessage(async (message: IncomingMessageEvent) => {
-        this.handleIncomingMessage(message);
+        void this.handleIncomingMessage(message);
       });
     }
 
@@ -100,16 +106,22 @@ export class IntegrationManager {
       return;
     }
 
-    Logger.info('检测到 QQ 环境变量配置，正在自动连接...', 'IntegrationManager');
+    Logger.info(
+      '检测到 QQ 环境变量配置，正在自动连接...',
+      'IntegrationManager'
+    );
 
     // 等待 2 秒让系统完全就绪
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    await new Promise((resolve) => setTimeout(resolve, 2000));
 
     const success = await this.connectPlatform('qq', qqConfig);
     if (success) {
       Logger.info('QQ 机器人自动连接成功', 'IntegrationManager');
     } else {
-      Logger.warn('QQ 机器人自动连接失败，将在后台自动重试', 'IntegrationManager');
+      Logger.warn(
+        'QQ 机器人自动连接失败，将在后台自动重试',
+        'IntegrationManager'
+      );
     }
   }
 
@@ -141,7 +153,7 @@ export class IntegrationManager {
       const qrAdapter = new WeChatQRAdapter();
       this.adapters.set('wechat', qrAdapter);
       qrAdapter.onMessage(async (message: IncomingMessageEvent) => {
-        this.handleIncomingMessage(message);
+        void this.handleIncomingMessage(message);
       });
     }
 
@@ -190,9 +202,7 @@ export class IntegrationManager {
   /**
    * 发送消息到指定平台
    */
-  async sendMessage(
-    request: SendMessageRequest
-  ): Promise<SendMessageResponse> {
+  async sendMessage(request: SendMessageRequest): Promise<SendMessageResponse> {
     const adapter = this.adapters.get(request.platform);
     if (!adapter) {
       return {
@@ -234,7 +244,11 @@ export class IntegrationManager {
   /**
    * 获取微信 QR 扫码状态（仅限 QR 模式）
    */
-  getWeChatQRState(): { qrCodeBase64: string | null; status: string; botNickname: string | null } | null {
+  getWeChatQRState(): {
+    qrCodeBase64: string | null;
+    status: string;
+    botNickname: string | null;
+  } | null {
     const adapter = this.adapters.get('wechat');
     if (adapter instanceof WeChatQRAdapter) {
       const state = adapter.getQRState();
@@ -250,7 +264,9 @@ export class IntegrationManager {
   /**
    * 处理收到的消息
    */
-  private async handleIncomingMessage(message: IncomingMessageEvent): Promise<void> {
+  private async handleIncomingMessage(
+    message: IncomingMessageEvent
+  ): Promise<void> {
     Logger.info(
       `收到来自 ${message.platform} 的消息: ${message.from}`,
       'IntegrationManager'

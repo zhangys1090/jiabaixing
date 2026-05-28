@@ -22,7 +22,8 @@ export const CODE_ANALYZE_DEF: ToolDefinition = {
     },
     analysisType: {
       type: 'string',
-      description: '分析类型: comprehensive=综合分析, security=安全检查, performance=性能分析',
+      description:
+        '分析类型: comprehensive=综合分析, security=安全检查, performance=性能分析',
       enum: ['comprehensive', 'security', 'performance'],
       default: 'comprehensive',
     },
@@ -66,7 +67,11 @@ export function createCodeAnalyzeExecutor(deps: CodeAnalyzeDeps) {
       const issues = performBasicAnalysis(code, analysisType);
       return {
         success: true,
-        output: formatAnalysisResult(issues, 0, '基础静态分析（LLM分析不可用）'),
+        output: formatAnalysisResult(
+          issues,
+          0,
+          '基础静态分析（LLM分析不可用）'
+        ),
         duration: 0,
         validated: false,
         metadata: { analysisType, fallback: true },
@@ -111,7 +116,11 @@ export function createCodeAnalyzeExecutor(deps: CodeAnalyzeDeps) {
 function performBasicAnalysis(
   code: string,
   analysisType: string
-): Array<{ severity: 'error' | 'warning' | 'info'; message: string; line?: number }> {
+): Array<{
+  severity: 'error' | 'warning' | 'info';
+  message: string;
+  line?: number;
+}> {
   const issues: Array<{
     severity: 'error' | 'warning' | 'info';
     message: string;

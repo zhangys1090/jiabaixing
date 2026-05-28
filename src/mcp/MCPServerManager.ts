@@ -6,6 +6,12 @@
 import { EventEmitter } from 'events';
 import { Logger } from '../utils/Logger';
 
+interface MockServerProcess {
+  pid: number;
+  status: string;
+  startTime: number;
+}
+
 export interface MCPServerConfig {
   name: string;
   command: string;
@@ -30,7 +36,7 @@ export interface MCPMessage {
 export class MCPServerManager extends EventEmitter {
   private static instance: MCPServerManager | null = null;
   private servers: Map<string, MCPServerConfig> = new Map();
-  private serverProcesses: Map<string, any> = new Map();
+  private serverProcesses: Map<string, MockServerProcess> = new Map();
   private messageHandlers: Map<string, (message: MCPMessage) => void> =
     new Map();
 

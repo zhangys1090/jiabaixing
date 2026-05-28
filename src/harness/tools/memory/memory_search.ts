@@ -21,7 +21,8 @@ export const MEMORY_SEARCH_DEF: ToolDefinition = {
     },
     category: {
       type: 'string',
-      description: '记忆分类过滤: preference=偏好, fact=事实, task=任务, event=事件',
+      description:
+        '记忆分类过滤: preference=偏好, fact=事实, task=任务, event=事件',
       enum: ['preference', 'fact', 'task', 'event'],
     },
     limit: {
@@ -43,7 +44,9 @@ export interface MemorySearchDeps {
     keywords: string;
     category?: string;
     limit: number;
-  }) => Promise<Array<{ content: string; category: string; timestamp: number }>>;
+  }) => Promise<
+    Array<{ content: string; category: string; timestamp: number }>
+  >;
 }
 
 /** 创建 memory_search 执行器 */
@@ -82,10 +85,7 @@ export function createMemorySearchExecutor(deps: MemorySearchDeps) {
       }
 
       const formatted = results
-        .map(
-          (m, i) =>
-            `${i + 1}. [${m.category}] ${m.content}`
-        )
+        .map((m, i) => `${i + 1}. [${m.category}] ${m.content}`)
         .join('\n');
 
       return {

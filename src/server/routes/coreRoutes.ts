@@ -2,7 +2,7 @@
  * 核心路由 - health / models / process / evolution(版本列表) / correct / logs
  */
 
-import express, { Request, Response } from 'express';
+import express from 'express';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -22,7 +22,7 @@ export function registerCoreRoutes(
       status: 'healthy',
       timestamp: new Date().toISOString(),
       uptime: process.uptime(),
-      model: process.env.LLM_MODEL || 'qwen2.5-vl',
+      model: process.env.LLM_MODEL || 'deepseek-chat',
       autoOptimize: process.env.ENABLE_AUTO_OPTIMIZE !== 'false',
       llm: llmHealth || { available: false, message: 'not initialized' },
     });
@@ -33,8 +33,8 @@ export function registerCoreRoutes(
       success: true,
       data: [
         {
-          id: process.env.LLM_MODEL || 'qwen2.5-vl',
-          name: 'Qwen 2.5 VL',
+          id: process.env.LLM_MODEL || 'deepseek-chat',
+          name: 'DeepSeek Chat',
           status: 'available',
           version: '2.5',
           description: '通义千问2.5 VL，通过OpenAI兼容接口加载',
@@ -42,6 +42,134 @@ export function registerCoreRoutes(
       ],
     });
   });
+
+  app.get('/api/models/status', async (_req, res) => {
+    try {
+      const { MultiModelLLMProvider } =
+        await import('../../models/MultiModelLLMProvider');
+      const provider = MultiModelLLMProvider.getInstance();
+      await provider.initialize();
+
+      const currentModel = process.env.LLM_MODEL || 'deepseek-chat';
+      const models = provider.getAvailableModels();
+
+      res.json({
+        success: true,
+        data: {
+          currentModel,
+          models,
+          status: 'running',
+          timestamp: new Date().toISOString(),
+        },
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: (error as Error).message,
+      });
+    }
+  });
+
+  app.get('/api/models/health', async (_req, res) => {
+    try {
+      const { MultiModelLLMProvider } =
+        await import('../../models/MultiModelLLMProvider');
+      const provider = MultiModelLLMProvider.getInstance();
+      await provider.initialize();
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const healthStatus = (provider as any).modelHealthStatus || new Map();
+      const models = provider.getAvailableModels();
+
+      const modelHealthList = models.map((model) => {
+        const health = healthStatus.get(model.id) || {
+          successCount: 0,
+          failureCount: 0,
+          avgLatency: 0,
+          lastError: null,
+        };
+
+        const totalCalls = health.successCount + health.failureCount;
+        const successRate =
+          totalCalls > 0 ? (health.successCount / totalCalls) * 100 : 100;
+
+        return {
+          modelId: model.id,
+          modelName: model.name,
+          available: successRate > 50,
+          successRate: Math.round(successRate),
+          totalCalls,
+          avgLatency: health.avgLatency || 0,
+          lastSuccess: health.lastSuccess || null,
+          lastError: health.lastError || null,
+        };
+      });
+
+      res.json({
+        success: true,
+        data: {
+          models: modelHealthList,
+          timestamp: new Date().toISOString(),
+        },
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: (error as Error).message,
+      });
+    }
+  });
+
+  app.post(
+    '/api/models/switch',
+    express.json({ limit: '1mb' }),
+    async (req, res) => {
+      try {
+        const { targetModel, reason } = req.body as {
+          targetModel?: string;
+          reason?: string;
+        };
+
+        if (!targetModel) {
+          return res.status(400).json({
+            success: false,
+            error: '请提供目标模型名称',
+          });
+        }
+
+        const { MultiModelLLMProvider } =
+          await import('../../models/MultiModelLLMProvider');
+        const provider = MultiModelLLMProvider.getInstance();
+
+        const availableModels = provider.getAvailableModels();
+        const modelExists = availableModels.some((m) => m.id === targetModel);
+
+        if (!modelExists) {
+          return res.status(404).json({
+            success: false,
+            error: `模型 ${targetModel} 不存在`,
+          });
+        }
+
+        process.env.LLM_MODEL = targetModel;
+
+        Logger.info(`模型已切换为: ${targetModel}`, 'Models', {
+          reason: reason || '用户手动切换',
+        });
+
+        res.json({
+          success: true,
+          message: `模型已成功切换为 ${targetModel}`,
+          currentModel: targetModel,
+        });
+      } catch (error) {
+        res.status(500).json({
+          success: false,
+          error: (error as Error).message,
+        });
+      }
+    }
+  );
 
   app.post(
     '/api/process',
@@ -202,5 +330,59 @@ export function registerCoreRoutes(
     });
 
     Logger.info('📝 新的日志流客户端已连接', 'SSE');
+  });
+
+  // ── Desktop 面板 API ──
+  app.post('/api/desktop/screenshot', async (_req, res) => {
+    try {
+      const harness = core?.getHarness();
+      if (!harness) {
+        return res.json({ success: false, error: 'Harness 未初始化', mock: true, data: { screenshot: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMDAiIGhlaWdodD0iMTUwIj48cmVjdCBmaWxsPSIjMjIyMjQ2IiB3aWR0aD0iMjAwIiBoZWlnaHQ9IjE1MCIvPjx0ZXh0IGZpbGw9IiM2MDYwYTAiIHg9IjUwJSIgeT0iNTAlIiBkb21pbmFudC1iYXNlbGluZT0ibWlkZGxlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5EZXNrdG9wIFBhbmVsIC0g5bqT55SoIEhhcm5lc3Mg5bel5YW354K55Ye7PC90ZXh0Pjwvc3ZnPg==' } });
+      }
+      const registry = harness.getToolRegistry();
+      if (!registry) {
+        return res.json({ success: false, error: '工具注册表不可用' });
+      }
+      const result = await registry.execute('desktop_screenshot', { screenIndex: 0 }, {
+        userId: 'api',
+        traceId: `screenshot_${Date.now()}`,
+        permissions: new Set(),
+        metadata: {},
+      });
+      // 截图工具返回 buffer，需要转 base64
+      const buffer = result.output as { buffer?: Buffer; width?: number; height?: number };
+      let screenshotData: string;
+      if (buffer?.buffer) {
+        const base64 = Buffer.from(buffer.buffer).toString('base64');
+        screenshotData = `data:image/png;base64,${base64}`;
+      } else {
+        // fallback: 返回 mock 图
+        screenshotData = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMDAiIGhlaWdodD0iMTUwIj48cmVjdCBmaWxsPSIjMjIyMjQ2IiB3aWR0aD0iMjAwIiBoZWlnaHQ9IjE1MCIvPjx0ZXh0IGZpbGw9IiM2MDYwYTAiIHg9IjUwJSIgeT0iNTAlIiBkb21pbmFudC1iYXNlbGluZT0ibWlkZGxlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj7mjqXlnovlt6Xlhbs8L3RleHQ+PC9zdmc+';
+      }
+      res.json({ success: true, data: { screenshot: screenshotData } });
+    } catch (error) {
+      Logger.error('❌ 截图失败', error as Error, 'DesktopAPI');
+      res.json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  app.post('/api/desktop/automate', express.json({ limit: '1mb' }), async (req, res) => {
+    try {
+      const { task } = req.body as { task?: string };
+      if (!task) return res.json({ success: false, error: '缺少 task 参数' });
+      const harness = core?.getHarness();
+      if (!harness) return res.json({ success: false, error: 'Harness 未初始化' });
+      const registry = harness.getToolRegistry();
+      if (!registry) return res.json({ success: false, error: '工具注册表不可用' });
+      const result = await registry.execute('desktop_automate', { task }, {
+        userId: 'api',
+        traceId: `auto_${Date.now()}`,
+        permissions: new Set(),
+        metadata: {},
+      });
+      res.json({ success: true, data: { output: result.output } });
+    } catch (error) {
+      res.json({ success: false, error: (error as Error).message });
+    }
   });
 }

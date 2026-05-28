@@ -4,14 +4,19 @@ import * as path from 'path';
 import { Logger } from '../utils/Logger';
 import { UIElementParser } from './ui/UIElementParser';
 import {
-  UIAControlType,
   UIElement,
   UIElementNode,
   ElementQueryResult,
   UIInspectorConfig,
 } from './ui/types';
 
-export { UIAControlType, UIElement, UIElementNode, ElementQueryResult, UIInspectorConfig } from './ui/types';
+export {
+  UIAControlType,
+  UIElement,
+  UIElementNode,
+  ElementQueryResult,
+  UIInspectorConfig,
+} from './ui/types';
 
 export class DesktopUIInspector {
   private static instance: DesktopUIInspector | null = null;

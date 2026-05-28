@@ -1,9 +1,181 @@
 import type { User, RiskLevel, RiskAssessment } from './types';
+import { Logger } from '../utils/Logger';
+
+export type CircuitState = 'closed' | 'open' | 'half_open';
+
+export interface CircuitBreakerConfig {
+  failureThreshold: number;
+  recoveryTimeoutMs: number;
+  halfOpenMaxRequests: number;
+  monitorIntervalMs: number;
+}
+
+const DEFAULT_CIRCUIT_CONFIG: CircuitBreakerConfig = {
+  failureThreshold: 5,
+  recoveryTimeoutMs: 30000,
+  halfOpenMaxRequests: 1,
+  monitorIntervalMs: 10000,
+};
+
+export class CircuitBreaker {
+  private state: CircuitState = 'closed';
+  private failureCount = 0;
+  private successCount = 0;
+  private lastFailureTime = 0;
+  private halfOpenRequests = 0;
+  private readonly config: CircuitBreakerConfig;
+  private readonly name: string;
+
+  constructor(name: string, config?: Partial<CircuitBreakerConfig>) {
+    this.name = name;
+    this.config = { ...DEFAULT_CIRCUIT_CONFIG, ...config };
+  }
+
+  getState(): CircuitState {
+    if (this.state === 'open') {
+      if (Date.now() - this.lastFailureTime >= this.config.recoveryTimeoutMs) {
+        this.state = 'half_open';
+        this.halfOpenRequests = 0;
+        Logger.info(`🔓 熔断器 [${this.name}] 进入半开状态`, 'CircuitBreaker');
+      }
+    }
+    return this.state;
+  }
+
+  canExecute(): boolean {
+    const state = this.getState();
+    if (state === 'closed') return true;
+    if (state === 'half_open') {
+      return this.halfOpenRequests < this.config.halfOpenMaxRequests;
+    }
+    return false;
+  }
+
+  recordSuccess(): void {
+    if (this.state === 'half_open') {
+      this.successCount++;
+      if (this.successCount >= this.config.halfOpenMaxRequests) {
+        this.state = 'closed';
+        this.failureCount = 0;
+        this.successCount = 0;
+        Logger.info(
+          `✅ 熔断器 [${this.name}] 恢复为关闭状态`,
+          'CircuitBreaker'
+        );
+      }
+    } else {
+      this.failureCount = Math.max(0, this.failureCount - 1);
+    }
+  }
+
+  recordFailure(): void {
+    this.failureCount++;
+    this.lastFailureTime = Date.now();
+
+    if (this.state === 'half_open') {
+      this.state = 'open';
+      this.successCount = 0;
+      Logger.warn(
+        `🔒 熔断器 [${this.name}] 半开状态失败，重新开启`,
+        'CircuitBreaker'
+      );
+      return;
+    }
+
+    if (this.failureCount >= this.config.failureThreshold) {
+      this.state = 'open';
+      Logger.warn(
+        `🔒 熔断器 [${this.name}] 开启 (失败${this.failureCount}次 >= 阈值${this.config.failureThreshold})`,
+        'CircuitBreaker'
+      );
+    }
+  }
+
+  getStats(): {
+    name: string;
+    state: CircuitState;
+    failureCount: number;
+    successCount: number;
+  } {
+    return {
+      name: this.name,
+      state: this.getState(),
+      failureCount: this.failureCount,
+      successCount: this.successCount,
+    };
+  }
+
+  reset(): void {
+    this.state = 'closed';
+    this.failureCount = 0;
+    this.successCount = 0;
+    this.halfOpenRequests = 0;
+  }
+}
+
+export interface SlidingWindowEntry {
+  timestamp: number;
+}
+
+export class SlidingWindowRateLimiter {
+  private windows: Map<string, SlidingWindowEntry[]> = new Map();
+  private readonly limit: number;
+  private readonly windowMs: number;
+
+  constructor(limit: number = 60, windowMs: number = 60000) {
+    this.limit = limit;
+    this.windowMs = windowMs;
+  }
+
+  check(key: string): { allowed: boolean; remaining: number; resetIn: number } {
+    const now = Date.now();
+    const cutoff = now - this.windowMs;
+
+    let entries = this.windows.get(key) || [];
+    entries = entries.filter((e) => e.timestamp > cutoff);
+
+    if (entries.length >= this.limit) {
+      const oldestInWindow = entries[0];
+      const resetIn = oldestInWindow
+        ? oldestInWindow.timestamp + this.windowMs - now
+        : this.windowMs;
+      this.windows.set(key, entries);
+      return { allowed: false, remaining: 0, resetIn: Math.max(0, resetIn) };
+    }
+
+    entries.push({ timestamp: now });
+    this.windows.set(key, entries);
+    return {
+      allowed: true,
+      remaining: this.limit - entries.length,
+      resetIn: this.windowMs,
+    };
+  }
+
+  getRemaining(key: string): number {
+    const now = Date.now();
+    const cutoff = now - this.windowMs;
+    const entries = (this.windows.get(key) || []).filter(
+      (e) => e.timestamp > cutoff
+    );
+    return Math.max(0, this.limit - entries.length);
+  }
+
+  reset(key?: string): void {
+    if (key) {
+      this.windows.delete(key);
+    } else {
+      this.windows.clear();
+    }
+  }
+}
 
 export class SecurityPolicyEngine {
   private static instance: SecurityPolicyEngine;
   private rateLimits: Map<string, { count: number; lastReset: number }> =
     new Map();
+  private slidingWindowLimiter: SlidingWindowRateLimiter;
+  private circuitBreakers: Map<string, CircuitBreaker> = new Map();
 
   private promptInjectionPatterns: RegExp[] = [
     /(ignore previous|forget previous|reset|clear context)/i,
@@ -31,7 +203,9 @@ export class SecurityPolicyEngine {
     /(malware|virus|trojan)/i,
   ];
 
-  private constructor() {}
+  private constructor() {
+    this.slidingWindowLimiter = new SlidingWindowRateLimiter(60, 60000);
+  }
 
   static getInstance(): SecurityPolicyEngine {
     if (!SecurityPolicyEngine.instance) {
@@ -251,5 +425,55 @@ export class SecurityPolicyEngine {
 
   clearRateLimits(): void {
     this.rateLimits.clear();
+    this.slidingWindowLimiter.reset();
+  }
+
+  /**
+   * 滑动窗口限流检查（比固定窗口更精确）
+   */
+  checkSlidingWindowRateLimit(
+    key: string,
+    limit?: number,
+    windowMs?: number
+  ): { allowed: boolean; remaining: number; resetIn: number } {
+    if (limit && windowMs && (limit !== 60 || windowMs !== 60000)) {
+      const limiter = new SlidingWindowRateLimiter(limit, windowMs);
+      return limiter.check(key);
+    }
+    return this.slidingWindowLimiter.check(key);
+  }
+
+  /**
+   * 获取或创建熔断器
+   */
+  getCircuitBreaker(
+    name: string,
+    config?: Partial<CircuitBreakerConfig>
+  ): CircuitBreaker {
+    if (!this.circuitBreakers.has(name)) {
+      this.circuitBreakers.set(name, new CircuitBreaker(name, config));
+    }
+    return this.circuitBreakers.get(name)!;
+  }
+
+  /**
+   * 检查熔断器是否允许执行
+   */
+  canExecuteWithCircuitBreaker(name: string): boolean {
+    const breaker = this.circuitBreakers.get(name);
+    if (!breaker) return true;
+    return breaker.canExecute();
+  }
+
+  /**
+   * 获取所有熔断器状态
+   */
+  getAllCircuitBreakerStats(): Array<{
+    name: string;
+    state: CircuitState;
+    failureCount: number;
+    successCount: number;
+  }> {
+    return Array.from(this.circuitBreakers.values()).map((cb) => cb.getStats());
   }
 }

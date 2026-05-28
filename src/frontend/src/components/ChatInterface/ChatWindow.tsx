@@ -90,7 +90,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerHeight, setContainerHeight] = React.useState(600);
 
-  const { metrics, startRender, endRender } = usePerformanceMonitor({
+  const { startRender, endRender } = usePerformanceMonitor({
     enabled: process.env.NODE_ENV === 'development',
     logThreshold: 50,
   });

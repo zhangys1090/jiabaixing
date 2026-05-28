@@ -44,8 +44,8 @@ export class FeishuAdapter extends BaseIntegrationAdapter {
   async sendMessage(
     message: string,
     to?: string,
-    imageUrls?: string[],
-    mentions?: string[]
+    _imageUrls?: string[],
+    _mentions?: string[]
   ): Promise<SendMessageResponse> {
     if (!this.status.connected) {
       return { success: false, error: '未连接到飞书' };
@@ -53,7 +53,7 @@ export class FeishuAdapter extends BaseIntegrationAdapter {
 
     try {
       Logger.info('正在发送消息到飞书', 'FeishuAdapter', { to, message });
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await new Promise((resolve) => setTimeout(resolve, 200));
 
       return {
         success: true,
@@ -90,20 +90,20 @@ export class FeishuAdapter extends BaseIntegrationAdapter {
         const sender = event.sender as Record<string, unknown>;
         const senderId = sender.sender_id as Record<string, unknown>;
         const message = event.message as Record<string, unknown>;
-        const contentRaw = message.content as string || '{}';
+        const contentRaw = (message.content as string) || '{}';
         let content: Record<string, unknown> = {};
         try {
           content = JSON.parse(contentRaw);
-        } catch (e) {
+        } catch {
           content = {};
         }
 
         const incomingMessage: IncomingMessageEvent = {
           platform: 'feishu',
           type: content.image_key ? 'image' : 'text',
-          content: content.text as string || '',
-          from: senderId.open_id as string || '',
-          fromName: senderId.name as string || '',
+          content: (content.text as string) || '',
+          from: (senderId.open_id as string) || '',
+          fromName: (senderId.name as string) || '',
           timestamp: new Date().toISOString(),
           rawData: payload,
         };

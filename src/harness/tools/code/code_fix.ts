@@ -17,7 +17,8 @@ export const CODE_FIX_DEF: ToolDefinition = {
     },
     errorDescription: {
       type: 'string',
-      description: '错误描述或修复要求，如"TypeError: Cannot read property of undefined"、"修复SQL注入漏洞"',
+      description:
+        '错误描述或修复要求，如"TypeError: Cannot read property of undefined"、"修复SQL注入漏洞"',
     },
     language: {
       type: 'string',
@@ -88,10 +89,7 @@ export function createCodeFixExecutor(deps: CodeFixDeps) {
       });
 
       const changeList = result.changes
-        .map(
-          (c) =>
-            `- [${c.type}] ${c.description}`
-        )
+        .map((c) => `- [${c.type}] ${c.description}`)
         .join('\n');
 
       const output = `修复完成，变更如下：\n${changeList}\n\n\`\`\`${language}\n${result.fixedCode}\n\`\`\``;
@@ -123,12 +121,20 @@ function performBasicFix(
   language: string
 ): {
   fixedCode: string;
-  changes: Array<{ type: 'fix' | 'improvement' | 'refactor'; description: string }>;
+  changes: Array<{
+    type: 'fix' | 'improvement' | 'refactor';
+    description: string;
+  }>;
 } {
-  const changes: Array<{ type: 'fix' | 'improvement' | 'refactor'; description: string }> = [];
+  const changes: Array<{
+    type: 'fix' | 'improvement' | 'refactor';
+    description: string;
+  }> = [];
   let fixed = code;
 
-  const isJsLike = ['typescript', 'javascript', 'ts', 'js'].includes(language.toLowerCase());
+  const isJsLike = ['typescript', 'javascript', 'ts', 'js'].includes(
+    language.toLowerCase()
+  );
   const isPython = ['python', 'py'].includes(language.toLowerCase());
 
   if (isJsLike) {
@@ -140,7 +146,10 @@ function performBasicFix(
         const isReassigned = new RegExp(`\\b${name}\\s*=`).test(rest);
         return `${isReassigned ? 'let' : 'const'} ${name} =`;
       });
-      changes.push({ type: 'improvement', description: `替换 var 为 const/let (${varMatches.length}处)` });
+      changes.push({
+        type: 'improvement',
+        description: `替换 var 为 const/let (${varMatches.length}处)`,
+      });
     }
 
     const eqRegex = /([^=!<>])={2}([^=])/g;
@@ -167,7 +176,9 @@ function performBasicFix(
         !trimmed.startsWith('/*')
       ) {
         if (
-          /^(?:const|let|var|return|throw|break|continue|import|export)\s/.test(trimmed) ||
+          /^(?:const|let|var|return|throw|break|continue|import|export)\s/.test(
+            trimmed
+          ) ||
           /^\w+\.\w+\(.*\)$/.test(trimmed) ||
           /^\w+\s*=/.test(trimmed)
         ) {
@@ -188,7 +199,10 @@ function performBasicFix(
     const trailingSemiRegex = /;+\s*$/gm;
     if (trailingSemiRegex.test(fixed)) {
       fixed = fixed.replace(/;+\s*$/gm, '');
-      changes.push({ type: 'improvement', description: '移除Python代码中的尾部分号' });
+      changes.push({
+        type: 'improvement',
+        description: '移除Python代码中的尾部分号',
+      });
     }
   }
 

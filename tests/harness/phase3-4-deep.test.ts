@@ -493,6 +493,9 @@ describe('持久化层深度集成', () => {
 
     const persistence = harness.getPersistenceService()!;
 
+    const existingToolMetrics = persistence.getEvolutionMetrics('tool_success_rate').length;
+    const existingAllMetrics = persistence.getEvolutionMetrics().length;
+
     for (let i = 0; i < 5; i++) {
       persistence.recordEvolutionMetric({
         metricType: 'tool_success_rate',
@@ -508,10 +511,10 @@ describe('持久化层深度集成', () => {
     });
 
     const toolMetrics = persistence.getEvolutionMetrics('tool_success_rate');
-    expect(toolMetrics).toHaveLength(5);
+    expect(toolMetrics).toHaveLength(existingToolMetrics + 5);
 
     const allMetrics = persistence.getEvolutionMetrics();
-    expect(allMetrics).toHaveLength(6);
+    expect(allMetrics).toHaveLength(existingAllMetrics + 6);
 
     const limitedMetrics = persistence.getEvolutionMetrics(undefined, 3);
     expect(limitedMetrics).toHaveLength(3);

@@ -203,7 +203,10 @@ export class ScenarioAwareScheduler {
     const task = this.tasks.get(taskId);
     if (task) {
       task.enabled = enabled ?? !task.enabled;
-      Logger.info(`${task.enabled ? '启用' : '禁用'} 任务: ${task.name}`, 'ScenarioAwareScheduler');
+      Logger.info(
+        `${task.enabled ? '启用' : '禁用'} 任务: ${task.name}`,
+        'ScenarioAwareScheduler'
+      );
     }
   }
 
@@ -216,7 +219,11 @@ export class ScenarioAwareScheduler {
     }
   }
 
-  public getProactiveTriggers(): Array<{ type: string; reason: string; priority: number }> {
+  public getProactiveTriggers(): Array<{
+    type: string;
+    reason: string;
+    priority: number;
+  }> {
     return [];
   }
 

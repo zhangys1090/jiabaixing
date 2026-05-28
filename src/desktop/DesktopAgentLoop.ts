@@ -169,6 +169,7 @@ export class DesktopAgentLoop {
     input: string,
     observation: DesktopObservation
   ): DesktopAction[] {
+    void observation;
     const lower = input.toLowerCase().trim();
     const actions: DesktopAction[] = [];
 

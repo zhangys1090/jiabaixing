@@ -25,6 +25,11 @@ module.exports = {
       return webpackConfig;
     },
   },
+  devServer: {
+    allowedHosts: 'all',
+    host: 'localhost',
+    port: process.env.PORT || 3100,
+  },
   jest: {
     configure: (jestConfig) => {
       jestConfig.moduleNameMapper = {

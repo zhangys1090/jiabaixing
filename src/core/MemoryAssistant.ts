@@ -198,7 +198,10 @@ export class MemoryAssistant {
     // 3. 存储
     for (const item of extracted) {
       try {
-        await this.memoryEngine.storeShortTermMemory(item.content, item.category);
+        await this.memoryEngine.storeShortTermMemory(
+          item.content,
+          item.category
+        );
         Logger.info(
           `🧠 自动提取知识: [${item.category}] ${item.content}`,
           'MemoryAssistant'

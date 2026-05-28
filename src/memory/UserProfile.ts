@@ -12,21 +12,159 @@ import { Logger } from '../utils/Logger';
 const fileSystem = FileSystem.getInstance();
 
 // 预编译的关键词索引 - 已精简
-const _FOOD_KEYWORDS = new Set(['火锅', '烧烤', '日料', '西餐', '中餐', '咖啡', '奶茶', '甜品', '素食', '辣', '清淡', '外卖', '做饭', '烹饪']);
-const _EXERCISE_KEYWORDS = new Set(['跑步', '游泳', '健身', '瑜伽', '篮球', '足球', '骑行', '散步', '爬山', '网球', '羽毛球', '运动']);
-const _ENTERTAINMENT_KEYWORDS = new Set(['电影', '音乐', '游戏', '看书', '阅读', '追剧', '综艺', '动漫', '摄影', '画画', '旅行', '冥想']);
-const _LANGUAGE_KEYWORDS = new Set(['javascript', 'typescript', 'python', 'java', 'go', 'c++', 'c#', 'rust', 'php', 'ruby', 'swift', 'kotlin']);
-const _FRAMEWORK_KEYWORDS = new Set(['react', 'angular', 'vue', 'node.js', 'express', 'django', 'spring', 'flask', 'laravel', 'symfony', 'asp.net', 'next.js', 'nuxt.js', 'svelte']);
-const _PROJECT_STRUCTURE_KEYWORDS = new Set(['src', 'components', 'utils', 'api', 'views', 'pages', 'services', 'models', 'controllers', 'routes', 'middlewares', 'config', 'assets']);
-const _TOOL_KEYWORDS = new Set(['vscode', 'intellij', 'sublime', 'vim', 'emacs', 'git', 'docker', 'npm', 'yarn', 'pip', 'maven', 'gradle']);
-const CODE_ORGANIZATION_MAP: Record<string, string> = { modular: 'modular', functional: 'functional', 'object-oriented': 'object-oriented', 'component-based': 'component-based', 'service-oriented': 'service-oriented' };
-const TESTING_APPROACH_MAP: Record<string, string> = { 'unit-testing': 'unit-testing', 'integration-testing': 'integration-testing', 'end-to-end-testing': 'end-to-end-testing', tdd: 'tdd', bdd: 'bdd' };
-const DOCUMENTATION_STYLE_MAP: Record<string, string> = { jsdoc: 'jsdoc', tsdoc: 'tsdoc', docstring: 'docstring', markdown: 'markdown', swagger: 'swagger' };
-const VERSION_CONTROL_MAP: Record<string, string> = { git: 'git', svn: 'svn', mercurial: 'mercurial' };
-const DEPLOYMENT_MAP: Record<string, string> = { continuous: 'continuous', manual: 'manual', 'ci/cd': 'ci/cd', docker: 'docker', kubernetes: 'kubernetes' };
-const PERFORMANCE_MAP: Record<string, string> = { profiling: 'profiling', caching: 'caching', optimization: 'optimization', benchmarking: 'benchmarking' };
-const SECURITY_MAP: Record<string, string> = { owasp: 'owasp', security: 'security', encryption: 'encryption', authentication: 'authentication' };
-const CODE_REVIEW_MAP: Record<string, string> = { 'pull-request': 'pull-request', 'code-review': 'code-review', 'peer-review': 'peer-review' };
+const _FOOD_KEYWORDS = new Set([
+  '火锅',
+  '烧烤',
+  '日料',
+  '西餐',
+  '中餐',
+  '咖啡',
+  '奶茶',
+  '甜品',
+  '素食',
+  '辣',
+  '清淡',
+  '外卖',
+  '做饭',
+  '烹饪',
+]);
+const _EXERCISE_KEYWORDS = new Set([
+  '跑步',
+  '游泳',
+  '健身',
+  '瑜伽',
+  '篮球',
+  '足球',
+  '骑行',
+  '散步',
+  '爬山',
+  '网球',
+  '羽毛球',
+  '运动',
+]);
+const _ENTERTAINMENT_KEYWORDS = new Set([
+  '电影',
+  '音乐',
+  '游戏',
+  '看书',
+  '阅读',
+  '追剧',
+  '综艺',
+  '动漫',
+  '摄影',
+  '画画',
+  '旅行',
+  '冥想',
+]);
+const _LANGUAGE_KEYWORDS = new Set([
+  'javascript',
+  'typescript',
+  'python',
+  'java',
+  'go',
+  'c++',
+  'c#',
+  'rust',
+  'php',
+  'ruby',
+  'swift',
+  'kotlin',
+]);
+const _FRAMEWORK_KEYWORDS = new Set([
+  'react',
+  'angular',
+  'vue',
+  'node.js',
+  'express',
+  'django',
+  'spring',
+  'flask',
+  'laravel',
+  'symfony',
+  'asp.net',
+  'next.js',
+  'nuxt.js',
+  'svelte',
+]);
+const _PROJECT_STRUCTURE_KEYWORDS = new Set([
+  'src',
+  'components',
+  'utils',
+  'api',
+  'views',
+  'pages',
+  'services',
+  'models',
+  'controllers',
+  'routes',
+  'middlewares',
+  'config',
+  'assets',
+]);
+const _TOOL_KEYWORDS = new Set([
+  'vscode',
+  'intellij',
+  'sublime',
+  'vim',
+  'emacs',
+  'git',
+  'docker',
+  'npm',
+  'yarn',
+  'pip',
+  'maven',
+  'gradle',
+]);
+const CODE_ORGANIZATION_MAP: Record<string, string> = {
+  modular: 'modular',
+  functional: 'functional',
+  'object-oriented': 'object-oriented',
+  'component-based': 'component-based',
+  'service-oriented': 'service-oriented',
+};
+const TESTING_APPROACH_MAP: Record<string, string> = {
+  'unit-testing': 'unit-testing',
+  'integration-testing': 'integration-testing',
+  'end-to-end-testing': 'end-to-end-testing',
+  tdd: 'tdd',
+  bdd: 'bdd',
+};
+const DOCUMENTATION_STYLE_MAP: Record<string, string> = {
+  jsdoc: 'jsdoc',
+  tsdoc: 'tsdoc',
+  docstring: 'docstring',
+  markdown: 'markdown',
+  swagger: 'swagger',
+};
+const VERSION_CONTROL_MAP: Record<string, string> = {
+  git: 'git',
+  svn: 'svn',
+  mercurial: 'mercurial',
+};
+const DEPLOYMENT_MAP: Record<string, string> = {
+  continuous: 'continuous',
+  manual: 'manual',
+  'ci/cd': 'ci/cd',
+  docker: 'docker',
+  kubernetes: 'kubernetes',
+};
+const PERFORMANCE_MAP: Record<string, string> = {
+  profiling: 'profiling',
+  caching: 'caching',
+  optimization: 'optimization',
+  benchmarking: 'benchmarking',
+};
+const SECURITY_MAP: Record<string, string> = {
+  owasp: 'owasp',
+  security: 'security',
+  encryption: 'encryption',
+  authentication: 'authentication',
+};
+const CODE_REVIEW_MAP: Record<string, string> = {
+  'pull-request': 'pull-request',
+  'code-review': 'code-review',
+  'peer-review': 'peer-review',
+};
 
 /**
  * 用户基础信息

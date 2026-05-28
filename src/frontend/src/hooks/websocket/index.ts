@@ -22,6 +22,7 @@ import {
   FileRollback,
   MultiFileModified,
   UserCorrection,
+  TaskCancelled,
 } from './types';
 
 const DEFAULT_WS_URL = `ws://localhost:3111`;
@@ -29,31 +30,9 @@ const DEFAULT_WS_URL = `ws://localhost:3111`;
 export function useWebSocket(options: UseWebSocketOptions = {}): WebSocketState & {
   sendMessage: (input: string, userId?: string) => boolean;
   send: (data: Record<string, unknown>) => boolean;
+  reconnect: () => void;
 } {
-  const {
-    url = DEFAULT_WS_URL,
-    onMessage,
-    onConnectionChange,
-    onConnectionStatusChange,
-    onDialogStateChange,
-    onAgentExecutionUpdate,
-    onPerceptionUpdate,
-    onBrainStageUpdate,
-    onSkillExecutionUpdate,
-    onEvolutionEvent,
-    onClarificationRequest,
-    onExecutionPreview,
-    onFileModified,
-    onToolTrace,
-    onServerLog,
-    onResponseReady,
-    onError,
-    onProactiveMessage,
-    onWeightUpdate,
-    onFileRollback,
-    onMultiFileModified,
-    onUserCorrection,
-  } = options;
+  const { url = DEFAULT_WS_URL } = options;
 
   const [connected, setConnected] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected');
@@ -74,113 +53,125 @@ export function useWebSocket(options: UseWebSocketOptions = {}): WebSocketState 
   const [fileRollbacks, setFileRollbacks] = useState<FileRollback[]>([]);
   const [multiFileModifiedEvents, setMultiFileModifiedEvents] = useState<MultiFileModified[]>([]);
   const [userCorrections, setUserCorrections] = useState<UserCorrection[]>([]);
+  const [taskCancelledEvents, setTaskCancelledEvents] = useState<TaskCancelled[]>([]);
 
   const cleanupRef = useRef<(() => void)[]>([]);
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
 
   useEffect(() => {
     connectionManager.initialize({ url });
 
     const handleStateChange = (newConnected: boolean) => {
       setConnected(newConnected);
-      onConnectionChange?.(newConnected);
+      optionsRef.current.onConnectionChange?.(newConnected);
     };
 
     const handleConnectionStatus = (status: ConnectionStatus) => {
       setConnectionStatus(status);
-      onConnectionStatusChange?.(status);
+      optionsRef.current.onConnectionStatusChange?.(status);
     };
 
     const handleDialogState = (state: DialogStateValue) => {
       setDialogState(state);
-      onDialogStateChange?.(state);
+      optionsRef.current.onDialogStateChange?.(state);
     };
 
     const handleMessage = (message: WebSocketMessage) => {
       setMessages((prev) => [...prev.slice(-99), message]);
-      onMessage?.(message);
+      optionsRef.current.onMessage?.(message);
     };
 
     const handleAgentExecution = (update: AgentExecutionUpdate) => {
       setAgentExecutions((prev) => [...prev.slice(-19), update]);
-      onAgentExecutionUpdate?.(update);
+      optionsRef.current.onAgentExecutionUpdate?.(update);
     };
 
     const handlePerceptionUpdate = (update: PerceptionUpdate) => {
       setPerceptionUpdates((prev) => [...prev.slice(-19), update]);
-      onPerceptionUpdate?.(update);
+      optionsRef.current.onPerceptionUpdate?.(update);
     };
 
     const handleBrainStageUpdate = (update: BrainStageUpdate) => {
       setBrainStageUpdates((prev) => [...prev.slice(-19), update]);
-      onBrainStageUpdate?.(update);
+      optionsRef.current.onBrainStageUpdate?.(update);
     };
 
     const handleSkillExecution = (update: SkillExecutionUpdate) => {
       setSkillExecutions((prev) => [...prev.slice(-19), update]);
-      onSkillExecutionUpdate?.(update);
+      optionsRef.current.onSkillExecutionUpdate?.(update);
     };
 
     const handleEvolutionEvent = (event: EvolutionEvent) => {
       setEvolutionEvents((prev) => [...prev.slice(-49), event]);
-      onEvolutionEvent?.(event);
+      optionsRef.current.onEvolutionEvent?.(event);
     };
 
     const handleClarificationRequest = (request: ClarificationRequest) => {
       setClarificationRequests((prev) => [...prev.slice(-9), request]);
-      onClarificationRequest?.(request);
+      optionsRef.current.onClarificationRequest?.(request);
     };
 
     const handleExecutionPreview = (preview: ExecutionPreview) => {
       setExecutionPreviews((prev) => [...prev.slice(-9), preview]);
-      onExecutionPreview?.(preview);
+      optionsRef.current.onExecutionPreview?.(preview);
     };
 
     const handleFileModified = (event: FileModifiedEvent) => {
       setFileModifiedEvents((prev) => [...prev.slice(-19), event]);
-      onFileModified?.(event);
+      optionsRef.current.onFileModified?.(event);
     };
 
     const handleToolTrace = (event: ToolTraceEvent) => {
       setToolTraces((prev) => [...prev.slice(-49), event]);
-      onToolTrace?.(event);
+      optionsRef.current.onToolTrace?.(event);
     };
 
     const handleServerLog = (entry: ServerLogEntry) => {
-      onServerLog?.(entry);
+      optionsRef.current.onServerLog?.(entry);
     };
 
     const handleResponseReady = (response: unknown, traceId?: string) => {
-      onResponseReady?.(response, traceId);
+      optionsRef.current.onResponseReady?.(response, traceId);
     };
 
     const handleError = (error: ErrorEvent) => {
       setErrors((prev) => [...prev.slice(-9), error]);
-      onError?.(error);
+      optionsRef.current.onError?.(error);
     };
 
     const handleProactiveMessage = (message: ProactiveMessage) => {
       setProactiveMessages((prev) => [...prev.slice(-9), message]);
-      onProactiveMessage?.(message);
+      optionsRef.current.onProactiveMessage?.(message);
     };
 
     const handleWeightUpdate = (update: WeightUpdate) => {
       setWeightUpdates((prev) => [...prev.slice(-19), update]);
-      onWeightUpdate?.(update);
+      optionsRef.current.onWeightUpdate?.(update);
     };
 
     const handleFileRollback = (event: FileRollback) => {
       setFileRollbacks((prev) => [...prev.slice(-9), event]);
-      onFileRollback?.(event);
+      optionsRef.current.onFileRollback?.(event);
     };
 
     const handleMultiFileModified = (event: MultiFileModified) => {
       setMultiFileModifiedEvents((prev) => [...prev.slice(-9), event]);
-      onMultiFileModified?.(event);
+      optionsRef.current.onMultiFileModified?.(event);
     };
 
     const handleUserCorrection = (data: UserCorrection) => {
       setUserCorrections((prev) => [...prev.slice(-9), data]);
-      onUserCorrection?.(data);
+      optionsRef.current.onUserCorrection?.(data);
+    };
+
+    const handleProcessingStatus = (data: { status: string; message: string; traceId?: string }) => {
+      optionsRef.current.onProcessingStatus?.(data);
+    };
+
+    const handleTaskCancelled = (data: TaskCancelled) => {
+      setTaskCancelledEvents((prev) => [...prev.slice(-9), data]);
+      optionsRef.current.onTaskCancelled?.(data);
     };
 
     connectionManager.onStateChange(handleStateChange);
@@ -204,6 +195,8 @@ export function useWebSocket(options: UseWebSocketOptions = {}): WebSocketState 
     connectionManager.onFileRollback(handleFileRollback);
     connectionManager.onMultiFileModified(handleMultiFileModified);
     connectionManager.onUserCorrection(handleUserCorrection);
+    connectionManager.onProcessingStatus(handleProcessingStatus);
+    connectionManager.onTaskCancelled(handleTaskCancelled);
 
     cleanupRef.current = [
       () => connectionManager.offStateChange(handleStateChange),
@@ -227,6 +220,8 @@ export function useWebSocket(options: UseWebSocketOptions = {}): WebSocketState 
       () => connectionManager.offFileRollback(handleFileRollback),
       () => connectionManager.offMultiFileModified(handleMultiFileModified),
       () => connectionManager.offUserCorrection(handleUserCorrection),
+      () => connectionManager.offProcessingStatus(handleProcessingStatus),
+      () => connectionManager.offTaskCancelled(handleTaskCancelled),
     ];
 
     return () => {
@@ -240,6 +235,10 @@ export function useWebSocket(options: UseWebSocketOptions = {}): WebSocketState 
 
   const send = useCallback((data: Record<string, unknown>) => {
     return connectionManager.send(data);
+  }, []);
+
+  const reconnect = useCallback(() => {
+    connectionManager.reconnect();
   }, []);
 
   return {
@@ -263,8 +262,10 @@ export function useWebSocket(options: UseWebSocketOptions = {}): WebSocketState 
     fileRollbacks,
     multiFileModifiedEvents,
     userCorrections,
+    taskCancelledEvents,
     sendMessage,
     send,
+    reconnect,
   };
 }
 

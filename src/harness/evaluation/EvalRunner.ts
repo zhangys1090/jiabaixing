@@ -162,8 +162,7 @@ ${output}
           reasoning: String(parsed.reasoning || ''),
         };
       }
-    } catch {
-    }
+    } catch {}
 
     return {
       passed: false,

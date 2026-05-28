@@ -46,6 +46,24 @@ export interface StateTransitionRecord {
   created_at: number;
 }
 
+export interface ContextSnapshotRecord {
+  id?: number;
+  execution_id: string;
+  phase:
+    | 'planning'
+    | 'executing'
+    | 'evaluating'
+    | 'reporting'
+    | 'tool_call'
+    | 'tool_result'
+    | 'llm_call';
+  step_index: number;
+  snapshot_json: string;
+  token_count?: number;
+  duration_ms?: number;
+  created_at: number;
+}
+
 export interface ExecutionStats {
   total: number;
   successRate: number;
@@ -66,7 +84,10 @@ export class TrajectoryDatabase {
     this.db = new Database(dbPath);
     this.db.pragma('journal_mode = WAL');
     this.initializeTables();
-    Logger.info(`💾 TrajectoryDatabase 初始化: ${dbPath}`, 'TrajectoryDatabase');
+    Logger.info(
+      `💾 TrajectoryDatabase 初始化: ${dbPath}`,
+      'TrajectoryDatabase'
+    );
   }
 
   private initializeTables(): void {
@@ -110,9 +131,23 @@ export class TrajectoryDatabase {
         FOREIGN KEY (execution_id) REFERENCES executions(id) ON DELETE CASCADE
       );
 
+      CREATE TABLE IF NOT EXISTS context_snapshots (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        execution_id TEXT NOT NULL,
+        phase TEXT NOT NULL,
+        step_index INTEGER NOT NULL,
+        snapshot_json TEXT NOT NULL,
+        token_count INTEGER,
+        duration_ms INTEGER,
+        created_at INTEGER NOT NULL,
+        FOREIGN KEY (execution_id) REFERENCES executions(id) ON DELETE CASCADE
+      );
+
       CREATE INDEX IF NOT EXISTS idx_tool_invocations_execution_id ON tool_invocations(execution_id);
       CREATE INDEX IF NOT EXISTS idx_tool_invocations_tool_name ON tool_invocations(tool_name);
       CREATE INDEX IF NOT EXISTS idx_state_transitions_execution_id ON state_transitions(execution_id);
+      CREATE INDEX IF NOT EXISTS idx_context_snapshots_execution_id ON context_snapshots(execution_id);
+      CREATE INDEX IF NOT EXISTS idx_context_snapshots_phase ON context_snapshots(phase);
       CREATE INDEX IF NOT EXISTS idx_executions_status ON executions(status);
       CREATE INDEX IF NOT EXISTS idx_executions_created_at ON executions(created_at);
     `);
@@ -198,6 +233,41 @@ export class TrajectoryDatabase {
     });
   }
 
+  recordContextSnapshot(snapshot: ContextSnapshotRecord): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO context_snapshots (
+        execution_id, phase, step_index, snapshot_json, token_count, duration_ms, created_at
+      ) VALUES (
+        @execution_id, @phase, @step_index, @snapshot_json, @token_count, @duration_ms, @created_at
+      )
+    `);
+    stmt.run({
+      execution_id: snapshot.execution_id,
+      phase: snapshot.phase,
+      step_index: snapshot.step_index,
+      snapshot_json: snapshot.snapshot_json,
+      token_count: snapshot.token_count || null,
+      duration_ms: snapshot.duration_ms || null,
+      created_at: snapshot.created_at,
+    });
+  }
+
+  getContextSnapshots(
+    executionId: string,
+    phase?: string
+  ): ContextSnapshotRecord[] {
+    if (phase) {
+      const stmt = this.db.prepare(
+        'SELECT * FROM context_snapshots WHERE execution_id = ? AND phase = ? ORDER BY step_index, id'
+      );
+      return stmt.all(executionId, phase) as ContextSnapshotRecord[];
+    }
+    const stmt = this.db.prepare(
+      'SELECT * FROM context_snapshots WHERE execution_id = ? ORDER BY step_index, id'
+    );
+    return stmt.all(executionId) as ContextSnapshotRecord[];
+  }
+
   getExecution(id: string): ExecutionRecord | null {
     const stmt = this.db.prepare('SELECT * FROM executions WHERE id = ?');
     return (stmt.get(id) as ExecutionRecord) || null;
@@ -225,7 +295,9 @@ export class TrajectoryDatabase {
   }
 
   getExecutionStats(): ExecutionStats {
-    const totalStmt = this.db.prepare('SELECT COUNT(*) as count FROM executions');
+    const totalStmt = this.db.prepare(
+      'SELECT COUNT(*) as count FROM executions'
+    );
     const totalResult = totalStmt.get() as { count: number } | undefined;
     const total = totalResult?.count ?? 0;
 
@@ -243,13 +315,17 @@ export class TrajectoryDatabase {
     const avgDurationStmt = this.db.prepare(
       'SELECT AVG(total_duration) as avg FROM executions WHERE total_duration > 0'
     );
-    const avgDurationResult = avgDurationStmt.get() as { avg: number | null } | undefined;
+    const avgDurationResult = avgDurationStmt.get() as
+      | { avg: number | null }
+      | undefined;
     const avgDuration = avgDurationResult?.avg ?? 0;
 
     const avgScoreStmt = this.db.prepare(
       'SELECT AVG(quality_overall) as avg FROM executions WHERE quality_overall IS NOT NULL'
     );
-    const avgScoreResult = avgScoreStmt.get() as { avg: number | null } | undefined;
+    const avgScoreResult = avgScoreStmt.get() as
+      | { avg: number | null }
+      | undefined;
     const avgScore = avgScoreResult?.avg ?? 0;
 
     return { total, successRate, avgDuration, avgScore };

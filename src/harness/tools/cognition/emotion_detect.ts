@@ -2,7 +2,7 @@
  * Harness Tool: emotion_detect - 分析用户情绪
  */
 
-import { ToolCategory, Permission } from '../../types';
+import { ToolCategory } from '../../types';
 import type { ToolDefinition, ToolResult, ToolContext } from '../../types';
 
 export const EMOTION_DETECT_DEF: ToolDefinition = {

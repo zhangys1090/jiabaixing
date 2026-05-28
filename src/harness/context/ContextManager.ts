@@ -2,11 +2,23 @@
  * Harness Layer 3: Context - 上下文管理器
  *
  * 可组合的上下文管道，替代 JiabaixingCore 中的硬编码 prompt 拼接
+ *
+ * Phase 2 增强:
+ *   - compressHistory(): 自动上下文压缩，当 Token 预算超阈值时合并早期对话
+ *   - summarizeHistory(): LLM 驱动的对话摘要，回退到规则引擎
+ *   - offloadHistory(): LRU 策略 + 文件系统卸荷索引
  */
 
+import fs from 'fs';
+import path from 'path';
 import { injectPreferences } from '../../memory/PreferenceInjector';
 import { Logger } from '../../utils/Logger';
-import type { ChatMessage, ContextEntry, TokenAllocation, UserInput } from '../types';
+import type {
+  ChatMessage,
+  ContextEntry,
+  TokenAllocation,
+  UserInput,
+} from '../types';
 import { TokenBudgetAllocator } from './TokenBudgetAllocator';
 
 /** 上下文压缩结果 */
@@ -31,6 +43,32 @@ export type OffloadStrategy =
   | 'oldest_first'
   | 'least_relevant'
   | 'compress_and_summarize';
+
+/** 卸荷索引条目 */
+interface OffloadIndexEntry {
+  messageId: string;
+  timestamp: number;
+  accessCount: number;
+  lastAccessed: number;
+  filePath: string;
+  keywords: string[];
+}
+
+/** 压缩触发阈值配置 */
+export interface CompressionThresholdConfig {
+  /** Token 使用率阈值 (0-1)，超过则触发压缩 */
+  tokenUsageThreshold: number;
+  /** 历史消息条数阈值，超过则触发压缩 */
+  historyCountThreshold: number;
+  /** 压缩后保留的最少历史条数 */
+  minRetainedHistory: number;
+}
+
+const DEFAULT_COMPRESSION_THRESHOLD: CompressionThresholdConfig = {
+  tokenUsageThreshold: 0.85,
+  historyCountThreshold: 30,
+  minRetainedHistory: 6,
+};
 
 /** ContextManager 依赖 */
 export interface ContextManagerDeps {
@@ -67,6 +105,16 @@ export interface ContextManagerDeps {
   sceneRecognizer?: {
     recognizeSceneFromInput(input: string): string;
   };
+  /** LLM 提供者（用于摘要生成） */
+  llm?: {
+    chat(prompt: string, systemPrompt?: string): Promise<string>;
+  };
+  /** 长期记忆存储（用于保存摘要） */
+  longTermMemory?: {
+    store(content: string, metadata?: Record<string, unknown>): Promise<void>;
+  };
+  /** 卸荷文件目录 */
+  offloadDir?: string;
 }
 
 export class ContextManager {
@@ -74,10 +122,17 @@ export class ContextManager {
   private allocator: TokenBudgetAllocator;
   private entries: ContextEntry[] = [];
   private offloadedHistory: ChatMessage[] = [];
+  private offloadIndex: OffloadIndexEntry[] = [];
+  private compressionConfig: CompressionThresholdConfig;
+  private lruAccessMap: Map<string, number> = new Map();
 
   constructor(deps: ContextManagerDeps, totalBudget: number = 8000) {
     this.deps = deps;
     this.allocator = new TokenBudgetAllocator(totalBudget);
+    this.compressionConfig = DEFAULT_COMPRESSION_THRESHOLD;
+    if (this.deps.offloadDir) {
+      this.loadOffloadIndex();
+    }
   }
 
   /**
@@ -90,9 +145,15 @@ export class ContextManager {
 
     // 1. Constitutional Prompt (priority: 10)
     try {
-      const constitutional = await this.deps.constitutionalBuilder.buildConstitutionPrompt(input.userId);
+      const constitutional =
+        await this.deps.constitutionalBuilder.buildConstitutionPrompt(
+          input.userId
+        );
       const enrichedConstitutional = injectPreferences(constitutional);
-      const truncated = this.allocator.truncateToBudget(enrichedConstitutional, allocation.systemPrompt);
+      const truncated = this.allocator.truncateToBudget(
+        enrichedConstitutional,
+        allocation.systemPrompt
+      );
       messages.push({ role: 'system', content: truncated });
       this.entries.push({
         id: 'constitutional',
@@ -103,7 +164,10 @@ export class ContextManager {
         source: 'ConstitutionalBuilder',
       });
     } catch (err) {
-      Logger.warn(`宪法 Prompt 构建失败: ${(err as Error).message}`, 'ContextManager');
+      Logger.warn(
+        `宪法 Prompt 构建失败: ${(err as Error).message}`,
+        'ContextManager'
+      );
     }
 
     // 2. Persona Tone Instruction (priority: 9) — 进化闭环：语气参数真实注入
@@ -112,11 +176,15 @@ export class ContextManager {
         const scene = this.deps.sceneRecognizer
           ? this.deps.sceneRecognizer.recognizeSceneFromInput(input.text)
           : this.inferSceneFromInput(input.text);
-        const toneInstruction = this.deps.personaCore.buildSceneToneInstruction(scene);
+        const toneInstruction =
+          this.deps.personaCore.buildSceneToneInstruction(scene);
         if (toneInstruction) {
           const personaSummary = this.deps.personaCore.buildPersonaSummary();
           const personaContent = `${personaSummary}\n\n${toneInstruction}`;
-          const truncated = this.allocator.truncateToBudget(personaContent, allocation.dynamicContext);
+          const truncated = this.allocator.truncateToBudget(
+            personaContent,
+            allocation.dynamicContext
+          );
           messages.push({ role: 'system', content: truncated });
           this.entries.push({
             id: 'persona_tone',
@@ -132,7 +200,10 @@ export class ContextManager {
           );
         }
       } catch (err) {
-        Logger.warn(`人格语气注入失败: ${(err as Error).message}`, 'ContextManager');
+        Logger.warn(
+          `人格语气注入失败: ${(err as Error).message}`,
+          'ContextManager'
+        );
       }
     }
 
@@ -140,7 +211,10 @@ export class ContextManager {
     try {
       const dynamic = this.deps.dynamicContext.getDynamicContext();
       if (dynamic) {
-        const truncated = this.allocator.truncateToBudget(dynamic, allocation.dynamicContext);
+        const truncated = this.allocator.truncateToBudget(
+          dynamic,
+          allocation.dynamicContext
+        );
         messages.push({ role: 'system', content: truncated });
         this.entries.push({
           id: 'dynamic',
@@ -163,8 +237,14 @@ export class ContextManager {
       );
       if (memories.length > 0) {
         const memoryText = memories.join('\n');
-        const truncated = this.allocator.truncateToBudget(memoryText, allocation.memory);
-        messages.push({ role: 'system', content: `【相关记忆】\n${truncated}` });
+        const truncated = this.allocator.truncateToBudget(
+          memoryText,
+          allocation.memory
+        );
+        messages.push({
+          role: 'system',
+          content: `【相关记忆】\n${truncated}`,
+        });
         this.entries.push({
           id: 'memories',
           type: 'memory',
@@ -203,6 +283,41 @@ export class ContextManager {
         ),
         source: 'HistoryProvider',
       });
+
+      const historyTokens = this.estimateMessageTokens(truncatedHistory);
+      const historyBudget = allocation.history;
+      if (
+        historyTokens >
+        historyBudget * this.compressionConfig.tokenUsageThreshold
+      ) {
+        Logger.info(
+          `🗜️ Token 使用率超阈值 (${((historyTokens / historyBudget) * 100).toFixed(0)}%)，触发自动压缩`,
+          'ContextManager'
+        );
+        const compressionResult = this.compressHistory(messages, historyBudget);
+        const historyIdx = messages.findIndex(
+          (m) => m.role !== 'system' && m.role !== 'user'
+        );
+        if (historyIdx !== -1) {
+          const systemMsgs = messages.filter((m) => m.role === 'system');
+          const userInputMsg = messages.find(
+            (m) => m.role === 'user' && m.content === input.text
+          );
+          messages.length = 0;
+          messages.push(...systemMsgs);
+          messages.push(
+            ...compressionResult.compressed.filter((m) => m.role !== 'system')
+          );
+          if (userInputMsg) {
+            const existingUser = messages.find(
+              (m) => m.role === 'user' && m.content === input.text
+            );
+            if (!existingUser) {
+              messages.push(userInputMsg);
+            }
+          }
+        }
+      }
     } catch {
       // 历史加载失败不影响主流程
     }
@@ -239,7 +354,8 @@ export class ContextManager {
   private inferSceneFromInput(input: string): string {
     const text = input.toLowerCase();
 
-    if (/代码|编程|开发|调试|bug|函数|接口|api|重构|部署/.test(text)) return 'development';
+    if (/代码|编程|开发|调试|bug|函数|接口|api|重构|部署/.test(text))
+      return 'development';
     if (/工作|项目|排期|会议|汇报|方案|需求|上线/.test(text)) return 'work';
     if (/难过|烦|累|焦虑|压力|不开心|心情|崩溃/.test(text)) return 'comfort';
     if (/你好|早上好|晚安|嗨|hello|hi/.test(text)) return 'greeting';
@@ -248,7 +364,234 @@ export class ContextManager {
     return 'daily';
   }
 
-  // ==================== 新增功能: 上下文压缩、摘要、卸荷 ====================
+  // ==================== Phase 2: 上下文压缩、摘要、卸荷 ====================
+
+  /**
+   * 上下文压缩: 当 Token 预算超阈值时自动合并早期对话为摘要
+   *
+   * @param messages - 当前消息列表
+   * @param targetTokenCount - 目标 Token 数
+   * @returns 压缩结果
+   */
+  compressHistory(
+    messages: ChatMessage[],
+    targetTokenCount: number
+  ): ContextCompressionResult {
+    const originalTokens = this.estimateMessageTokens(messages);
+    if (originalTokens <= targetTokenCount) {
+      return {
+        compressed: [...messages],
+        originalTokenCount: originalTokens,
+        compressedTokenCount: originalTokens,
+        compressionRatio: 1.0,
+        strategy: 'none_needed',
+      };
+    }
+
+    const systemMessages = messages.filter((m) => m.role === 'system');
+    const nonSystemMessages = messages.filter((m) => m.role !== 'system');
+
+    const systemTokens = this.estimateMessageTokens(systemMessages);
+    const availableForHistory = targetTokenCount - systemTokens;
+
+    if (availableForHistory <= 0) {
+      const truncatedSystem = systemMessages.map((m) =>
+        this.truncateMessage(
+          m,
+          Math.floor(targetTokenCount / systemMessages.length)
+        )
+      );
+      const finalTokens = this.estimateMessageTokens(truncatedSystem);
+      return {
+        compressed: truncatedSystem,
+        originalTokenCount: originalTokens,
+        compressedTokenCount: finalTokens,
+        compressionRatio: finalTokens / originalTokens,
+        strategy: 'system_only_truncated',
+      };
+    }
+
+    const retainedCount = Math.max(
+      this.compressionConfig.minRetainedHistory,
+      Math.floor(nonSystemMessages.length * 0.3)
+    );
+    const recentMessages = nonSystemMessages.slice(-retainedCount);
+    const oldMessages = nonSystemMessages.slice(
+      0,
+      nonSystemMessages.length - retainedCount
+    );
+
+    let summaryMessage: ChatMessage | null = null;
+    if (oldMessages.length > 0) {
+      const summaryResult = this.summarizeContext(
+        oldMessages,
+        availableForHistory * 2
+      );
+      summaryMessage = summaryResult.summary;
+    }
+
+    const compressed: ChatMessage[] = [...systemMessages];
+    if (summaryMessage) {
+      compressed.push(summaryMessage);
+    }
+    compressed.push(...recentMessages);
+
+    const finalTokens = this.estimateMessageTokens(compressed);
+    return {
+      compressed,
+      originalTokenCount: originalTokens,
+      compressedTokenCount: finalTokens,
+      compressionRatio: finalTokens / originalTokens,
+      strategy: 'compress_early_keep_recent',
+    };
+  }
+
+  /**
+   * 上下文摘要: LLM 驱动的对话摘要，回退到规则引擎
+   *
+   * @param messages - 需要摘要的消息列表
+   * @param maxSummaryLength - 摘要最大长度
+   * @returns 摘要结果
+   */
+  async summarizeHistory(
+    messages: ChatMessage[],
+    maxSummaryLength: number = 1000
+  ): Promise<ContextSummaryResult> {
+    if (this.deps.llm) {
+      try {
+        const conversationText = messages
+          .map((m) => `${m.role}: ${m.content || ''}`)
+          .join('\n');
+
+        const prompt = `请对以下对话历史生成简洁的摘要，保留关键信息和决策点。摘要应包含：
+1. 用户的主要需求
+2. 已完成的关键操作
+3. 重要的中间结果
+4. 待解决的问题
+
+对话历史:
+${conversationText.substring(0, 4000)}
+
+请直接输出摘要内容，不要包含其他格式。`;
+
+        const llmSummary = await this.deps.llm.chat(prompt);
+        const truncatedSummary = llmSummary.substring(0, maxSummaryLength);
+
+        const keyPoints = this.extractKeyPoints(messages);
+
+        if (this.deps.longTermMemory) {
+          try {
+            await this.deps.longTermMemory.store(truncatedSummary, {
+              type: 'conversation_summary',
+              messageCount: messages.length,
+              timestamp: Date.now(),
+            });
+            Logger.info('📝 对话摘要已存储到长期记忆', 'ContextManager');
+          } catch (err) {
+            Logger.warn(
+              `摘要存储失败: ${(err as Error).message}`,
+              'ContextManager'
+            );
+          }
+        }
+
+        return {
+          summary: {
+            role: 'system',
+            content: `【对话摘要(LLM)】\n${truncatedSummary}`,
+          },
+          originalCount: messages.length,
+          summaryLength: truncatedSummary.length,
+          keyPoints,
+        };
+      } catch (err) {
+        Logger.warn(
+          `LLM 摘要生成失败，回退到规则引擎: ${(err as Error).message}`,
+          'ContextManager'
+        );
+      }
+    }
+
+    return this.summarizeContext(messages, maxSummaryLength);
+  }
+
+  /**
+   * 上下文卸荷: LRU 策略 + 文件系统卸荷索引
+   *
+   * @param messages - 需要卸荷的消息列表
+   * @param keepCount - 保留的消息条数
+   * @param strategy - 卸荷策略
+   * @returns 活跃消息和卸荷消息
+   */
+  offloadHistory(
+    messages: ChatMessage[],
+    keepCount: number = 10,
+    strategy: OffloadStrategy = 'oldest_first'
+  ): {
+    active: ChatMessage[];
+    offloaded: ChatMessage[];
+  } {
+    const nonSystemMessages = messages.filter((m) => m.role !== 'system');
+    const systemMessages = messages.filter((m) => m.role === 'system');
+
+    let activeNonSystem: ChatMessage[];
+    let offloaded: ChatMessage[];
+
+    switch (strategy) {
+      case 'oldest_first':
+        activeNonSystem = nonSystemMessages.slice(-keepCount);
+        offloaded = nonSystemMessages.slice(
+          0,
+          nonSystemMessages.length - keepCount
+        );
+        break;
+
+      case 'least_relevant':
+        activeNonSystem = this.selectByLruRelevance(
+          nonSystemMessages,
+          keepCount
+        );
+        offloaded = nonSystemMessages.filter(
+          (m) => !activeNonSystem.includes(m)
+        );
+        break;
+
+      case 'compress_and_summarize': {
+        const toOffload = nonSystemMessages.slice(
+          0,
+          nonSystemMessages.length - keepCount
+        );
+        activeNonSystem = nonSystemMessages.slice(-keepCount);
+        offloaded = toOffload;
+        break;
+      }
+
+      default:
+        activeNonSystem = nonSystemMessages.slice(-keepCount);
+        offloaded = nonSystemMessages.slice(
+          0,
+          nonSystemMessages.length - keepCount
+        );
+    }
+
+    this.offloadedHistory.push(...offloaded);
+
+    if (this.deps.offloadDir) {
+      this.persistOffloadedMessages(offloaded);
+    }
+
+    Logger.info(
+      `📦 上下文卸荷完成: 保留 ${activeNonSystem.length} 条, 卸荷 ${offloaded.length} 条`,
+      'ContextManager'
+    );
+
+    return {
+      active: [...systemMessages, ...activeNonSystem],
+      offloaded,
+    };
+  }
+
+  // ==================== 原有功能: 上下文压缩、摘要、卸荷 ====================
 
   /**
    * 上下文压缩: 减少消息长度但保留核心语义
@@ -271,7 +614,6 @@ export class ContextManager {
     const compressed: ChatMessage[] = [];
     let currentTokens = 0;
 
-    // 优先保留 system 消息
     const systemMessages = messages.filter((m) => m.role === 'system');
     for (const msg of systemMessages) {
       const msgTokens = this.estimateMessageTokens([msg]);
@@ -279,18 +621,19 @@ export class ContextManager {
         compressed.push(msg);
         currentTokens += msgTokens;
       } else {
-        // 对 system 消息进行截断
-        const truncated = this.truncateMessage(msg, targetTokenCount - currentTokens);
+        const truncated = this.truncateMessage(
+          msg,
+          targetTokenCount - currentTokens
+        );
         compressed.push(truncated);
         currentTokens = targetTokenCount;
         break;
       }
     }
 
-    // 处理对话历史（保留最新消息）
-    const historyMessages = messages.filter(
-      (m) => m.role !== 'system'
-    ).reverse();
+    const historyMessages = messages
+      .filter((m) => m.role !== 'system')
+      .reverse();
 
     for (const msg of historyMessages) {
       const msgTokens = this.estimateMessageTokens([msg]);
@@ -298,7 +641,6 @@ export class ContextManager {
         compressed.push(msg);
         currentTokens += msgTokens;
       } else {
-        // 尝试压缩这条消息
         const compressedMsg = this.compressSingleMessage(msg);
         const compressedTokens = this.estimateMessageTokens([compressedMsg]);
         if (currentTokens + compressedTokens <= targetTokenCount) {
@@ -308,7 +650,6 @@ export class ContextManager {
       }
     }
 
-    // 重新排序
     compressed.sort((a, b) => {
       if (a.role === 'system' && b.role !== 'system') return -1;
       if (b.role === 'system' && a.role !== 'system') return 1;
@@ -326,24 +667,16 @@ export class ContextManager {
   }
 
   /**
-   * 上下文摘要: 生成对话历史的摘要
+   * 上下文摘要: 生成对话历史的摘要（规则引擎版本）
    */
   summarizeContext(
     messages: ChatMessage[],
     maxSummaryLength: number = 1000
   ): ContextSummaryResult {
-    const keyPoints: string[] = [];
+    const keyPoints = this.extractKeyPoints(messages);
     const userMessages = messages.filter((m) => m.role === 'user');
     const assistantMessages = messages.filter((m) => m.role === 'assistant');
 
-    // 提取关键点
-    for (const msg of userMessages.slice(-10)) {
-      if (msg.content && msg.content.length > 0) {
-        keyPoints.push(`用户: ${msg.content.substring(0, 100)}`);
-      }
-    }
-
-    // 构建摘要
     const summaryContent = `【对话摘要】
 本次会话共 ${messages.length} 条消息
 - 用户消息: ${userMessages.length} 条
@@ -367,7 +700,7 @@ ${keyPoints.slice(-5).join('\n')}`;
   }
 
   /**
-   * 上下文卸荷: 将旧消息移动到 "卸荷" 存储
+   * 上下文卸荷: 将旧消息移动到 "卸荷" 存储（兼容旧接口）
    */
   offloadOldMessages(
     messages: ChatMessage[],
@@ -377,53 +710,11 @@ ${keyPoints.slice(-5).join('\n')}`;
     active: ChatMessage[];
     offloaded: ChatMessage[];
   } {
-    // 提取所有非系统消息
-    const nonSystemMessages = messages.filter((m) => m.role !== 'system');
-    const systemMessages = messages.filter((m) => m.role === 'system');
-
-    let activeNonSystem: ChatMessage[];
-    let offloaded: ChatMessage[];
-
-    switch (strategy) {
-      case 'oldest_first':
-        activeNonSystem = nonSystemMessages.slice(-keepCount);
-        offloaded = nonSystemMessages.slice(0, nonSystemMessages.length - keepCount);
-        break;
-
-      case 'least_relevant':
-        // 简单实现：保留最新的，其余卸荷
-        activeNonSystem = nonSystemMessages.slice(-keepCount);
-        offloaded = nonSystemMessages.slice(0, nonSystemMessages.length - keepCount);
-        break;
-
-      case 'compress_and_summarize':
-        // 保留最新的，其他先压缩然后生成摘要
-        const toOffload = nonSystemMessages.slice(0, nonSystemMessages.length - keepCount);
-        activeNonSystem = nonSystemMessages.slice(-keepCount);
-        offloaded = toOffload;
-        break;
-
-      default:
-        activeNonSystem = nonSystemMessages.slice(-keepCount);
-        offloaded = nonSystemMessages.slice(0, nonSystemMessages.length - keepCount);
-    }
-
-    // 存储卸荷的消息
-    this.offloadedHistory.push(...offloaded);
-
-    Logger.info(
-      `📦 上下文卸荷完成: 保留 ${activeNonSystem.length} 条, 卸荷 ${offloaded.length} 条`,
-      'ContextManager'
-    );
-
-    return {
-      active: [...systemMessages, ...activeNonSystem],
-      offloaded,
-    };
+    return this.offloadHistory(messages, keepCount, strategy);
   }
 
   /**
-   * 从卸荷存储中检索消息
+   * 从卸荷存储中检索消息（支持 LRU 访问更新）
    */
   retrieveOffloadedMessages(
     keywords?: string[],
@@ -437,9 +728,44 @@ ${keyPoints.slice(-5).join('\n')}`;
           msg.content?.toLowerCase().includes(kw.toLowerCase())
         )
       );
+
+      for (const kw of keywords) {
+        for (const entry of this.offloadIndex) {
+          if (
+            entry.keywords.some((k) =>
+              k.toLowerCase().includes(kw.toLowerCase())
+            )
+          ) {
+            entry.accessCount++;
+            entry.lastAccessed = Date.now();
+            this.lruAccessMap.set(entry.messageId, entry.lastAccessed);
+          }
+        }
+      }
+    }
+
+    if (this.deps.offloadDir && this.offloadIndex.length > 0) {
+      const fromDisk = this.retrieveFromDisk(keywords, limit);
+      if (fromDisk.length > 0) {
+        result = [...result, ...fromDisk];
+      }
     }
 
     return result.slice(0, limit);
+  }
+
+  /**
+   * 设置压缩阈值配置
+   */
+  setCompressionConfig(config: Partial<CompressionThresholdConfig>): void {
+    this.compressionConfig = { ...this.compressionConfig, ...config };
+  }
+
+  /**
+   * 获取卸荷索引
+   */
+  getOffloadIndex(): OffloadIndexEntry[] {
+    return [...this.offloadIndex];
   }
 
   // ==================== 辅助方法 ====================
@@ -471,7 +797,6 @@ ${keyPoints.slice(-5).join('\n')}`;
    */
   private compressSingleMessage(msg: ChatMessage): ChatMessage {
     const content = msg.content || '';
-    // 简单压缩：移除多余空格，截断长内容
     const compressed = content
       .replace(/\s+/g, ' ')
       .trim()
@@ -489,8 +814,284 @@ ${keyPoints.slice(-5).join('\n')}`;
   /**
    * 估算对话的时间跨度
    */
-  private estimateTimeSpan(messages: ChatMessage[]): string {
-    // 简单实现：返回 "未知"
+  private estimateTimeSpan(_messages: ChatMessage[]): string {
     return '未知';
+  }
+
+  /**
+   * 从消息中提取关键点
+   */
+  private extractKeyPoints(messages: ChatMessage[]): string[] {
+    const keyPoints: string[] = [];
+    const userMessages = messages.filter((m) => m.role === 'user');
+
+    for (const msg of userMessages.slice(-10)) {
+      if (msg.content && msg.content.length > 0) {
+        keyPoints.push(`用户: ${msg.content.substring(0, 100)}`);
+      }
+    }
+
+    return keyPoints;
+  }
+
+  /**
+   * LRU 相关性选择：根据访问频率和最近访问时间选择保留消息
+   */
+  private selectByLruRelevance(
+    messages: ChatMessage[],
+    keepCount: number
+  ): ChatMessage[] {
+    if (messages.length <= keepCount) return [...messages];
+
+    const scored = messages.map((msg, idx) => {
+      const content = msg.content || '';
+      const accessCount = Array.from(this.lruAccessMap.entries()).filter(
+        ([, time]) => time > 0
+      ).length;
+      const recencyScore = idx / messages.length;
+      const lengthScore = Math.min(content.length / 500, 1);
+      const accessScore = accessCount > 0 ? 0.3 : 0;
+      const totalScore = recencyScore * 0.5 + lengthScore * 0.2 + accessScore;
+
+      return { msg, score: totalScore };
+    });
+
+    scored.sort((a, b) => b.score - a.score);
+
+    const selectedIndices = new Set(
+      scored.slice(0, keepCount).map((s) => messages.indexOf(s.msg))
+    );
+
+    return messages.filter((_, idx) => selectedIndices.has(idx));
+  }
+
+  /**
+   * 将卸荷消息持久化到文件系统
+   */
+  private persistOffloadedMessages(messages: ChatMessage[]): void {
+    const offloadDir = this.deps.offloadDir;
+    if (!offloadDir) return;
+
+    try {
+      if (!fs.existsSync(offloadDir)) {
+        fs.mkdirSync(offloadDir, { recursive: true });
+      }
+
+      for (const msg of messages) {
+        const messageId = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+        const filePath = path.join(offloadDir, `${messageId}.json`);
+        const keywords = this.extractKeywords(msg.content || '');
+
+        fs.writeFileSync(filePath, JSON.stringify(msg, null, 2), 'utf-8');
+
+        this.offloadIndex.push({
+          messageId,
+          timestamp: Date.now(),
+          accessCount: 0,
+          lastAccessed: Date.now(),
+          filePath,
+          keywords,
+        });
+
+        this.lruAccessMap.set(messageId, Date.now());
+      }
+
+      this.saveOffloadIndex();
+    } catch (err) {
+      Logger.error(
+        `卸荷消息持久化失败: ${(err as Error).message}`,
+        err as Error,
+        'ContextManager'
+      );
+    }
+  }
+
+  /**
+   * 从磁盘检索卸荷消息
+   */
+  private retrieveFromDisk(
+    keywords?: string[],
+    limit: number = 20
+  ): ChatMessage[] {
+    const results: ChatMessage[] = [];
+
+    let indexEntries = [...this.offloadIndex];
+    if (keywords && keywords.length > 0) {
+      indexEntries = indexEntries.filter((entry) =>
+        keywords.some((kw) =>
+          entry.keywords.some((k) => k.toLowerCase().includes(kw.toLowerCase()))
+        )
+      );
+    }
+
+    indexEntries.sort((a, b) => b.lastAccessed - a.lastAccessed);
+
+    for (const entry of indexEntries.slice(0, limit)) {
+      try {
+        if (fs.existsSync(entry.filePath)) {
+          const raw = fs.readFileSync(entry.filePath, 'utf-8');
+          const msg = JSON.parse(raw) as ChatMessage;
+          results.push(msg);
+
+          entry.accessCount++;
+          entry.lastAccessed = Date.now();
+          this.lruAccessMap.set(entry.messageId, entry.lastAccessed);
+        }
+      } catch {
+        // 单个文件读取失败不影响整体
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * 从消息内容提取关键词
+   */
+  private extractKeywords(content: string): string[] {
+    const keywords: string[] = [];
+    const stopWords = new Set([
+      '的',
+      '了',
+      '是',
+      '在',
+      '我',
+      '你',
+      '他',
+      '她',
+      '它',
+      '们',
+      '这',
+      '那',
+      '有',
+      '不',
+      '就',
+      '也',
+      '都',
+      '而',
+      '及',
+      '与',
+      '或',
+      'the',
+      'a',
+      'an',
+      'is',
+      'are',
+      'was',
+      'were',
+      'be',
+      'been',
+      'being',
+      'have',
+      'has',
+      'had',
+      'do',
+      'does',
+      'did',
+      'will',
+      'would',
+      'could',
+      'should',
+      'may',
+      'might',
+      'can',
+      'shall',
+      'to',
+      'of',
+      'in',
+      'for',
+      'on',
+      'with',
+      'at',
+      'by',
+      'from',
+      'as',
+      'into',
+      'through',
+      'during',
+      'before',
+      'after',
+      'above',
+      'below',
+      'between',
+      'out',
+      'off',
+      'over',
+      'under',
+      'again',
+      'further',
+      'then',
+      'once',
+      'and',
+      'but',
+      'or',
+      'nor',
+      'not',
+      'so',
+      'if',
+      'it',
+      'its',
+    ]);
+
+    const words = content.split(/[\s,，。.!！?？;；:：、\n]+/);
+    for (const word of words) {
+      const trimmed = word.trim().toLowerCase();
+      if (trimmed.length >= 2 && !stopWords.has(trimmed)) {
+        keywords.push(trimmed);
+      }
+    }
+
+    return [...new Set(keywords)].slice(0, 20);
+  }
+
+  /**
+   * 保存卸荷索引到磁盘
+   */
+  private saveOffloadIndex(): void {
+    const offloadDir = this.deps.offloadDir;
+    if (!offloadDir) return;
+
+    try {
+      if (!fs.existsSync(offloadDir)) {
+        fs.mkdirSync(offloadDir, { recursive: true });
+      }
+      const indexPath = path.join(offloadDir, 'offload-index.json');
+      fs.writeFileSync(
+        indexPath,
+        JSON.stringify(this.offloadIndex, null, 2),
+        'utf-8'
+      );
+    } catch (err) {
+      Logger.error(
+        `卸荷索引保存失败: ${(err as Error).message}`,
+        err as Error,
+        'ContextManager'
+      );
+    }
+  }
+
+  /**
+   * 从磁盘加载卸荷索引
+   */
+  private loadOffloadIndex(): void {
+    const offloadDir = this.deps.offloadDir;
+    if (!offloadDir) return;
+
+    try {
+      const indexPath = path.join(offloadDir, 'offload-index.json');
+      if (fs.existsSync(indexPath)) {
+        const raw = fs.readFileSync(indexPath, 'utf-8');
+        this.offloadIndex = JSON.parse(raw) as OffloadIndexEntry[];
+        for (const entry of this.offloadIndex) {
+          this.lruAccessMap.set(entry.messageId, entry.lastAccessed);
+        }
+        Logger.info(
+          `📦 已加载 ${this.offloadIndex.length} 条卸荷索引`,
+          'ContextManager'
+        );
+      }
+    } catch {
+      // 索引加载失败不影响主流程
+    }
   }
 }

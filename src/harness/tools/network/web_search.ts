@@ -39,7 +39,9 @@ export interface WebSearchDeps {
   searchEngine?: (
     query: string,
     options: { searchType: string; maxResults: number; language: string }
-  ) => Promise<Array<{ title: string; url: string; snippet: string; source?: string }>>;
+  ) => Promise<
+    Array<{ title: string; url: string; snippet: string; source?: string }>
+  >;
   httpClient?: { get(url: string): Promise<string> };
 }
 
@@ -58,7 +60,10 @@ function parseDuckDuckGoHtml(html: string): SearchResult[] {
   const links: Array<{ url: string; title: string }> = [];
   let match: RegExpExecArray | null;
   while ((match = linkRegex.exec(html)) !== null) {
-    links.push({ url: match[1], title: match[2].replace(/<[^>]+>/g, '').trim() });
+    links.push({
+      url: match[1],
+      title: match[2].replace(/<[^>]+>/g, '').trim(),
+    });
   }
 
   const snippets: string[] = [];
@@ -83,8 +88,11 @@ function formatResults(results: SearchResult[]): string {
   const lines = results.map(
     (r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`
   );
-  const sources = [...new Set(results.filter((r) => r.source).map((r) => r.source!))];
-  const attribution = sources.length > 0 ? `\n\n来源: ${sources.join(', ')}` : '';
+  const sources = [
+    ...new Set(results.filter((r) => r.source).map((r) => r.source!)),
+  ];
+  const attribution =
+    sources.length > 0 ? `\n\n来源: ${sources.join(', ')}` : '';
   return lines.join('\n\n') + attribution;
 }
 
@@ -95,7 +103,13 @@ export function createWebSearchExecutor(deps: WebSearchDeps) {
   ): Promise<ToolResult> => {
     const query = String(params.query || '');
     if (!query) {
-      return { success: false, output: null, error: '搜索关键词不能为空', duration: 0, validated: false };
+      return {
+        success: false,
+        output: null,
+        error: '搜索关键词不能为空',
+        duration: 0,
+        validated: false,
+      };
     }
 
     const searchType = String(params.search_type || 'general');
@@ -117,12 +131,29 @@ export function createWebSearchExecutor(deps: WebSearchDeps) {
         const html = await deps.httpClient.get(url);
         results = parseDuckDuckGoHtml(html).slice(0, maxResults);
       } else {
-        return { success: false, output: null, error: '搜索服务不可用', duration: 0, validated: false };
+        return {
+          success: false,
+          output: null,
+          error: '搜索服务不可用',
+          duration: 0,
+          validated: false,
+        };
       }
 
-      return { success: true, output: formatResults(results.slice(0, maxResults)), duration: 0, validated: false };
+      return {
+        success: true,
+        output: formatResults(results.slice(0, maxResults)),
+        duration: 0,
+        validated: false,
+      };
     } catch (err) {
-      return { success: false, output: null, error: `搜索失败: ${(err as Error).message}`, duration: 0, validated: false };
+      return {
+        success: false,
+        output: null,
+        error: `搜索失败: ${(err as Error).message}`,
+        duration: 0,
+        validated: false,
+      };
     }
   };
 }

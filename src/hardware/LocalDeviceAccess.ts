@@ -211,7 +211,7 @@ export class LocalDeviceAccess {
   public async sendCommand(
     deviceId: string,
     command: LocalDeviceCommand
-  ): Promise<any> {
+  ): Promise<Record<string, unknown>> {
     this.ensureInitialized();
 
     const device = this.devices.get(deviceId);
@@ -264,9 +264,9 @@ export class LocalDeviceAccess {
    * 执行屏幕截图
    */
   private async executeScreenCapture(
-    device: LocalDevice,
-    parameters: Record<string, unknown>
-  ): Promise<any> {
+    _device: LocalDevice,
+    _parameters: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
     // 简化实现：模拟屏幕截图
 
     // 实际实现中应该使用RobotJS或PyAutoGUI等库
@@ -282,9 +282,9 @@ export class LocalDeviceAccess {
    * 执行键盘控制
    */
   private async executeKeyboardControl(
-    device: LocalDevice,
-    parameters: Record<string, unknown>
-  ): Promise<any> {
+    _device: LocalDevice,
+    _parameters: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
     // 简化实现：模拟键盘控制
 
     // 实际实现中应该使用RobotJS或PyAutoGUI等库
@@ -299,10 +299,9 @@ export class LocalDeviceAccess {
    * 执行鼠标控制
    */
   private async executeMouseControl(
-    device: LocalDevice,
-    parameters: Record<string, unknown>
-  ): Promise<any> {
-    // 简化实现：模拟鼠标控制
+    _device: LocalDevice,
+    _parameters: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
     Logger.info('🖱️  本地设备接入：执行鼠标控制', 'LocalDeviceAccess');
 
     // 实际实现中应该使用RobotJS或PyAutoGUI等库
@@ -317,9 +316,9 @@ export class LocalDeviceAccess {
    * 执行进程管理
    */
   private async executeProcessManagement(
-    device: LocalDevice,
-    parameters: Record<string, unknown>
-  ): Promise<any> {
+    _device: LocalDevice,
+    _parameters: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
     // 简化实现：模拟进程管理
 
     // 实际实现中应该使用系统API
@@ -334,9 +333,9 @@ export class LocalDeviceAccess {
    * 执行文件访问
    */
   private async executeFileAccess(
-    device: LocalDevice,
-    parameters: Record<string, unknown>
-  ): Promise<any> {
+    _device: LocalDevice,
+    _parameters: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
     // 简化实现：模拟文件访问
 
     // 实际实现中应该使用文件系统API
@@ -351,9 +350,9 @@ export class LocalDeviceAccess {
    * 执行屏幕镜像
    */
   private async executeScreenMirroring(
-    device: LocalDevice,
-    parameters: Record<string, unknown>
-  ): Promise<any> {
+    _device: LocalDevice,
+    _parameters: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
     // 简化实现：模拟屏幕镜像
 
     // 实际实现中应该使用相应的屏幕镜像协议
@@ -368,9 +367,9 @@ export class LocalDeviceAccess {
    * 执行文件传输
    */
   private async executeFileTransfer(
-    device: LocalDevice,
-    parameters: Record<string, unknown>
-  ): Promise<any> {
+    _device: LocalDevice,
+    _parameters: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
     // 简化实现：模拟文件传输
 
     // 实际实现中应该使用相应的文件传输协议
@@ -385,9 +384,9 @@ export class LocalDeviceAccess {
    * 执行应用控制
    */
   private async executeAppControl(
-    device: LocalDevice,
-    parameters: Record<string, unknown>
-  ): Promise<any> {
+    _device: LocalDevice,
+    _parameters: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
     // 简化实现：模拟应用控制
 
     // 实际实现中应该使用相应的应用控制API
@@ -402,9 +401,9 @@ export class LocalDeviceAccess {
    * 执行SSH访问
    */
   private async executeSSHAccess(
-    device: LocalDevice,
-    parameters: Record<string, unknown>
-  ): Promise<any> {
+    _device: LocalDevice,
+    _parameters: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
     // 简化实现：模拟SSH访问
 
     // 实际实现中应该使用SSH库
@@ -419,9 +418,9 @@ export class LocalDeviceAccess {
    * 执行服务管理
    */
   private async executeServiceManagement(
-    device: LocalDevice,
-    parameters: Record<string, unknown>
-  ): Promise<any> {
+    _device: LocalDevice,
+    _parameters: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
     // 简化实现：模拟服务管理
     Logger.info('🛠️  本地设备接入：执行服务管理', 'LocalDeviceAccess');
 

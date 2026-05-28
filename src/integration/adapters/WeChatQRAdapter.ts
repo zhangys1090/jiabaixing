@@ -26,7 +26,9 @@ export class WeChatQRAdapter extends BaseIntegrationAdapter {
     botNickname: null,
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private browser: any = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private page: any = null;
   private loginCheckTimer: NodeJS.Timeout | null = null;
   private messagePollTimer: NodeJS.Timeout | null = null;
@@ -115,8 +117,8 @@ export class WeChatQRAdapter extends BaseIntegrationAdapter {
   async sendMessage(
     message: string,
     to?: string,
-    imageUrls?: string[],
-    mentions?: string[]
+    _imageUrls?: string[],
+    _mentions?: string[]
   ): Promise<SendMessageResponse> {
     if (this.loginState.status !== 'logged_in' || !this.page) {
       return { success: false, error: '微信未登录' };
@@ -129,9 +131,12 @@ export class WeChatQRAdapter extends BaseIntegrationAdapter {
         // 查找联系人
         await this.page.evaluate(
           (payload: { wxid: string; msg: string }) => {
-            const win = window as any;
-            if (win.msgSend) {
-              win.msgSend(payload.wxid, payload.msg);
+            const win = window as unknown as Record<string, unknown>;
+            const msgSend = win.msgSend as
+              | ((wxid: string, msg: string) => void)
+              | undefined;
+            if (msgSend) {
+              msgSend(payload.wxid, payload.msg);
             }
           },
           { wxid: to, msg: message }
@@ -153,7 +158,7 @@ export class WeChatQRAdapter extends BaseIntegrationAdapter {
   }
 
   async handleWebhook(
-    payload: Record<string, unknown>
+    _payload: Record<string, unknown>
   ): Promise<{ success: boolean; response?: unknown }> {
     return { success: true, response: { handled: false } };
   }
@@ -207,8 +212,8 @@ export class WeChatQRAdapter extends BaseIntegrationAdapter {
       try {
         // 检查是否已登录
         const isLoggedIn = await this.page.evaluate(() => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const win = window as any;
-          // Web 微信登录后的标志
           return (
             typeof win.login !== 'undefined' ||
             document.querySelector('.chat') !== null ||
@@ -221,6 +226,7 @@ export class WeChatQRAdapter extends BaseIntegrationAdapter {
 
           // 获取用户信息
           const userInfo = await this.page.evaluate(() => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const win = window as any;
             return {
               wxid: win.__wxUser?.uin || win.uin || 'unknown',
@@ -235,10 +241,7 @@ export class WeChatQRAdapter extends BaseIntegrationAdapter {
           this.loginState.botNickname = userInfo.nickname;
 
           this.updateStatus('connected');
-          Logger.info(
-            `微信已登录: ${userInfo.nickname}`,
-            'WeChatQRAdapter'
-          );
+          Logger.info(`微信已登录: ${userInfo.nickname}`, 'WeChatQRAdapter');
 
           if (this.loginCheckTimer) {
             clearInterval(this.loginCheckTimer);
@@ -251,11 +254,14 @@ export class WeChatQRAdapter extends BaseIntegrationAdapter {
     }, 2000);
 
     // 二维码每 5 分钟刷新一次
-    setTimeout(() => {
-      if (this.loginState.status === 'waiting_scan') {
-        this.refreshQRCode();
-      }
-    }, 5 * 60 * 1000);
+    setTimeout(
+      () => {
+        if (this.loginState.status === 'waiting_scan') {
+          void this.refreshQRCode();
+        }
+      },
+      5 * 60 * 1000
+    );
   }
 
   private startMessagePolling(): void {
@@ -264,12 +270,13 @@ export class WeChatQRAdapter extends BaseIntegrationAdapter {
 
       try {
         const messages = await this.page.evaluate(() => {
-          const win = window as any;
-          // 获取新消息
-          if (win.__newMessages && win.__newMessages.length > 0) {
-            const msgs = win.__newMessages;
+          const win = window as unknown as Record<string, unknown>;
+          const newMsgs = win.__newMessages as
+            | Array<Record<string, unknown>>
+            | undefined;
+          if (newMsgs && newMsgs.length > 0) {
             win.__newMessages = [];
-            return msgs;
+            return newMsgs;
           }
           return [];
         });

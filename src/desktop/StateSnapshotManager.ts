@@ -175,9 +175,7 @@ export class StateSnapshotManager {
 
       if (options.restoreWindows !== false && snapshot.foregroundWindowHandle) {
         try {
-          await this.windowManager.activateWindow(
-            snapshot.foregroundWindowHandle
-          );
+          this.windowManager.activateWindow(snapshot.foregroundWindowHandle);
           result.restoredComponents.push('foreground_window');
         } catch (error) {
           result.failedComponents.push({
@@ -454,13 +452,11 @@ export class StateSnapshotManager {
     const snapshotId = this.generateSnapshotId();
 
     try {
-      const [windowList, uiTreeNodes, mousePos] = await Promise.all([
-        this.windowManager.listWindows(),
-        this.config.includeUITree
-          ? Promise.resolve(this.uiInspector.getControlTree())
-          : Promise.resolve([] as UIElementNode[]),
-        this.getMousePosition(),
-      ]);
+      const windowList = this.windowManager.listWindows();
+      const uiTreeNodes = this.config.includeUITree
+        ? this.uiInspector.getControlTree()
+        : [];
+      const mousePos = await this.getMousePosition();
 
       let foregroundWindow: WindowInfo | null = null;
       try {
@@ -496,7 +492,7 @@ export class StateSnapshotManager {
       for (const [name, provider] of this.customProviders) {
         try {
           customStates[name] = await provider.getState();
-        } catch (error) {
+        } catch {
           Logger.warn(`自定义状态获取失败: ${name}`, 'StateSnapshotManager');
         }
       }

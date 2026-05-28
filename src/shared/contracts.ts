@@ -429,6 +429,7 @@ export const WS_EVENTS = {
     GET_STATUS: 'get_status',
     CLARIFICATION_RESPONSE: 'clarification_response',
     EXECUTION_CONFIRM: 'execution_confirm',
+    CANCEL_TASK: 'cancel_task',
   },
 
   // 后端 → 前端
@@ -454,6 +455,8 @@ export const WS_EVENTS = {
     SERVER_LOG: 'server_log',
     USER_CORRECTION: 'user_correction',
     THINKING: 'thinking',
+    PROCESSING_STATUS: 'processing_status',
+    TASK_CANCELLED: 'task_cancelled',
     ASR_RESULT: 'asr_result',
     TTS_CHUNK: 'tts_chunk',
     DIALOG_STATE: 'dialog_state',
@@ -791,4 +794,3 @@ export interface SendMessageResponse {
   timestamp?: string;
   error?: string;
 }
-

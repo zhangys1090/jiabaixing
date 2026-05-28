@@ -8,12 +8,12 @@ import type { TokenAllocation } from '../types';
 
 /** 分配比例 */
 const ALLOCATION_RATIOS = {
-  systemPrompt: 0.30,
+  systemPrompt: 0.3,
   memory: 0.15,
   history: 0.25,
   dynamicContext: 0.15,
   toolResults: 0.15,
-  reserve: 0.10,
+  reserve: 0.1,
 };
 
 export class TokenBudgetAllocator {
@@ -35,10 +35,14 @@ export class TokenBudgetAllocator {
    */
   allocate(): TokenAllocation {
     return {
-      systemPrompt: Math.floor(this.totalBudget * ALLOCATION_RATIOS.systemPrompt),
+      systemPrompt: Math.floor(
+        this.totalBudget * ALLOCATION_RATIOS.systemPrompt
+      ),
       memory: Math.floor(this.totalBudget * ALLOCATION_RATIOS.memory),
       history: Math.floor(this.totalBudget * ALLOCATION_RATIOS.history),
-      dynamicContext: Math.floor(this.totalBudget * ALLOCATION_RATIOS.dynamicContext),
+      dynamicContext: Math.floor(
+        this.totalBudget * ALLOCATION_RATIOS.dynamicContext
+      ),
       toolResults: Math.floor(this.totalBudget * ALLOCATION_RATIOS.toolResults),
       reserve: Math.floor(this.totalBudget * ALLOCATION_RATIOS.reserve),
     };

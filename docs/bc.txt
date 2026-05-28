@@ -1,0 +1,2458 @@
+[1]     255 |   }, []);
+[1]     256 |
+[1]   > 257 |   return {
+[1]         |   ^^^^^^^^
+[1]   > 258 |     connected,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 259 |     isConnected: connected,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 260 |     connectionStatus,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 261 |     dialogState,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 262 |     messages,
+[1]   > 263 |     agentExecutions,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 264 |     perceptionUpdates,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 265 |     brainStageUpdates,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 266 |     skillExecutions,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 267 |     evolutionEvents,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 268 |     clarificationRequests,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 269 |     executionPreviews,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 270 |     fileModifiedEvents,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 271 |     toolTraces,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 272 |     errors,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 273 |     proactiveMessages,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 274 |     weightUpdates,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 275 |     fileRollbacks,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 276 |     multiFileModifiedEvents,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 277 |     userCorrections,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 278 |     sendMessage,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 279 |     send,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 280 |     reconnect,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 281 |   };
+[1]         | ^^^^^
+[1]     282 | }
+[1]     283 |
+[1]     284 | export { connectionManager } from './WebSocketConnectionManager';
+[1]
+[1] ERROR in src/hooks/websocket/WebSocketConnectionManager.ts:444:48
+[1] TS2339: Property 'taskId' does not exist on type 'TaskCancelled'.
+[1]     442 |       case 'task_cancelled': {
+[1]     443 |         const cancelledData = message.data as unknown as TaskCancelled;
+[1]   > 444 |         console.log('🚫 任务已取消:', cancelledData.taskId);
+[1]         |                                                ^^^^^^
+[1]     445 |         this.taskCancelledListeners.forEach((listener) => {
+[1]     446 |           try {
+[1]     447 |             listener(cancelledData);
+[1]
+[1] ^CTerminate batch job (Y/N)?
+PS C:\zy\jiabaixing>
+[1] npm run start:frontend exited with code 1
+                     npm start
+>>
+
+> jiabaixing@5.0.0 start
+> concurrently "npm run start:backend" "npm run start:frontend"
+
+[0]
+[0] > jiabaixing@5.0.0 start:backend
+[0] > set CONSOLE_LOG_LEVEL=warn&& chcp 65001 >nul 2>&1 && ts-node --transpileOnly src/main.ts
+[0]
+[1]
+[1] > jiabaixing@5.0.0 start:frontend
+[1] > npm start --prefix src/frontend
+[1]
+[1]
+[1] > frontend@0.1.0 start
+[1] > set NODE_OPTIONS=--no-deprecation && craco start
+[1]
+[0]   🚀 jiabaixing v5.0 启动中...
+[0]
+[0]   🧠 核心引擎... ✅
+[0]   🔒 安全模块... ✅
+[0]   💾 数据库... ✅
+[0]   🎭 交互模块... ✅
+[0]   🔧 技能系统... ✅ (内置)
+[0]   🧠 推理引擎... ✅
+[0]   🧬 核心初始化...
+[1] Attempting to bind to HOST environment variable: localhost
+[1] If this was unintentional, check that you haven't mistakenly set it in your shell.
+[1] Learn more here: https://cra.link/advanced-config
+[1]
+[0] 15:07:46 warn [OpenAICompatibleModel] ⚠️ OpenAI 兼容服务 /models 端点返回 401 (认证失败)，请检查 API_KEY 配置，模型仍会尝试使用
+[0] ✅
+[0]   📡 调度器... ✅
+[0]   🧬 进化引擎...  ✅
+[0]   🏗️ Harness 框架...  ✅
+[0]   📡 网关隔离... ✅ (隔离进程模式)
+[0] ✅
+[0]
+[0]   ✅ 系统就绪
+[0]
+[0] Error: listen EADDRINUSE: address already in use :::3111
+[0]     at Server.setupListenHandle [as _listen2] (node:net:1948:16)
+[0]     at listenInCluster (node:net:2005:12)
+[0]     at Server.listen (node:net:2110:7)
+[0]     at C:\zy\jiabaixing\src\main.ts:151:13
+[0]     at new Promise (<anonymous>)
+[0]     at listenServer (C:\zy\jiabaixing\src\main.ts:150:10)
+[0]     at startServerWithRetry (C:\zy\jiabaixing\src\main.ts:179:13) {
+[0]   code: 'EADDRINUSE',
+[0]   errno: -4091,
+[0]   syscall: 'listen',
+[0]   address: '::',
+[0]   port: 3111
+[0] }
+[0] npm run start:backend exited with code 1
+[1] Starting the development server...
+[1]
+[1] Compiled successfully!
+[1]
+[1] You can now view frontend in the browser.
+[1]
+[1]   http://localhost:3100
+[1]
+[1] Note that the development build is not optimized.
+[1] To create a production build, use npm run build.
+[1]
+[1] webpack compiled successfully
+[1] Files successfully emitted, waiting for typecheck results...
+[1] Issues checking in progress...
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:53:19
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     51 |             className="control-button stop-btn"
+[1]     52 |             onClick={() => {
+[1]   > 53 |               if (currentTraceIdRef.current && send) {
+[1]        |                   ^^^^^^^^^^^^^^^^^
+[1]     54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:53:48
+[1] TS2304: Cannot find name 'send'.
+[1]     51 |             className="control-button stop-btn"
+[1]     52 |             onClick={() => {
+[1]   > 53 |               if (currentTraceIdRef.current && send) {
+[1]        |                                                ^^^^
+[1]     54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:54:17
+[1] TS2304: Cannot find name 'send'.
+[1]     52 |             onClick={() => {
+[1]     53 |               if (currentTraceIdRef.current && send) {
+[1]   > 54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]        |                 ^^^^
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:54:54
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     52 |             onClick={() => {
+[1]     53 |               if (currentTraceIdRef.current && send) {
+[1]   > 54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]        |                                                      ^^^^^^^^^^^^^^^^^
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:58:15
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]   > 58 |               currentTraceIdRef.current = null;
+[1]        |               ^^^^^^^^^^^^^^^^^
+[1]     59 |             }}
+[1]     60 |             title="取消执行"
+[1]     61 |           >
+[1]
+[1] ERROR in src/hooks/websocket/index.ts:257:3
+[1] TS2322: Type '{ connected: boolean; isConnected: boolean; connectionStatus: ConnectionStatus; dialogState: DialogStateValue; messages: WebSocketMessage[]; ... 17 more ...; reconnect: () => void; }' is not assignable to type 'WebSocketState & { sendMessage: (input: string, userId?: string | undefined) => boolean; send: (data: Record<string, unknown>) => boolean; reconnect: () => void; }'.
+[1]   Property 'taskCancelledEvents' is missing in type '{ connected: boolean; isConnected: boolean; connectionStatus: ConnectionStatus; dialogState: DialogStateValue; messages: WebSocketMessage[]; ... 17 more ...; reconnect: () => void; }' but required in type 'WebSocketState'.
+[1]     255 |   }, []);
+[1]     256 |
+[1]   > 257 |   return {
+[1]         |   ^^^^^^^^
+[1]   > 258 |     connected,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 259 |     isConnected: connected,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 260 |     connectionStatus,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 261 |     dialogState,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 262 |     messages,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 263 |     agentExecutions,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 264 |     perceptionUpdates,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 265 |     brainStageUpdates,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 266 |     skillExecutions,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 267 |     evolutionEvents,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 268 |     clarificationRequests,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 269 |     executionPreviews,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 270 |     fileModifiedEvents,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 271 |     toolTraces,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 272 |     errors,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 273 |     proactiveMessages,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 274 |     weightUpdates,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 275 |     fileRollbacks,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 276 |     multiFileModifiedEvents,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 277 |     userCorrections,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 278 |     sendMessage,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 279 |     send,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 280 |     reconnect,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 281 |   };
+[1]         | ^^^^^
+[1]     282 | }
+[1]     283 |
+[1]     284 | export { connectionManager } from './WebSocketConnectionManager';
+[1]
+[1] ERROR in src/hooks/websocket/WebSocketConnectionManager.ts:444:48
+[1] TS2339: Property 'taskId' does not exist on type 'TaskCancelled'.
+[1]     442 |       case 'task_cancelled': {
+[1]     443 |         const cancelledData = message.data as unknown as TaskCancelled;
+[1]   > 444 |         console.log('🚫 任务已取消:', cancelledData.taskId);
+[1]         |                                                ^^^^^^
+[1]     445 |         this.taskCancelledListeners.forEach((listener) => {
+[1]     446 |           try {
+[1]     447 |             listener(cancelledData);
+[1]
+[1] Compiling...
+[1] Compiled with warnings.
+[1]
+[1] [eslint]
+[1] src\hooks\websocket\index.ts
+[1]   Line 25:3:   'TaskCancelled' is defined but never used. Allowed unused vars must match /^_/u                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           @typescript-eslint/no-unused-vars
+[1]   Line 244:6:  React Hook useEffect has missing dependencies: 'onAgentExecutionUpdate', 'onBrainStageUpdate', 'onClarificationRequest', 'onConnectionChange', 'onConnectionStatusChange', 'onDialogStateChange', 'onError', 'onEvolutionEvent', 'onExecutionPreview', 'onFileModified', 'onFileRollback', 'onMessage', 'onMultiFileModified', 'onPerceptionUpdate', 'onProactiveMessage', 'onProcessingStatus', 'onResponseReady', 'onServerLog', 'onSkillExecutionUpdate', 'onToolTrace', 'onUserCorrection', and 'onWeightUpdate'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] Search for the keywords to learn more about each warning.
+[1] To ignore, add // eslint-disable-next-line to the line before.
+[1]
+[1] WARNING in [eslint]
+[1] src\hooks\websocket\index.ts
+[1]   Line 25:3:   'TaskCancelled' is defined but never used. Allowed unused vars must match /^_/u                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           @typescript-eslint/no-unused-vars
+[1]   Line 244:6:  React Hook useEffect has missing dependencies: 'onAgentExecutionUpdate', 'onBrainStageUpdate', 'onClarificationRequest', 'onConnectionChange', 'onConnectionStatusChange', 'onDialogStateChange', 'onError', 'onEvolutionEvent', 'onExecutionPreview', 'onFileModified', 'onFileRollback', 'onMessage', 'onMultiFileModified', 'onPerceptionUpdate', 'onProactiveMessage', 'onProcessingStatus', 'onResponseReady', 'onServerLog', 'onSkillExecutionUpdate', 'onToolTrace', 'onUserCorrection', and 'onWeightUpdate'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] webpack compiled with 1 warning
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:53:19
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     51 |             className="control-button stop-btn"
+[1]     52 |             onClick={() => {
+[1]   > 53 |               if (currentTraceIdRef.current && send) {
+[1]        |                   ^^^^^^^^^^^^^^^^^
+[1]     54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:53:48
+[1] TS2304: Cannot find name 'send'.
+[1]     51 |             className="control-button stop-btn"
+[1]     52 |             onClick={() => {
+[1]   > 53 |               if (currentTraceIdRef.current && send) {
+[1]        |                                                ^^^^
+[1]     54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:54:17
+[1] TS2304: Cannot find name 'send'.
+[1]     52 |             onClick={() => {
+[1]     53 |               if (currentTraceIdRef.current && send) {
+[1]   > 54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]        |                 ^^^^
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:54:54
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     52 |             onClick={() => {
+[1]     53 |               if (currentTraceIdRef.current && send) {
+[1]   > 54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]        |                                                      ^^^^^^^^^^^^^^^^^
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:58:15
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]   > 58 |               currentTraceIdRef.current = null;
+[1]        |               ^^^^^^^^^^^^^^^^^
+[1]     59 |             }}
+[1]     60 |             title="取消执行"
+[1]     61 |           >
+[1]
+[1] ERROR in src/hooks/websocket/index.ts:258:3
+[1] TS2322: Type '{ connected: boolean; isConnected: boolean; connectionStatus: ConnectionStatus; dialogState: DialogStateValue; messages: WebSocketMessage[]; ... 17 more ...; reconnect: () => void; }' is not assignable to type 'WebSocketState & { sendMessage: (input: string, userId?: string | undefined) => boolean; send: (data: Record<string, unknown>) => boolean; reconnect: () => void; }'.
+[1]   Property 'taskCancelledEvents' is missing in type '{ connected: boolean; isConnected: boolean; connectionStatus: ConnectionStatus; dialogState: DialogStateValue; messages: WebSocketMessage[]; ... 17 more ...; reconnect: () => void; }' but required in type 'WebSocketState'.
+[1]     256 |   }, []);
+[1]     257 |
+[1]   > 258 |   return {
+[1]         |   ^^^^^^^^
+[1]   > 259 |     connected,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 260 |     isConnected: connected,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 261 |     connectionStatus,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 262 |     dialogState,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 263 |     messages,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 264 |     agentExecutions,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 265 |     perceptionUpdates,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 266 |     brainStageUpdates,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 267 |     skillExecutions,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 268 |     evolutionEvents,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 269 |     clarificationRequests,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 270 |     executionPreviews,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 271 |     fileModifiedEvents,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 272 |     toolTraces,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 273 |     errors,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 274 |     proactiveMessages,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 275 |     weightUpdates,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 276 |     fileRollbacks,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 277 |     multiFileModifiedEvents,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 278 |     userCorrections,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 279 |     sendMessage,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 280 |     send,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 281 |     reconnect,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 282 |   };
+[1]         | ^^^^^
+[1]     283 | }
+[1]     284 |
+[1]     285 | export { connectionManager } from './WebSocketConnectionManager';
+[1]
+[1] ERROR in src/hooks/websocket/WebSocketConnectionManager.ts:444:48
+[1] TS2339: Property 'taskId' does not exist on type 'TaskCancelled'.
+[1]     442 |       case 'task_cancelled': {
+[1]     443 |         const cancelledData = message.data as unknown as TaskCancelled;
+[1]   > 444 |         console.log('🚫 任务已取消:', cancelledData.taskId);
+[1]         |                                                ^^^^^^
+[1]     445 |         this.taskCancelledListeners.forEach((listener) => {
+[1]     446 |           try {
+[1]     447 |             listener(cancelledData);
+[1]
+[1] Compiling...
+[1] Compiled with warnings.
+[1]
+[1] [eslint]
+[1] src\hooks\websocket\index.ts
+[1]   Line 25:3:   'TaskCancelled' is defined but never used. Allowed unused vars must match /^_/u                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           @typescript-eslint/no-unused-vars
+[1]   Line 59:5:   'onTaskCancelled' is assigned a value but never used. Allowed unused vars must match /^_/u                                                                                                                                                                                                                                                                                                                                                                                                                                                                                @typescript-eslint/no-unused-vars
+[1]   Line 245:6:  React Hook useEffect has missing dependencies: 'onAgentExecutionUpdate', 'onBrainStageUpdate', 'onClarificationRequest', 'onConnectionChange', 'onConnectionStatusChange', 'onDialogStateChange', 'onError', 'onEvolutionEvent', 'onExecutionPreview', 'onFileModified', 'onFileRollback', 'onMessage', 'onMultiFileModified', 'onPerceptionUpdate', 'onProactiveMessage', 'onProcessingStatus', 'onResponseReady', 'onServerLog', 'onSkillExecutionUpdate', 'onToolTrace', 'onUserCorrection', and 'onWeightUpdate'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] Search for the keywords to learn more about each warning.
+[1] To ignore, add // eslint-disable-next-line to the line before.
+[1]
+[1] WARNING in [eslint]
+[1] src\hooks\websocket\index.ts
+[1]   Line 25:3:   'TaskCancelled' is defined but never used. Allowed unused vars must match /^_/u                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           @typescript-eslint/no-unused-vars
+[1]   Line 59:5:   'onTaskCancelled' is assigned a value but never used. Allowed unused vars must match /^_/u                                                                                                                                                                                                                                                                                                                                                                                                                                                                                @typescript-eslint/no-unused-vars
+[1]   Line 245:6:  React Hook useEffect has missing dependencies: 'onAgentExecutionUpdate', 'onBrainStageUpdate', 'onClarificationRequest', 'onConnectionChange', 'onConnectionStatusChange', 'onDialogStateChange', 'onError', 'onEvolutionEvent', 'onExecutionPreview', 'onFileModified', 'onFileRollback', 'onMessage', 'onMultiFileModified', 'onPerceptionUpdate', 'onProactiveMessage', 'onProcessingStatus', 'onResponseReady', 'onServerLog', 'onSkillExecutionUpdate', 'onToolTrace', 'onUserCorrection', and 'onWeightUpdate'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] webpack compiled with 1 warning
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:53:19
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     51 |             className="control-button stop-btn"
+[1]     52 |             onClick={() => {
+[1]   > 53 |               if (currentTraceIdRef.current && send) {
+[1]        |                   ^^^^^^^^^^^^^^^^^
+[1]     54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:53:48
+[1] TS2304: Cannot find name 'send'.
+[1]     51 |             className="control-button stop-btn"
+[1]     52 |             onClick={() => {
+[1]   > 53 |               if (currentTraceIdRef.current && send) {
+[1]        |                                                ^^^^
+[1]     54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:54:17
+[1] TS2304: Cannot find name 'send'.
+[1]     52 |             onClick={() => {
+[1]     53 |               if (currentTraceIdRef.current && send) {
+[1]   > 54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]        |                 ^^^^
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:54:54
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     52 |             onClick={() => {
+[1]     53 |               if (currentTraceIdRef.current && send) {
+[1]   > 54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]        |                                                      ^^^^^^^^^^^^^^^^^
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:58:15
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]   > 58 |               currentTraceIdRef.current = null;
+[1]        |               ^^^^^^^^^^^^^^^^^
+[1]     59 |             }}
+[1]     60 |             title="取消执行"
+[1]     61 |           >
+[1]
+[1] ERROR in src/hooks/websocket/index.ts:259:3
+[1] TS2322: Type '{ connected: boolean; isConnected: boolean; connectionStatus: ConnectionStatus; dialogState: DialogStateValue; messages: WebSocketMessage[]; ... 17 more ...; reconnect: () => void; }' is not assignable to type 'WebSocketState & { sendMessage: (input: string, userId?: string | undefined) => boolean; send: (data: Record<string, unknown>) => boolean; reconnect: () => void; }'.
+[1]   Property 'taskCancelledEvents' is missing in type '{ connected: boolean; isConnected: boolean; connectionStatus: ConnectionStatus; dialogState: DialogStateValue; messages: WebSocketMessage[]; ... 17 more ...; reconnect: () => void; }' but required in type 'WebSocketState'.
+[1]     257 |   }, []);
+[1]     258 |
+[1]   > 259 |   return {
+[1]         |   ^^^^^^^^
+[1]   > 260 |     connected,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 261 |     isConnected: connected,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 262 |     connectionStatus,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 263 |     dialogState,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 264 |     messages,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 265 |     agentExecutions,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 266 |     perceptionUpdates,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 267 |     brainStageUpdates,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 268 |     skillExecutions,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 269 |     evolutionEvents,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 270 |     clarificationRequests,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 271 |     executionPreviews,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 272 |     fileModifiedEvents,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 273 |     toolTraces,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 274 |     errors,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 275 |     proactiveMessages,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 276 |     weightUpdates,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 277 |     fileRollbacks,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 278 |     multiFileModifiedEvents,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 279 |     userCorrections,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 280 |     sendMessage,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 281 |     send,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 282 |     reconnect,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 283 |   };
+[1]         | ^^^^^
+[1]     284 | }
+[1]     285 |
+[1]     286 | export { connectionManager } from './WebSocketConnectionManager';
+[1]
+[1] ERROR in src/hooks/websocket/WebSocketConnectionManager.ts:444:48
+[1] TS2339: Property 'taskId' does not exist on type 'TaskCancelled'.
+[1]     442 |       case 'task_cancelled': {
+[1]     443 |         const cancelledData = message.data as unknown as TaskCancelled;
+[1]   > 444 |         console.log('🚫 任务已取消:', cancelledData.taskId);
+[1]         |                                                ^^^^^^
+[1]     445 |         this.taskCancelledListeners.forEach((listener) => {
+[1]     446 |           try {
+[1]     447 |             listener(cancelledData);
+[1]
+[1] Compiling...
+[1] Compiled with warnings.
+[1]
+[1] [eslint]
+[1] src\hooks\websocket\index.ts
+[1]   Line 59:5:   'onTaskCancelled' is assigned a value but never used. Allowed unused vars must match /^_/u                                                                                                                                                                                                                                                                                                                                                                                                                                                                                @typescript-eslint/no-unused-vars
+[1]   Line 81:10:  'taskCancelledEvents' is assigned a value but never used. Allowed unused vars must match /^_/u                                                                                                                                                                                                                                                                                                                                                                                                                                                                            @typescript-eslint/no-unused-vars
+[1]   Line 81:31:  'setTaskCancelledEvents' is assigned a value but never used. Allowed unused vars must match /^_/u                                                                                                                                                                                                                                                                                                                                                                                                                                                                         @typescript-eslint/no-unused-vars
+[1]   Line 246:6:  React Hook useEffect has missing dependencies: 'onAgentExecutionUpdate', 'onBrainStageUpdate', 'onClarificationRequest', 'onConnectionChange', 'onConnectionStatusChange', 'onDialogStateChange', 'onError', 'onEvolutionEvent', 'onExecutionPreview', 'onFileModified', 'onFileRollback', 'onMessage', 'onMultiFileModified', 'onPerceptionUpdate', 'onProactiveMessage', 'onProcessingStatus', 'onResponseReady', 'onServerLog', 'onSkillExecutionUpdate', 'onToolTrace', 'onUserCorrection', and 'onWeightUpdate'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] Search for the keywords to learn more about each warning.
+[1] To ignore, add // eslint-disable-next-line to the line before.
+[1]
+[1] WARNING in [eslint]
+[1] src\hooks\websocket\index.ts
+[1]   Line 59:5:   'onTaskCancelled' is assigned a value but never used. Allowed unused vars must match /^_/u                                                                                                                                                                                                                                                                                                                                                                                                                                                                                @typescript-eslint/no-unused-vars
+[1]   Line 81:10:  'taskCancelledEvents' is assigned a value but never used. Allowed unused vars must match /^_/u                                                                                                                                                                                                                                                                                                                                                                                                                                                                            @typescript-eslint/no-unused-vars
+[1]   Line 81:31:  'setTaskCancelledEvents' is assigned a value but never used. Allowed unused vars must match /^_/u                                                                                                                                                                                                                                                                                                                                                                                                                                                                         @typescript-eslint/no-unused-vars
+[1]   Line 246:6:  React Hook useEffect has missing dependencies: 'onAgentExecutionUpdate', 'onBrainStageUpdate', 'onClarificationRequest', 'onConnectionChange', 'onConnectionStatusChange', 'onDialogStateChange', 'onError', 'onEvolutionEvent', 'onExecutionPreview', 'onFileModified', 'onFileRollback', 'onMessage', 'onMultiFileModified', 'onPerceptionUpdate', 'onProactiveMessage', 'onProcessingStatus', 'onResponseReady', 'onServerLog', 'onSkillExecutionUpdate', 'onToolTrace', 'onUserCorrection', and 'onWeightUpdate'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] webpack compiled with 1 warning
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:53:19
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     51 |             className="control-button stop-btn"
+[1]     52 |             onClick={() => {
+[1]   > 53 |               if (currentTraceIdRef.current && send) {
+[1]        |                   ^^^^^^^^^^^^^^^^^
+[1]     54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:53:48
+[1] TS2304: Cannot find name 'send'.
+[1]     51 |             className="control-button stop-btn"
+[1]     52 |             onClick={() => {
+[1]   > 53 |               if (currentTraceIdRef.current && send) {
+[1]        |                                                ^^^^
+[1]     54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:54:17
+[1] TS2304: Cannot find name 'send'.
+[1]     52 |             onClick={() => {
+[1]     53 |               if (currentTraceIdRef.current && send) {
+[1]   > 54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]        |                 ^^^^
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:54:54
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     52 |             onClick={() => {
+[1]     53 |               if (currentTraceIdRef.current && send) {
+[1]   > 54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]        |                                                      ^^^^^^^^^^^^^^^^^
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:58:15
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]   > 58 |               currentTraceIdRef.current = null;
+[1]        |               ^^^^^^^^^^^^^^^^^
+[1]     59 |             }}
+[1]     60 |             title="取消执行"
+[1]     61 |           >
+[1]
+[1] ERROR in src/hooks/websocket/index.ts:260:3
+[1] TS2322: Type '{ connected: boolean; isConnected: boolean; connectionStatus: ConnectionStatus; dialogState: DialogStateValue; messages: WebSocketMessage[]; ... 17 more ...; reconnect: () => void; }' is not assignable to type 'WebSocketState & { sendMessage: (input: string, userId?: string | undefined) => boolean; send: (data: Record<string, unknown>) => boolean; reconnect: () => void; }'.
+[1]   Property 'taskCancelledEvents' is missing in type '{ connected: boolean; isConnected: boolean; connectionStatus: ConnectionStatus; dialogState: DialogStateValue; messages: WebSocketMessage[]; ... 17 more ...; reconnect: () => void; }' but required in type 'WebSocketState'.
+[1]     258 |   }, []);
+[1]     259 |
+[1]   > 260 |   return {
+[1]         |   ^^^^^^^^
+[1]   > 261 |     connected,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 262 |     isConnected: connected,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 263 |     connectionStatus,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 264 |     dialogState,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 265 |     messages,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 266 |     agentExecutions,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 267 |     perceptionUpdates,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 268 |     brainStageUpdates,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 269 |     skillExecutions,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 270 |     evolutionEvents,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 271 |     clarificationRequests,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 272 |     executionPreviews,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 273 |     fileModifiedEvents,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 274 |     toolTraces,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 275 |     errors,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 276 |     proactiveMessages,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 277 |     weightUpdates,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 278 |     fileRollbacks,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 279 |     multiFileModifiedEvents,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 280 |     userCorrections,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 281 |     sendMessage,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 282 |     send,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 283 |     reconnect,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 284 |   };
+[1]         | ^^^^^
+[1]     285 | }
+[1]     286 |
+[1]     287 | export { connectionManager } from './WebSocketConnectionManager';
+[1]
+[1] ERROR in src/hooks/websocket/WebSocketConnectionManager.ts:444:48
+[1] TS2339: Property 'taskId' does not exist on type 'TaskCancelled'.
+[1]     442 |       case 'task_cancelled': {
+[1]     443 |         const cancelledData = message.data as unknown as TaskCancelled;
+[1]   > 444 |         console.log('🚫 任务已取消:', cancelledData.taskId);
+[1]         |                                                ^^^^^^
+[1]     445 |         this.taskCancelledListeners.forEach((listener) => {
+[1]     446 |           try {
+[1]     447 |             listener(cancelledData);
+[1]
+[1] Compiling...
+[1] Compiled with warnings.
+[1]
+[1] [eslint]
+[1] src\hooks\websocket\index.ts
+[1]   Line 81:10:   'taskCancelledEvents' is assigned a value but never used. Allowed unused vars must match /^_/u                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               @typescript-eslint/no-unused-vars
+[1]   Line 195:11:  'handleTaskCancelled' is assigned a value but never used. Allowed unused vars must match /^_/u                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               @typescript-eslint/no-unused-vars
+[1]   Line 251:6:   React Hook useEffect has missing dependencies: 'onAgentExecutionUpdate', 'onBrainStageUpdate', 'onClarificationRequest', 'onConnectionChange', 'onConnectionStatusChange', 'onDialogStateChange', 'onError', 'onEvolutionEvent', 'onExecutionPreview', 'onFileModified', 'onFileRollback', 'onMessage', 'onMultiFileModified', 'onPerceptionUpdate', 'onProactiveMessage', 'onProcessingStatus', 'onResponseReady', 'onServerLog', 'onSkillExecutionUpdate', 'onTaskCancelled', 'onToolTrace', 'onUserCorrection', and 'onWeightUpdate'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] Search for the keywords to learn more about each warning.
+[1] To ignore, add // eslint-disable-next-line to the line before.
+[1]
+[1] WARNING in [eslint]
+[1] src\hooks\websocket\index.ts
+[1]   Line 81:10:   'taskCancelledEvents' is assigned a value but never used. Allowed unused vars must match /^_/u                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               @typescript-eslint/no-unused-vars
+[1]   Line 195:11:  'handleTaskCancelled' is assigned a value but never used. Allowed unused vars must match /^_/u                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               @typescript-eslint/no-unused-vars
+[1]   Line 251:6:   React Hook useEffect has missing dependencies: 'onAgentExecutionUpdate', 'onBrainStageUpdate', 'onClarificationRequest', 'onConnectionChange', 'onConnectionStatusChange', 'onDialogStateChange', 'onError', 'onEvolutionEvent', 'onExecutionPreview', 'onFileModified', 'onFileRollback', 'onMessage', 'onMultiFileModified', 'onPerceptionUpdate', 'onProactiveMessage', 'onProcessingStatus', 'onResponseReady', 'onServerLog', 'onSkillExecutionUpdate', 'onTaskCancelled', 'onToolTrace', 'onUserCorrection', and 'onWeightUpdate'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] webpack compiled with 1 warning
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:53:19
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     51 |             className="control-button stop-btn"
+[1]     52 |             onClick={() => {
+[1]   > 53 |               if (currentTraceIdRef.current && send) {
+[1]        |                   ^^^^^^^^^^^^^^^^^
+[1]     54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:53:48
+[1] TS2304: Cannot find name 'send'.
+[1]     51 |             className="control-button stop-btn"
+[1]     52 |             onClick={() => {
+[1]   > 53 |               if (currentTraceIdRef.current && send) {
+[1]        |                                                ^^^^
+[1]     54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:54:17
+[1] TS2304: Cannot find name 'send'.
+[1]     52 |             onClick={() => {
+[1]     53 |               if (currentTraceIdRef.current && send) {
+[1]   > 54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]        |                 ^^^^
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:54:54
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     52 |             onClick={() => {
+[1]     53 |               if (currentTraceIdRef.current && send) {
+[1]   > 54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]        |                                                      ^^^^^^^^^^^^^^^^^
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:58:15
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]   > 58 |               currentTraceIdRef.current = null;
+[1]        |               ^^^^^^^^^^^^^^^^^
+[1]     59 |             }}
+[1]     60 |             title="取消执行"
+[1]     61 |           >
+[1]
+[1] ERROR in src/hooks/websocket/index.ts:265:3
+[1] TS2322: Type '{ connected: boolean; isConnected: boolean; connectionStatus: ConnectionStatus; dialogState: DialogStateValue; messages: WebSocketMessage[]; ... 17 more ...; reconnect: () => void; }' is not assignable to type 'WebSocketState & { sendMessage: (input: string, userId?: string | undefined) => boolean; send: (data: Record<string, unknown>) => boolean; reconnect: () => void; }'.
+[1]   Property 'taskCancelledEvents' is missing in type '{ connected: boolean; isConnected: boolean; connectionStatus: ConnectionStatus; dialogState: DialogStateValue; messages: WebSocketMessage[]; ... 17 more ...; reconnect: () => void; }' but required in type 'WebSocketState'.
+[1]     263 |   }, []);
+[1]     264 |
+[1]   > 265 |   return {
+[1]         |   ^^^^^^^^
+[1]   > 266 |     connected,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 267 |     isConnected: connected,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 268 |     connectionStatus,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 269 |     dialogState,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 270 |     messages,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 271 |     agentExecutions,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 272 |     perceptionUpdates,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 273 |     brainStageUpdates,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 274 |     skillExecutions,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 275 |     evolutionEvents,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 276 |     clarificationRequests,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 277 |     executionPreviews,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 278 |     fileModifiedEvents,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 279 |     toolTraces,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 280 |     errors,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 281 |     proactiveMessages,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 282 |     weightUpdates,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 283 |     fileRollbacks,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 284 |     multiFileModifiedEvents,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 285 |     userCorrections,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 286 |     sendMessage,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 287 |     send,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 288 |     reconnect,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 289 |   };
+[1]         | ^^^^^
+[1]     290 | }
+[1]     291 |
+[1]     292 | export { connectionManager } from './WebSocketConnectionManager';
+[1]
+[1] ERROR in src/hooks/websocket/WebSocketConnectionManager.ts:444:48
+[1] TS2339: Property 'taskId' does not exist on type 'TaskCancelled'.
+[1]     442 |       case 'task_cancelled': {
+[1]     443 |         const cancelledData = message.data as unknown as TaskCancelled;
+[1]   > 444 |         console.log('🚫 任务已取消:', cancelledData.taskId);
+[1]         |                                                ^^^^^^
+[1]     445 |         this.taskCancelledListeners.forEach((listener) => {
+[1]     446 |           try {
+[1]     447 |             listener(cancelledData);
+[1]
+[1] Compiling...
+[1] Compiled with warnings.
+[1]
+[1] [eslint]
+[1] src\hooks\websocket\index.ts
+[1]   Line 81:10:  'taskCancelledEvents' is assigned a value but never used. Allowed unused vars must match /^_/u                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               @typescript-eslint/no-unused-vars
+[1]   Line 252:6:  React Hook useEffect has missing dependencies: 'onAgentExecutionUpdate', 'onBrainStageUpdate', 'onClarificationRequest', 'onConnectionChange', 'onConnectionStatusChange', 'onDialogStateChange', 'onError', 'onEvolutionEvent', 'onExecutionPreview', 'onFileModified', 'onFileRollback', 'onMessage', 'onMultiFileModified', 'onPerceptionUpdate', 'onProactiveMessage', 'onProcessingStatus', 'onResponseReady', 'onServerLog', 'onSkillExecutionUpdate', 'onTaskCancelled', 'onToolTrace', 'onUserCorrection', and 'onWeightUpdate'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] Search for the keywords to learn more about each warning.
+[1] To ignore, add // eslint-disable-next-line to the line before.
+[1]
+[1] WARNING in [eslint]
+[1] src\hooks\websocket\index.ts
+[1]   Line 81:10:  'taskCancelledEvents' is assigned a value but never used. Allowed unused vars must match /^_/u                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               @typescript-eslint/no-unused-vars
+[1]   Line 252:6:  React Hook useEffect has missing dependencies: 'onAgentExecutionUpdate', 'onBrainStageUpdate', 'onClarificationRequest', 'onConnectionChange', 'onConnectionStatusChange', 'onDialogStateChange', 'onError', 'onEvolutionEvent', 'onExecutionPreview', 'onFileModified', 'onFileRollback', 'onMessage', 'onMultiFileModified', 'onPerceptionUpdate', 'onProactiveMessage', 'onProcessingStatus', 'onResponseReady', 'onServerLog', 'onSkillExecutionUpdate', 'onTaskCancelled', 'onToolTrace', 'onUserCorrection', and 'onWeightUpdate'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] webpack compiled with 1 warning
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:53:19
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     51 |             className="control-button stop-btn"
+[1]     52 |             onClick={() => {
+[1]   > 53 |               if (currentTraceIdRef.current && send) {
+[1]        |                   ^^^^^^^^^^^^^^^^^
+[1]     54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:53:48
+[1] TS2304: Cannot find name 'send'.
+[1]     51 |             className="control-button stop-btn"
+[1]     52 |             onClick={() => {
+[1]   > 53 |               if (currentTraceIdRef.current && send) {
+[1]        |                                                ^^^^
+[1]     54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:54:17
+[1] TS2304: Cannot find name 'send'.
+[1]     52 |             onClick={() => {
+[1]     53 |               if (currentTraceIdRef.current && send) {
+[1]   > 54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]        |                 ^^^^
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:54:54
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     52 |             onClick={() => {
+[1]     53 |               if (currentTraceIdRef.current && send) {
+[1]   > 54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]        |                                                      ^^^^^^^^^^^^^^^^^
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:58:15
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]   > 58 |               currentTraceIdRef.current = null;
+[1]        |               ^^^^^^^^^^^^^^^^^
+[1]     59 |             }}
+[1]     60 |             title="取消执行"
+[1]     61 |           >
+[1]
+[1] ERROR in src/hooks/websocket/index.ts:266:3
+[1] TS2322: Type '{ connected: boolean; isConnected: boolean; connectionStatus: ConnectionStatus; dialogState: DialogStateValue; messages: WebSocketMessage[]; ... 17 more ...; reconnect: () => void; }' is not assignable to type 'WebSocketState & { sendMessage: (input: string, userId?: string | undefined) => boolean; send: (data: Record<string, unknown>) => boolean; reconnect: () => void; }'.
+[1]   Property 'taskCancelledEvents' is missing in type '{ connected: boolean; isConnected: boolean; connectionStatus: ConnectionStatus; dialogState: DialogStateValue; messages: WebSocketMessage[]; ... 17 more ...; reconnect: () => void; }' but required in type 'WebSocketState'.
+[1]     264 |   }, []);
+[1]     265 |
+[1]   > 266 |   return {
+[1]         |   ^^^^^^^^
+[1]   > 267 |     connected,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 268 |     isConnected: connected,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 269 |     connectionStatus,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 270 |     dialogState,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 271 |     messages,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 272 |     agentExecutions,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 273 |     perceptionUpdates,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 274 |     brainStageUpdates,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 275 |     skillExecutions,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 276 |     evolutionEvents,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 277 |     clarificationRequests,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 278 |     executionPreviews,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 279 |     fileModifiedEvents,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 280 |     toolTraces,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 281 |     errors,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 282 |     proactiveMessages,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 283 |     weightUpdates,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 284 |     fileRollbacks,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 285 |     multiFileModifiedEvents,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 286 |     userCorrections,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 287 |     sendMessage,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 288 |     send,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 289 |     reconnect,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 290 |   };
+[1]         | ^^^^^
+[1]     291 | }
+[1]     292 |
+[1]     293 | export { connectionManager } from './WebSocketConnectionManager';
+[1]
+[1] ERROR in src/hooks/websocket/WebSocketConnectionManager.ts:444:48
+[1] TS2339: Property 'taskId' does not exist on type 'TaskCancelled'.
+[1]     442 |       case 'task_cancelled': {
+[1]     443 |         const cancelledData = message.data as unknown as TaskCancelled;
+[1]   > 444 |         console.log('🚫 任务已取消:', cancelledData.taskId);
+[1]         |                                                ^^^^^^
+[1]     445 |         this.taskCancelledListeners.forEach((listener) => {
+[1]     446 |           try {
+[1]     447 |             listener(cancelledData);
+[1]
+[1] Compiling...
+[1] Compiled with warnings.
+[1]
+[1] [eslint]
+[1] src\hooks\websocket\index.ts
+[1]   Line 81:10:  'taskCancelledEvents' is assigned a value but never used. Allowed unused vars must match /^_/u                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               @typescript-eslint/no-unused-vars
+[1]   Line 253:6:  React Hook useEffect has missing dependencies: 'onAgentExecutionUpdate', 'onBrainStageUpdate', 'onClarificationRequest', 'onConnectionChange', 'onConnectionStatusChange', 'onDialogStateChange', 'onError', 'onEvolutionEvent', 'onExecutionPreview', 'onFileModified', 'onFileRollback', 'onMessage', 'onMultiFileModified', 'onPerceptionUpdate', 'onProactiveMessage', 'onProcessingStatus', 'onResponseReady', 'onServerLog', 'onSkillExecutionUpdate', 'onTaskCancelled', 'onToolTrace', 'onUserCorrection', and 'onWeightUpdate'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] Search for the keywords to learn more about each warning.
+[1] To ignore, add // eslint-disable-next-line to the line before.
+[1]
+[1] WARNING in [eslint]
+[1] src\hooks\websocket\index.ts
+[1]   Line 81:10:  'taskCancelledEvents' is assigned a value but never used. Allowed unused vars must match /^_/u                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               @typescript-eslint/no-unused-vars
+[1]   Line 253:6:  React Hook useEffect has missing dependencies: 'onAgentExecutionUpdate', 'onBrainStageUpdate', 'onClarificationRequest', 'onConnectionChange', 'onConnectionStatusChange', 'onDialogStateChange', 'onError', 'onEvolutionEvent', 'onExecutionPreview', 'onFileModified', 'onFileRollback', 'onMessage', 'onMultiFileModified', 'onPerceptionUpdate', 'onProactiveMessage', 'onProcessingStatus', 'onResponseReady', 'onServerLog', 'onSkillExecutionUpdate', 'onTaskCancelled', 'onToolTrace', 'onUserCorrection', and 'onWeightUpdate'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] webpack compiled with 1 warning
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:53:19
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     51 |             className="control-button stop-btn"
+[1]     52 |             onClick={() => {
+[1]   > 53 |               if (currentTraceIdRef.current && send) {
+[1]        |                   ^^^^^^^^^^^^^^^^^
+[1]     54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:53:48
+[1] TS2304: Cannot find name 'send'.
+[1]     51 |             className="control-button stop-btn"
+[1]     52 |             onClick={() => {
+[1]   > 53 |               if (currentTraceIdRef.current && send) {
+[1]        |                                                ^^^^
+[1]     54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:54:17
+[1] TS2304: Cannot find name 'send'.
+[1]     52 |             onClick={() => {
+[1]     53 |               if (currentTraceIdRef.current && send) {
+[1]   > 54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]        |                 ^^^^
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:54:54
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     52 |             onClick={() => {
+[1]     53 |               if (currentTraceIdRef.current && send) {
+[1]   > 54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]        |                                                      ^^^^^^^^^^^^^^^^^
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:58:15
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]   > 58 |               currentTraceIdRef.current = null;
+[1]        |               ^^^^^^^^^^^^^^^^^
+[1]     59 |             }}
+[1]     60 |             title="取消执行"
+[1]     61 |           >
+[1]
+[1] ERROR in src/hooks/websocket/index.ts:267:3
+[1] TS2322: Type '{ connected: boolean; isConnected: boolean; connectionStatus: ConnectionStatus; dialogState: DialogStateValue; messages: WebSocketMessage[]; ... 17 more ...; reconnect: () => void; }' is not assignable to type 'WebSocketState & { sendMessage: (input: string, userId?: string | undefined) => boolean; send: (data: Record<string, unknown>) => boolean; reconnect: () => void; }'.
+[1]   Property 'taskCancelledEvents' is missing in type '{ connected: boolean; isConnected: boolean; connectionStatus: ConnectionStatus; dialogState: DialogStateValue; messages: WebSocketMessage[]; ... 17 more ...; reconnect: () => void; }' but required in type 'WebSocketState'.
+[1]     265 |   }, []);
+[1]     266 |
+[1]   > 267 |   return {
+[1]         |   ^^^^^^^^
+[1]   > 268 |     connected,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 269 |     isConnected: connected,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 270 |     connectionStatus,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 271 |     dialogState,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 272 |     messages,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 273 |     agentExecutions,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 274 |     perceptionUpdates,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 275 |     brainStageUpdates,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 276 |     skillExecutions,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 277 |     evolutionEvents,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 278 |     clarificationRequests,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 279 |     executionPreviews,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 280 |     fileModifiedEvents,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 281 |     toolTraces,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 282 |     errors,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 283 |     proactiveMessages,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 284 |     weightUpdates,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 285 |     fileRollbacks,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 286 |     multiFileModifiedEvents,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 287 |     userCorrections,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 288 |     sendMessage,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 289 |     send,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 290 |     reconnect,
+[1]         | ^^^^^^^^^^^^^^
+[1]   > 291 |   };
+[1]         | ^^^^^
+[1]     292 | }
+[1]     293 |
+[1]     294 | export { connectionManager } from './WebSocketConnectionManager';
+[1]
+[1] ERROR in src/hooks/websocket/WebSocketConnectionManager.ts:444:48
+[1] TS2339: Property 'taskId' does not exist on type 'TaskCancelled'.
+[1]     442 |       case 'task_cancelled': {
+[1]     443 |         const cancelledData = message.data as unknown as TaskCancelled;
+[1]   > 444 |         console.log('🚫 任务已取消:', cancelledData.taskId);
+[1]         |                                                ^^^^^^
+[1]     445 |         this.taskCancelledListeners.forEach((listener) => {
+[1]     446 |           try {
+[1]     447 |             listener(cancelledData);
+[1]
+[1] Compiling...
+[1] Compiled with warnings.
+[1]
+[1] [eslint]
+[1] src\hooks\websocket\index.ts
+[1]   Line 253:6:  React Hook useEffect has missing dependencies: 'onAgentExecutionUpdate', 'onBrainStageUpdate', 'onClarificationRequest', 'onConnectionChange', 'onConnectionStatusChange', 'onDialogStateChange', 'onError', 'onEvolutionEvent', 'onExecutionPreview', 'onFileModified', 'onFileRollback', 'onMessage', 'onMultiFileModified', 'onPerceptionUpdate', 'onProactiveMessage', 'onProcessingStatus', 'onResponseReady', 'onServerLog', 'onSkillExecutionUpdate', 'onTaskCancelled', 'onToolTrace', 'onUserCorrection', and 'onWeightUpdate'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] Search for the keywords to learn more about each warning.
+[1] To ignore, add // eslint-disable-next-line to the line before.
+[1]
+[1] WARNING in [eslint]
+[1] src\hooks\websocket\index.ts
+[1]   Line 253:6:  React Hook useEffect has missing dependencies: 'onAgentExecutionUpdate', 'onBrainStageUpdate', 'onClarificationRequest', 'onConnectionChange', 'onConnectionStatusChange', 'onDialogStateChange', 'onError', 'onEvolutionEvent', 'onExecutionPreview', 'onFileModified', 'onFileRollback', 'onMessage', 'onMultiFileModified', 'onPerceptionUpdate', 'onProactiveMessage', 'onProcessingStatus', 'onResponseReady', 'onServerLog', 'onSkillExecutionUpdate', 'onTaskCancelled', 'onToolTrace', 'onUserCorrection', and 'onWeightUpdate'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] webpack compiled with 1 warning
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:53:19
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     51 |             className="control-button stop-btn"
+[1]     52 |             onClick={() => {
+[1]   > 53 |               if (currentTraceIdRef.current && send) {
+[1]        |                   ^^^^^^^^^^^^^^^^^
+[1]     54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:53:48
+[1] TS2304: Cannot find name 'send'.
+[1]     51 |             className="control-button stop-btn"
+[1]     52 |             onClick={() => {
+[1]   > 53 |               if (currentTraceIdRef.current && send) {
+[1]        |                                                ^^^^
+[1]     54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:54:17
+[1] TS2304: Cannot find name 'send'.
+[1]     52 |             onClick={() => {
+[1]     53 |               if (currentTraceIdRef.current && send) {
+[1]   > 54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]        |                 ^^^^
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:54:54
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     52 |             onClick={() => {
+[1]     53 |               if (currentTraceIdRef.current && send) {
+[1]   > 54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]        |                                                      ^^^^^^^^^^^^^^^^^
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:58:15
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]   > 58 |               currentTraceIdRef.current = null;
+[1]        |               ^^^^^^^^^^^^^^^^^
+[1]     59 |             }}
+[1]     60 |             title="取消执行"
+[1]     61 |           >
+[1]
+[1] ERROR in src/hooks/websocket/WebSocketConnectionManager.ts:444:48
+[1] TS2339: Property 'taskId' does not exist on type 'TaskCancelled'.
+[1]     442 |       case 'task_cancelled': {
+[1]     443 |         const cancelledData = message.data as unknown as TaskCancelled;
+[1]   > 444 |         console.log('🚫 任务已取消:', cancelledData.taskId);
+[1]         |                                                ^^^^^^
+[1]     445 |         this.taskCancelledListeners.forEach((listener) => {
+[1]     446 |           try {
+[1]     447 |             listener(cancelledData);
+[1]
+[1] Compiling...
+[1] Compiled with warnings.
+[1]
+[1] [eslint]
+[1] src\components\ChatInterface\ChatInterface.tsx
+[1]   Line 14:19:  'MessageStatus' is defined but never used. Allowed unused vars must match /^_/u                                   @typescript-eslint/no-unused-vars
+[1]   Line 362:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]   Line 564:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] src\hooks\websocket\index.ts
+[1]   Line 253:6:  React Hook useEffect has missing dependencies: 'onAgentExecutionUpdate', 'onBrainStageUpdate', 'onClarificationRequest', 'onConnectionChange', 'onConnectionStatusChange', 'onDialogStateChange', 'onError', 'onEvolutionEvent', 'onExecutionPreview', 'onFileModified', 'onFileRollback', 'onMessage', 'onMultiFileModified', 'onPerceptionUpdate', 'onProactiveMessage', 'onProcessingStatus', 'onResponseReady', 'onServerLog', 'onSkillExecutionUpdate', 'onTaskCancelled', 'onToolTrace', 'onUserCorrection', and 'onWeightUpdate'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] Search for the keywords to learn more about each warning.
+[1] To ignore, add // eslint-disable-next-line to the line before.
+[1]
+[1] WARNING in [eslint]
+[1] src\components\ChatInterface\ChatInterface.tsx
+[1]   Line 14:19:  'MessageStatus' is defined but never used. Allowed unused vars must match /^_/u                                   @typescript-eslint/no-unused-vars
+[1]   Line 362:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]   Line 564:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] src\hooks\websocket\index.ts
+[1]   Line 253:6:  React Hook useEffect has missing dependencies: 'onAgentExecutionUpdate', 'onBrainStageUpdate', 'onClarificationRequest', 'onConnectionChange', 'onConnectionStatusChange', 'onDialogStateChange', 'onError', 'onEvolutionEvent', 'onExecutionPreview', 'onFileModified', 'onFileRollback', 'onMessage', 'onMultiFileModified', 'onPerceptionUpdate', 'onProactiveMessage', 'onProcessingStatus', 'onResponseReady', 'onServerLog', 'onSkillExecutionUpdate', 'onTaskCancelled', 'onToolTrace', 'onUserCorrection', and 'onWeightUpdate'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] webpack compiled with 1 warning
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:53:19
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     51 |             className="control-button stop-btn"
+[1]     52 |             onClick={() => {
+[1]   > 53 |               if (currentTraceIdRef.current && send) {
+[1]        |                   ^^^^^^^^^^^^^^^^^
+[1]     54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:53:48
+[1] TS2304: Cannot find name 'send'.
+[1]     51 |             className="control-button stop-btn"
+[1]     52 |             onClick={() => {
+[1]   > 53 |               if (currentTraceIdRef.current && send) {
+[1]        |                                                ^^^^
+[1]     54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:54:17
+[1] TS2304: Cannot find name 'send'.
+[1]     52 |             onClick={() => {
+[1]     53 |               if (currentTraceIdRef.current && send) {
+[1]   > 54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]        |                 ^^^^
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:54:54
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     52 |             onClick={() => {
+[1]     53 |               if (currentTraceIdRef.current && send) {
+[1]   > 54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]        |                                                      ^^^^^^^^^^^^^^^^^
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:58:15
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]   > 58 |               currentTraceIdRef.current = null;
+[1]        |               ^^^^^^^^^^^^^^^^^
+[1]     59 |             }}
+[1]     60 |             title="取消执行"
+[1]     61 |           >
+[1]
+[1] ERROR in src/hooks/websocket/WebSocketConnectionManager.ts:444:48
+[1] TS2339: Property 'taskId' does not exist on type 'TaskCancelled'.
+[1]     442 |       case 'task_cancelled': {
+[1]     443 |         const cancelledData = message.data as unknown as TaskCancelled;
+[1]   > 444 |         console.log('🚫 任务已取消:', cancelledData.taskId);
+[1]         |                                                ^^^^^^
+[1]     445 |         this.taskCancelledListeners.forEach((listener) => {
+[1]     446 |           try {
+[1]     447 |             listener(cancelledData);
+[1]
+[1] Compiling...
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:53:19
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     51 |             className="control-button stop-btn"
+[1]     52 |             onClick={() => {
+[1]   > 53 |               if (currentTraceIdRef.current && send) {
+[1]        |                   ^^^^^^^^^^^^^^^^^
+[1]     54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:53:48
+[1] TS2304: Cannot find name 'send'.
+[1]     51 |             className="control-button stop-btn"
+[1]     52 |             onClick={() => {
+[1]   > 53 |               if (currentTraceIdRef.current && send) {
+[1]        |                                                ^^^^
+[1]     54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:54:17
+[1] TS2304: Cannot find name 'send'.
+[1]     52 |             onClick={() => {
+[1]     53 |               if (currentTraceIdRef.current && send) {
+[1]   > 54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]        |                 ^^^^
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:54:54
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     52 |             onClick={() => {
+[1]     53 |               if (currentTraceIdRef.current && send) {
+[1]   > 54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]        |                                                      ^^^^^^^^^^^^^^^^^
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:58:15
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]   > 58 |               currentTraceIdRef.current = null;
+[1]        |               ^^^^^^^^^^^^^^^^^
+[1]     59 |             }}
+[1]     60 |             title="取消执行"
+[1]     61 |           >
+[1]
+[1] ERROR in src/contexts/ChatContext.tsx:299:29
+[1] TS2769: No overload matches this call.
+[1]   Overload 1 of 5, '(reducer: ReducerWithoutAction<any>, initializerArg: any, initializer?: undefined): [any, DispatchWithoutAction]', gave the following error.
+[1]     Argument of type '(state: ChatState, action: ChatAction) => ChatState' is not assignable to parameter of type 'ReducerWithoutAction<any>'.
+[1]   Overload 2 of 5, '(reducer: (state: ChatState, action: ChatAction) => ChatState, initialState: ChatState, initializer?: undefined): [ChatState, Dispatch<...>]', gave the following error.
+[1]     Argument of type '{ messages: Message[]; inputText: string; isLoading: false; isTyping: false; isRunning: false; logPanelVisible: false; ttsEnabled: true; serverLogs: never[]; agentSteps: { name: string; label: string; status: "pending" | ... 2 more ... | "failed"; }[]; brainStageUpdates: never[]; perceptionUpdates: never[]; skillExe...' is not assignable to parameter of type 'ChatState'.
+[1]       Property 'currentTraceId' is missing in type '{ messages: Message[]; inputText: string; isLoading: false; isTyping: false; isRunning: false; logPanelVisible: false; ttsEnabled: true; serverLogs: never[]; agentSteps: { name: string; label: string; status: "pending" | ... 2 more ... | "failed"; }[]; brainStageUpdates: never[]; perceptionUpdates: never[]; skillExe...' but required in type 'ChatState'.
+[1]     297 |         ];
+[1]     298 |
+[1]   > 299 |   const [state, dispatch] = useReducer(chatReducer, {
+[1]         |                             ^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 300 |     messages: initialMessages,
+[1]         | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 301 |     inputText: '',
+[1]         | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 302 |     isLoading: false,
+[1]         | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 303 |     isTyping: false,
+[1]         | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 304 |     isRunning: false,
+[1]         | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 305 |     logPanelVisible: false,
+[1]         | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 306 |     ttsEnabled: true,
+[1]         | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 307 |     serverLogs: [],
+[1]         | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 308 |     agentSteps: INITIAL_AGENT_STEPS.map((s) => ({ ...s })),
+[1]         | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 309 |     brainStageUpdates: [],
+[1]         | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 310 |     perceptionUpdates: [],
+[1]         | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 311 |     skillExecutionUpdates: [],
+[1]         | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 312 |     evolutionEvents: [],
+[1]         | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 313 |   });
+[1]         | ^^^^^
+[1]     314 |
+[1]     315 |   useEffect(() => {
+[1]     316 |     if (historyLoadedRef.current) return;
+[1]
+[1] ERROR in src/contexts/ChatContext.tsx:332:22
+[1] TS2554: Expected 0 arguments, but got 1.
+[1]     330 |           const historyMessages = convertConversationToMessages(conversations);
+[1]     331 |           if (historyMessages.length > 0) {
+[1]   > 332 |             dispatch({ type: 'PREPEND_MESSAGES', payload: historyMessages });
+[1]         |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]     333 |           }
+[1]     334 |         }
+[1]     335 |       } catch {
+[1]
+[1] ERROR in src/contexts/ChatContext.tsx:347:18
+[1] TS7006: Parameter 'm' implicitly has an 'any' type.
+[1]     345 |     try {
+[1]     346 |       const toStore = state.messages
+[1]   > 347 |         .filter((m) => m.status !== 'sending' && m.status !== 'thinking' && m.status !== 'typing')
+[1]         |                  ^
+[1]     348 |         .slice(-MAX_MESSAGES)
+[1]     349 |         .map((m) => ({ ...m, timestamp: m.timestamp.toISOString() }));
+[1]     350 |       localStorage.setItem(STORAGE_KEY, JSON.stringify(toStore));
+[1]
+[1] ERROR in src/contexts/ChatContext.tsx:349:15
+[1] TS7006: Parameter 'm' implicitly has an 'any' type.
+[1]     347 |         .filter((m) => m.status !== 'sending' && m.status !== 'thinking' && m.status !== 'typing')
+[1]     348 |         .slice(-MAX_MESSAGES)
+[1]   > 349 |         .map((m) => ({ ...m, timestamp: m.timestamp.toISOString() }));
+[1]         |               ^
+[1]     350 |       localStorage.setItem(STORAGE_KEY, JSON.stringify(toStore));
+[1]     351 |     } catch {
+[1]     352 |       // noop
+[1]
+[1] ERROR in src/hooks/websocket/WebSocketConnectionManager.ts:444:48
+[1] TS2339: Property 'taskId' does not exist on type 'TaskCancelled'.
+[1]     442 |       case 'task_cancelled': {
+[1]     443 |         const cancelledData = message.data as unknown as TaskCancelled;
+[1]   > 444 |         console.log('🚫 任务已取消:', cancelledData.taskId);
+[1]         |                                                ^^^^^^
+[1]     445 |         this.taskCancelledListeners.forEach((listener) => {
+[1]     446 |           try {
+[1]     447 |             listener(cancelledData);
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:53:19
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     51 |             className="control-button stop-btn"
+[1]     52 |             onClick={() => {
+[1]   > 53 |               if (currentTraceIdRef.current && send) {
+[1]        |                   ^^^^^^^^^^^^^^^^^
+[1]     54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:53:48
+[1] TS2304: Cannot find name 'send'.
+[1]     51 |             className="control-button stop-btn"
+[1]     52 |             onClick={() => {
+[1]   > 53 |               if (currentTraceIdRef.current && send) {
+[1]        |                                                ^^^^
+[1]     54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:54:17
+[1] TS2304: Cannot find name 'send'.
+[1]     52 |             onClick={() => {
+[1]     53 |               if (currentTraceIdRef.current && send) {
+[1]   > 54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]        |                 ^^^^
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:54:54
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     52 |             onClick={() => {
+[1]     53 |               if (currentTraceIdRef.current && send) {
+[1]   > 54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]        |                                                      ^^^^^^^^^^^^^^^^^
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:58:15
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]   > 58 |               currentTraceIdRef.current = null;
+[1]        |               ^^^^^^^^^^^^^^^^^
+[1]     59 |             }}
+[1]     60 |             title="取消执行"
+[1]     61 |           >
+[1]
+[1] ERROR in src/contexts/ChatContext.tsx:300:29
+[1] TS2769: No overload matches this call.
+[1]   Overload 1 of 5, '(reducer: ReducerWithoutAction<any>, initializerArg: any, initializer?: undefined): [any, DispatchWithoutAction]', gave the following error.
+[1]     Argument of type '(state: ChatState, action: ChatAction) => ChatState' is not assignable to parameter of type 'ReducerWithoutAction<any>'.
+[1]   Overload 2 of 5, '(reducer: (state: ChatState, action: ChatAction) => ChatState, initialState: ChatState, initializer?: undefined): [ChatState, Dispatch<...>]', gave the following error.
+[1]     Argument of type '{ messages: Message[]; inputText: string; isLoading: false; isTyping: false; isRunning: false; logPanelVisible: false; ttsEnabled: true; serverLogs: never[]; agentSteps: { name: string; label: string; status: "pending" | ... 2 more ... | "failed"; }[]; brainStageUpdates: never[]; perceptionUpdates: never[]; skillExe...' is not assignable to parameter of type 'ChatState'.
+[1]       Property 'currentTraceId' is missing in type '{ messages: Message[]; inputText: string; isLoading: false; isTyping: false; isRunning: false; logPanelVisible: false; ttsEnabled: true; serverLogs: never[]; agentSteps: { name: string; label: string; status: "pending" | ... 2 more ... | "failed"; }[]; brainStageUpdates: never[]; perceptionUpdates: never[]; skillExe...' but required in type 'ChatState'.
+[1]     298 |         ];
+[1]     299 |
+[1]   > 300 |   const [state, dispatch] = useReducer(chatReducer, {
+[1]         |                             ^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 301 |     messages: initialMessages,
+[1]         | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 302 |     inputText: '',
+[1]         | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 303 |     isLoading: false,
+[1]         | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 304 |     isTyping: false,
+[1]         | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 305 |     isRunning: false,
+[1]         | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 306 |     logPanelVisible: false,
+[1]         | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 307 |     ttsEnabled: true,
+[1]         | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 308 |     serverLogs: [],
+[1]         | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 309 |     agentSteps: INITIAL_AGENT_STEPS.map((s) => ({ ...s })),
+[1]         | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 310 |     brainStageUpdates: [],
+[1]         | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 311 |     perceptionUpdates: [],
+[1]         | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 312 |     skillExecutionUpdates: [],
+[1]         | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 313 |     evolutionEvents: [],
+[1]         | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 314 |   });
+[1]         | ^^^^^
+[1]     315 |
+[1]     316 |   useEffect(() => {
+[1]     317 |     if (historyLoadedRef.current) return;
+[1]
+[1] ERROR in src/contexts/ChatContext.tsx:333:22
+[1] TS2554: Expected 0 arguments, but got 1.
+[1]     331 |           const historyMessages = convertConversationToMessages(conversations);
+[1]     332 |           if (historyMessages.length > 0) {
+[1]   > 333 |             dispatch({ type: 'PREPEND_MESSAGES', payload: historyMessages });
+[1]         |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]     334 |           }
+[1]     335 |         }
+[1]     336 |       } catch {
+[1]
+[1] ERROR in src/contexts/ChatContext.tsx:348:18
+[1] TS7006: Parameter 'm' implicitly has an 'any' type.
+[1]     346 |     try {
+[1]     347 |       const toStore = state.messages
+[1]   > 348 |         .filter((m) => m.status !== 'sending' && m.status !== 'thinking' && m.status !== 'typing')
+[1]         |                  ^
+[1]     349 |         .slice(-MAX_MESSAGES)
+[1]     350 |         .map((m) => ({ ...m, timestamp: m.timestamp.toISOString() }));
+[1]     351 |       localStorage.setItem(STORAGE_KEY, JSON.stringify(toStore));
+[1]
+[1] ERROR in src/contexts/ChatContext.tsx:350:15
+[1] TS7006: Parameter 'm' implicitly has an 'any' type.
+[1]     348 |         .filter((m) => m.status !== 'sending' && m.status !== 'thinking' && m.status !== 'typing')
+[1]     349 |         .slice(-MAX_MESSAGES)
+[1]   > 350 |         .map((m) => ({ ...m, timestamp: m.timestamp.toISOString() }));
+[1]         |               ^
+[1]     351 |       localStorage.setItem(STORAGE_KEY, JSON.stringify(toStore));
+[1]     352 |     } catch {
+[1]     353 |       // noop
+[1]
+[1] ERROR in src/hooks/websocket/WebSocketConnectionManager.ts:444:48
+[1] TS2339: Property 'taskId' does not exist on type 'TaskCancelled'.
+[1]     442 |       case 'task_cancelled': {
+[1]     443 |         const cancelledData = message.data as unknown as TaskCancelled;
+[1]   > 444 |         console.log('🚫 任务已取消:', cancelledData.taskId);
+[1]         |                                                ^^^^^^
+[1]     445 |         this.taskCancelledListeners.forEach((listener) => {
+[1]     446 |           try {
+[1]     447 |             listener(cancelledData);
+[1]
+[1] Compiled with warnings.
+[1]
+[1] [eslint]
+[1] src\components\ChatInterface\ChatInterface.tsx
+[1]   Line 14:19:  'MessageStatus' is defined but never used. Allowed unused vars must match /^_/u                                   @typescript-eslint/no-unused-vars
+[1]   Line 362:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]   Line 564:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] src\hooks\websocket\index.ts
+[1]   Line 253:6:  React Hook useEffect has missing dependencies: 'onAgentExecutionUpdate', 'onBrainStageUpdate', 'onClarificationRequest', 'onConnectionChange', 'onConnectionStatusChange', 'onDialogStateChange', 'onError', 'onEvolutionEvent', 'onExecutionPreview', 'onFileModified', 'onFileRollback', 'onMessage', 'onMultiFileModified', 'onPerceptionUpdate', 'onProactiveMessage', 'onProcessingStatus', 'onResponseReady', 'onServerLog', 'onSkillExecutionUpdate', 'onTaskCancelled', 'onToolTrace', 'onUserCorrection', and 'onWeightUpdate'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] Search for the keywords to learn more about each warning.
+[1] To ignore, add // eslint-disable-next-line to the line before.
+[1]
+[1] WARNING in [eslint]
+[1] src\components\ChatInterface\ChatInterface.tsx
+[1]   Line 14:19:  'MessageStatus' is defined but never used. Allowed unused vars must match /^_/u                                   @typescript-eslint/no-unused-vars
+[1]   Line 362:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]   Line 564:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] src\hooks\websocket\index.ts
+[1]   Line 253:6:  React Hook useEffect has missing dependencies: 'onAgentExecutionUpdate', 'onBrainStageUpdate', 'onClarificationRequest', 'onConnectionChange', 'onConnectionStatusChange', 'onDialogStateChange', 'onError', 'onEvolutionEvent', 'onExecutionPreview', 'onFileModified', 'onFileRollback', 'onMessage', 'onMultiFileModified', 'onPerceptionUpdate', 'onProactiveMessage', 'onProcessingStatus', 'onResponseReady', 'onServerLog', 'onSkillExecutionUpdate', 'onTaskCancelled', 'onToolTrace', 'onUserCorrection', and 'onWeightUpdate'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] webpack compiled with 1 warning
+[1] Files successfully emitted, waiting for typecheck results...
+[1] Issues checking in progress...
+[1] Compiling...
+[1] Compiled with warnings.
+[1]
+[1] [eslint]
+[1] src\components\ChatInterface\ChatInterface.tsx
+[1]   Line 14:19:  'MessageStatus' is defined but never used. Allowed unused vars must match /^_/u                                   @typescript-eslint/no-unused-vars
+[1]   Line 362:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]   Line 564:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] src\hooks\websocket\index.ts
+[1]   Line 253:6:  React Hook useEffect has missing dependencies: 'onAgentExecutionUpdate', 'onBrainStageUpdate', 'onClarificationRequest', 'onConnectionChange', 'onConnectionStatusChange', 'onDialogStateChange', 'onError', 'onEvolutionEvent', 'onExecutionPreview', 'onFileModified', 'onFileRollback', 'onMessage', 'onMultiFileModified', 'onPerceptionUpdate', 'onProactiveMessage', 'onProcessingStatus', 'onResponseReady', 'onServerLog', 'onSkillExecutionUpdate', 'onTaskCancelled', 'onToolTrace', 'onUserCorrection', and 'onWeightUpdate'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] Search for the keywords to learn more about each warning.
+[1] To ignore, add // eslint-disable-next-line to the line before.
+[1]
+[1] WARNING in [eslint]
+[1] src\components\ChatInterface\ChatInterface.tsx
+[1]   Line 14:19:  'MessageStatus' is defined but never used. Allowed unused vars must match /^_/u                                   @typescript-eslint/no-unused-vars
+[1]   Line 362:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]   Line 564:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] src\hooks\websocket\index.ts
+[1]   Line 253:6:  React Hook useEffect has missing dependencies: 'onAgentExecutionUpdate', 'onBrainStageUpdate', 'onClarificationRequest', 'onConnectionChange', 'onConnectionStatusChange', 'onDialogStateChange', 'onError', 'onEvolutionEvent', 'onExecutionPreview', 'onFileModified', 'onFileRollback', 'onMessage', 'onMultiFileModified', 'onPerceptionUpdate', 'onProactiveMessage', 'onProcessingStatus', 'onResponseReady', 'onServerLog', 'onSkillExecutionUpdate', 'onTaskCancelled', 'onToolTrace', 'onUserCorrection', and 'onWeightUpdate'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] webpack compiled with 1 warning
+[1] Compiling...
+[1] Compiled with warnings.
+[1]
+[1] [eslint]
+[1] src\components\ChatInterface\ChatInterface.tsx
+[1]   Line 14:19:  'MessageStatus' is defined but never used. Allowed unused vars must match /^_/u                                   @typescript-eslint/no-unused-vars
+[1]   Line 362:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]   Line 564:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] src\hooks\websocket\index.ts
+[1]   Line 253:6:  React Hook useEffect has missing dependencies: 'onAgentExecutionUpdate', 'onBrainStageUpdate', 'onClarificationRequest', 'onConnectionChange', 'onConnectionStatusChange', 'onDialogStateChange', 'onError', 'onEvolutionEvent', 'onExecutionPreview', 'onFileModified', 'onFileRollback', 'onMessage', 'onMultiFileModified', 'onPerceptionUpdate', 'onProactiveMessage', 'onProcessingStatus', 'onResponseReady', 'onServerLog', 'onSkillExecutionUpdate', 'onTaskCancelled', 'onToolTrace', 'onUserCorrection', and 'onWeightUpdate'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] Search for the keywords to learn more about each warning.
+[1] To ignore, add // eslint-disable-next-line to the line before.
+[1]
+[1] WARNING in [eslint]
+[1] src\components\ChatInterface\ChatInterface.tsx
+[1]   Line 14:19:  'MessageStatus' is defined but never used. Allowed unused vars must match /^_/u                                   @typescript-eslint/no-unused-vars
+[1]   Line 362:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]   Line 564:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] src\hooks\websocket\index.ts
+[1]   Line 253:6:  React Hook useEffect has missing dependencies: 'onAgentExecutionUpdate', 'onBrainStageUpdate', 'onClarificationRequest', 'onConnectionChange', 'onConnectionStatusChange', 'onDialogStateChange', 'onError', 'onEvolutionEvent', 'onExecutionPreview', 'onFileModified', 'onFileRollback', 'onMessage', 'onMultiFileModified', 'onPerceptionUpdate', 'onProactiveMessage', 'onProcessingStatus', 'onResponseReady', 'onServerLog', 'onSkillExecutionUpdate', 'onTaskCancelled', 'onToolTrace', 'onUserCorrection', and 'onWeightUpdate'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] webpack compiled with 1 warning
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:53:19
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     51 |             className="control-button stop-btn"
+[1]     52 |             onClick={() => {
+[1]   > 53 |               if (currentTraceIdRef.current && send) {
+[1]        |                   ^^^^^^^^^^^^^^^^^
+[1]     54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:53:48
+[1] TS2304: Cannot find name 'send'.
+[1]     51 |             className="control-button stop-btn"
+[1]     52 |             onClick={() => {
+[1]   > 53 |               if (currentTraceIdRef.current && send) {
+[1]        |                                                ^^^^
+[1]     54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:54:17
+[1] TS2304: Cannot find name 'send'.
+[1]     52 |             onClick={() => {
+[1]     53 |               if (currentTraceIdRef.current && send) {
+[1]   > 54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]        |                 ^^^^
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:54:54
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     52 |             onClick={() => {
+[1]     53 |               if (currentTraceIdRef.current && send) {
+[1]   > 54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]        |                                                      ^^^^^^^^^^^^^^^^^
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:58:15
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]   > 58 |               currentTraceIdRef.current = null;
+[1]        |               ^^^^^^^^^^^^^^^^^
+[1]     59 |             }}
+[1]     60 |             title="取消执行"
+[1]     61 |           >
+[1]
+[1] ERROR in src/contexts/ChatContext.tsx:305:29
+[1] TS2769: No overload matches this call.
+[1]   Overload 1 of 5, '(reducer: ReducerWithoutAction<any>, initializerArg: any, initializer?: undefined): [any, DispatchWithoutAction]', gave the following error.
+[1]     Argument of type '(state: ChatState, action: ChatAction) => ChatState' is not assignable to parameter of type 'ReducerWithoutAction<any>'.
+[1]   Overload 2 of 5, '(reducer: (state: ChatState, action: ChatAction) => ChatState, initialState: ChatState, initializer?: undefined): [ChatState, Dispatch<...>]', gave the following error.
+[1]     Argument of type '{ messages: Message[]; inputText: string; isLoading: false; isTyping: false; isRunning: false; logPanelVisible: false; ttsEnabled: true; serverLogs: never[]; agentSteps: { name: string; label: string; status: "pending" | ... 2 more ... | "failed"; }[]; brainStageUpdates: never[]; perceptionUpdates: never[]; skillExe...' is not assignable to parameter of type 'ChatState'.
+[1]       Property 'currentTraceId' is missing in type '{ messages: Message[]; inputText: string; isLoading: false; isTyping: false; isRunning: false; logPanelVisible: false; ttsEnabled: true; serverLogs: never[]; agentSteps: { name: string; label: string; status: "pending" | ... 2 more ... | "failed"; }[]; brainStageUpdates: never[]; perceptionUpdates: never[]; skillExe...' but required in type 'ChatState'.
+[1]     303 |         ];
+[1]     304 |
+[1]   > 305 |   const [state, dispatch] = useReducer(chatReducer, {
+[1]         |                             ^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 306 |     messages: initialMessages,
+[1]         | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 307 |     inputText: '',
+[1]         | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 308 |     isLoading: false,
+[1]         | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 309 |     isTyping: false,
+[1]         | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 310 |     isRunning: false,
+[1]         | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 311 |     logPanelVisible: false,
+[1]         | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 312 |     ttsEnabled: true,
+[1]         | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 313 |     serverLogs: [],
+[1]         | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 314 |     agentSteps: INITIAL_AGENT_STEPS.map((s) => ({ ...s })),
+[1]         | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 315 |     brainStageUpdates: [],
+[1]         | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 316 |     perceptionUpdates: [],
+[1]         | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 317 |     skillExecutionUpdates: [],
+[1]         | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 318 |     evolutionEvents: [],
+[1]         | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]   > 319 |   });
+[1]         | ^^^^^
+[1]     320 |
+[1]     321 |   useEffect(() => {
+[1]     322 |     if (historyLoadedRef.current) return;
+[1]
+[1] ERROR in src/contexts/ChatContext.tsx:338:22
+[1] TS2554: Expected 0 arguments, but got 1.
+[1]     336 |           const historyMessages = convertConversationToMessages(conversations);
+[1]     337 |           if (historyMessages.length > 0) {
+[1]   > 338 |             dispatch({ type: 'PREPEND_MESSAGES', payload: historyMessages });
+[1]         |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[1]     339 |           }
+[1]     340 |         }
+[1]     341 |       } catch {
+[1]
+[1] ERROR in src/contexts/ChatContext.tsx:353:18
+[1] TS7006: Parameter 'm' implicitly has an 'any' type.
+[1]     351 |     try {
+[1]     352 |       const toStore = state.messages
+[1]   > 353 |         .filter((m) => m.status !== 'sending' && m.status !== 'thinking' && m.status !== 'typing')
+[1]         |                  ^
+[1]     354 |         .slice(-MAX_MESSAGES)
+[1]     355 |         .map((m) => ({ ...m, timestamp: m.timestamp.toISOString() }));
+[1]     356 |       localStorage.setItem(STORAGE_KEY, JSON.stringify(toStore));
+[1]
+[1] ERROR in src/contexts/ChatContext.tsx:355:15
+[1] TS7006: Parameter 'm' implicitly has an 'any' type.
+[1]     353 |         .filter((m) => m.status !== 'sending' && m.status !== 'thinking' && m.status !== 'typing')
+[1]     354 |         .slice(-MAX_MESSAGES)
+[1]   > 355 |         .map((m) => ({ ...m, timestamp: m.timestamp.toISOString() }));
+[1]         |               ^
+[1]     356 |       localStorage.setItem(STORAGE_KEY, JSON.stringify(toStore));
+[1]     357 |     } catch {
+[1]     358 |       // noop
+[1]
+[1] ERROR in src/hooks/websocket/WebSocketConnectionManager.ts:444:48
+[1] TS2339: Property 'taskId' does not exist on type 'TaskCancelled'.
+[1]     442 |       case 'task_cancelled': {
+[1]     443 |         const cancelledData = message.data as unknown as TaskCancelled;
+[1]   > 444 |         console.log('🚫 任务已取消:', cancelledData.taskId);
+[1]         |                                                ^^^^^^
+[1]     445 |         this.taskCancelledListeners.forEach((listener) => {
+[1]     446 |           try {
+[1]     447 |             listener(cancelledData);
+[1]
+[1] Compiling...
+[1] Compiled with warnings.
+[1]
+[1] [eslint]
+[1] src\components\ChatInterface\ChatInterface.tsx
+[1]   Line 14:19:  'MessageStatus' is defined but never used. Allowed unused vars must match /^_/u                                   @typescript-eslint/no-unused-vars
+[1]   Line 362:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]   Line 564:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] src\hooks\websocket\index.ts
+[1]   Line 253:6:  React Hook useEffect has missing dependencies: 'onAgentExecutionUpdate', 'onBrainStageUpdate', 'onClarificationRequest', 'onConnectionChange', 'onConnectionStatusChange', 'onDialogStateChange', 'onError', 'onEvolutionEvent', 'onExecutionPreview', 'onFileModified', 'onFileRollback', 'onMessage', 'onMultiFileModified', 'onPerceptionUpdate', 'onProactiveMessage', 'onProcessingStatus', 'onResponseReady', 'onServerLog', 'onSkillExecutionUpdate', 'onTaskCancelled', 'onToolTrace', 'onUserCorrection', and 'onWeightUpdate'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] Search for the keywords to learn more about each warning.
+[1] To ignore, add // eslint-disable-next-line to the line before.
+[1]
+[1] WARNING in [eslint]
+[1] src\components\ChatInterface\ChatInterface.tsx
+[1]   Line 14:19:  'MessageStatus' is defined but never used. Allowed unused vars must match /^_/u                                   @typescript-eslint/no-unused-vars
+[1]   Line 362:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]   Line 564:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] src\hooks\websocket\index.ts
+[1]   Line 253:6:  React Hook useEffect has missing dependencies: 'onAgentExecutionUpdate', 'onBrainStageUpdate', 'onClarificationRequest', 'onConnectionChange', 'onConnectionStatusChange', 'onDialogStateChange', 'onError', 'onEvolutionEvent', 'onExecutionPreview', 'onFileModified', 'onFileRollback', 'onMessage', 'onMultiFileModified', 'onPerceptionUpdate', 'onProactiveMessage', 'onProcessingStatus', 'onResponseReady', 'onServerLog', 'onSkillExecutionUpdate', 'onTaskCancelled', 'onToolTrace', 'onUserCorrection', and 'onWeightUpdate'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] webpack compiled with 1 warning
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:53:19
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     51 |             className="control-button stop-btn"
+[1]     52 |             onClick={() => {
+[1]   > 53 |               if (currentTraceIdRef.current && send) {
+[1]        |                   ^^^^^^^^^^^^^^^^^
+[1]     54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:53:48
+[1] TS2304: Cannot find name 'send'.
+[1]     51 |             className="control-button stop-btn"
+[1]     52 |             onClick={() => {
+[1]   > 53 |               if (currentTraceIdRef.current && send) {
+[1]        |                                                ^^^^
+[1]     54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:54:17
+[1] TS2304: Cannot find name 'send'.
+[1]     52 |             onClick={() => {
+[1]     53 |               if (currentTraceIdRef.current && send) {
+[1]   > 54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]        |                 ^^^^
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:54:54
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     52 |             onClick={() => {
+[1]     53 |               if (currentTraceIdRef.current && send) {
+[1]   > 54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]        |                                                      ^^^^^^^^^^^^^^^^^
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:58:15
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]   > 58 |               currentTraceIdRef.current = null;
+[1]        |               ^^^^^^^^^^^^^^^^^
+[1]     59 |             }}
+[1]     60 |             title="取消执行"
+[1]     61 |           >
+[1]
+[1] ERROR in src/hooks/websocket/WebSocketConnectionManager.ts:444:48
+[1] TS2339: Property 'taskId' does not exist on type 'TaskCancelled'.
+[1]     442 |       case 'task_cancelled': {
+[1]     443 |         const cancelledData = message.data as unknown as TaskCancelled;
+[1]   > 444 |         console.log('🚫 任务已取消:', cancelledData.taskId);
+[1]         |                                                ^^^^^^
+[1]     445 |         this.taskCancelledListeners.forEach((listener) => {
+[1]     446 |           try {
+[1]     447 |             listener(cancelledData);
+[1]
+[1] Compiling...
+[1] Compiled with warnings.
+[1]
+[1] [eslint]
+[1] src\components\ChatInterface\ChatInterface.tsx
+[1]   Line 14:19:  'MessageStatus' is defined but never used. Allowed unused vars must match /^_/u                                   @typescript-eslint/no-unused-vars
+[1]   Line 134:9:  'setCurrentTraceId' is assigned a value but never used. Allowed unused vars must match /^_/u                      @typescript-eslint/no-unused-vars
+[1]   Line 367:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]   Line 569:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] src\hooks\websocket\index.ts
+[1]   Line 253:6:  React Hook useEffect has missing dependencies: 'onAgentExecutionUpdate', 'onBrainStageUpdate', 'onClarificationRequest', 'onConnectionChange', 'onConnectionStatusChange', 'onDialogStateChange', 'onError', 'onEvolutionEvent', 'onExecutionPreview', 'onFileModified', 'onFileRollback', 'onMessage', 'onMultiFileModified', 'onPerceptionUpdate', 'onProactiveMessage', 'onProcessingStatus', 'onResponseReady', 'onServerLog', 'onSkillExecutionUpdate', 'onTaskCancelled', 'onToolTrace', 'onUserCorrection', and 'onWeightUpdate'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] Search for the keywords to learn more about each warning.
+[1] To ignore, add // eslint-disable-next-line to the line before.
+[1]
+[1] WARNING in [eslint]
+[1] src\components\ChatInterface\ChatInterface.tsx
+[1]   Line 14:19:  'MessageStatus' is defined but never used. Allowed unused vars must match /^_/u                                   @typescript-eslint/no-unused-vars
+[1]   Line 134:9:  'setCurrentTraceId' is assigned a value but never used. Allowed unused vars must match /^_/u                      @typescript-eslint/no-unused-vars
+[1]   Line 367:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]   Line 569:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] src\hooks\websocket\index.ts
+[1]   Line 253:6:  React Hook useEffect has missing dependencies: 'onAgentExecutionUpdate', 'onBrainStageUpdate', 'onClarificationRequest', 'onConnectionChange', 'onConnectionStatusChange', 'onDialogStateChange', 'onError', 'onEvolutionEvent', 'onExecutionPreview', 'onFileModified', 'onFileRollback', 'onMessage', 'onMultiFileModified', 'onPerceptionUpdate', 'onProactiveMessage', 'onProcessingStatus', 'onResponseReady', 'onServerLog', 'onSkillExecutionUpdate', 'onTaskCancelled', 'onToolTrace', 'onUserCorrection', and 'onWeightUpdate'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] webpack compiled with 1 warning
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:53:19
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     51 |             className="control-button stop-btn"
+[1]     52 |             onClick={() => {
+[1]   > 53 |               if (currentTraceIdRef.current && send) {
+[1]        |                   ^^^^^^^^^^^^^^^^^
+[1]     54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:53:48
+[1] TS2304: Cannot find name 'send'.
+[1]     51 |             className="control-button stop-btn"
+[1]     52 |             onClick={() => {
+[1]   > 53 |               if (currentTraceIdRef.current && send) {
+[1]        |                                                ^^^^
+[1]     54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:54:17
+[1] TS2304: Cannot find name 'send'.
+[1]     52 |             onClick={() => {
+[1]     53 |               if (currentTraceIdRef.current && send) {
+[1]   > 54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]        |                 ^^^^
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:54:54
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     52 |             onClick={() => {
+[1]     53 |               if (currentTraceIdRef.current && send) {
+[1]   > 54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]        |                                                      ^^^^^^^^^^^^^^^^^
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:58:15
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]   > 58 |               currentTraceIdRef.current = null;
+[1]        |               ^^^^^^^^^^^^^^^^^
+[1]     59 |             }}
+[1]     60 |             title="取消执行"
+[1]     61 |           >
+[1]
+[1] ERROR in src/hooks/websocket/WebSocketConnectionManager.ts:444:48
+[1] TS2339: Property 'taskId' does not exist on type 'TaskCancelled'.
+[1]     442 |       case 'task_cancelled': {
+[1]     443 |         const cancelledData = message.data as unknown as TaskCancelled;
+[1]   > 444 |         console.log('🚫 任务已取消:', cancelledData.taskId);
+[1]         |                                                ^^^^^^
+[1]     445 |         this.taskCancelledListeners.forEach((listener) => {
+[1]     446 |           try {
+[1]     447 |             listener(cancelledData);
+[1]
+[1] Compiling...
+[1] Compiled with warnings.
+[1]
+[1] [eslint]
+[1] src\components\ChatInterface\ChatInterface.tsx
+[1]   Line 14:19:  'MessageStatus' is defined but never used. Allowed unused vars must match /^_/u                                         @typescript-eslint/no-unused-vars
+[1]   Line 253:5:  React Hook useCallback has a missing dependency: 'setCurrentTraceId'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]   Line 367:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array        react-hooks/exhaustive-deps
+[1]   Line 569:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array        react-hooks/exhaustive-deps
+[1]
+[1] src\hooks\websocket\index.ts
+[1]   Line 253:6:  React Hook useEffect has missing dependencies: 'onAgentExecutionUpdate', 'onBrainStageUpdate', 'onClarificationRequest', 'onConnectionChange', 'onConnectionStatusChange', 'onDialogStateChange', 'onError', 'onEvolutionEvent', 'onExecutionPreview', 'onFileModified', 'onFileRollback', 'onMessage', 'onMultiFileModified', 'onPerceptionUpdate', 'onProactiveMessage', 'onProcessingStatus', 'onResponseReady', 'onServerLog', 'onSkillExecutionUpdate', 'onTaskCancelled', 'onToolTrace', 'onUserCorrection', and 'onWeightUpdate'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] Search for the keywords to learn more about each warning.
+[1] To ignore, add // eslint-disable-next-line to the line before.
+[1]
+[1] WARNING in [eslint]
+[1] src\components\ChatInterface\ChatInterface.tsx
+[1]   Line 14:19:  'MessageStatus' is defined but never used. Allowed unused vars must match /^_/u                                         @typescript-eslint/no-unused-vars
+[1]   Line 253:5:  React Hook useCallback has a missing dependency: 'setCurrentTraceId'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]   Line 367:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array        react-hooks/exhaustive-deps
+[1]   Line 569:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array        react-hooks/exhaustive-deps
+[1]
+[1] src\hooks\websocket\index.ts
+[1]   Line 253:6:  React Hook useEffect has missing dependencies: 'onAgentExecutionUpdate', 'onBrainStageUpdate', 'onClarificationRequest', 'onConnectionChange', 'onConnectionStatusChange', 'onDialogStateChange', 'onError', 'onEvolutionEvent', 'onExecutionPreview', 'onFileModified', 'onFileRollback', 'onMessage', 'onMultiFileModified', 'onPerceptionUpdate', 'onProactiveMessage', 'onProcessingStatus', 'onResponseReady', 'onServerLog', 'onSkillExecutionUpdate', 'onTaskCancelled', 'onToolTrace', 'onUserCorrection', and 'onWeightUpdate'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] webpack compiled with 1 warning
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:53:19
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     51 |             className="control-button stop-btn"
+[1]     52 |             onClick={() => {
+[1]   > 53 |               if (currentTraceIdRef.current && send) {
+[1]        |                   ^^^^^^^^^^^^^^^^^
+[1]     54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:53:48
+[1] TS2304: Cannot find name 'send'.
+[1]     51 |             className="control-button stop-btn"
+[1]     52 |             onClick={() => {
+[1]   > 53 |               if (currentTraceIdRef.current && send) {
+[1]        |                                                ^^^^
+[1]     54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:54:17
+[1] TS2304: Cannot find name 'send'.
+[1]     52 |             onClick={() => {
+[1]     53 |               if (currentTraceIdRef.current && send) {
+[1]   > 54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]        |                 ^^^^
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:54:54
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     52 |             onClick={() => {
+[1]     53 |               if (currentTraceIdRef.current && send) {
+[1]   > 54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]        |                                                      ^^^^^^^^^^^^^^^^^
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:58:15
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]   > 58 |               currentTraceIdRef.current = null;
+[1]        |               ^^^^^^^^^^^^^^^^^
+[1]     59 |             }}
+[1]     60 |             title="取消执行"
+[1]     61 |           >
+[1]
+[1] ERROR in src/hooks/websocket/WebSocketConnectionManager.ts:444:48
+[1] TS2339: Property 'taskId' does not exist on type 'TaskCancelled'.
+[1]     442 |       case 'task_cancelled': {
+[1]     443 |         const cancelledData = message.data as unknown as TaskCancelled;
+[1]   > 444 |         console.log('🚫 任务已取消:', cancelledData.taskId);
+[1]         |                                                ^^^^^^
+[1]     445 |         this.taskCancelledListeners.forEach((listener) => {
+[1]     446 |           try {
+[1]     447 |             listener(cancelledData);
+[1]
+[1] Compiling...
+[1] Compiled with warnings.
+[1]
+[1] [eslint]
+[1] src\components\ChatInterface\ChatInterface.tsx
+[1]   Line 14:19:  'MessageStatus' is defined but never used. Allowed unused vars must match /^_/u                                         @typescript-eslint/no-unused-vars
+[1]   Line 253:5:  React Hook useCallback has a missing dependency: 'setCurrentTraceId'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]   Line 368:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array        react-hooks/exhaustive-deps
+[1]   Line 570:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array        react-hooks/exhaustive-deps
+[1]
+[1] src\hooks\websocket\index.ts
+[1]   Line 253:6:  React Hook useEffect has missing dependencies: 'onAgentExecutionUpdate', 'onBrainStageUpdate', 'onClarificationRequest', 'onConnectionChange', 'onConnectionStatusChange', 'onDialogStateChange', 'onError', 'onEvolutionEvent', 'onExecutionPreview', 'onFileModified', 'onFileRollback', 'onMessage', 'onMultiFileModified', 'onPerceptionUpdate', 'onProactiveMessage', 'onProcessingStatus', 'onResponseReady', 'onServerLog', 'onSkillExecutionUpdate', 'onTaskCancelled', 'onToolTrace', 'onUserCorrection', and 'onWeightUpdate'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] Search for the keywords to learn more about each warning.
+[1] To ignore, add // eslint-disable-next-line to the line before.
+[1]
+[1] WARNING in [eslint]
+[1] src\components\ChatInterface\ChatInterface.tsx
+[1]   Line 14:19:  'MessageStatus' is defined but never used. Allowed unused vars must match /^_/u                                         @typescript-eslint/no-unused-vars
+[1]   Line 253:5:  React Hook useCallback has a missing dependency: 'setCurrentTraceId'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]   Line 368:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array        react-hooks/exhaustive-deps
+[1]   Line 570:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array        react-hooks/exhaustive-deps
+[1]
+[1] src\hooks\websocket\index.ts
+[1]   Line 253:6:  React Hook useEffect has missing dependencies: 'onAgentExecutionUpdate', 'onBrainStageUpdate', 'onClarificationRequest', 'onConnectionChange', 'onConnectionStatusChange', 'onDialogStateChange', 'onError', 'onEvolutionEvent', 'onExecutionPreview', 'onFileModified', 'onFileRollback', 'onMessage', 'onMultiFileModified', 'onPerceptionUpdate', 'onProactiveMessage', 'onProcessingStatus', 'onResponseReady', 'onServerLog', 'onSkillExecutionUpdate', 'onTaskCancelled', 'onToolTrace', 'onUserCorrection', and 'onWeightUpdate'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] webpack compiled with 1 warning
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:53:19
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     51 |             className="control-button stop-btn"
+[1]     52 |             onClick={() => {
+[1]   > 53 |               if (currentTraceIdRef.current && send) {
+[1]        |                   ^^^^^^^^^^^^^^^^^
+[1]     54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:53:48
+[1] TS2304: Cannot find name 'send'.
+[1]     51 |             className="control-button stop-btn"
+[1]     52 |             onClick={() => {
+[1]   > 53 |               if (currentTraceIdRef.current && send) {
+[1]        |                                                ^^^^
+[1]     54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:54:17
+[1] TS2304: Cannot find name 'send'.
+[1]     52 |             onClick={() => {
+[1]     53 |               if (currentTraceIdRef.current && send) {
+[1]   > 54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]        |                 ^^^^
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:54:54
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     52 |             onClick={() => {
+[1]     53 |               if (currentTraceIdRef.current && send) {
+[1]   > 54 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]        |                                                      ^^^^^^^^^^^^^^^^^
+[1]     55 |               }
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:58:15
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     56 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     57 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]   > 58 |               currentTraceIdRef.current = null;
+[1]        |               ^^^^^^^^^^^^^^^^^
+[1]     59 |             }}
+[1]     60 |             title="取消执行"
+[1]     61 |           >
+[1]
+[1] ERROR in src/hooks/websocket/WebSocketConnectionManager.ts:444:48
+[1] TS2339: Property 'taskId' does not exist on type 'TaskCancelled'.
+[1]     442 |       case 'task_cancelled': {
+[1]     443 |         const cancelledData = message.data as unknown as TaskCancelled;
+[1]   > 444 |         console.log('🚫 任务已取消:', cancelledData.taskId);
+[1]         |                                                ^^^^^^
+[1]     445 |         this.taskCancelledListeners.forEach((listener) => {
+[1]     446 |           try {
+[1]     447 |             listener(cancelledData);
+[1]
+[1] Compiling...
+[1] Compiled with warnings.
+[1]
+[1] [eslint]
+[1] src\components\ChatInterface\ChatInterface.tsx
+[1]   Line 14:19:  'MessageStatus' is defined but never used. Allowed unused vars must match /^_/u                                         @typescript-eslint/no-unused-vars
+[1]   Line 35:22:  'onCancelTask' is defined but never used. Allowed unused args must match /^_/u                                          @typescript-eslint/no-unused-vars
+[1]   Line 256:5:  React Hook useCallback has a missing dependency: 'setCurrentTraceId'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]   Line 371:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array        react-hooks/exhaustive-deps
+[1]   Line 573:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array        react-hooks/exhaustive-deps
+[1]
+[1] src\hooks\websocket\index.ts
+[1]   Line 253:6:  React Hook useEffect has missing dependencies: 'onAgentExecutionUpdate', 'onBrainStageUpdate', 'onClarificationRequest', 'onConnectionChange', 'onConnectionStatusChange', 'onDialogStateChange', 'onError', 'onEvolutionEvent', 'onExecutionPreview', 'onFileModified', 'onFileRollback', 'onMessage', 'onMultiFileModified', 'onPerceptionUpdate', 'onProactiveMessage', 'onProcessingStatus', 'onResponseReady', 'onServerLog', 'onSkillExecutionUpdate', 'onTaskCancelled', 'onToolTrace', 'onUserCorrection', and 'onWeightUpdate'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] Search for the keywords to learn more about each warning.
+[1] To ignore, add // eslint-disable-next-line to the line before.
+[1]
+[1] WARNING in [eslint]
+[1] src\components\ChatInterface\ChatInterface.tsx
+[1]   Line 14:19:  'MessageStatus' is defined but never used. Allowed unused vars must match /^_/u                                         @typescript-eslint/no-unused-vars
+[1]   Line 35:22:  'onCancelTask' is defined but never used. Allowed unused args must match /^_/u                                          @typescript-eslint/no-unused-vars
+[1]   Line 256:5:  React Hook useCallback has a missing dependency: 'setCurrentTraceId'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]   Line 371:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array        react-hooks/exhaustive-deps
+[1]   Line 573:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array        react-hooks/exhaustive-deps
+[1]
+[1] src\hooks\websocket\index.ts
+[1]   Line 253:6:  React Hook useEffect has missing dependencies: 'onAgentExecutionUpdate', 'onBrainStageUpdate', 'onClarificationRequest', 'onConnectionChange', 'onConnectionStatusChange', 'onDialogStateChange', 'onError', 'onEvolutionEvent', 'onExecutionPreview', 'onFileModified', 'onFileRollback', 'onMessage', 'onMultiFileModified', 'onPerceptionUpdate', 'onProactiveMessage', 'onProcessingStatus', 'onResponseReady', 'onServerLog', 'onSkillExecutionUpdate', 'onTaskCancelled', 'onToolTrace', 'onUserCorrection', and 'onWeightUpdate'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] webpack compiled with 1 warning
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:56:19
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     54 |             className="control-button stop-btn"
+[1]     55 |             onClick={() => {
+[1]   > 56 |               if (currentTraceIdRef.current && send) {
+[1]        |                   ^^^^^^^^^^^^^^^^^
+[1]     57 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]     58 |               }
+[1]     59 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:56:48
+[1] TS2304: Cannot find name 'send'.
+[1]     54 |             className="control-button stop-btn"
+[1]     55 |             onClick={() => {
+[1]   > 56 |               if (currentTraceIdRef.current && send) {
+[1]        |                                                ^^^^
+[1]     57 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]     58 |               }
+[1]     59 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:57:17
+[1] TS2304: Cannot find name 'send'.
+[1]     55 |             onClick={() => {
+[1]     56 |               if (currentTraceIdRef.current && send) {
+[1]   > 57 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]        |                 ^^^^
+[1]     58 |               }
+[1]     59 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     60 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:57:54
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     55 |             onClick={() => {
+[1]     56 |               if (currentTraceIdRef.current && send) {
+[1]   > 57 |                 send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+[1]        |                                                      ^^^^^^^^^^^^^^^^^
+[1]     58 |               }
+[1]     59 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     60 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:61:15
+[1] TS2304: Cannot find name 'currentTraceIdRef'.
+[1]     59 |               dispatch({ type: 'SET_IS_RUNNING', payload: false });
+[1]     60 |               dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+[1]   > 61 |               currentTraceIdRef.current = null;
+[1]        |               ^^^^^^^^^^^^^^^^^
+[1]     62 |             }}
+[1]     63 |             title="取消执行"
+[1]     64 |           >
+[1]
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:600:8
+[1] TS2741: Property 'onCancelTask' is missing in type '{ isConnected: boolean; }' but required in type '{ isConnected: boolean; onCancelTask: () => void; }'.
+[1]     598 |   return (
+[1]     599 |     <div className="chat-interface">
+[1]   > 600 |       <ChatHeader isConnected={isConnected} />
+[1]         |        ^^^^^^^^^^
+[1]     601 |       <ExecutionPanel />
+[1]     602 |       <ChatWindow
+[1]     603 |         messages={state.messages}
+[1]
+[1] ERROR in src/hooks/websocket/WebSocketConnectionManager.ts:444:48
+[1] TS2339: Property 'taskId' does not exist on type 'TaskCancelled'.
+[1]     442 |       case 'task_cancelled': {
+[1]     443 |         const cancelledData = message.data as unknown as TaskCancelled;
+[1]   > 444 |         console.log('🚫 任务已取消:', cancelledData.taskId);
+[1]         |                                                ^^^^^^
+[1]     445 |         this.taskCancelledListeners.forEach((listener) => {
+[1]     446 |           try {
+[1]     447 |             listener(cancelledData);
+[1]
+[1] Compiling...
+[1] Compiled with warnings.
+[1]
+[1] [eslint]
+[1] src\components\ChatInterface\ChatInterface.tsx
+[1]   Line 14:19:  'MessageStatus' is defined but never used. Allowed unused vars must match /^_/u                                         @typescript-eslint/no-unused-vars
+[1]   Line 249:5:  React Hook useCallback has a missing dependency: 'setCurrentTraceId'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]   Line 364:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array        react-hooks/exhaustive-deps
+[1]   Line 566:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array        react-hooks/exhaustive-deps
+[1]
+[1] src\hooks\websocket\index.ts
+[1]   Line 253:6:  React Hook useEffect has missing dependencies: 'onAgentExecutionUpdate', 'onBrainStageUpdate', 'onClarificationRequest', 'onConnectionChange', 'onConnectionStatusChange', 'onDialogStateChange', 'onError', 'onEvolutionEvent', 'onExecutionPreview', 'onFileModified', 'onFileRollback', 'onMessage', 'onMultiFileModified', 'onPerceptionUpdate', 'onProactiveMessage', 'onProcessingStatus', 'onResponseReady', 'onServerLog', 'onSkillExecutionUpdate', 'onTaskCancelled', 'onToolTrace', 'onUserCorrection', and 'onWeightUpdate'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] Search for the keywords to learn more about each warning.
+[1] To ignore, add // eslint-disable-next-line to the line before.
+[1]
+[1] WARNING in [eslint]
+[1] src\components\ChatInterface\ChatInterface.tsx
+[1]   Line 14:19:  'MessageStatus' is defined but never used. Allowed unused vars must match /^_/u                                         @typescript-eslint/no-unused-vars
+[1]   Line 249:5:  React Hook useCallback has a missing dependency: 'setCurrentTraceId'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]   Line 364:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array        react-hooks/exhaustive-deps
+[1]   Line 566:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array        react-hooks/exhaustive-deps
+[1]
+[1] src\hooks\websocket\index.ts
+[1]   Line 253:6:  React Hook useEffect has missing dependencies: 'onAgentExecutionUpdate', 'onBrainStageUpdate', 'onClarificationRequest', 'onConnectionChange', 'onConnectionStatusChange', 'onDialogStateChange', 'onError', 'onEvolutionEvent', 'onExecutionPreview', 'onFileModified', 'onFileRollback', 'onMessage', 'onMultiFileModified', 'onPerceptionUpdate', 'onProactiveMessage', 'onProcessingStatus', 'onResponseReady', 'onServerLog', 'onSkillExecutionUpdate', 'onTaskCancelled', 'onToolTrace', 'onUserCorrection', and 'onWeightUpdate'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] webpack compiled with 1 warning
+[1] ERROR in src/components/ChatInterface/ChatInterface.tsx:593:8
+[1] TS2741: Property 'onCancelTask' is missing in type '{ isConnected: boolean; }' but required in type '{ isConnected: boolean; onCancelTask: () => void; }'.
+[1]     591 |   return (
+[1]     592 |     <div className="chat-interface">
+[1]   > 593 |       <ChatHeader isConnected={isConnected} />
+[1]         |        ^^^^^^^^^^
+[1]     594 |       <ExecutionPanel />
+[1]     595 |       <ChatWindow
+[1]     596 |         messages={state.messages}
+[1]
+[1] ERROR in src/hooks/websocket/WebSocketConnectionManager.ts:444:48
+[1] TS2339: Property 'taskId' does not exist on type 'TaskCancelled'.
+[1]     442 |       case 'task_cancelled': {
+[1]     443 |         const cancelledData = message.data as unknown as TaskCancelled;
+[1]   > 444 |         console.log('🚫 任务已取消:', cancelledData.taskId);
+[1]         |                                                ^^^^^^
+[1]     445 |         this.taskCancelledListeners.forEach((listener) => {
+[1]     446 |           try {
+[1]     447 |             listener(cancelledData);
+[1]
+[1] Compiling...
+[1] Compiled with warnings.
+[1]
+[1] [eslint]
+[1] src\components\ChatInterface\ChatInterface.tsx
+[1]   Line 14:19:  'MessageStatus' is defined but never used. Allowed unused vars must match /^_/u                                         @typescript-eslint/no-unused-vars
+[1]   Line 249:5:  React Hook useCallback has a missing dependency: 'setCurrentTraceId'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]   Line 364:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array        react-hooks/exhaustive-deps
+[1]   Line 566:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array        react-hooks/exhaustive-deps
+[1]
+[1] src\hooks\websocket\index.ts
+[1]   Line 253:6:  React Hook useEffect has missing dependencies: 'onAgentExecutionUpdate', 'onBrainStageUpdate', 'onClarificationRequest', 'onConnectionChange', 'onConnectionStatusChange', 'onDialogStateChange', 'onError', 'onEvolutionEvent', 'onExecutionPreview', 'onFileModified', 'onFileRollback', 'onMessage', 'onMultiFileModified', 'onPerceptionUpdate', 'onProactiveMessage', 'onProcessingStatus', 'onResponseReady', 'onServerLog', 'onSkillExecutionUpdate', 'onTaskCancelled', 'onToolTrace', 'onUserCorrection', and 'onWeightUpdate'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] Search for the keywords to learn more about each warning.
+[1] To ignore, add // eslint-disable-next-line to the line before.
+[1]
+[1] WARNING in [eslint]
+[1] src\components\ChatInterface\ChatInterface.tsx
+[1]   Line 14:19:  'MessageStatus' is defined but never used. Allowed unused vars must match /^_/u                                         @typescript-eslint/no-unused-vars
+[1]   Line 249:5:  React Hook useCallback has a missing dependency: 'setCurrentTraceId'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]   Line 364:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array        react-hooks/exhaustive-deps
+[1]   Line 566:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array        react-hooks/exhaustive-deps
+[1]
+[1] src\hooks\websocket\index.ts
+[1]   Line 253:6:  React Hook useEffect has missing dependencies: 'onAgentExecutionUpdate', 'onBrainStageUpdate', 'onClarificationRequest', 'onConnectionChange', 'onConnectionStatusChange', 'onDialogStateChange', 'onError', 'onEvolutionEvent', 'onExecutionPreview', 'onFileModified', 'onFileRollback', 'onMessage', 'onMultiFileModified', 'onPerceptionUpdate', 'onProactiveMessage', 'onProcessingStatus', 'onResponseReady', 'onServerLog', 'onSkillExecutionUpdate', 'onTaskCancelled', 'onToolTrace', 'onUserCorrection', and 'onWeightUpdate'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] webpack compiled with 1 warning
+[1] ERROR in src/hooks/websocket/WebSocketConnectionManager.ts:444:48
+[1] TS2339: Property 'taskId' does not exist on type 'TaskCancelled'.
+[1]     442 |       case 'task_cancelled': {
+[1]     443 |         const cancelledData = message.data as unknown as TaskCancelled;
+[1]   > 444 |         console.log('🚫 任务已取消:', cancelledData.taskId);
+[1]         |                                                ^^^^^^
+[1]     445 |         this.taskCancelledListeners.forEach((listener) => {
+[1]     446 |           try {
+[1]     447 |             listener(cancelledData);
+[1]
+[1] Compiling...
+[1] Compiled with warnings.
+[1]
+[1] [eslint]
+[1] src\components\ChatInterface\ChatInterface.tsx
+[1]   Line 14:19:  'MessageStatus' is defined but never used. Allowed unused vars must match /^_/u                                         @typescript-eslint/no-unused-vars
+[1]   Line 249:5:  React Hook useCallback has a missing dependency: 'setCurrentTraceId'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]   Line 364:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array        react-hooks/exhaustive-deps
+[1]   Line 566:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array        react-hooks/exhaustive-deps
+[1]
+[1] src\hooks\websocket\index.ts
+[1]   Line 253:6:  React Hook useEffect has missing dependencies: 'onAgentExecutionUpdate', 'onBrainStageUpdate', 'onClarificationRequest', 'onConnectionChange', 'onConnectionStatusChange', 'onDialogStateChange', 'onError', 'onEvolutionEvent', 'onExecutionPreview', 'onFileModified', 'onFileRollback', 'onMessage', 'onMultiFileModified', 'onPerceptionUpdate', 'onProactiveMessage', 'onProcessingStatus', 'onResponseReady', 'onServerLog', 'onSkillExecutionUpdate', 'onTaskCancelled', 'onToolTrace', 'onUserCorrection', and 'onWeightUpdate'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] Search for the keywords to learn more about each warning.
+[1] To ignore, add // eslint-disable-next-line to the line before.
+[1]
+[1] WARNING in [eslint]
+[1] src\components\ChatInterface\ChatInterface.tsx
+[1]   Line 14:19:  'MessageStatus' is defined but never used. Allowed unused vars must match /^_/u                                         @typescript-eslint/no-unused-vars
+[1]   Line 249:5:  React Hook useCallback has a missing dependency: 'setCurrentTraceId'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]   Line 364:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array        react-hooks/exhaustive-deps
+[1]   Line 566:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array        react-hooks/exhaustive-deps
+[1]
+[1] src\hooks\websocket\index.ts
+[1]   Line 253:6:  React Hook useEffect has missing dependencies: 'onAgentExecutionUpdate', 'onBrainStageUpdate', 'onClarificationRequest', 'onConnectionChange', 'onConnectionStatusChange', 'onDialogStateChange', 'onError', 'onEvolutionEvent', 'onExecutionPreview', 'onFileModified', 'onFileRollback', 'onMessage', 'onMultiFileModified', 'onPerceptionUpdate', 'onProactiveMessage', 'onProcessingStatus', 'onResponseReady', 'onServerLog', 'onSkillExecutionUpdate', 'onTaskCancelled', 'onToolTrace', 'onUserCorrection', and 'onWeightUpdate'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] webpack compiled with 1 warning
+[1] Files successfully emitted, waiting for typecheck results...
+[1] Issues checking in progress...
+[1] No issues found.
+[1] Compiling...
+[1] Compiled with warnings.
+[1]
+[1] [eslint]
+[1] src\components\ChatInterface\ChatInterface.tsx
+[1]   Line 14:19:  'MessageStatus' is defined but never used. Allowed unused vars must match /^_/u                                         @typescript-eslint/no-unused-vars
+[1]   Line 249:5:  React Hook useCallback has a missing dependency: 'setCurrentTraceId'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]   Line 364:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array        react-hooks/exhaustive-deps
+[1]   Line 566:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array        react-hooks/exhaustive-deps
+[1]
+[1] src\hooks\websocket\index.ts
+[1]   Line 255:6:  React Hook useEffect has missing dependencies: 'onAgentExecutionUpdate', 'onBrainStageUpdate', 'onClarificationRequest', 'onConnectionChange', 'onConnectionStatusChange', 'onDialogStateChange', 'onError', 'onEvolutionEvent', 'onExecutionPreview', 'onFileModified', 'onFileRollback', 'onMessage', 'onMultiFileModified', 'onPerceptionUpdate', 'onProactiveMessage', 'onProcessingStatus', 'onResponseReady', 'onServerLog', 'onSkillExecutionUpdate', 'onTaskCancelled', 'onToolTrace', 'onUserCorrection', and 'onWeightUpdate'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] Search for the keywords to learn more about each warning.
+[1] To ignore, add // eslint-disable-next-line to the line before.
+[1]
+[1] WARNING in [eslint]
+[1] src\components\ChatInterface\ChatInterface.tsx
+[1]   Line 14:19:  'MessageStatus' is defined but never used. Allowed unused vars must match /^_/u                                         @typescript-eslint/no-unused-vars
+[1]   Line 249:5:  React Hook useCallback has a missing dependency: 'setCurrentTraceId'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]   Line 364:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array        react-hooks/exhaustive-deps
+[1]   Line 566:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array        react-hooks/exhaustive-deps
+[1]
+[1] src\hooks\websocket\index.ts
+[1]   Line 255:6:  React Hook useEffect has missing dependencies: 'onAgentExecutionUpdate', 'onBrainStageUpdate', 'onClarificationRequest', 'onConnectionChange', 'onConnectionStatusChange', 'onDialogStateChange', 'onError', 'onEvolutionEvent', 'onExecutionPreview', 'onFileModified', 'onFileRollback', 'onMessage', 'onMultiFileModified', 'onPerceptionUpdate', 'onProactiveMessage', 'onProcessingStatus', 'onResponseReady', 'onServerLog', 'onSkillExecutionUpdate', 'onTaskCancelled', 'onToolTrace', 'onUserCorrection', and 'onWeightUpdate'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] webpack compiled with 1 warning
+[1] Files successfully emitted, waiting for typecheck results...
+[1] Issues checking in progress...
+[1] No issues found.
+[1] Compiling...
+[1] Compiled with warnings.
+[1]
+[1] [eslint]
+[1] src\components\ChatInterface\ChatInterface.tsx
+[1]   Line 14:19:  'MessageStatus' is defined but never used. Allowed unused vars must match /^_/u                                         @typescript-eslint/no-unused-vars
+[1]   Line 249:5:  React Hook useCallback has a missing dependency: 'setCurrentTraceId'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]   Line 364:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array        react-hooks/exhaustive-deps
+[1]   Line 566:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array        react-hooks/exhaustive-deps
+[1]
+[1] src\hooks\websocket\index.ts
+[1]   Line 37:5:  'onMessage' is assigned a value but never used. Allowed unused vars must match /^_/u                 @typescript-eslint/no-unused-vars
+[1]   Line 38:5:  'onConnectionChange' is assigned a value but never used. Allowed unused vars must match /^_/u        @typescript-eslint/no-unused-vars
+[1]   Line 39:5:  'onConnectionStatusChange' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+[1]   Line 40:5:  'onDialogStateChange' is assigned a value but never used. Allowed unused vars must match /^_/u       @typescript-eslint/no-unused-vars
+[1]   Line 41:5:  'onAgentExecutionUpdate' is assigned a value but never used. Allowed unused vars must match /^_/u    @typescript-eslint/no-unused-vars
+[1]   Line 42:5:  'onPerceptionUpdate' is assigned a value but never used. Allowed unused vars must match /^_/u        @typescript-eslint/no-unused-vars
+[1]   Line 43:5:  'onBrainStageUpdate' is assigned a value but never used. Allowed unused vars must match /^_/u        @typescript-eslint/no-unused-vars
+[1]   Line 44:5:  'onSkillExecutionUpdate' is assigned a value but never used. Allowed unused vars must match /^_/u    @typescript-eslint/no-unused-vars
+[1]   Line 45:5:  'onEvolutionEvent' is assigned a value but never used. Allowed unused vars must match /^_/u          @typescript-eslint/no-unused-vars
+[1]   Line 46:5:  'onClarificationRequest' is assigned a value but never used. Allowed unused vars must match /^_/u    @typescript-eslint/no-unused-vars
+[1]   Line 47:5:  'onExecutionPreview' is assigned a value but never used. Allowed unused vars must match /^_/u        @typescript-eslint/no-unused-vars
+[1]   Line 48:5:  'onFileModified' is assigned a value but never used. Allowed unused vars must match /^_/u            @typescript-eslint/no-unused-vars
+[1]   Line 49:5:  'onToolTrace' is assigned a value but never used. Allowed unused vars must match /^_/u               @typescript-eslint/no-unused-vars
+[1]   Line 50:5:  'onServerLog' is assigned a value but never used. Allowed unused vars must match /^_/u               @typescript-eslint/no-unused-vars
+[1]   Line 51:5:  'onResponseReady' is assigned a value but never used. Allowed unused vars must match /^_/u           @typescript-eslint/no-unused-vars
+[1]   Line 52:5:  'onError' is assigned a value but never used. Allowed unused vars must match /^_/u                   @typescript-eslint/no-unused-vars
+[1]   Line 53:5:  'onProactiveMessage' is assigned a value but never used. Allowed unused vars must match /^_/u        @typescript-eslint/no-unused-vars
+[1]   Line 54:5:  'onWeightUpdate' is assigned a value but never used. Allowed unused vars must match /^_/u            @typescript-eslint/no-unused-vars
+[1]   Line 55:5:  'onFileRollback' is assigned a value but never used. Allowed unused vars must match /^_/u            @typescript-eslint/no-unused-vars
+[1]   Line 56:5:  'onMultiFileModified' is assigned a value but never used. Allowed unused vars must match /^_/u       @typescript-eslint/no-unused-vars
+[1]   Line 57:5:  'onUserCorrection' is assigned a value but never used. Allowed unused vars must match /^_/u          @typescript-eslint/no-unused-vars
+[1]   Line 58:5:  'onProcessingStatus' is assigned a value but never used. Allowed unused vars must match /^_/u        @typescript-eslint/no-unused-vars
+[1]   Line 59:5:  'onTaskCancelled' is assigned a value but never used. Allowed unused vars must match /^_/u           @typescript-eslint/no-unused-vars
+[1]
+[1] Search for the keywords to learn more about each warning.
+[1] To ignore, add // eslint-disable-next-line to the line before.
+[1]
+[1] WARNING in [eslint]
+[1] src\components\ChatInterface\ChatInterface.tsx
+[1]   Line 14:19:  'MessageStatus' is defined but never used. Allowed unused vars must match /^_/u                                         @typescript-eslint/no-unused-vars
+[1]   Line 249:5:  React Hook useCallback has a missing dependency: 'setCurrentTraceId'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]   Line 364:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array        react-hooks/exhaustive-deps
+[1]   Line 566:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array        react-hooks/exhaustive-deps
+[1]
+[1] src\hooks\websocket\index.ts
+[1]   Line 37:5:  'onMessage' is assigned a value but never used. Allowed unused vars must match /^_/u                 @typescript-eslint/no-unused-vars
+[1]   Line 38:5:  'onConnectionChange' is assigned a value but never used. Allowed unused vars must match /^_/u        @typescript-eslint/no-unused-vars
+[1]   Line 39:5:  'onConnectionStatusChange' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+[1]   Line 40:5:  'onDialogStateChange' is assigned a value but never used. Allowed unused vars must match /^_/u       @typescript-eslint/no-unused-vars
+[1]   Line 41:5:  'onAgentExecutionUpdate' is assigned a value but never used. Allowed unused vars must match /^_/u    @typescript-eslint/no-unused-vars
+[1]   Line 42:5:  'onPerceptionUpdate' is assigned a value but never used. Allowed unused vars must match /^_/u        @typescript-eslint/no-unused-vars
+[1]   Line 43:5:  'onBrainStageUpdate' is assigned a value but never used. Allowed unused vars must match /^_/u        @typescript-eslint/no-unused-vars
+[1]   Line 44:5:  'onSkillExecutionUpdate' is assigned a value but never used. Allowed unused vars must match /^_/u    @typescript-eslint/no-unused-vars
+[1]   Line 45:5:  'onEvolutionEvent' is assigned a value but never used. Allowed unused vars must match /^_/u          @typescript-eslint/no-unused-vars
+[1]   Line 46:5:  'onClarificationRequest' is assigned a value but never used. Allowed unused vars must match /^_/u    @typescript-eslint/no-unused-vars
+[1]   Line 47:5:  'onExecutionPreview' is assigned a value but never used. Allowed unused vars must match /^_/u        @typescript-eslint/no-unused-vars
+[1]   Line 48:5:  'onFileModified' is assigned a value but never used. Allowed unused vars must match /^_/u            @typescript-eslint/no-unused-vars
+[1]   Line 49:5:  'onToolTrace' is assigned a value but never used. Allowed unused vars must match /^_/u               @typescript-eslint/no-unused-vars
+[1]   Line 50:5:  'onServerLog' is assigned a value but never used. Allowed unused vars must match /^_/u               @typescript-eslint/no-unused-vars
+[1]   Line 51:5:  'onResponseReady' is assigned a value but never used. Allowed unused vars must match /^_/u           @typescript-eslint/no-unused-vars
+[1]   Line 52:5:  'onError' is assigned a value but never used. Allowed unused vars must match /^_/u                   @typescript-eslint/no-unused-vars
+[1]   Line 53:5:  'onProactiveMessage' is assigned a value but never used. Allowed unused vars must match /^_/u        @typescript-eslint/no-unused-vars
+[1]   Line 54:5:  'onWeightUpdate' is assigned a value but never used. Allowed unused vars must match /^_/u            @typescript-eslint/no-unused-vars
+[1]   Line 55:5:  'onFileRollback' is assigned a value but never used. Allowed unused vars must match /^_/u            @typescript-eslint/no-unused-vars
+[1]   Line 56:5:  'onMultiFileModified' is assigned a value but never used. Allowed unused vars must match /^_/u       @typescript-eslint/no-unused-vars
+[1]   Line 57:5:  'onUserCorrection' is assigned a value but never used. Allowed unused vars must match /^_/u          @typescript-eslint/no-unused-vars
+[1]   Line 58:5:  'onProcessingStatus' is assigned a value but never used. Allowed unused vars must match /^_/u        @typescript-eslint/no-unused-vars
+[1]   Line 59:5:  'onTaskCancelled' is assigned a value but never used. Allowed unused vars must match /^_/u           @typescript-eslint/no-unused-vars
+[1]
+[1] webpack compiled with 1 warning
+[1] No issues found.
+[1] Compiling...
+[1] Compiled with warnings.
+[1]
+[1] [eslint]
+[1] src\components\ChatInterface\ChatInterface.tsx
+[1]   Line 14:19:  'MessageStatus' is defined but never used. Allowed unused vars must match /^_/u                                         @typescript-eslint/no-unused-vars
+[1]   Line 249:5:  React Hook useCallback has a missing dependency: 'setCurrentTraceId'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]   Line 364:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array        react-hooks/exhaustive-deps
+[1]   Line 566:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array        react-hooks/exhaustive-deps
+[1]
+[1] Search for the keywords to learn more about each warning.
+[1] To ignore, add // eslint-disable-next-line to the line before.
+[1]
+[1] WARNING in [eslint]
+[1] src\components\ChatInterface\ChatInterface.tsx
+[1]   Line 14:19:  'MessageStatus' is defined but never used. Allowed unused vars must match /^_/u                                         @typescript-eslint/no-unused-vars
+[1]   Line 249:5:  React Hook useCallback has a missing dependency: 'setCurrentTraceId'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]   Line 364:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array        react-hooks/exhaustive-deps
+[1]   Line 566:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array        react-hooks/exhaustive-deps
+[1]
+[1] webpack compiled with 1 warning
+[1] No issues found.
+[1] Compiling...
+[1] Compiled with warnings.
+[1]
+[1] [eslint]
+[1] src\components\ChatInterface\ChatInterface.tsx
+[1]   Line 249:5:  React Hook useCallback has a missing dependency: 'setCurrentTraceId'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]   Line 364:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array        react-hooks/exhaustive-deps
+[1]   Line 566:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array        react-hooks/exhaustive-deps
+[1]
+[1] Search for the keywords to learn more about each warning.
+[1] To ignore, add // eslint-disable-next-line to the line before.
+[1]
+[1] WARNING in [eslint]
+[1] src\components\ChatInterface\ChatInterface.tsx
+[1]   Line 249:5:  React Hook useCallback has a missing dependency: 'setCurrentTraceId'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]   Line 364:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array        react-hooks/exhaustive-deps
+[1]   Line 566:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array        react-hooks/exhaustive-deps
+[1]
+[1] webpack compiled with 1 warning
+[1] No issues found.
+[1] Compiling...
+[1] Compiled with warnings.
+[1]
+[1] [eslint]
+[1] src\components\ChatInterface\ChatInterface.tsx
+[1]   Line 364:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]   Line 566:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] Search for the keywords to learn more about each warning.
+[1] To ignore, add // eslint-disable-next-line to the line before.
+[1]
+[1] WARNING in [eslint]
+[1] src\components\ChatInterface\ChatInterface.tsx
+[1]   Line 364:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]   Line 566:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] webpack compiled with 1 warning
+[1] No issues found.
+[1] Compiling...
+[1] Compiled with warnings.
+[1]
+[1] [eslint]
+[1] src\components\ChatInterface\ChatInterface.tsx
+[1]   Line 566:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] Search for the keywords to learn more about each warning.
+[1] To ignore, add // eslint-disable-next-line to the line before.
+[1]
+[1] WARNING in [eslint]
+[1] src\components\ChatInterface\ChatInterface.tsx
+[1]   Line 566:5:  React Hook useCallback has a missing dependency: 'logFrontend'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+[1]
+[1] webpack compiled with 1 warning
+[1] No issues found.
+[1] Compiling...
+[1] Compiled successfully!
+[1] webpack compiled successfully
+[1] No issues found.

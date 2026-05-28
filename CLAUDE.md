@@ -134,8 +134,8 @@ Six-layer E-T-C-S-L-V Harness: the model makes cognitive decisions; the Harness 
 | Phase 1-7: Foundation | LLM-First, FC loop, budget, memory, proactive | 100% | JiabaixingCore, LLMProvider, SkillRegistry |
 | **Phase 8: Harness Framework** | **Six-layer E-T-C-S-L-V Harness** | **100%** | AgentHarness, LoopController, ToolRegistry, ContextManager, PersistenceService, VerificationService, ConstraintsService |
 | **Phase 9: Full Integration** | **Harness wired into all pathways** | **100%** | JiabaixingCore → Harness routing, gateway → Harness, dual-write compatibility |
-| Phase 10: Multi-Agent | Multi-agent orchestration | Planning | TBD |
-| Phase 11: Self-Evaluation | Auto-evaluation pipeline + continuous optimization | Planning | TBD |
+| **Phase 10: Multi-Agent** | **Multi-agent orchestration** | **100%** | AgentRegistry, TaskDispatcher (DAG), ResultAggregator, OrchestratorAgent |
+| **Phase 11: Self-Evaluation** | **Auto-evaluation pipeline + continuous optimization** | **100%** | QualityScorer (5-dim), EvaluationPipeline, OptimizationFeedbackLoop |
 
 ### Key Infrastructure
 

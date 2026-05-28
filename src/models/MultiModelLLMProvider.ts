@@ -1,8 +1,4 @@
-import {
-  ModelConfig,
-  ModelInput,
-  ModelOutput,
-} from '../core/ModelInterface';
+import { ModelConfig, ModelInput, ModelOutput } from '../core/ModelInterface';
 import { Logger } from '../utils/Logger';
 import { OpenAICompatibleModel } from './OpenAICompatibleModel';
 import { ModelSelector } from './ModelSelector';
@@ -75,13 +71,14 @@ export class MultiModelLLMProvider {
   }
 
   private async registerDefaultModels(): Promise<void> {
+    /* 本地模型已注释 - 日志报错本地模型不可用
     const localBaseUrl =
       process.env.OPENAI_API_BASE ||
       process.env.LLM_BASE_URL ||
       'http://127.0.0.1:8001/v1';
     const localApiKey =
       process.env.OPENAI_API_KEY || process.env.LLM_API_KEY || 'not-needed';
-    const localModelName = process.env.LLM_MODEL || 'qwen2.5:3b';
+    const localModelName = process.env.LLM_MODEL || 'deepseek-chat';
 
     await this.registerModel(
       'local-llm',
@@ -111,6 +108,7 @@ export class MultiModelLLMProvider {
       `✅ 已注册本地模型: ${localModelName} @ ${localBaseUrl}`,
       'MultiModelLLMProvider'
     );
+    */
 
     const zhipuApiKey = process.env.ZHIPU_API_KEY;
     const zhipuBaseUrl =

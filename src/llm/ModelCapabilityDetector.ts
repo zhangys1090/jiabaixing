@@ -303,7 +303,7 @@ export class ModelCapabilityDetector {
 
   public async testStreaming(
     modelId: string,
-    client: unknown
+    _client: unknown
   ): Promise<boolean> {
     try {
       const capabilities = this.getCapabilities(modelId);
@@ -315,7 +315,7 @@ export class ModelCapabilityDetector {
 
   public async testFunctionCalling(
     modelId: string,
-    client: unknown
+    _client: unknown
   ): Promise<boolean> {
     try {
       const capabilities = this.getCapabilities(modelId);
@@ -325,7 +325,7 @@ export class ModelCapabilityDetector {
     }
   }
 
-  public async testVision(modelId: string, client: unknown): Promise<boolean> {
+  public async testVision(modelId: string, _client: unknown): Promise<boolean> {
     try {
       const capabilities = this.getCapabilities(modelId);
       return capabilities.vision;

@@ -39,14 +39,24 @@ class MultiModelManager {
   }
   private models: Map<string, ModelConfig> = new Map();
   async initializeAll(): Promise<void> {}
-  getAvailableModels(): string[] { return []; }
-  selectModel(_task: string): string { return 'default'; }
+  getAvailableModels(): string[] {
+    return [];
+  }
+  selectModel(_task: string): string {
+    return 'default';
+  }
   addModel(_config: ModelConfig): void {}
   removeModel(_id: string): void {}
-  getModel(_id: string): ModelConfig | undefined { return undefined; }
-  listModels(): ModelConfig[] { return []; }
+  getModel(_id: string): ModelConfig | undefined {
+    return undefined;
+  }
+  listModels(): ModelConfig[] {
+    return [];
+  }
   registerModel(_config: ModelConfig): void {}
-  getCurrentModelName(): string { return this.currentModelName; }
+  getCurrentModelName(): string {
+    return this.currentModelName;
+  }
 }
 
 export class ModelManager implements ModelManagerInterface {
@@ -63,7 +73,10 @@ export class ModelManager implements ModelManagerInterface {
       await this.registerDefaultModels();
       await this.multiModelManager.initializeAll();
       this.initialized = true;
-      Logger.info('✅ 模型管理器初始化成功（使用MultiModelManager）', 'ModelManager');
+      Logger.info(
+        '✅ 模型管理器初始化成功（使用MultiModelManager）',
+        'ModelManager'
+      );
     } catch (error) {
       Logger.error('❌ 模型管理器初始化失败:', error as Error, 'ModelManager');
       throw error;
@@ -71,7 +84,7 @@ export class ModelManager implements ModelManagerInterface {
   }
 
   private async registerDefaultModels(): Promise<void> {
-    const llmModel = process.env.LLM_MODEL || 'qwen2.5:3b';
+    const llmModel = process.env.LLM_MODEL || 'deepseek-chat';
     const baseUrl = process.env.OPENAI_API_BASE || 'http://127.0.0.1:8001/v1';
     const apiKey = process.env.OPENAI_API_KEY || 'not-needed';
 
@@ -122,13 +135,13 @@ export class ModelManager implements ModelManagerInterface {
 
   public getDefaultModel(): Model | null {
     this.ensureInitialized();
-    
+
     const currentModelName = this.multiModelManager.getCurrentModelName();
     if (currentModelName) {
       const model = this.models.get(currentModelName);
       if (model) return model;
     }
-    
+
     return this.models.get('default') || null;
   }
 

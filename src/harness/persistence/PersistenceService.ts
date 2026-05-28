@@ -83,9 +83,21 @@ export interface EvolutionMetric {
 export interface PersistenceServiceDeps {
   /** 记忆引擎 */
   memoryEngine?: {
-    storeShortTermMemory(content: string, scene?: string, emotion?: string): Promise<unknown>;
-    storeLongTermMemory(content: string, scene?: string, emotion?: string): Promise<unknown>;
-    storeInstantMemory(content: string, scene?: string, emotion?: string): Promise<unknown>;
+    storeShortTermMemory(
+      content: string,
+      scene?: string,
+      emotion?: string
+    ): Promise<unknown>;
+    storeLongTermMemory(
+      content: string,
+      scene?: string,
+      emotion?: string
+    ): Promise<unknown>;
+    storeInstantMemory(
+      content: string,
+      scene?: string,
+      emotion?: string
+    ): Promise<unknown>;
     preciseHybridRetrieval(query: {
       query: string;
       scene?: string;
@@ -136,7 +148,8 @@ export class PersistenceService {
 
   constructor(deps: PersistenceServiceDeps, dataDir?: string) {
     this.deps = deps;
-    const baseDir = dataDir || path.resolve(process.cwd(), 'data', 'persistence');
+    const baseDir =
+      dataDir || path.resolve(process.cwd(), 'data', 'persistence');
     this.taskStatesPath = path.join(baseDir, 'task-states.json');
     this.evolutionMetricsPath = path.join(baseDir, 'evolution-metrics.json');
   }
@@ -150,8 +163,8 @@ export class PersistenceService {
     await this.loadTaskStatesFromDisk();
     await this.loadEvolutionMetricsFromDisk();
     this.flushTimer = setInterval(() => {
-      this.flushTaskStatesToDisk();
-      this.flushEvolutionMetricsToDisk();
+      void this.flushTaskStatesToDisk();
+      void this.flushEvolutionMetricsToDisk();
       this.promoteMemories().catch((err: Error) => {
         Logger.error('定时记忆晋升失败', err, 'PersistenceService');
       });
@@ -178,13 +191,25 @@ export class PersistenceService {
     try {
       switch (type) {
         case 'instant':
-          await this.deps.memoryEngine.storeInstantMemory(content, scene, emotion);
+          await this.deps.memoryEngine.storeInstantMemory(
+            content,
+            scene,
+            emotion
+          );
           break;
         case 'long_term':
-          await this.deps.memoryEngine.storeLongTermMemory(content, scene, emotion);
+          await this.deps.memoryEngine.storeLongTermMemory(
+            content,
+            scene,
+            emotion
+          );
           break;
         default:
-          await this.deps.memoryEngine.storeShortTermMemory(content, scene, emotion);
+          await this.deps.memoryEngine.storeShortTermMemory(
+            content,
+            scene,
+            emotion
+          );
       }
       return 'stored';
     } catch (err) {
@@ -257,10 +282,11 @@ export class PersistenceService {
     }
 
     try {
-      const shortTermMemories = await this.deps.memoryEngine.preciseHybridRetrieval({
-        query: '',
-        topK: 100,
-      });
+      const shortTermMemories =
+        await this.deps.memoryEngine.preciseHybridRetrieval({
+          query: '',
+          topK: 100,
+        });
 
       const candidates = shortTermMemories.filter(
         (m) =>
@@ -388,7 +414,10 @@ export class PersistenceService {
    */
   async listActiveTasks(): Promise<TaskState[]> {
     return Array.from(this.taskStates.values()).filter(
-      (t) => t.status === 'pending' || t.status === 'in_progress' || t.status === 'paused'
+      (t) =>
+        t.status === 'pending' ||
+        t.status === 'in_progress' ||
+        t.status === 'paused'
     );
   }
 
@@ -463,17 +492,14 @@ export class PersistenceService {
     }
     this.evolutionMetricsSinceLastFlush++;
     if (this.evolutionMetricsSinceLastFlush >= 10) {
-      this.flushEvolutionMetricsToDisk();
+      void this.flushEvolutionMetricsToDisk();
     }
   }
 
   /**
    * 获取进化指标
    */
-  getEvolutionMetrics(
-    metricType?: string,
-    limit?: number
-  ): EvolutionMetric[] {
+  getEvolutionMetrics(metricType?: string, limit?: number): EvolutionMetric[] {
     let metrics = this.evolutionMetrics;
     if (metricType) {
       metrics = metrics.filter((m) => m.metricType === metricType);
@@ -512,7 +538,11 @@ export class PersistenceService {
         fs.mkdirSync(dir, { recursive: true });
       }
       const data = Array.from(this.taskStates.values());
-      fs.writeFileSync(this.taskStatesPath, JSON.stringify(data, null, 2), 'utf-8');
+      fs.writeFileSync(
+        this.taskStatesPath,
+        JSON.stringify(data, null, 2),
+        'utf-8'
+      );
     } catch (err) {
       Logger.error('任务状态刷盘失败', err as Error, 'PersistenceService');
     }
@@ -547,7 +577,11 @@ export class PersistenceService {
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
       }
-      fs.writeFileSync(this.evolutionMetricsPath, JSON.stringify(this.evolutionMetrics, null, 2), 'utf-8');
+      fs.writeFileSync(
+        this.evolutionMetricsPath,
+        JSON.stringify(this.evolutionMetrics, null, 2),
+        'utf-8'
+      );
       this.evolutionMetricsSinceLastFlush = 0;
     } catch (err) {
       Logger.error('进化指标刷盘失败', err as Error, 'PersistenceService');

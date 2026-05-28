@@ -144,8 +144,8 @@ export class SpeechSynthesizer extends EventEmitter {
       this.coquiAvailable = true;
       Logger.info('✅ Coqui TTS Python 环境可用', 'SpeechSynthesizer');
     } catch {
-      Logger.warn(
-        '⚠️ Coqui TTS Python 环境不可用，语音合成将使用本地 mock 模式',
+      Logger.debug(
+        'Coqui TTS Python 环境不可用，语音合成将使用本地 mock 模式',
         'SpeechSynthesizer'
       );
       this.coquiAvailable = false;

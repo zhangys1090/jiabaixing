@@ -52,8 +52,10 @@ describe('AuditLogger', () => {
         action: 'test_action',
         actor: 'test_actor',
         target: 'test_target',
-        result: 'success',
-        category: 'test',
+        result: 'success' as const,
+        category: 'test_category',
+        userId: 'test_user',
+        resource: 'test_resource',
         details: { key: 'value' },
       });
 

@@ -23,7 +23,9 @@ function getGateway(): IntegrationManager | GatewayBridge {
   return IntegrationManager.getInstance();
 }
 
-function isBridge(gateway: IntegrationManager | GatewayBridge): gateway is GatewayBridge {
+function isBridge(
+  gateway: IntegrationManager | GatewayBridge
+): gateway is GatewayBridge {
   return gateway instanceof GatewayBridge;
 }
 
@@ -238,11 +240,7 @@ router.get('/system-status', async (_req: Request, res: Response) => {
       data: systemStatus,
     });
   } catch (error) {
-    Logger.error(
-      '获取系统状态失败',
-      error as Error,
-      'IntegrationRoutes'
-    );
+    Logger.error('获取系统状态失败', error as Error, 'IntegrationRoutes');
     res.status(500).json({
       success: false,
       error: '获取系统状态失败',

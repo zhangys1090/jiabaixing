@@ -382,33 +382,6 @@ jiabaixing/
 
 ---
 
-## 十、下一步
-
-当前 V5.0 核心链路已工作，以下三项是打通"最小闭环"的关键：
-
-### P0 — Evaluator 独立化
-
-**现状**：VerificationService 与执行过程耦合，评估和生成在同一个 LLM 调用中完成。
-
-**目标**：独立的 Evaluator Agent，在执行完成后单独调用 LLM 评判结果。评判标准包括：任务是否完成、回答是否基于工具数据、是否有安全风险。
-
-**为什么是 P0**：Anthropic 实验数据表明分离 Evaluator 可提升 task success 约 10 个百分点。当前耦合模式下 Agent 存在"自我评价失真"——自评 90 分，实际 60 分。
-
-### P1 — 结构化 Eval Set
-
-**现状**：132 个 Harness 测试覆盖的是工程正确性（工具注册、Schema 验证、预算控制），不覆盖端到端行为质量。
-
-**目标**：收集 20-50 个真实对话失败案例，标注预期行为和评判标准。每次改动后跑 eval 看回归情况。
-
-**为什么是 P1**：没有 eval set，所有改动都是"我感觉没问题"。Anthropic 工程团队建议从 20 个真实失败任务开始就能获得信号。
-
-### P2 — 全轨迹审计
-
-**现状**：仅记录工具调用结果，不记录每步的完整上下文快照。
-
-**目标**：记录 Plan-Execute-Evaluate 每一步的完整状态（输入、模型输出、工具调用参数与结果、评估结论），结构化存储，可回溯查询。
-
-**为什么是 P2**：独立的 Evaluator 需要完整的轨迹才能做出准确判断。Claw-Eval 研究表明仅检查输出的评估遗漏 44% 安全违规和 13% 鲁棒性失败。
 
 ---
 
@@ -465,8 +438,8 @@ pm2 save && pm2 startup
 | Phase 1-7: Foundation               | LLM-First, FC loop, 预算, 记忆, 主动触发    | ✅ 100%   |
 | Phase 8: Harness Agent Framework    | 六层 E-T-C-S-L-V Harness                    | ✅ 100%   |
 | Phase 9: Full Harness Integration   | Harness 完全集成至所有通路                  | ✅ 100%   |
-| Phase 10: Multi-Agent Orchestration | 多 Agent 协同 + 任务拆解 + Sub-Agent 扇出   | 📋 规划中 |
-| Phase 11: Self-Evaluation Pipeline  | 效果自评估 + 持续优化闭环 + Golden Eval Set | 📋 规划中 |
+| Phase 10: Multi-Agent Orchestration | 多 Agent 协同 + 任务拆解 + Sub-Agent 扇出   | 🚧 开发中 |
+| Phase 11: Self-Evaluation Pipeline  | 效果自评估 + 持续优化闭环 + Golden Eval Set | 🚧 开发中 |
 | Phase 12: Docker + K8s              | 容器化部署 + 编排                           | 📋 规划中 |
 | Phase 13: Plugin Ecosystem          | 第三方插件市场                              | 💡 设想   |
 

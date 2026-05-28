@@ -95,7 +95,11 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
     }
 
     const taskId = req.params.id;
-    const updated = await persistence.updateTaskStatus(taskId, 'failed', '用户取消');
+    const updated = await persistence.updateTaskStatus(
+      taskId,
+      'failed',
+      '用户取消'
+    );
     if (!updated) {
       res.status(404).json({ error: '任务不存在' });
       return;

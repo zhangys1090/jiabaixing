@@ -69,6 +69,12 @@ export type MultiFileModified = {
   timestamp?: number;
 };
 export type UserCorrection = unknown;
+export type TaskCancelled = {
+  taskId?: string;
+  traceId?: string;
+  message?: string;
+  timestamp?: number;
+};
 
 export interface WebSocketMessage {
   type: WsServerEventType;
@@ -101,6 +107,7 @@ export type WeightUpdateListener = (update: WeightUpdate) => void;
 export type FileRollbackListener = (event: FileRollback) => void;
 export type MultiFileModifiedListener = (event: MultiFileModified) => void;
 export type UserCorrectionListener = (data: UserCorrection) => void;
+export type TaskCancelledListener = (data: TaskCancelled) => void;
 
 export interface UseWebSocketOptions {
   url?: string;
@@ -125,6 +132,8 @@ export interface UseWebSocketOptions {
   onFileRollback?: (event: FileRollback) => void;
   onMultiFileModified?: (event: MultiFileModified) => void;
   onUserCorrection?: (data: UserCorrection) => void;
+  onProcessingStatus?: (data: { status: string; message: string; traceId?: string }) => void;
+  onTaskCancelled?: (data: TaskCancelled) => void;
 }
 
 export interface WebSocketState {
@@ -148,6 +157,7 @@ export interface WebSocketState {
   fileRollbacks: FileRollback[];
   multiFileModifiedEvents: MultiFileModified[];
   userCorrections: UserCorrection[];
+  taskCancelledEvents: TaskCancelled[];
 }
 
 export type { WS_EVENTS, WsServerEventType };

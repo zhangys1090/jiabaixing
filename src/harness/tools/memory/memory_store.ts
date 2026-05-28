@@ -50,7 +50,10 @@ export interface MemoryMetadata {
 
 /** memory_store 依赖接口 */
 export interface MemoryStoreDeps {
-  storeShortTermMemory?: (content: string, category: string) => Promise<boolean>;
+  storeShortTermMemory?: (
+    content: string,
+    category: string
+  ) => Promise<boolean>;
   checkDuplicate?: (content: string, category: string) => Promise<boolean>;
   storeWithMetadata?: (
     content: string,
@@ -112,7 +115,10 @@ export function createMemoryStoreExecutor(deps: MemoryStoreDeps) {
   ): Promise<ToolResult> => {
     const content = String(params.content || '');
     const category = String(params.category || 'other');
-    const importance = Math.min(10, Math.max(1, Number(params.importance) || 5));
+    const importance = Math.min(
+      10,
+      Math.max(1, Number(params.importance) || 5)
+    );
 
     if (!content.trim()) {
       return {
@@ -146,7 +152,11 @@ export function createMemoryStoreExecutor(deps: MemoryStoreDeps) {
       };
 
       if (deps.storeWithMetadata) {
-        const stored = await deps.storeWithMetadata(content, category, metadata);
+        const stored = await deps.storeWithMetadata(
+          content,
+          category,
+          metadata
+        );
         if (stored === false) {
           return {
             success: false,

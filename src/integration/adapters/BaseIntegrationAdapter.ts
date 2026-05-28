@@ -10,7 +10,9 @@ import { Logger } from '../../utils/Logger';
 export abstract class BaseIntegrationAdapter {
   protected config: PlatformConfig;
   protected status: IntegrationStatus;
-  protected messageHandlers: Array<(message: IncomingMessageEvent) => Promise<void>> = [];
+  protected messageHandlers: Array<
+    (message: IncomingMessageEvent) => Promise<void>
+  > = [];
 
   constructor(public readonly platform: IntegrationPlatform) {
     this.config = {};
@@ -44,7 +46,9 @@ export abstract class BaseIntegrationAdapter {
   /**
    * 处理 Webhook 请求
    */
-  abstract handleWebhook(payload: Record<string, unknown>): Promise<{ success: boolean; response?: unknown }>;
+  abstract handleWebhook(
+    payload: Record<string, unknown>
+  ): Promise<{ success: boolean; response?: unknown }>;
 
   /**
    * 获取当前状态
@@ -58,7 +62,10 @@ export abstract class BaseIntegrationAdapter {
    */
   onMessage(handler: (message: IncomingMessageEvent) => Promise<void>): void {
     this.messageHandlers.push(handler);
-    Logger.info(`注册了新的消息处理器到 ${this.platform}`, 'IntegrationAdapter');
+    Logger.info(
+      `注册了新的消息处理器到 ${this.platform}`,
+      'IntegrationAdapter'
+    );
   }
 
   /**
@@ -90,9 +97,15 @@ export abstract class BaseIntegrationAdapter {
       status,
       connected: status === 'connected',
       lastConnectedAt:
-        status === 'connected' ? new Date().toISOString() : this.status.lastConnectedAt,
+        status === 'connected'
+          ? new Date().toISOString()
+          : this.status.lastConnectedAt,
       error,
     };
-    Logger.debug(`${this.platform} 状态更新`, 'IntegrationAdapter', this.status);
+    Logger.debug(
+      `${this.platform} 状态更新`,
+      'IntegrationAdapter',
+      this.status
+    );
   }
 }

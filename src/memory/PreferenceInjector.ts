@@ -50,7 +50,11 @@ export function buildPreferenceBlock(): string {
 export function buildEvolutionExamplesBlock(): string {
   const dispatcher = OptimizationResultDispatcher.getInstance();
   const snapshot = dispatcher.getLastSnapshot();
-  if (!snapshot || !snapshot.promptExamples || snapshot.promptExamples.length === 0) {
+  if (
+    !snapshot ||
+    !snapshot.promptExamples ||
+    snapshot.promptExamples.length === 0
+  ) {
     return '';
   }
 

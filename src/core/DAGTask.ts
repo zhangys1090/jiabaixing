@@ -621,5 +621,4 @@ export class DAGTask {
     const handlers = this.eventHandlers.get(event);
     handlers?.forEach((handler) => handler(node));
   }
-
 }

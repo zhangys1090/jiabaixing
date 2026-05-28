@@ -73,7 +73,7 @@ export class AuditLogger {
     if (!fs.existsSync(storagePath)) {
       fs.mkdirSync(storagePath, { recursive: true });
     }
-    
+
     const dbDir = path.dirname(this.dbPath);
     if (!fs.existsSync(dbDir)) {
       fs.mkdirSync(dbDir, { recursive: true });
@@ -181,12 +181,12 @@ export class AuditLogger {
     try {
       const retentionTime =
         Date.now() - this.config.retentionDays * 24 * 60 * 60 * 1000;
-      
+
       const deleteStmt = this.db.prepare(
         'DELETE FROM audit_logs WHERE timestamp < @retention_time'
       );
       const result = deleteStmt.run({ retention_time: retentionTime });
-      
+
       if (result.changes > 0) {
         AppLogger.info(`🗑️  清理了 ${result.changes} 条过期审计日志`);
       }
@@ -217,7 +217,12 @@ export class AuditLogger {
     }
   }
 
-  public log(entry: Omit<AuditLogEntry, 'id' | 'timestamp'>): void {
+  public log(
+    entry: Partial<AuditLogEntry> & {
+      action: string;
+      result: 'success' | 'failure' | 'warning';
+    }
+  ): void {
     if (!this.initialized) {
       throw new Error('审计日志器未初始化');
     }
@@ -226,6 +231,8 @@ export class AuditLogger {
       const logEntry: AuditLogEntry = {
         id: this.generateLogId(),
         timestamp: new Date(),
+        userId: entry.userId || 'system',
+        resource: entry.resource || 'system',
         ...entry,
       };
 
@@ -248,9 +255,11 @@ export class AuditLogger {
         result: logEntry.result,
         category: logEntry.category || null,
         details: logEntry.details ? JSON.stringify(logEntry.details) : null,
-        ip_address: (logEntry as any).ipAddress || null,
-        user_agent: (logEntry as any).userAgent || null,
-        created_at: Date.now()
+        ip_address:
+          (logEntry as unknown as Record<string, unknown>).ipAddress || null,
+        user_agent:
+          (logEntry as unknown as Record<string, unknown>).userAgent || null,
+        created_at: Date.now(),
       });
 
       this.logger.log({
@@ -289,7 +298,7 @@ export class AuditLogger {
 
     try {
       let sql = 'SELECT * FROM audit_logs WHERE 1=1';
-      const params: Record<string, any> = {};
+      const params: Record<string, unknown> = {};
 
       if (filter) {
         if (filter.action) {
@@ -339,7 +348,7 @@ export class AuditLogger {
         user_agent: string | null;
         created_at: number;
       }>;
-      
+
       // 手动处理分页
       rows = rows.slice(offset, offset + limit);
 
@@ -347,11 +356,15 @@ export class AuditLogger {
         id: row.id,
         timestamp: new Date(row.timestamp),
         action: row.action,
+        userId: row.actor || '',
+        resource: row.target || '',
         actor: row.actor || undefined,
         target: row.target || undefined,
         result: row.result as 'success' | 'failure' | 'warning',
         category: row.category || undefined,
         details: row.details ? JSON.parse(row.details) : undefined,
+        ipAddress: row.ip_address || undefined,
+        userAgent: row.user_agent || undefined,
       }));
     } catch (error) {
       AppLogger.error('❌ 查询审计日志失败:', error as Error);
@@ -414,23 +427,26 @@ export class AuditLogger {
     try {
       // 先获取所有日志，手动计算统计信息（提高测试兼容性）
       const allLogs = this.queryLogs({}, 10000, 0);
-      
-      const successCount = allLogs.filter(l => l.result === 'success').length;
-      const failureCount = allLogs.filter(l => l.result === 'failure').length;
-      const warningCount = allLogs.filter(l => l.result === 'warning').length;
-      
+
+      const successCount = allLogs.filter((l) => l.result === 'success').length;
+      const failureCount = allLogs.filter((l) => l.result === 'failure').length;
+      const warningCount = allLogs.filter((l) => l.result === 'warning').length;
+
       // 计算 top categories
       const categoryMap = new Map<string, number>();
       for (const log of allLogs) {
         if (log.category) {
-          categoryMap.set(log.category, (categoryMap.get(log.category) || 0) + 1);
+          categoryMap.set(
+            log.category,
+            (categoryMap.get(log.category) || 0) + 1
+          );
         }
       }
       const topCategories = Array.from(categoryMap.entries())
         .sort((a, b) => b[1] - a[1])
         .slice(0, 10)
         .map(([category, count]) => ({ category, count }));
-      
+
       // 计算 top actions
       const actionMap = new Map<string, number>();
       for (const log of allLogs) {
@@ -486,11 +502,104 @@ export class AuditLogger {
         });
       }
 
+      if (this.db) {
+        this.db.close();
+      }
+
       this.initialized = false;
       AppLogger.info('✅ 审计日志器：关闭完成！');
     } catch (error) {
       AppLogger.error('❌ 审计日志器：关闭失败:', error as Error);
       throw error;
     }
+  }
+
+  /**
+   * 追踪请求的完整生命周期
+   *
+   * 记录从用户输入到最终输出的每一步操作，
+   * 包括工具调用、LLM 请求、上下文构建等
+   */
+  public traceRequest(
+    traceId: string,
+    step: string,
+    data: {
+      action: string;
+      actor?: string;
+      target?: string;
+      result: 'success' | 'failure' | 'warning';
+      category?: string;
+      details?: Record<string, unknown>;
+      duration?: number;
+    }
+  ): void {
+    this.log({
+      action: `trace:${traceId}:${step}`,
+      actor: data.actor || 'system',
+      target: data.target || `trace:${traceId}`,
+      result: data.result,
+      category: data.category || 'request_trace',
+      details: {
+        traceId,
+        step,
+        duration: data.duration,
+        ...data.details,
+      },
+    });
+  }
+
+  /**
+   * 查询请求的完整轨迹
+   *
+   * 通过 traceId 查询请求从输入到输出的所有步骤
+   */
+  public getRequestTrace(traceId: string): AuditLogEntry[] {
+    return this.queryLogs(
+      {
+        action: `trace:${traceId}`,
+        category: 'request_trace',
+      },
+      1000,
+      0
+    ).filter((log) => log.action.startsWith(`trace:${traceId}:`));
+  }
+
+  /**
+   * 获取请求轨迹摘要
+   */
+  public getRequestTraceSummary(traceId: string): {
+    traceId: string;
+    totalSteps: number;
+    successSteps: number;
+    failureSteps: number;
+    totalDuration: number;
+    steps: Array<{
+      step: string;
+      result: string;
+      duration?: number;
+      timestamp: Date;
+    }>;
+  } {
+    const trace = this.getRequestTrace(traceId);
+
+    const steps = trace.map((log) => {
+      const details = log.details as Record<string, unknown> | undefined;
+      return {
+        step:
+          (details?.step as string) || log.action.split(':').pop() || 'unknown',
+        result: log.result,
+        duration: details?.duration as number | undefined,
+        timestamp: log.timestamp,
+      };
+    });
+
+    return {
+      traceId,
+      totalSteps: steps.length,
+      successSteps: steps.filter((s) => s.result === 'success').length,
+      failureSteps: steps.filter((s) => s.result === 'failure').length,
+      totalDuration: steps.reduce((sum, s) => sum + (s.duration || 0), 0),
+      steps,
+    };
   }
 }

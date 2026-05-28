@@ -4,7 +4,6 @@
  * 多层验证体系：工具结果验证 + 输出安全检查 + 质量评分 + 目标达成评估
  */
 
-import { Logger } from '../../utils/Logger';
 import type {
   ToolResult,
   ValidationResult,
@@ -65,16 +64,26 @@ export class VerificationService {
     }
 
     // 3. 检查输出是否包含明显错误标记
-    const errorPatterns = ['error', 'exception', 'failed', 'timeout', 'unauthorized'];
+    const errorPatterns = [
+      'error',
+      'exception',
+      'failed',
+      'timeout',
+      'unauthorized',
+    ];
     const lowerOutput = outputStr.toLowerCase();
-    if (errorPatterns.some((p) => lowerOutput.includes(p)) && outputStr.length < 200) {
+    if (
+      errorPatterns.some((p) => lowerOutput.includes(p)) &&
+      outputStr.length < 200
+    ) {
       warnings.push(`工具 ${toolName} 可能返回了错误信息`);
     }
 
     // 4. 截断过长输出
     const MAX_OUTPUT = 4000;
     if (outputStr.length > MAX_OUTPUT) {
-      sanitizedOutput = outputStr.substring(0, MAX_OUTPUT) + '\n...[内容已截断]';
+      sanitizedOutput =
+        outputStr.substring(0, MAX_OUTPUT) + '\n...[内容已截断]';
       warnings.push(`工具 ${toolName} 输出过长，已截断`);
       return {
         valid: true,
@@ -104,29 +113,117 @@ export class VerificationService {
     const sensitivePatterns = [
       // 金融类敏感信息
       { pattern: /\b\d{16,19}\b/g, name: '银行卡号', risk: 'high' },
-      { pattern: /\b\d{6}\d{4}\d{2}\d{2}\d{4}\b/g, name: '身份证号', risk: 'high' },
+      {
+        pattern: /\b\d{6}\d{4}\d{2}\d{2}\d{4}\b/g,
+        name: '身份证号',
+        risk: 'high',
+      },
       { pattern: /\b\d{10,12}\b/g, name: '可能的社保号', risk: 'high' },
 
       // 认证凭据
-      { pattern: /(?:password|密码|pwd|passwd)\s*[:=]\s*\S+/gi, name: '密码泄露', risk: 'critical' },
-      { pattern: /(?:secret|密钥|api[_-]?key|token)\s*[:=]\s*\S+/gi, name: '密钥/Token泄露', risk: 'critical' },
+      {
+        pattern: /(?:password|密码|pwd|passwd)\s*[:=]\s*\S+/gi,
+        name: '密码泄露',
+        risk: 'critical',
+      },
+      {
+        pattern: /(?:secret|密钥|api[_-]?key|token)\s*[:=]\s*\S+/gi,
+        name: '密钥/Token泄露',
+        risk: 'critical',
+      },
       { pattern: /(?:bearer|basic)\s+\S+/gi, name: '认证头泄露', risk: 'high' },
 
       // 通信联系方式
       { pattern: /\b1[3-9]\d{9}\b/g, name: '手机号码', risk: 'medium' },
-      { pattern: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g, name: '邮箱地址', risk: 'medium' },
+      {
+        pattern: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g,
+        name: '邮箱地址',
+        risk: 'medium',
+      },
 
       // 网络标识
-      { pattern: /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/g, name: 'IPv4地址', risk: 'low' },
-      { pattern: /\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b/g, name: 'IPv4地址(严格)', risk: 'low' },
+      {
+        pattern: /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/g,
+        name: 'IPv4地址',
+        risk: 'low',
+      },
+      {
+        pattern:
+          /\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b/g,
+        name: 'IPv4地址(严格)',
+        risk: 'low',
+      },
+      {
+        pattern: /\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b/g,
+        name: 'IPv6地址',
+        risk: 'low',
+      },
+      {
+        pattern: /\b(?:[0-9a-fA-F]{1,4}:){1,7}:\b/g,
+        name: 'IPv6地址(压缩)',
+        risk: 'low',
+      },
+      {
+        pattern: /\b(?:[0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}\b/g,
+        name: 'IPv6地址',
+        risk: 'low',
+      },
+      {
+        pattern: /\b(?:[0-9a-fA-F]{1,4}:){1,5}(?::[0-9a-fA-F]{1,4}){1,2}\b/g,
+        name: 'IPv6地址',
+        risk: 'low',
+      },
+      {
+        pattern: /\b(?:[0-9a-fA-F]{1,4}:){1,4}(?::[0-9a-fA-F]{1,4}){1,3}\b/g,
+        name: 'IPv6地址',
+        risk: 'low',
+      },
+      {
+        pattern: /\b(?:[0-9a-fA-F]{1,4}:){1,3}(?::[0-9a-fA-F]{1,4}){1,4}\b/g,
+        name: 'IPv6地址',
+        risk: 'low',
+      },
+      {
+        pattern: /\b(?:[0-9a-fA-F]{1,4}:){1,2}(?::[0-9a-fA-F]{1,4}){1,5}\b/g,
+        name: 'IPv6地址',
+        risk: 'low',
+      },
+      {
+        pattern: /\b[0-9a-fA-F]{1,4}:(?::[0-9a-fA-F]{1,4}){1,6}\b/g,
+        name: 'IPv6地址',
+        risk: 'low',
+      },
+      {
+        pattern: /::(?:[0-9a-fA-F]{1,4}:){0,5}[0-9a-fA-F]{1,4}\b/g,
+        name: 'IPv6地址(全零压缩)',
+        risk: 'low',
+      },
+      { pattern: /::1\b/g, name: 'IPv6本地地址', risk: 'low' },
+      {
+        pattern: /fe80:(?:[0-9a-fA-F]{1,4}:){0,3}[0-9a-fA-F]{1,4}\b/gi,
+        name: 'IPv6链路本地地址',
+        risk: 'low',
+      },
 
       // 地址和位置
       { pattern: /家庭地址[:：]\S+/gi, name: '家庭地址', risk: 'medium' },
-      { pattern: /(?:家庭|公司)电话[:：]\S+/gi, name: '电话号码', risk: 'medium' },
+      {
+        pattern: /(?:家庭|公司)电话[:：]\S+/gi,
+        name: '电话号码',
+        risk: 'medium',
+      },
 
       // 医疗健康
-      { pattern: /\b[A-Z]{2}\d{6,9}\b/g, name: '可能的医疗记录号', risk: 'medium' },
-      { pattern: /(?:病历|处方|诊断)[:：]\S+/gi, name: '医疗信息', risk: 'high' },
+      {
+        pattern: /\b[A-Z]{2}\d{6,9}\b/g,
+        name: '可能的医疗记录号',
+        risk: 'medium',
+      },
+      {
+        pattern: /(?:病历|处方|诊断)[:：]\S+/gi,
+        name: '医疗信息',
+        risk: 'high',
+      },
     ];
 
     for (const { pattern, name, risk } of sensitivePatterns) {
@@ -145,18 +242,49 @@ export class VerificationService {
         // 手机号
         .replace(/\b1[3-9]\d{9}\b/g, '[手机号-已脱敏]')
         // 邮箱
-        .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g, '[邮箱-已脱敏]')
+        .replace(
+          /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g,
+          '[邮箱-已脱敏]'
+        )
         // IPv4
         .replace(/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/g, '[IP-已脱敏]')
+        // IPv6 (完整格式)
+        .replace(
+          /\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b/gi,
+          '[IPv6-已脱敏]'
+        )
+        // IPv6 (各种压缩格式)
+        .replace(
+          /(?:[0-9a-fA-F]{1,4}:){1,7}:[0-9a-fA-F]{1,4}\b/gi,
+          '[IPv6-已脱敏]'
+        )
+        .replace(
+          /::(?:[0-9a-fA-F]{1,4}:){0,5}[0-9a-fA-F]{1,4}\b/gi,
+          '[IPv6-已脱敏]'
+        )
+        .replace(/::1\b/gi, '[IPv6本地-已脱敏]')
+        .replace(
+          /fe80:(?:[0-9a-fA-F]{1,4}:){0,3}[0-9a-fA-F]{1,4}\b/gi,
+          '[IPv6链路本地-已脱敏]'
+        )
         // 密码/密钥
-        .replace(/(?:password|密码|pwd|passwd|secret|密钥|api[_-]?key|token)\s*[:=]\s*\S+/gi, '$& [已脱敏]')
+        .replace(
+          /(?:password|密码|pwd|passwd|secret|密钥|api[_-]?key|token)\s*[:=]\s*\S+/gi,
+          '$& [已脱敏]'
+        )
         // 身份证号
         .replace(/\b\d{6}\d{4}\d{2}\d{2}\d{4}\b/g, '[身份证-已脱敏]');
     }
 
     return {
       safe: !hasViolations,
-      riskLevel: hasViolations ? (violations.some(v => v.includes('critical')) ? 'critical' : violations.some(v => v.includes('high')) ? 'high' : 'medium') : 'none',
+      riskLevel: hasViolations
+        ? violations.some((v) => v.includes('critical'))
+          ? 'critical'
+          : violations.some((v) => v.includes('high'))
+            ? 'high'
+            : 'medium'
+        : 'none',
       violations,
       sanitizedOutput,
     };
@@ -259,7 +387,12 @@ export class VerificationService {
     currentOutput: string
   ): Promise<GoalProgress> {
     if (!this.deps.llm) {
-      return { achieved: false, progress: 0.5, remainingSteps: [], suggestedAction: 'continue' };
+      return {
+        achieved: false,
+        progress: 0.5,
+        remainingSteps: [],
+        suggestedAction: 'continue',
+      };
     }
 
     const prompt = `评估以下输出是否达成了用户的目标。
@@ -273,7 +406,12 @@ export class VerificationService {
     const response = await this.deps.llm.chat(prompt);
     const jsonMatch = response.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      return { achieved: true, progress: 0.7, remainingSteps: [], suggestedAction: 'continue' };
+      return {
+        achieved: true,
+        progress: 0.7,
+        remainingSteps: [],
+        suggestedAction: 'continue',
+      };
     }
 
     try {
@@ -285,7 +423,12 @@ export class VerificationService {
         suggestedAction: parsed.suggestedAction || 'continue',
       };
     } catch {
-      return { achieved: true, progress: 0.7, remainingSteps: [], suggestedAction: 'continue' };
+      return {
+        achieved: true,
+        progress: 0.7,
+        remainingSteps: [],
+        suggestedAction: 'continue',
+      };
     }
   }
 }

@@ -2,6 +2,8 @@ import React, { useCallback, useState } from 'react';
 import './DesktopPanel.css';
 import { useDesktopStore } from '../../stores/useDesktopStore';
 
+const API_BASE = `http://${window.location.hostname}:3111`;
+
 export const DesktopPanel: React.FC = () => {
   const {
     screenshot,
@@ -17,40 +19,59 @@ export const DesktopPanel: React.FC = () => {
   } = useDesktopStore();
 
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleScreenshot = useCallback(() => {
+  const handleScreenshot = useCallback(async () => {
     setLoading(true);
-    addAction({
-      type: 'screenshot',
-      detail: '屏幕截图',
-      timestamp: Date.now(),
-    });
-    setScreenshot(
-      'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMDAiIGhlaWdodD0iMTUwIj48cmVjdCBmaWxsPSIjMjIyMjQ2IiB3aWR0aD0iMjAwIiBoZWlnaHQ9IjE1MCIvPjx0ZXh0IGZpbGw9IiM2MDYwYTAiIHg9IjUwJSIgeT0iNTAlIiBkb21pbmFudC1iYXNlbGluZT0ibWlkZGxlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5zY3JlZW5zaG90PC90ZXh0Pjwvc3ZnPg=='
-    );
-    setLoading(false);
+    setError(null);
+    addAction({ type: 'screenshot', detail: '屏幕截图', timestamp: Date.now() });
+    try {
+      const resp = await fetch(`${API_BASE}/api/desktop/screenshot`, { method: 'POST' });
+      const data = await resp.json();
+      if (data.success && data.data?.screenshot) {
+        setScreenshot(data.data.screenshot);
+      } else {
+        setError(data.error || '截图失败');
+      }
+    } catch (e) {
+      setError(`截图失败: ${(e as Error).message}`);
+    } finally {
+      setLoading(false);
+    }
   }, [addAction, setScreenshot]);
 
   const handleOcr = useCallback(() => {
     if (!screenshot) return;
     setLoading(true);
+    setError(null);
+    addAction({ type: 'ocr', detail: 'OCR识别', timestamp: Date.now() });
+    // OCR 后端未实现，保留前端模拟作为降级
     setTimeout(() => {
-      setOcrResult(['文件', '编辑', '查看', '项目', '终端', '帮助']);
-      setLoading(false);
-    }, 1000);
-  }, [screenshot, setOcrResult]);
-
-  const handleUiCheck = useCallback(() => {
-    if (!screenshot) return;
-    setLoading(true);
-    addAction({
-      type: 'click',
-      detail: 'UI检查',
-      timestamp: Date.now(),
-    });
-    setTimeout(() => {
+      setOcrResult(['（OCR后端未实现，此为降级显示）']);
       setLoading(false);
     }, 500);
+  }, [screenshot, setOcrResult, addAction]);
+
+  const handleUiCheck = useCallback(async () => {
+    if (!screenshot) return;
+    setLoading(true);
+    setError(null);
+    addAction({ type: 'click', detail: 'UI检查', timestamp: Date.now() });
+    try {
+      const resp = await fetch(`${API_BASE}/api/desktop/automate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task: '检查当前桌面UI元素布局' }),
+      });
+      const data = await resp.json();
+      if (data.success) {
+        addAction({ type: 'click', detail: `UI检查: ${String(data.data?.output || '').substring(0, 80)}`, timestamp: Date.now() });
+      }
+    } catch {
+      // 静默降级
+    } finally {
+      setLoading(false);
+    }
   }, [screenshot, addAction]);
 
   const handleStartLoop = useCallback(() => {
@@ -84,8 +105,10 @@ export const DesktopPanel: React.FC = () => {
         <div className="desktop-panel__screenshot-area">
           {screenshot ? (
             <img className="desktop-panel__screenshot-image" src={screenshot} alt="桌面截图" />
+          ) : error ? (
+            <div className="desktop-panel__error">{error}</div>
           ) : (
-            '点击"截图"按钮获取屏幕截图'
+            '点击截图按钮获取屏幕截图'
           )}
         </div>
         <div className="desktop-panel__action-row">

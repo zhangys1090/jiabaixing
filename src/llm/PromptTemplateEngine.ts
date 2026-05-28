@@ -344,7 +344,7 @@ export class PromptTemplateEngine {
           if (typeof item === 'object' && item !== null) {
             itemContent = itemContent.replace(
               /\{\{this\.(\w+)\}\}/g,
-              (_: any, prop: any) =>
+              (_: string, prop: string) =>
                 String((item as Record<string, unknown>)[prop] || '')
             );
           } else {

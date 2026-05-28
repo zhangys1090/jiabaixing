@@ -172,7 +172,7 @@ export class SkillRegistry {
    * 获取技能元数据列表（用于外部查询/展示）
    */
   public getAllSkillMeta(): SkillMeta[] {
-    return Array.from(this.skills.values()).map((skill) => ({
+    const skillMetas = Array.from(this.skills.values()).map((skill) => ({
       name: skill.definition.name,
       description: skill.definition.description,
       category: skill.definition.category,
@@ -186,6 +186,20 @@ export class SkillRegistry {
         description: p.description,
       })),
     }));
+    const infraMetas = Array.from(this.infrastructureTools.values()).map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      category: 'infrastructure',
+      version: '1.0.0',
+      tags: [],
+      parameters: tool.parameters.map((p) => ({
+        name: p.name,
+        type: p.type,
+        required: p.required,
+        description: p.description,
+      })),
+    }));
+    return [...infraMetas, ...skillMetas];
   }
 
   /**

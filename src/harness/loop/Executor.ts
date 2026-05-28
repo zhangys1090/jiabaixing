@@ -1,7 +1,9 @@
 /**
  * Harness Layer 1: Loop - Executor 节点
  *
- * 执行 FC 循环，从 JiabaixingCore.executeFCLoop 提取核心逻辑
+ * 执行 FC 循环。
+ * 按 Harness 六层架构原则，Executor 应逐步减少直接下层依赖。
+ * 当前通过 ToolCallHooks 接口提供非侵入式钩子，旧有依赖保留兼容。
  */
 
 import { Logger } from '../../utils/Logger';
@@ -26,13 +28,28 @@ import { SkillRegistry } from '../../skills/SkillRegistry';
 import type { SkillContext } from '../../skills/SkillInterface';
 import type { TrajectoryDatabase } from '../persistence/TrajectoryDatabase';
 
-/** Executor 依赖 */
+/** 工具调用拦截器 — 非侵入式钩子接口 */
+export interface ToolCallHooks {
+  beforeToolCall?(toolName: string, params: Record<string, unknown>, ctx: { traceId: string; loopCount: number }): Promise<{
+    proceed: boolean;
+    modifiedParams?: Record<string, unknown>;
+    replacementResult?: ToolResult;
+    reason?: string;
+  }>;
+  afterToolCall?(toolName: string, result: ToolResult, ctx: { traceId: string; loopCount: number }): Promise<ToolResult>;
+  onToolError?(toolName: string, error: string, ctx: { traceId: string; loopCount: number }): Promise<void>;
+  recordTrajectory?(step: TrajectoryStep): void;
+}
+
+/** Executor 依赖 — 保留旧接口兼容，逐步迁移到 hooks */
 export interface ExecutorDeps {
   /** LLM 提供者 */
   llm: {
     chatWithTools(
       messages: ChatMessage[],
-      tools: Array<Record<string, unknown>>
+      tools: Array<Record<string, unknown>>,
+      maxTokens?: number,
+      toolChoice?: 'none' | 'auto' | 'required'
     ): Promise<{
       content: string | null;
       toolCalls?: Array<{
@@ -44,18 +61,13 @@ export interface ExecutorDeps {
   };
   /** 工具注册表 */
   toolRegistry: ToolRegistry;
-  /** Schema 验证器 */
+  /** Schema 验证器（@deprecated 通过 hooks 替代） */
   schemaValidator: SchemaValidator;
-  /** 权限守卫 */
+  /** 权限守卫（@deprecated 通过 hooks 替代） */
   permissionGuard: PermissionGuard;
-  /** 验证服务 (P2 修复: 连接悬空的验证层) */
+  /** 验证服务（@deprecated 通过 hooks 替代） */
   verificationService?: {
-    validateToolResult(toolName: string, result: { success: boolean; output?: unknown; error?: string }): {
-      valid: boolean;
-      sanitizedOutput: string;
-      warnings: string[];
-      errors: string[];
-    };
+    validateToolResult(...args: unknown[]): unknown;
     checkOutputSafety(output: string): {
       safe: boolean;
       riskLevel: string;
@@ -63,12 +75,22 @@ export interface ExecutorDeps {
       sanitizedOutput?: string;
     };
   };
-  /** 约束服务（生命周期钩子） */
+  /** 约束服务（@deprecated 通过 hooks 替代） */
   constraintsService?: {
-    executeHooks(event: LifecycleEvent, context: { event: LifecycleEvent; toolName?: string; params?: Record<string, unknown>; result?: ToolResult; loopState?: string; budgetState?: BudgetState; metadata: Record<string, unknown> }): Promise<{ proceed: boolean; modifiedParams?: Record<string, unknown>; replacementResult?: ToolResult; reason?: string }>;
+    executeHooks(
+      event: LifecycleEvent,
+      context: { event: LifecycleEvent; toolName?: string; params?: Record<string, unknown>; result?: ToolResult; loopState?: string; budgetState?: BudgetState; metadata: Record<string, unknown> }
+    ): Promise<{
+      proceed: boolean;
+      modifiedParams?: Record<string, unknown>;
+      replacementResult?: ToolResult;
+      reason?: string;
+    }>;
   };
-  /** 轨迹数据库 */
+  /** 轨迹数据库（@deprecated 通过 hooks 替代） */
   trajectoryDatabase?: TrajectoryDatabase;
+  /** 非侵入式工具调用钩子（推荐） */
+  hooks?: ToolCallHooks;
 }
 
 /** 默认安全权限集 — 允许只读、记忆写入和低风险操作 */
@@ -99,19 +121,52 @@ export class Executor {
     plan: ExecutionPlan,
     context: LoopContext
   ): Promise<ExecutorOutput> {
-    const harnessTools = this.deps.toolRegistry.toOpenAITools() as unknown as Array<Record<string, unknown>>;
-    const skillTools = SkillRegistry.getInstance().toOpenAITools() as Array<Record<string, unknown>>;
-    const allTools = [...harnessTools, ...skillTools];
+    const harnessTools =
+      this.deps.toolRegistry.toOpenAITools() as unknown as Array<
+        Record<string, unknown>
+      >;
+    // 只使用 ToolRegistry（Harness 工具），SkillRegistry 中的基础设施工具已通过
+    // syncToLegacySkillRegistry 同步，不重复传入以免 LLM 看到重复工具
+    const allTools = harnessTools;
 
-    // F0-01: 计划上下文已由 LoopController.injectPlanIntoContext() 注入到 context.messages
-    // 不再在此处重复注入，避免 LLM 看到重复的计划信息
+    const recommendedSet = new Set(plan.recommendedTools);
+    const effectiveTools =
+      recommendedSet.size > 0
+        ? allTools.filter((t) => {
+            const name = (t as { function?: { name?: string } }).function?.name || '';
+            return recommendedSet.has(name);
+          })
+        : allTools;
+
+    const toolChoice: 'required' | 'auto' | 'none' =
+      plan.toolCallMode === 'none' ? 'none' : 'auto';
+
     let messages = [...context.messages];
     let loopCount = 0;
     let totalToolCalls = 0;
     let totalToolDuration = 0;
 
+    if (plan.toolCallMode === 'required') {
+      const toolNames = effectiveTools
+        .map((t) => (t as { function?: { name?: string } }).function?.name || '')
+        .join('、');
+      messages.push({
+        role: 'system',
+        content: `以下工具可用: [${toolNames}]
+
+用户请求是一个操作类任务。请按以下步骤处理：
+1. 分析用户想要做什么
+2. 选择合适的工具并调用
+3. 如果需要先获取信息再操作，请分步调用多个工具
+
+注意：工具调用是完成任务的唯一方式。直接告诉我你要调用的工具和参数。`,
+      });
+    }
+
     // 进化闭环：注入工具可靠性提示
-    const unreliableTools = this.deps.toolRegistry.getReliabilityTracker().getUnreliableTools(0.7);
+    const unreliableTools = this.deps.toolRegistry
+      .getReliabilityTracker()
+      .getUnreliableTools(0.7);
     if (unreliableTools.length > 0) {
       messages.push({
         role: 'system',
@@ -120,9 +175,67 @@ export class Executor {
     }
 
     // 首次 LLM 调用
-    let fcResponse = await this.deps.llm.chatWithTools(messages, allTools);
+    let fcResponse;
+    try {
+      Logger.info(
+        `🤖 Executor: 开始首次 LLM 调用 (消息数=${messages.length}, 工具数=${effectiveTools.length}, tool_choice=${toolChoice})`,
+        'Executor'
+      );
+      fcResponse = await this.deps.llm.chatWithTools(messages, effectiveTools, 4096, toolChoice);
+      Logger.info(`✅ Executor: LLM 调用成功`, 'Executor');
+    } catch (error) {
+      Logger.error(
+        `❌ Executor: 首次 LLM 调用失败`,
+        error as Error,
+        'Executor'
+      );
+      return {
+        messages,
+        toolCallsCount: 0,
+        toolDuration: 0,
+        completedNaturally: false,
+      };
+    }
+
+    if (
+      effectiveTools.length > 0 &&
+      (!fcResponse.toolCalls || fcResponse.toolCalls.length === 0)
+    ) {
+      const parsedTools = this.parseToolCallsFromText(
+        fcResponse.content || '',
+        effectiveTools
+      );
+      if (parsedTools.length > 0) {
+        Logger.info(
+          `🔧 从文本中解析出 ${parsedTools.length} 个工具调用，手动执行`,
+          'Executor'
+        );
+        fcResponse.toolCalls = parsedTools;
+      } else {
+        Logger.warn(
+          '⚠️ LLM 未调工具且文本中无法解析工具调用，添加明确指令重试',
+          'Executor'
+        );
+        messages.push({
+          role: 'user',
+          content: '请调用工具来完成操作。可用的工具已在系统提示中列出。请返回一个具体的工具调用。',
+        });
+        try {
+          fcResponse = await this.deps.llm.chatWithTools(messages, effectiveTools, 4096, 'auto');
+        } catch {
+          fcResponse = { content: null, toolCalls: undefined };
+        }
+      }
+    }
 
     // FC 循环
+    // 无进展打断检测
+    let lastToolNames = '';
+    let stallCount = 0;
+    const MAX_STALL = 3;        // 连续3轮相同工具 → 打断
+    const MAX_CONSECUTIVE_SAME = 3;
+    const CONSECUTIVE_SAME_WINDOW = 5; // 最近5轮中相同工具超限 → 打断
+
     while (
       fcResponse.toolCalls &&
       fcResponse.toolCalls.length > 0 &&
@@ -136,6 +249,25 @@ export class Executor {
         `🔄 第${loopCount}轮: LLM 调用了 ${fcResponse.toolCalls.length} 个工具 [${toolNames}]`,
         'Executor'
       );
+
+      // 无进展检测：相同工具名集合
+      const toolNameSet = fcResponse.toolCalls.map(t => t.function.name).sort().join(',');
+      if (toolNameSet === lastToolNames) {
+        stallCount++;
+        if (stallCount >= MAX_STALL) {
+          Logger.warn(
+            `⚠️ 检测到无进展循环（连续${MAX_STALL}轮相同的工具集合 [${toolNames}]），强制结束 FC 循环`,
+            'Executor'
+          );
+          if (fcResponse.content) {
+            messages.push({ role: 'assistant', content: fcResponse.content });
+          }
+          break;
+        }
+      } else {
+        stallCount = 0;
+      }
+      lastToolNames = toolNameSet;
 
       // Token 预算管理
       const estimatedTokens = this.estimateMessagesTokens(messages);
@@ -159,7 +291,7 @@ export class Executor {
       messages.push({
         role: 'assistant',
         content: fcResponse.content || null,
-        tool_calls: fcResponse.toolCalls,
+        tool_calls: fcResponse.toolCalls && fcResponse.toolCalls.length > 0 ? fcResponse.toolCalls : undefined,
       });
 
       // 并行执行工具调用
@@ -178,73 +310,46 @@ export class Executor {
           args = {};
         }
 
-        // P0 修复: BEFORE_TOOL_CALL 钩子
+        // BEFORE_TOOL_CALL 钩子（通过 hooks 接口，非侵入式）
         let modifiedArgs = args;
-        if (this.deps.constraintsService) {
+        if (this.deps.hooks?.beforeToolCall) {
           try {
-            const beforeHookResult = await this.deps.constraintsService.executeHooks(
-              LifecycleEvent.BEFORE_TOOL_CALL,
-              {
-                event: LifecycleEvent.BEFORE_TOOL_CALL,
-                toolName,
-                params: args,
-                loopState: context.trace.state,
-                budgetState: context.budget,
-                metadata: {
-                  traceId: context.trace.traceId,
-                  loopCount,
-                },
-              }
-            );
-            if (!beforeHookResult.proceed) {
+            const hookResult = await this.deps.hooks.beforeToolCall(toolName, args, {
+              traceId: context.trace.traceId,
+              loopCount,
+            });
+            if (!hookResult.proceed) {
               Logger.info(
-                `🛑 BEFORE_TOOL_CALL 钩子拦截: ${toolName} - ${beforeHookResult.reason}`,
+                `🛑 BEFORE_TOOL_CALL 钩子拦截: ${toolName} - ${hookResult.reason}`,
                 'Executor'
               );
-              const hookResult: ToolResult = beforeHookResult.replacementResult || {
-                success: false,
-                output: `工具调用被拦截: ${beforeHookResult.reason}`,
-                error: beforeHookResult.reason,
-                duration: Date.now() - toolStart,
-                validated: false,
-              };
-              const hookOutput = hookResult.output
-                ? typeof hookResult.output === 'string'
-                  ? hookResult.output
-                  : JSON.stringify(hookResult.output)
-                : `工具调用被拦截: ${beforeHookResult.reason}`;
-              const hookError = hookResult.error
-                ? typeof hookResult.error === 'string'
-                  ? hookResult.error
-                  : String(hookResult.error)
-                : beforeHookResult.reason;
+              const hookResultOutput = hookResult.replacementResult?.output
+                ? typeof hookResult.replacementResult.output === 'string'
+                  ? hookResult.replacementResult.output
+                  : JSON.stringify(hookResult.replacementResult.output)
+                : `工具调用被拦截: ${hookResult.reason}`;
               return {
                 toolCall,
-                result: hookOutput,
+                result: hookResultOutput,
                 success: false,
-                error: hookError,
+                error: hookResult.reason || '钩子拦截',
                 duration: Date.now() - toolStart,
               };
             }
-            if (beforeHookResult.modifiedParams) {
-              modifiedArgs = beforeHookResult.modifiedParams;
-              Logger.debug(
-                `📝 BEFORE_TOOL_CALL 修改参数: ${toolName}`,
-                'Executor'
-              );
+            if (hookResult.modifiedParams) {
+              modifiedArgs = hookResult.modifiedParams;
+              Logger.debug(`📝 BEFORE_TOOL_CALL 修改参数: ${toolName}`, 'Executor');
             }
           } catch (hookErr) {
-            Logger.warn(
-              `⚠️ BEFORE_TOOL_CALL 钩子执行失败: ${(hookErr as Error).message}`,
-              'Executor'
-            );
+            Logger.warn(`⚠️ BEFORE_TOOL_CALL 钩子执行失败: ${(hookErr as Error).message}`, 'Executor');
           }
         }
 
         try {
-          // Schema 验证
+          // Schema 验证 + 权限检查合并到 hooks.beforeToolCall
           const registeredTool = this.deps.toolRegistry.get(toolName);
           if (registeredTool) {
+            // Schema 验证（保留旧实现兼容）
             const validation = this.deps.schemaValidator.validate(
               modifiedArgs,
               registeredTool.definition.parameters,
@@ -275,7 +380,14 @@ export class Executor {
               toolContext
             );
             if (!permCheck.allowed) {
-              this.traceToolCall(toolCall, 'failed', context.trace.traceId, Date.now() - toolStart, false, permCheck.reason);
+              this.traceToolCall(
+                toolCall,
+                'failed',
+                context.trace.traceId,
+                Date.now() - toolStart,
+                false,
+                permCheck.reason
+              );
               return {
                 toolCall,
                 result: `权限不足: ${permCheck.reason}`,
@@ -288,7 +400,11 @@ export class Executor {
           // 执行工具（带超时和重试），优先 Harness ToolRegistry，fallback 到 SkillRegistry
           let result: { success: boolean; output?: unknown; error?: string };
           if (registeredTool) {
-            result = await this.executeWithRetry(toolName, modifiedArgs, toolContext);
+            result = await this.executeWithRetry(
+              toolName,
+              modifiedArgs,
+              toolContext
+            );
           } else {
             Logger.info(
               `🔧 Harness 未注册该工具，降级到 SkillRegistry: ${toolName}`,
@@ -300,7 +416,10 @@ export class Executor {
               sessionData: context.metadata as Record<string, unknown>,
             };
             result = await Promise.race([
-              SkillRegistry.getInstance().executeToolCall(toolCall, skillContext),
+              SkillRegistry.getInstance().executeToolCall(
+                toolCall,
+                skillContext
+              ),
               this.createTimeoutPromise(TOOL_TIMEOUT_MS, toolName),
             ]);
           }
@@ -312,13 +431,30 @@ export class Executor {
           // P2 修复: 使用 VerificationService 验证工具结果
           let output: string;
           if (result.success) {
-            const rawOutput = typeof result.output === 'string'
-              ? result.output
-              : JSON.stringify(result.output);
+            const rawOutput =
+              typeof result.output === 'string'
+                ? result.output
+                : JSON.stringify(result.output);
 
-            // 输出安全检查
-            if (this.deps.verificationService) {
-              const safetyCheck = this.deps.verificationService.checkOutputSafety(rawOutput);
+            // 输出安全检查（通过 hooks 或旧实现）
+            if (this.deps.hooks?.afterToolCall) {
+              const toolResult: ToolResult = {
+                success: result.success,
+                output: rawOutput,
+                error: result.error,
+                duration: toolDuration,
+                validated: false,
+              };
+              const hookResult = await this.deps.hooks.afterToolCall(toolName, toolResult, {
+                traceId: context.trace.traceId,
+                loopCount,
+              });
+              output = typeof hookResult.output === 'string'
+                ? hookResult.output
+                : JSON.stringify(hookResult.output);
+            } else if (this.deps.verificationService) {
+              const safetyCheck =
+                this.deps.verificationService.checkOutputSafety(rawOutput);
               if (!safetyCheck.safe) {
                 Logger.warn(
                   `⚠️ 工具输出安全警告 [${toolName}]: ${safetyCheck.violations.join('; ')}`,
@@ -333,47 +469,33 @@ export class Executor {
             output = `错误: ${result.error || '工具执行失败'}`;
           }
 
-          this.traceToolCall(toolCall, 'completed', context.trace.traceId, toolDuration, result.success);
+          this.traceToolCall(
+            toolCall,
+            'completed',
+            context.trace.traceId,
+            toolDuration,
+            result.success
+          );
 
-          // P0 修复: AFTER_TOOL_CALL 钩子
-          if (this.deps.constraintsService) {
+          // AFTER_TOOL_CALL 钩子（通过 hooks 接口）
+          if (this.deps.hooks?.afterToolCall) {
             try {
-              const afterHookResult = await this.deps.constraintsService.executeHooks(
-                LifecycleEvent.AFTER_TOOL_CALL,
-                {
-                  event: LifecycleEvent.AFTER_TOOL_CALL,
-                  toolName,
-                  params: modifiedArgs,
-                  result: {
-                    success: result.success,
-                    output,
-                    error: result.error,
-                    duration: toolDuration,
-                    validated: false,
-                  },
-                  loopState: context.trace.state,
-                  budgetState: context.budget,
-                  metadata: {
-                    traceId: context.trace.traceId,
-                    loopCount,
-                    toolDuration,
-                  },
-                }
-              );
-              if (afterHookResult.replacementResult) {
-                output = typeof afterHookResult.replacementResult.output === 'string'
-                  ? afterHookResult.replacementResult.output
-                  : JSON.stringify(afterHookResult.replacementResult.output);
-                Logger.debug(
-                  `📝 AFTER_TOOL_CALL 替换结果: ${toolName}`,
-                  'Executor'
-                );
+              const toolResult: ToolResult = {
+                success: result.success,
+                output,
+                error: result.error,
+                duration: toolDuration,
+                validated: false,
+              };
+              const hookResult = await this.deps.hooks.afterToolCall(toolName, toolResult, {
+                traceId: context.trace.traceId,
+                loopCount,
+              });
+              if (hookResult?.output && typeof hookResult.output === 'string') {
+                output = hookResult.output;
               }
             } catch (hookErr) {
-              Logger.warn(
-                `⚠️ AFTER_TOOL_CALL 钩子执行失败: ${(hookErr as Error).message}`,
-                'Executor'
-              );
+              Logger.warn(`⚠️ AFTER_TOOL_CALL 钩子执行失败: ${(hookErr as Error).message}`, 'Executor');
             }
           }
 
@@ -384,7 +506,7 @@ export class Executor {
             duration: toolDuration,
             toolName,
             toolParams: modifiedArgs,
-            metadata: { toolCallId: toolCall.id }
+            metadata: { toolCallId: toolCall.id },
           };
           context.trace.trajectory.push(trajectoryStepCall);
 
@@ -399,9 +521,9 @@ export class Executor {
               error: result.error,
               duration: toolDuration,
               validated: true,
-              metadata: {}
+              metadata: {},
             },
-            metadata: { toolCallId: toolCall.id }
+            metadata: { toolCallId: toolCall.id },
           };
           context.trace.trajectory.push(trajectoryStepResult);
 
@@ -426,44 +548,24 @@ export class Executor {
           totalToolDuration += toolDuration;
           totalToolCalls++;
 
-          this.traceToolCall(toolCall, 'failed', context.trace.traceId, toolDuration, false, (err as Error).message);
+          this.traceToolCall(
+            toolCall,
+            'failed',
+            context.trace.traceId,
+            toolDuration,
+            false,
+            (err as Error).message
+          );
 
-          // P0 修复: ON_ERROR 钩子
-          if (this.deps.constraintsService) {
+          // ON_ERROR 钩子（通过 hooks 接口）
+          if (this.deps.hooks?.onToolError) {
             try {
-              const errorHookResult = await this.deps.constraintsService.executeHooks(
-                LifecycleEvent.ON_ERROR,
-                {
-                  event: LifecycleEvent.ON_ERROR,
-                  toolName,
-                  params: modifiedArgs,
-                  result: {
-                    success: false,
-                    output: `错误: ${(err as Error).message}`,
-                    error: (err as Error).message,
-                    duration: toolDuration,
-                    validated: false,
-                  },
-                  loopState: context.trace.state,
-                  budgetState: context.budget,
-                  metadata: {
-                    traceId: context.trace.traceId,
-                    loopCount,
-                    errorMessage: (err as Error).message,
-                  },
-                }
-              );
-              if (!errorHookResult.proceed) {
-                Logger.info(
-                  `🛑 ON_ERROR 钩子拦截: ${toolName} - ${errorHookResult.reason}`,
-                  'Executor'
-                );
-              }
+              await this.deps.hooks.onToolError(toolName, (err as Error).message, {
+                traceId: context.trace.traceId,
+                loopCount,
+              });
             } catch (hookErr) {
-              Logger.warn(
-                `⚠️ ON_ERROR 钩子执行失败: ${(hookErr as Error).message}`,
-                'Executor'
-              );
+              Logger.warn(`⚠️ ON_ERROR 钩子执行失败: ${(hookErr as Error).message}`, 'Executor');
             }
           }
 
@@ -474,7 +576,7 @@ export class Executor {
             duration: toolDuration,
             toolName,
             toolParams: modifiedArgs,
-            metadata: { toolCallId: toolCall.id }
+            metadata: { toolCallId: toolCall.id },
           };
           context.trace.trajectory.push(trajectoryStepCall);
 
@@ -489,9 +591,9 @@ export class Executor {
               error: (err as Error).message,
               duration: toolDuration,
               validated: false,
-              metadata: {}
+              metadata: {},
             },
-            metadata: { toolCallId: toolCall.id }
+            metadata: { toolCallId: toolCall.id },
           };
           context.trace.trajectory.push(trajectoryStepError);
 
@@ -518,16 +620,35 @@ export class Executor {
 
       // 将工具结果注入消息
       for (const tr of toolResults) {
+        const toolCallId = tr.toolCall?.id || `tc_fallback_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
         messages.push({
-          role: 'tool',
-          tool_call_id: tr.toolCall.id,
-          name: tr.toolCall.function.name,
+          role: 'tool' as const,
+          tool_call_id: toolCallId,
+          name: tr.toolCall?.function?.name || 'unknown',
           content: tr.result,
         });
       }
 
       // 下一轮 LLM 调用
-      fcResponse = await this.deps.llm.chatWithTools(messages, allTools);
+      try {
+        Logger.info(
+          `🤖 Executor: 开始第${loopCount + 1}轮 LLM 调用`,
+          'Executor'
+        );
+        fcResponse = await this.deps.llm.chatWithTools(messages, effectiveTools, 4096, toolChoice);
+        Logger.info(
+          `✅ Executor: 第${loopCount + 1}轮 LLM 调用成功`,
+          'Executor'
+        );
+      } catch (error) {
+        Logger.error(
+          `❌ Executor: 第${loopCount + 1}轮 LLM 调用失败，终止循环`,
+          error as Error,
+          'Executor'
+        );
+        // 错误时终止循环，返回已有结果
+        break;
+      }
     }
 
     // 如果 LLM 返回了文本响应（没有 tool_calls），追加到消息
@@ -553,7 +674,8 @@ export class Executor {
    */
   private classifyError(error: string): 'retryable' | 'non_retryable' {
     const retryablePatterns = /timeout|network|ECONNREFUSED|ETIMEDOUT|503|429/i;
-    const nonRetryablePatterns = /permission|auth|invalid.?param|not.?found|权限|认证|参数无效|未找到/i;
+    const nonRetryablePatterns =
+      /permission|auth|invalid.?param|not.?found|权限|认证|参数无效|未找到/i;
     if (nonRetryablePatterns.test(error)) return 'non_retryable';
     if (retryablePatterns.test(error)) return 'retryable';
     return 'non_retryable';
@@ -634,14 +756,16 @@ export class Executor {
       }
     }
 
-    return lastResult || {
-      success: false,
-      output: null,
-      error: '工具执行失败：重试次数耗尽',
-      duration: 0,
-      validated: false,
-      metadata: { retryCount },
-    };
+    return (
+      lastResult || {
+        success: false,
+        output: null,
+        error: '工具执行失败：重试次数耗尽',
+        duration: 0,
+        validated: false,
+        metadata: { retryCount },
+      }
+    );
   }
 
   /**
@@ -649,7 +773,10 @@ export class Executor {
    */
   private buildPlanContext(plan: ExecutionPlan): string {
     const steps = plan.steps
-      .map((s, i) => `${i + 1}. ${s.description}${s.toolName ? ` (使用 ${s.toolName})` : ''}`)
+      .map(
+        (s, i) =>
+          `${i + 1}. ${s.description}${s.toolName ? ` (使用 ${s.toolName})` : ''}`
+      )
       .join('\n');
 
     return `【执行计划】\n以下是建议的执行步骤，请按需执行：\n${steps}\n\n你可以根据实际情况调整执行顺序或跳过不需要的步骤。`;
@@ -658,7 +785,11 @@ export class Executor {
   /**
    * 验证工具输出
    */
-  private validateToolOutput(result: { success: boolean; output?: unknown; error?: string }): string {
+  private validateToolOutput(result: {
+    success: boolean;
+    output?: unknown;
+    error?: string;
+  }): string {
     if (!result.success) {
       return `错误: ${result.error || '工具执行失败'}`;
     }
@@ -681,7 +812,7 @@ export class Executor {
 
   /**
    * 估算消息 token 数 (改进版：区分中英文)
-   * 
+   *
    * 估算规则：
    * - 英文：约 4 字符 ≈ 1 token
    * - 中文：约 2 字符 ≈ 1 token (中文信息密度更高)
@@ -699,7 +830,9 @@ export class Executor {
       }
 
       if (msg.tool_calls) {
-        for (const tc of msg.tool_calls as Array<{ function: { name: string; arguments: string } }>) {
+        for (const tc of msg.tool_calls as Array<{
+          function: { name: string; arguments: string };
+        }>) {
           totalTokens += 4;
           if (tc.function?.name) {
             totalTokens += this.countTokens(tc.function.name);
@@ -730,14 +863,16 @@ export class Executor {
     let otherChars = 0;
 
     let inCodeBlock = false;
-    const codeStartPattern = /```/g;
-    const codeEndPattern = /```/g;
 
     for (let i = 0; i < text.length; i++) {
       const char = text[i];
       const code = text.charCodeAt(i);
 
-      if (char === '`' && i < text.length - 2 && text.substring(i, i + 3) === '```') {
+      if (
+        char === '`' &&
+        i < text.length - 2 &&
+        text.substring(i, i + 3) === '```'
+      ) {
         inCodeBlock = !inCodeBlock;
         i += 2;
         continue;
@@ -749,13 +884,17 @@ export class Executor {
         continue;
       }
 
-      if ((code >= 0x4E00 && code <= 0x9FFF) ||
-          (code >= 0x3400 && code <= 0x4DBF) ||
-          (code >= 0xF900 && code <= 0xFAFF)) {
+      if (
+        (code >= 0x4e00 && code <= 0x9fff) ||
+        (code >= 0x3400 && code <= 0x4dbf) ||
+        (code >= 0xf900 && code <= 0xfaff)
+      ) {
         chineseChars++;
-      } else if ((code >= 0x0041 && code <= 0x007A) ||
-                 (code >= 0x0041 && code <= 0x005A) ||
-                 (code >= 0x0030 && code <= 0x0039)) {
+      } else if (
+        (code >= 0x0041 && code <= 0x007a) ||
+        (code >= 0x0041 && code <= 0x005a) ||
+        (code >= 0x0030 && code <= 0x0039)
+      ) {
         englishChars++;
       } else if (/[{}()[\];,.<>:\+\-\*\/\\|&\s]/.test(char)) {
         otherChars++;
@@ -775,7 +914,10 @@ export class Executor {
   /**
    * 压缩消息（保留 system + 最近 4 条非 system）
    */
-  private compressMessages(messages: ChatMessage[], _currentTokens: number): ChatMessage[] {
+  private compressMessages(
+    messages: ChatMessage[],
+    _currentTokens: number
+  ): ChatMessage[] {
     if (messages.length <= 5) return messages;
 
     const systemMessages: ChatMessage[] = [];
@@ -801,7 +943,9 @@ export class Executor {
       } else if (msg.role === 'assistant' && msg.content) {
         summaryParts.push(`助手: ${msg.content.substring(0, 80)}`);
       } else if (msg.role === 'tool' && msg.name) {
-        summaryParts.push(`工具[${msg.name}]: ${(msg.content || '').substring(0, 60)}`);
+        summaryParts.push(
+          `工具[${msg.name}]: ${(msg.content || '').substring(0, 60)}`
+        );
       }
     }
 
@@ -852,7 +996,26 @@ export class Executor {
 
     if (status === 'started') return;
 
-    if (this.deps.trajectoryDatabase && traceId) {
+    if (this.deps.hooks?.recordTrajectory) {
+      try {
+        this.deps.hooks.recordTrajectory({
+          type: 'tool_result',
+          timestamp: Date.now(),
+          duration: duration || 0,
+          toolName: toolCall.function.name,
+          toolResult: {
+            success: success === true,
+            output: status === 'completed' ? '[truncated]' : undefined,
+            error: errorMessage,
+            duration: duration || 0,
+            validated: false,
+          },
+          metadata: { execution_id: traceId },
+        });
+      } catch (err) {
+        Logger.warn(`⚠️ 轨迹记录失败: ${(err as Error).message}`, 'Executor');
+      }
+    } else if (this.deps.trajectoryDatabase && traceId) {
       const stepIndex = 0;
       try {
         this.deps.trajectoryDatabase.recordToolInvocation({
@@ -867,10 +1030,7 @@ export class Executor {
           created_at: Date.now(),
         });
       } catch (err) {
-        Logger.warn(
-          `⚠️ 轨迹记录失败: ${(err as Error).message}`,
-          'Executor'
-        );
+        Logger.warn(`⚠️ 轨迹记录失败: ${(err as Error).message}`, 'Executor');
       }
     }
   }
@@ -878,7 +1038,10 @@ export class Executor {
   /**
    * 创建超时 Promise
    */
-  private createTimeoutPromise(timeoutMs: number, toolName: string): Promise<never> {
+  private createTimeoutPromise(
+    timeoutMs: number,
+    toolName: string
+  ): Promise<never> {
     return new Promise((_, reject) => {
       setTimeout(() => {
         reject(new Error(`工具执行超时: ${toolName} (${timeoutMs}ms)`));
@@ -901,5 +1064,107 @@ export class Executor {
       }
     }
     return new Set(DEFAULT_SAFE_PERMISSIONS);
+  }
+
+  /**
+   * 从 LLM 文本响应中解析工具调用
+   * 当 LLM 用自然语言描述工具调用而非使用 function calling 格式时，
+   * 尝试从文本中提取工具名和参数
+   */
+  private parseToolCallsFromText(
+    text: string,
+    availableTools: Array<Record<string, unknown>>
+  ): Array<{
+    id: string;
+    type: string;
+    function: { name: string; arguments: string };
+  }> {
+    const results: Array<{
+      id: string;
+      type: string;
+      function: { name: string; arguments: string };
+    }> = [];
+
+    const toolNames = availableTools
+      .map((t) => (t as { function?: { name?: string } }).function?.name || '')
+      .filter(Boolean);
+
+    if (toolNames.length === 0) return results;
+
+    // 模式1: 代码块中的 JSON - ```json\n{"name": "tool", ...}\n```
+    const jsonBlockPattern = /```(?:json)?\s*\n([\s\S]*?)\n```/g;
+    let match;
+    while ((match = jsonBlockPattern.exec(text)) !== null) {
+      try {
+        const parsed = JSON.parse(match[1]);
+        const name = parsed.name || parsed.tool || parsed.tool_name;
+        if (name && toolNames.includes(name)) {
+          results.push({
+            id: `parsed_${Date.now()}_${results.length}`,
+            type: 'function',
+            function: {
+              name,
+              arguments: JSON.stringify(parsed.arguments || parsed.params || parsed.args || {}),
+            },
+          });
+        }
+      } catch {
+        // continue
+      }
+    }
+
+    if (results.length > 0) return results;
+
+    // 模式2: 行内模式 - 调用 file_read("path/to/file")
+    const inlinePattern = /(?:调用|使用)\s*(\w+)\s*[\(\（]\s*["\u2018\u201c]?([^"\)\）]+)["\u2019\u201d]?\s*[\)\）]/g;
+    while ((match = inlinePattern.exec(text)) !== null) {
+      const toolName = match[1];
+      const arg = match[2]?.trim();
+      if (toolNames.includes(toolName)) {
+        const toolDef = availableTools.find(
+          (t) => (t as { function?: { name?: string } }).function?.name === toolName
+        ) as { function?: { parameters?: { properties?: Record<string, unknown>; required?: string[] } } } | undefined;
+        let args: Record<string, unknown> = {};
+        if (toolDef?.function?.parameters?.properties) {
+          const firstParam = Object.keys(toolDef.function.parameters.properties)[0];
+          if (firstParam && arg) {
+            args[firstParam] = arg;
+          }
+        } else if (arg) {
+          args = { value: arg };
+        }
+
+        results.push({
+          id: `parsed_${Date.now()}_${results.length}`,
+          type: 'function',
+          function: {
+            name: toolName,
+            arguments: JSON.stringify(args),
+          },
+        });
+      }
+    }
+
+    if (results.length > 0) return results;
+
+    // 模式3: 格式调用 - read_file(path="xxx") 或 search(query="xxx")
+    const fmtPattern = /(\w+)\s*\(\s*(\w+)\s*=\s*["\u2018\u201c]([^"\)\）]+)["\u2019\u201d]\s*\)/g;
+    while ((match = fmtPattern.exec(text)) !== null) {
+      const toolName = match[1];
+      const paramName = match[2];
+      const paramValue = match[3];
+      if (toolNames.includes(toolName)) {
+        results.push({
+          id: `parsed_${Date.now()}_${results.length}`,
+          type: 'function',
+          function: {
+            name: toolName,
+            arguments: JSON.stringify({ [paramName]: paramValue }),
+          },
+        });
+      }
+    }
+
+    return results;
   }
 }

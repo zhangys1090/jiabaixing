@@ -14,7 +14,6 @@
  * 10. 场景感知调度器（启动核心任务执行循环）
  */
 
-// 设置控制台 UTF-8 编码（解决 Windows 中文乱码）
 if (process.platform === 'win32') {
   process.stdout.setDefaultEncoding?.('utf8');
 }
@@ -35,16 +34,18 @@ import { Logger } from './utils/Logger';
 
 type WSServer = WebSocket.Server;
 
-// 核心引擎
 import { JiabaixingCore } from './core/JiabaixingCore';
 
-// Phase 3/4 集成 API（前端 IntegrationPanel）
 import automationRoutes from './routes/automation';
 import taskRoutes, { setHarnessInstance } from './routes/tasks';
+import chatRoutes, { setChatCore } from './routes/chat';
+import orchestrateRoutes, { setOrchestrateCore } from './routes/orchestrate';
 import integrationRoutes from './server/routes/integrationRoutes';
-import { systemStateRoutes, setSystemStateCore } from './server/routes/systemStateRoutes';
+import {
+  systemStateRoutes,
+  setSystemStateCore,
+} from './server/routes/systemStateRoutes';
 
-// 路由模块
 import { registerCoreRoutes } from './server/routes/coreRoutes';
 import { registerDebugRoutes } from './server/routes/debugRoutes';
 import { registerEvolutionRoutes } from './server/routes/evolutionRoutes';
@@ -54,28 +55,23 @@ import { registerSecurityRoutes } from './server/routes/securityRoutes';
 import { registerSkillRoutes } from './server/routes/skillRoutes';
 import { registerTraeRoutes } from './server/routes/traeRoutes';
 
-// 服务器模块
 import { bootstrap } from './server/bootstrap';
 import { setupEventBus } from './server/eventBusSetup';
 import { gracefulShutdown } from './server/shutdown';
 import { setupWebSocket } from './server/websocket';
 
-// 全局变量
 let PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3111;
 let server: http.Server | null = null;
 let wss: WSServer | null = null;
 let core: JiabaixingCore | null = null;
 const app = express();
 
-// ===================== API 路由 =====================
-
 function setupRoutes(broadcast: (data: Record<string, unknown>) => void): void {
-  // CORS 配置：允许前端开发服务器跨域访问
   app.use(
     cors({
       origin:
         process.env.NODE_ENV === 'production'
-          ? false // 生产环境禁用CORS（使用同源策略）
+          ? false
           : ['http://localhost:3100'],
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -86,19 +82,13 @@ function setupRoutes(broadcast: (data: Record<string, unknown>) => void): void {
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ extended: true }));
 
-  // Phase 3/4 集成面板 REST API
   app.use('/api/integration', integrationRoutes);
-
-  // 智能自动化 REST API
   app.use('/api/automation', automationRoutes);
-
-  // Harness 任务管理 REST API
   app.use('/api/tasks', taskRoutes);
-
-  // 系统状态 REST API（进化状态、系统资源等）
+  app.use('/api', chatRoutes);
+  app.use('/api', orchestrateRoutes);
   app.use(systemStateRoutes);
 
-  // 注册各模块路由
   registerCoreRoutes(app, core);
   registerPerformanceRoutes(app, core);
   registerSecurityRoutes(app, core);
@@ -108,8 +98,6 @@ function setupRoutes(broadcast: (data: Record<string, unknown>) => void): void {
   registerTraeRoutes(app, core);
   registerDebugRoutes(app, core, broadcast);
 }
-
-// ===================== 静态文件服务 =====================
 
 async function setupStaticFiles(): Promise<void> {
   const frontendBuildPath = path.join(
@@ -131,7 +119,7 @@ async function setupStaticFiles(): Promise<void> {
     app.get('/', (_req, res) => {
       res.json({
         message: 'jiabaixing API 服务已就绪',
-        model: process.env.MODEL_NAME || 'qwen2.5:3b',
+        model: process.env.LLM_MODEL || 'deepseek-chat',
         port: PORT,
         frontend: '未构建（可选功能）',
       });
@@ -139,54 +127,52 @@ async function setupStaticFiles(): Promise<void> {
   }
 }
 
-// ===================== 启动流程 =====================
-
 async function startServer(): Promise<void> {
   core = await bootstrap();
 
-  setSystemStateCore(core as unknown as import('./interfaces').JiabaixingCorePublicAPI);
+  setSystemStateCore(
+    core as unknown as import('./interfaces').JiabaixingCorePublicAPI
+  );
+  setChatCore(core);
+  setOrchestrateCore(core);
 
   const harness = core.getHarness();
   if (harness) {
     setHarnessInstance(harness);
   }
 
+  server = http.createServer(app);
+  wss = new WebSocket.WebSocketServer({ server: server! });
   const broadcast = setupEventBus(wss, core);
   setupRoutes(broadcast);
   await setupStaticFiles();
-
-  server = http.createServer(app);
-
-  wss = new WebSocket.WebSocketServer({ server: server! });
-
   setupWebSocket(wss, core);
-
   process.on('SIGTERM', () => gracefulShutdown('SIGTERM', core, wss, server!));
   process.on('SIGINT', () => gracefulShutdown('SIGINT', core, wss, server!));
 }
 
 function listenServer(): Promise<void> {
   return new Promise<void>((resolve, reject) => {
-    server!.listen(PORT, () => {
-      console.log(
-        '  ==========================================================='
-      );
-      console.log('  [READY] jiabaixing\n');
-      console.log(`  API:       http://localhost:${PORT}`);
-      console.log(`  WebSocket: ws://localhost:${PORT}`);
-      console.log(
-        `  Model:     ${process.env.LLM_SERVER_MODEL || process.env.MODEL_NAME || 'qwen2.5:3b'}`
-      );
-      console.log(
-        `  Auto Opt:  ${process.env.ENABLE_AUTO_OPTIMIZE !== 'false' ? 'ON' : 'OFF'}`
-      );
-      console.log(
-        '\n  ===========================================================\n'
-      );
-      resolve();
-    }).on('error', (err: { code: string }) => {
-      reject(err);
-    });
+    server!
+      .listen(PORT, () => {
+        console.log(
+          '  ==========================================================='
+        );
+        console.log('  [READY] jiabaixing\n');
+        console.log(`  API:       http://localhost:${PORT}`);
+        console.log(`  WebSocket: ws://localhost:${PORT}`);
+        console.log(`  Model:     ${process.env.LLM_MODEL || 'deepseek-chat'}`);
+        console.log(
+          `  Auto Opt:  ${process.env.ENABLE_AUTO_OPTIMIZE !== 'false' ? 'ON' : 'OFF'}`
+        );
+        console.log(
+          '\n  ===========================================================\n'
+        );
+        resolve();
+      })
+      .on('error', (err: { code: string }) => {
+        reject(err);
+      });
   });
 }
 
@@ -202,15 +188,23 @@ async function startServerWithRetry(maxRetries = 3): Promise<void> {
       if (errCode === 'EADDRINUSE' && attempt < maxRetries) {
         Logger.warn(`端口 ${PORT} 被占用，尝试端口 ${PORT + 1}`, 'Main');
         PORT++;
+        if (server) {
+          server.close();
+        }
+        if (wss) {
+          wss.close();
+        }
         server = http.createServer(app);
         wss = new WebSocket.WebSocketServer({ server: server! });
         setupWebSocket(wss, core!);
         continue;
       }
       if (errCode === 'EADDRINUSE') {
-        console.error(`\n  ❌ 端口 ${PORT} 已被占用（已尝试 ${maxRetries + 1} 个端口），请先关闭占用端口的进程：`);
-        console.error(`     Windows: netstat -ano | findstr :${PORT}`);
-        console.error(`     然后执行 taskkill /PID <进程ID> /F\n`);
+        console.error(
+          `\n  ❌ 端口 ${PORT} 已被占用（已尝试 ${maxRetries + 1} 个端口），请先关闭占用端口的进程：`
+        );
+        console.error(`     Windows: Get-NetTCPConnection -LocalPort ${PORT}`);
+        console.error(`     然后执行 Stop-Process -Id <进程ID> -Force\n`);
       }
       throw error;
     }

@@ -40,6 +40,8 @@ export interface ModelInput {
   stream?: boolean;
   /** OpenAI Function Calling 工具定义 */
   tools?: Array<Record<string, unknown>>;
+  /** OpenAI Function Calling tool_choice 参数 */
+  toolChoice?: 'none' | 'auto' | 'required' | { type: 'function'; function: { name: string } };
   /** 直接传入消息数组（用于 Function Calling 循环，替代 prompt 构造） */
   messages?: Array<{
     role: string;

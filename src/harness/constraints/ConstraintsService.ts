@@ -47,13 +47,17 @@ export class ConstraintsService {
     if (state.roundsUsed >= state.hardRoundLimit) {
       warnings.push(`轮次已达硬限制 ${state.hardRoundLimit}`);
     } else if (state.roundsUsed >= state.softRoundLimit) {
-      warnings.push(`轮次已达软限制 ${state.softRoundLimit}/${state.hardRoundLimit}`);
+      warnings.push(
+        `轮次已达软限制 ${state.softRoundLimit}/${state.hardRoundLimit}`
+      );
     }
 
     if (state.tokensUsed >= state.tokenHardLimit) {
       warnings.push(`Token 已达硬限制 ${state.tokenHardLimit}`);
     } else if (state.tokensUsed >= state.tokenWarningLimit) {
-      warnings.push(`Token 接近限制 ${state.tokenWarningLimit}/${state.tokenHardLimit}`);
+      warnings.push(
+        `Token 接近限制 ${state.tokenWarningLimit}/${state.tokenHardLimit}`
+      );
     }
 
     if (state.toolCallsUsed >= state.maxToolCalls) {
@@ -102,7 +106,10 @@ export class ConstraintsService {
   /**
    * 安全边界检查
    */
-  checkSafetyBoundary(input: string, action: string): {
+  checkSafetyBoundary(
+    input: string,
+    action: string
+  ): {
     allowed: boolean;
     reason?: string;
   } {
@@ -112,7 +119,13 @@ export class ConstraintsService {
     }
 
     // 检查危险操作
-    const dangerousActions = ['rm -rf', 'del /f', 'format', 'shutdown', 'drop table'];
+    const dangerousActions = [
+      'rm -rf',
+      'del /f',
+      'format',
+      'shutdown',
+      'drop table',
+    ];
     const lowerAction = action.toLowerCase();
     for (const da of dangerousActions) {
       if (lowerAction.includes(da)) {
@@ -136,7 +149,10 @@ export class ConstraintsService {
   /**
    * 执行生命周期钩子
    */
-  async executeHooks(event: LifecycleEvent, context: HookContext): Promise<HookResult> {
+  async executeHooks(
+    event: LifecycleEvent,
+    context: HookContext
+  ): Promise<HookResult> {
     const hooks = this.hooks.get(event) || [];
 
     for (const hook of hooks) {
@@ -185,7 +201,7 @@ export class ConstraintsService {
         if (recursionDepth >= maxDepth) {
           return {
             compliant: false,
-            violation: `递归深度 ${recursionDepth} 超过限制 ${maxDepth}，可能存在无限递归风险`
+            violation: `递归深度 ${recursionDepth} 超过限制 ${maxDepth}，可能存在无限递归风险`,
           };
         }
         return { compliant: true };
@@ -207,7 +223,7 @@ export class ConstraintsService {
             if (filePath.startsWith(forbidden)) {
               return {
                 compliant: false,
-                violation: `禁止访问系统目录: ${forbidden}`
+                violation: `禁止访问系统目录: ${forbidden}`,
               };
             }
           }
@@ -218,21 +234,39 @@ export class ConstraintsService {
       case 'no-sensitive-data-leak': {
         const output = ctx?.result?.output;
         if (output) {
-          const outputStr = typeof output === 'string' ? output : JSON.stringify(output);
+          const outputStr =
+            typeof output === 'string' ? output : JSON.stringify(output);
           const sensitivePatterns = [
             { pattern: /\b\d{16,19}\b/g, name: '银行卡号' },
             { pattern: /\b\d{6}\d{4}\d{2}\d{2}\d{4}\b/g, name: '身份证号' },
-            { pattern: /(?:password|密码|secret|密钥)\s*[:=]\s*\S+/gi, name: '密码/密钥' },
-            { pattern: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g, name: '邮箱地址' },
+            {
+              pattern: /(?:password|密码|secret|密钥)\s*[:=]\s*\S+/gi,
+              name: '密码/密钥',
+            },
+            {
+              pattern: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g,
+              name: '邮箱地址',
+            },
             { pattern: /\b1[3-9]\d{9}\b/g, name: '手机号码' },
-            { pattern: /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/g, name: 'IP 地址' },
+            {
+              pattern: /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/g,
+              name: 'IPv4地址',
+            },
+            {
+              pattern: /\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b/gi,
+              name: 'IPv6地址',
+            },
+            {
+              pattern: /::(?:[0-9a-fA-F]{1,4}:){0,5}[0-9a-fA-F]{1,4}\b/gi,
+              name: 'IPv6地址',
+            },
           ];
 
           for (const { pattern, name } of sensitivePatterns) {
             if (pattern.test(outputStr)) {
               return {
                 compliant: false,
-                violation: `检测到可能泄露的敏感信息: ${name}`
+                violation: `检测到可能泄露的敏感信息: ${name}`,
               };
             }
           }
@@ -248,22 +282,32 @@ export class ConstraintsService {
         const allParamValues = Object.values(ctx?.params || {})
           .map((v) => String(v))
           .join(' ');
-        const content = String(ctx?.params?.content || ctx?.params?.text || '') + ' ' + allParamValues;
+        const content =
+          String(ctx?.params?.content || ctx?.params?.text || '') +
+          ' ' +
+          allParamValues;
         if (!content.trim()) return { compliant: true };
         const storageSensitivePatterns = [
           { pattern: /\bsk-[a-zA-Z0-9]{8,}/, name: 'API密钥' },
           { pattern: /\bAKIA[A-Z0-9]{16}\b/, name: 'AWS密钥' },
           { pattern: /\bghp_[a-zA-Z0-9]{36}\b/, name: 'GitHub令牌' },
-          { pattern: /(?:api[_-]?key|apikey|access[_-]?token|secret[_-]?key)\s*[:=]\s*['"]?[a-zA-Z0-9]{8,}/i, name: '密钥凭证' },
+          {
+            pattern:
+              /(?:api[_-]?key|apikey|access[_-]?token|secret[_-]?key)\s*[:=]\s*['"]?[a-zA-Z0-9]{8,}/i,
+            name: '密钥凭证',
+          },
           { pattern: /\b\d{16,19}\b/, name: '银行卡号' },
           { pattern: /\b\d{17}[\dXx]\b/, name: '身份证号' },
-          { pattern: /密钥|密码|口令|私钥|secret|credential/i, name: '敏感凭证关键词' },
+          {
+            pattern: /密钥|密码|口令|私钥|secret|credential/i,
+            name: '敏感凭证关键词',
+          },
         ];
         for (const { pattern, name } of storageSensitivePatterns) {
           if (pattern.test(content)) {
             return {
               compliant: false,
-              violation: `禁止存储敏感信息 (${name})，请勿将密钥、凭证等敏感数据保存到记忆中`
+              violation: `禁止存储敏感信息 (${name})，请勿将密钥、凭证等敏感数据保存到记忆中`,
             };
           }
         }
@@ -271,7 +315,10 @@ export class ConstraintsService {
       }
 
       case 'no-dangerous-commands': {
-        const cmd = ctx?.params?.command as string || ctx?.params?.script as string || '';
+        const cmd =
+          (ctx?.params?.command as string) ||
+          (ctx?.params?.script as string) ||
+          '';
         const dangerousPatterns = [
           /\brm\s+-rf\s+\//,
           /\bdel\s+\/f\s+\/q\s+/i,
@@ -287,7 +334,7 @@ export class ConstraintsService {
           if (pattern.test(cmd)) {
             return {
               compliant: false,
-              violation: `检测到危险命令: ${cmd.substring(0, 50)}...`
+              violation: `检测到危险命令: ${cmd.substring(0, 50)}...`,
             };
           }
         }
@@ -303,13 +350,13 @@ export class ConstraintsService {
         if (memoryUsage > maxMemoryMB) {
           return {
             compliant: false,
-            violation: `内存使用 ${memoryUsage}MB 超过限制 ${maxMemoryMB}MB`
+            violation: `内存使用 ${memoryUsage}MB 超过限制 ${maxMemoryMB}MB`,
           };
         }
         if (cpuTime > maxCpuTimeMs) {
           return {
             compliant: false,
-            violation: `CPU 时间 ${cpuTime}ms 超过限制 ${maxCpuTimeMs}ms`
+            violation: `CPU 时间 ${cpuTime}ms 超过限制 ${maxCpuTimeMs}ms`,
           };
         }
         return { compliant: true };

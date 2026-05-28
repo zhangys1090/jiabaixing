@@ -86,7 +86,7 @@ export class GatewayBridge {
       this.restartTimer = null;
     }
 
-    for (const [id, pending] of this.pendingRequests) {
+    for (const [, pending] of this.pendingRequests) {
       clearTimeout(pending.timer);
       pending.reject(new Error('GatewayBridge 正在关闭'));
     }
@@ -130,16 +130,15 @@ export class GatewayBridge {
     return result as boolean;
   }
 
-  async disconnectPlatform(
-    platform: IntegrationPlatform
-  ): Promise<void> {
+  async disconnectPlatform(platform: IntegrationPlatform): Promise<void> {
     await this.sendRequest('disconnect', { platform });
   }
 
-  async sendMessage(
-    request: SendMessageRequest
-  ): Promise<SendMessageResponse> {
-    return (await this.sendRequest('sendMessage', request)) as SendMessageResponse;
+  async sendMessage(request: SendMessageRequest): Promise<SendMessageResponse> {
+    return (await this.sendRequest(
+      'sendMessage',
+      request
+    )) as SendMessageResponse;
   }
 
   getPlatforms(): IntegrationPlatformInfo[] {
@@ -148,8 +147,10 @@ export class GatewayBridge {
     }
 
     const syncResult = this.sendSyncRequest('getPlatforms');
-    return (syncResult?.data as { platforms: IntegrationPlatformInfo[] })
-      ?.platforms ?? this.getOfflinePlatforms();
+    return (
+      (syncResult?.data as { platforms: IntegrationPlatformInfo[] })
+        ?.platforms ?? this.getOfflinePlatforms()
+    );
   }
 
   getPlatformStatus(
@@ -431,8 +432,7 @@ export class GatewayBridge {
 
     this.restartAttempts++;
     const delay = Math.min(
-      this.options.restartDelayMs *
-        Math.pow(1.5, this.restartAttempts - 1),
+      this.options.restartDelayMs * Math.pow(1.5, this.restartAttempts - 1),
       60000
     );
 

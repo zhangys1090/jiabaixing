@@ -67,8 +67,13 @@ export function createMemoryRecallExecutor(deps: MemoryRecallDeps) {
 
       const formatted = memories
         .map((m, i) => {
-          const item = m as { content: string; importance?: number; accessCount?: number };
-          const meta = item.importance != null ? ` [重要性:${item.importance}]` : '';
+          const item = m as {
+            content: string;
+            importance?: number;
+            accessCount?: number;
+          };
+          const meta =
+            item.importance != null ? ` [重要性:${item.importance}]` : '';
           return `${i + 1}. ${item.content}${meta}`;
         })
         .join('\n');

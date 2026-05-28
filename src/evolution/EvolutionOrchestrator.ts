@@ -13,29 +13,10 @@
  */
 
 import { DynamicTaskAdjuster } from '../core/DynamicTaskAdjuster';
-import { LLMProvider } from '../models/LLMProvider';
 import EventBus from '../shared/EventBus';
 import { ProfileEvolutionManager } from '../user/ProfileEvolutionManager';
 import { Logger } from '../utils/Logger';
 import { EvolutionEngine, EvolutionMetrics } from './EvolutionEngine';
-
-/** 修复结果（原 SelfHealingEngine 已删除，本地定义） */
-interface HealingResult {
-  id: string;
-  success: boolean;
-  problem: string;
-  fix: string;
-  timestamp: number;
-}
-
-/** 重构结果（原 SelfRefactorEngine 已删除，本地定义） */
-interface RefactoringResult {
-  id: string;
-  success: boolean;
-  filesModified: string[];
-  description: string;
-  timestamp: number;
-}
 
 /** 自我增强结果（原 SelfEnhancementEngine 已删除，本地定义） */
 export interface EnhancementResult {
@@ -272,6 +253,19 @@ export class EvolutionOrchestrator {
         record.success,
         record.qualityScore,
         record.executionDuration,
+        record.scene
+      );
+
+      // 关键修复：同时喂 FeedbackCollector，让 StrategyOptimizer
+      // 的 feedbackBuffer 累积真实交互数据
+      this.evolutionEngine.collectFeedback(
+        record.input,
+        record.response,
+        {
+          success: record.success,
+          intent: record.scene || 'general',
+          toolsUsed: record.toolCalls.map((t) => t.toolName),
+        },
         record.scene
       );
     } catch {
@@ -839,7 +833,6 @@ export class EvolutionOrchestrator {
     }
     return null;
   }
-
 }
 
 export default EvolutionOrchestrator;

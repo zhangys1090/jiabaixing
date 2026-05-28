@@ -8,7 +8,12 @@
  */
 
 import Logger from '../utils/Logger';
-import { MemoryItem, GraphNode, GraphEdge, KnowledgeGraph } from './MemoryEngine';
+import {
+  MemoryItem,
+  GraphNode,
+  GraphEdge,
+  KnowledgeGraph,
+} from './MemoryEngine';
 
 export class KnowledgeGraphBuilder {
   /**

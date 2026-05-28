@@ -11,24 +11,29 @@ import React, { useCallback, useEffect, useRef } from 'react';
 import { apiService } from '../../api/apiService';
 import { useChat } from '../../contexts/ChatContext';
 import { useWebSocket } from '../../hooks/useWebSocket';
-import { Message, MessageStatus } from '../../types/chat';
+import { Message } from '../../types/chat';
 import { AgentExecutionPanel } from '../AgentExecutionPanel/AgentExecutionPanel';
 import { LogPanel } from '../LogPanel/LogPanel';
 import './ChatInterface.css';
 import ChatWindow from './ChatWindow';
-import DevQuickActions, { QuickAction } from './DevQuickActions';
 import MessageInput from './MessageInput';
 import VoiceInteraction from './VoiceInteraction';
+import type {
+  WsBrainStageUpdateData,
+  WsPerceptionUpdateData,
+  WsSkillExecutionUpdateData,
+  WsEvolutionEventData,
+} from '@shared/contracts';
 
 const WS_URL = `ws://${window.location.hostname}:3111`;
-const RESPONSE_TIMEOUT_MS = 35000;
+const API_BASE = `http://${window.location.hostname}:3111`;
+const RESPONSE_TIMEOUT_MS = 0;
 const MAX_INPUT_LENGTH = 500;
 
-// ═══════════════════════════════════════════════════════════════
-// 子组件：头部控制栏
-// ═══════════════════════════════════════════════════════════════
-
-const ChatHeader: React.FC<{ isConnected: boolean }> = ({ isConnected }) => {
+const ChatHeader: React.FC<{
+  isConnected: boolean;
+  onCancelTask: () => void;
+}> = ({ isConnected, onCancelTask }) => {
   const { state, dispatch } = useChat();
 
   const connectionStatus = isConnected ? 'connected' : 'disconnected';
@@ -46,11 +51,7 @@ const ChatHeader: React.FC<{ isConnected: boolean }> = ({ isConnected }) => {
           <span>{statusLabel}</span>
         </div>
         {state.isRunning && (
-          <button
-            className="control-button stop-btn"
-            onClick={() => dispatch({ type: 'SET_IS_RUNNING', payload: false })}
-            title="停止执行"
-          >
+          <button className="control-button stop-btn" onClick={onCancelTask} title="取消执行">
             ⏹
           </button>
         )}
@@ -83,10 +84,6 @@ const ChatHeader: React.FC<{ isConnected: boolean }> = ({ isConnected }) => {
   );
 };
 
-// ═══════════════════════════════════════════════════════════════
-// 子组件：执行状态面板
-// ═══════════════════════════════════════════════════════════════
-
 const ExecutionPanel: React.FC = () => {
   const { state, dispatch } = useChat();
 
@@ -102,10 +99,6 @@ const ExecutionPanel: React.FC = () => {
   );
 };
 
-// ═══════════════════════════════════════════════════════════════
-// 子组件：日志面板
-// ═══════════════════════════════════════════════════════════════
-
 const ServerLogPanel: React.FC = () => {
   const { state } = useChat();
 
@@ -113,38 +106,92 @@ const ServerLogPanel: React.FC = () => {
 
   return (
     <LogPanel
-      wsLogs={state.serverLogs.map((log, index) => ({
-        id: `ws_log_${index}_${Date.now()}`,
-        timestamp: log.timestamp || new Date().toISOString(),
-        level: (log.level as 'debug' | 'info' | 'warn' | 'error') || 'info',
-        module: log.module || 'Backend',
-        message: log.message,
-      }))}
+      wsLogs={state.serverLogs.map(
+        (log: { timestamp?: string; level?: string; module?: string; message?: string }, index: number) => ({
+          id: `ws_log_${index}_${Date.now()}`,
+          timestamp: log.timestamp || new Date().toISOString(),
+          level: (log.level as 'debug' | 'info' | 'warn' | 'error') || 'info',
+          module: log.module || 'Backend',
+          message: log.message || '',
+        })
+      )}
     />
   );
 };
-
-// ═══════════════════════════════════════════════════════════════
-// 主组件：ChatInterface
-// ═══════════════════════════════════════════════════════════════
 
 const ChatInterface: React.FC = () => {
   const { state, dispatch, generateMessageId } = useChat();
   const responseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasRespondedOnceRef = useRef(false);
   const typingMessageIdRef = useRef<string | null>(null);
+  const currentTraceIdRef = useRef<string | null>(null);
 
-  // 处理 Agent 执行状态更新
+  const setCurrentTraceId = useCallback(
+    (traceId: string | null) => {
+      currentTraceIdRef.current = traceId;
+      dispatch({ type: 'SET_CURRENT_TRACE_ID', payload: traceId });
+    },
+    [dispatch]
+  );
+
+  const logFrontend = useCallback(
+    (level: 'debug' | 'info' | 'warn' | 'error', module: string, message: string) => {
+      const prefix = level === 'error' ? '❌' : level === 'warn' ? '⚠️' : level === 'info' ? 'ℹ️' : '🔍';
+      console.log(`${prefix} [${module}] ${message}`);
+      dispatch({
+        type: 'ADD_SERVER_LOG',
+        payload: {
+          timestamp: new Date().toISOString(),
+          level,
+          module: `FE:${module}`,
+          message,
+        },
+      });
+    },
+    [dispatch]
+  );
+
   const handleAgentExecutionUpdate = useCallback(
-    (update: { traceId: string; phase: string; status: string; result?: unknown; timestamp: string }) => {
+    (update: {
+      traceId: string;
+      phase: string;
+      status: string;
+      result?: unknown;
+      timestamp: string;
+      roundsUsed?: number;
+      toolCallsUsed?: number;
+      elapsedMs?: number;
+    }) => {
+      if (update.traceId) {
+        setCurrentTraceId(update.traceId);
+      }
       const phaseName = (update.phase || '').toLowerCase();
       const status = (update.status || '').toLowerCase();
       const isInProgress = status === 'in-progress' || status === 'running' || status === 'started';
       const isCompleted = status === 'completed' || status === 'success' || status === 'done';
-      const isFailed = status === 'failed' || status === 'error';
-      const stepName = ['perceive', 'plan', 'execute', 'verify', 'output', 'learn'].find((name) =>
-        phaseName.includes(name)
-      );
+      const isFailed = status === 'failed' || status === 'error' || status === 'aborted';
+
+      const phaseToStepMap: Record<string, string> = {
+        planning: 'plan',
+        plan: 'plan',
+        executing: 'execute',
+        execute: 'execute',
+        evaluating: 'verify',
+        verify: 'verify',
+        reporting: 'output',
+        output: 'output',
+        learning: 'learn',
+        learn: 'learn',
+        processing_start: 'perceive',
+        perceive: 'perceive',
+        harness_start: 'perceive',
+        building_context: 'perceive',
+        processing_error: 'output',
+        retrying: 'execute',
+        cancelled: 'output',
+      };
+
+      const stepName = phaseToStepMap[phaseName] || Object.keys(phaseToStepMap).find((key) => phaseName.includes(key));
 
       if (stepName) {
         dispatch({
@@ -154,10 +201,30 @@ const ChatInterface: React.FC = () => {
         });
       }
 
+      const fallbackMessages: Record<string, string> = {
+        planning: '正在分析需求...',
+        plan: '正在制定方案...',
+        executing: `正在执行中... (${update.toolCallsUsed || 0} 次工具调用)`,
+        execute: `正在执行中... (${update.toolCallsUsed || 0} 次工具调用)`,
+        evaluating: '正在验证结果...',
+        verify: '正在验证结果...',
+        reporting: '正在生成回复...',
+        output: '正在生成回复...',
+        processing_start: '已收到消息，开始处理...',
+        harness_start: '正在初始化智能引擎...',
+        building_context: '正在构建上下文...',
+        completed: '处理完成',
+        retrying: '处理遇到问题，正在重试...',
+        cancelled: '任务已取消',
+      };
+
       if (isInProgress) {
         dispatch({ type: 'SET_IS_RUNNING', payload: true });
       }
-      if (isCompleted || isFailed) {
+      if (isCompleted) {
+        dispatch({ type: 'SET_IS_RUNNING', payload: false });
+      }
+      if (isFailed) {
         dispatch({ type: 'SET_IS_RUNNING', payload: false });
       }
 
@@ -166,7 +233,7 @@ const ChatInterface: React.FC = () => {
           type: 'ADD_MESSAGE',
           payload: {
             id: generateMessageId(),
-            content: `Agent 执行失败：${update.result}`,
+            content: `执行失败：${update.result}`,
             sender: 'system',
             timestamp: new Date(),
             status: 'error',
@@ -175,7 +242,7 @@ const ChatInterface: React.FC = () => {
         });
       }
     },
-    [dispatch, generateMessageId]
+    [dispatch, generateMessageId, setCurrentTraceId]
   );
 
   const { send, isConnected, dialogState } = useWebSocket({
@@ -184,20 +251,41 @@ const ChatInterface: React.FC = () => {
     onServerLog: handleServerLog,
     onAgentExecutionUpdate: handleAgentExecutionUpdate,
     onBrainStageUpdate: (update) => {
-      dispatch({ type: 'ADD_BRAIN_STAGE_UPDATE', payload: update });
+      dispatch({ type: 'ADD_BRAIN_STAGE_UPDATE', payload: update as WsBrainStageUpdateData });
     },
     onPerceptionUpdate: (update) => {
-      dispatch({ type: 'ADD_PERCEPTION_UPDATE', payload: update });
+      dispatch({ type: 'ADD_PERCEPTION_UPDATE', payload: update as WsPerceptionUpdateData });
     },
     onSkillExecutionUpdate: (update) => {
-      dispatch({ type: 'ADD_SKILL_EXECUTION_UPDATE', payload: update });
+      dispatch({ type: 'ADD_SKILL_EXECUTION_UPDATE', payload: update as WsSkillExecutionUpdateData });
     },
     onEvolutionEvent: (event) => {
-      dispatch({ type: 'ADD_EVOLUTION_EVENT', payload: event });
+      dispatch({ type: 'ADD_EVOLUTION_EVENT', payload: event as WsEvolutionEventData });
+    },
+    onProcessingStatus: (data) => {
+      logFrontend('info', 'Chat', `收到处理状态: ${data.message}, traceId=${data.traceId}`);
+      dispatch({ type: 'SET_IS_TYPING', payload: true });
+    },
+    onTaskCancelled: (data) => {
+      logFrontend('info', 'Chat', `任务已取消: traceId=${data.traceId}`);
+      dispatch({ type: 'SET_IS_RUNNING', payload: false });
+      dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+      dispatch({
+        type: 'ADD_MESSAGE',
+        payload: {
+          id: generateMessageId(),
+          content: data.message || '任务已取消',
+          sender: 'system',
+          timestamp: new Date(),
+          status: 'error',
+          emoji: '🚫',
+        },
+      });
+      currentTraceIdRef.current = null;
+      setCurrentTraceId(null);
     },
   });
 
-  // 清理超时定时器
   const clearResponseTimeout = useCallback(() => {
     if (responseTimeoutRef.current !== null) {
       clearTimeout(responseTimeoutRef.current);
@@ -205,7 +293,6 @@ const ChatInterface: React.FC = () => {
     }
   }, []);
 
-  // 语音播报
   const speakResponse = useCallback(
     (text: string) => {
       if (!state.ttsEnabled || !text || typeof window === 'undefined') return;
@@ -238,7 +325,6 @@ const ChatInterface: React.FC = () => {
     [state.ttsEnabled]
   );
 
-  // 应用助手回复
   const applyAssistantResponse = useCallback(
     (responseText: string, _traceId?: string) => {
       clearResponseTimeout();
@@ -247,19 +333,26 @@ const ChatInterface: React.FC = () => {
       const assistantMessageId = generateMessageId();
       typingMessageIdRef.current = assistantMessageId;
 
+      logFrontend(
+        'info',
+        'Chat',
+        `applyAssistantResponse: 添加AI消息 id=${assistantMessageId.substring(0, 8)}, traceId=${_traceId}`
+      );
+
       dispatch({
-        type: 'SET_MESSAGES',
-        payload: [
-          ...state.messages.map((m) => (m.status === 'sending' ? { ...m, status: 'sent' as MessageStatus } : m)),
-          {
-            id: assistantMessageId,
-            content: responseText,
-            sender: 'assistant',
-            timestamp: new Date(),
-            status: 'typing',
-            emoji: '🤔',
-          },
-        ],
+        type: 'MARK_SENDING_AS_SENT',
+      });
+
+      dispatch({
+        type: 'ADD_MESSAGE',
+        payload: {
+          id: assistantMessageId,
+          content: responseText,
+          sender: 'assistant',
+          timestamp: new Date(),
+          status: 'typing',
+          emoji: '🤔',
+        },
       });
 
       dispatch({ type: 'SET_IS_LOADING', payload: false });
@@ -268,10 +361,9 @@ const ChatInterface: React.FC = () => {
 
       setTimeout(() => speakResponse(responseText), 300);
     },
-    [state.messages, generateMessageId, clearResponseTimeout, speakResponse, dispatch]
+    [generateMessageId, clearResponseTimeout, speakResponse, dispatch, logFrontend]
   );
 
-  // 处理响应就绪
   function handleResponseReady(response: string | unknown, _traceId?: string) {
     let responseText: string;
     if (typeof response === 'string') {
@@ -282,15 +374,17 @@ const ChatInterface: React.FC = () => {
     } else {
       responseText = String(response || '');
     }
+    console.log(
+      `✅ [Chat] handleResponseReady: traceId=${_traceId}, 长度=${responseText.length}, 预览="${responseText.substring(0, 60)}"`
+    );
+    logFrontend('info', 'Chat', `handleResponseReady: traceId=${_traceId}, 响应长度=${responseText.length}`);
     applyAssistantResponse(responseText, _traceId);
   }
 
-  // 处理服务器日志
   function handleServerLog(entry: { timestamp: string; level: string; message: string; module?: string }) {
     dispatch({ type: 'ADD_SERVER_LOG', payload: entry });
   }
 
-  // 标记消息失败
   const markMessageFailed = useCallback(
     (messageId: string, reason: string) => {
       clearResponseTimeout();
@@ -307,7 +401,6 @@ const ChatInterface: React.FC = () => {
     [clearResponseTimeout, dispatch]
   );
 
-  // 跳过打字效果
   const skipTyping = useCallback(
     (messageId: string) => {
       if (typingMessageIdRef.current === messageId) {
@@ -323,7 +416,6 @@ const ChatInterface: React.FC = () => {
     [dispatch]
   );
 
-  // 重试发送
   const retrySend = useCallback(
     (failedMessage: Message) => {
       if (!failedMessage.retryPayload) return;
@@ -336,9 +428,11 @@ const ChatInterface: React.FC = () => {
       });
 
       clearResponseTimeout();
-      responseTimeoutRef.current = setTimeout(() => {
-        markMessageFailed(failedMessage.id, '响应超时，请稍后重试');
-      }, RESPONSE_TIMEOUT_MS);
+      if (RESPONSE_TIMEOUT_MS > 0) {
+        responseTimeoutRef.current = setTimeout(() => {
+          markMessageFailed(failedMessage.id, '响应超时，请稍后重试');
+        }, RESPONSE_TIMEOUT_MS);
+      }
 
       if (isConnected && send) {
         send({
@@ -386,12 +480,84 @@ const ChatInterface: React.FC = () => {
     [isConnected, send, clearResponseTimeout, markMessageFailed, speakResponse, dispatch]
   );
 
-  // 发送消息
   const handleSendMessage = useCallback(
     async (images?: string[]) => {
       if (!state.inputText.trim() && (!images || images.length === 0)) return;
 
-      if (state.inputText.length > MAX_INPUT_LENGTH) {
+      // 斜杠命令处理
+      const text = state.inputText.trim();
+      if (text.startsWith('/')) {
+        const parts = text.slice(1).split(/\s+/);
+        const cmd = parts[0].toLowerCase();
+        const args = parts.slice(1).join(' ');
+
+        // 本地命令（不请求后端）
+        if (cmd === 'clear') {
+          dispatch({ type: 'CLEAR_MESSAGES' });
+          dispatch({ type: 'SET_INPUT_TEXT', payload: '' });
+          return;
+        }
+        if (cmd === 'help') {
+          dispatch({
+            type: 'ADD_MESSAGE',
+            payload: {
+              id: generateMessageId(),
+              content: `**家百星 · 命令帮助**\n\n/help — 显示此帮助\n/clear — 清空对话\n/skills — 打开技能面板\n/status — 查看系统状态\n/model — 查看当前模型\n\n也可以直接跟我聊天，我会自动判断是否需要调工具来完成任务。`,
+              sender: 'assistant' as const,
+              timestamp: new Date(),
+              status: 'sent' as const,
+              emoji: '💡',
+            },
+          });
+          dispatch({ type: 'SET_INPUT_TEXT', payload: '' });
+          return;
+        }
+        if (cmd === 'skills') {
+          // 切换到技能面板
+          window.location.hash = '#skills';
+          dispatch({ type: 'SET_INPUT_TEXT', payload: '' });
+          return;
+        }
+        if (cmd === 'status') {
+          // 调后端获取状态
+          try {
+            const resp = await fetch(`${API_BASE}/api/health`);
+            const data = await resp.json();
+            dispatch({
+              type: 'ADD_MESSAGE',
+              payload: {
+                id: generateMessageId(),
+                content: `**系统状态**\n- 模型: ${data.model}\n- 运行时间: ${Math.floor(data.uptime / 60)} 分钟\n- LLM: ${data.llm?.available ? '✅ 可用' : '❌ 不可用'}\n- 自动优化: ${data.autoOptimize ? '✅ 开启' : '❌ 关闭'}`,
+                sender: 'assistant' as const,
+                timestamp: new Date(),
+                status: 'sent' as const,
+                emoji: '📊',
+              },
+            });
+          } catch {
+            dispatch({ type: 'ADD_MESSAGE', payload: { id: generateMessageId(), content: '获取状态失败', sender: 'system' as const, timestamp: new Date(), status: 'error' as const, emoji: '⚠️' } });
+          }
+          dispatch({ type: 'SET_INPUT_TEXT', payload: '' });
+          return;
+        }
+        if (cmd === 'model') {
+          dispatch({
+            type: 'ADD_MESSAGE',
+            payload: {
+              id: generateMessageId(),
+              content: `当前模型: ${API_BASE.replace('http://', '').split(':')[0]}:3111 (DeepSeek 兼容接口)`,
+              sender: 'assistant' as const,
+              timestamp: new Date(),
+              status: 'sent' as const,
+              emoji: '🤖',
+            },
+          });
+          dispatch({ type: 'SET_INPUT_TEXT', payload: '' });
+          return;
+        }
+      }
+
+      if (text.length > MAX_INPUT_LENGTH) {
         dispatch({
           type: 'ADD_MESSAGE',
           payload: {
@@ -414,10 +580,16 @@ const ChatInterface: React.FC = () => {
           content: state.inputText || `[图片${images?.length || 0}张]`,
           sender: 'user',
           timestamp: new Date(),
-          status: 'sending',
+          status: 'sent',
           retryPayload: { text: state.inputText, images },
         },
       });
+
+      logFrontend(
+        'info',
+        'Chat',
+        `用户消息已添加: id=${pendingId.substring(0, 8)}, 内容="${state.inputText.substring(0, 30)}"`
+      );
 
       dispatch({ type: 'SET_INPUT_TEXT', payload: '' });
       dispatch({ type: 'SET_IS_RUNNING', payload: true });
@@ -426,14 +598,16 @@ const ChatInterface: React.FC = () => {
       hasRespondedOnceRef.current = false;
 
       clearResponseTimeout();
-      responseTimeoutRef.current = setTimeout(() => {
-        if (!hasRespondedOnceRef.current) {
-          markMessageFailed(pendingId, '对方响应超时，可能正在忙碌');
-        }
-      }, RESPONSE_TIMEOUT_MS);
+      if (RESPONSE_TIMEOUT_MS > 0) {
+        responseTimeoutRef.current = setTimeout(() => {
+          if (!hasRespondedOnceRef.current) {
+            markMessageFailed(pendingId, '对方响应超时，可能正在忙碌');
+          }
+        }, RESPONSE_TIMEOUT_MS);
+      }
 
-      // 优先走 WebSocket（响应通过 onResponseReady 回调返回）
       if (isConnected && send) {
+        logFrontend('info', 'Chat', `WS发送: "${state.inputText.substring(0, 50)}", 已连接=${isConnected}`);
         send({
           type: 'user_input',
           payload: { input: state.inputText, userId: 'web_user', images },
@@ -441,7 +615,7 @@ const ChatInterface: React.FC = () => {
         return;
       }
 
-      // WebSocket 未连接时，回退到 HTTP API
+      logFrontend('info', 'Chat', `WS未连接，走HTTP API: "${state.inputText.substring(0, 50)}"`);
       try {
         const response = await apiService.processMultimodalMessage(state.inputText, images);
         clearResponseTimeout();
@@ -481,10 +655,10 @@ const ChatInterface: React.FC = () => {
       markMessageFailed,
       applyAssistantResponse,
       dispatch,
+      logFrontend,
     ]
   );
 
-  // 语音输入
   const handleVoiceInput = useCallback(
     (text: string) => {
       if (!text.trim()) return;
@@ -494,37 +668,24 @@ const ChatInterface: React.FC = () => {
     [handleSendMessage, dispatch]
   );
 
-  // 快捷操作
-  const handleQuickAction = useCallback(
-    (action: QuickAction) => {
-      dispatch({ type: 'SET_INPUT_TEXT', payload: action.prompt });
-      setTimeout(() => handleSendMessage(), 50);
-    },
-    [handleSendMessage, dispatch]
-  );
-
-  // 取消执行
-  const cancelExecution = useCallback(() => {
-    if (isConnected && send) {
-      send({ type: 'cancel', payload: { reason: 'user_cancelled' } });
-    }
-    dispatch({ type: 'SET_IS_RUNNING', payload: false });
-    dispatch({ type: 'SET_IS_LOADING', payload: false });
-    dispatch({ type: 'SET_IS_TYPING', payload: false });
-    typingMessageIdRef.current = null;
-    clearResponseTimeout();
-  }, [isConnected, send, clearResponseTimeout, dispatch]);
-
-  // 清理
   useEffect(() => {
     return () => clearResponseTimeout();
   }, [clearResponseTimeout]);
 
   return (
     <div className="chat-interface">
-      <ChatHeader isConnected={isConnected} />
+      <ChatHeader
+        isConnected={isConnected}
+        onCancelTask={() => {
+          if (currentTraceIdRef.current && send) {
+            send({ type: 'cancel_task', traceId: currentTraceIdRef.current });
+          }
+          dispatch({ type: 'SET_IS_RUNNING', payload: false });
+          dispatch({ type: 'CLEAR_PROGRESS_MESSAGES' });
+          setCurrentTraceId(null);
+        }}
+      />
       <ExecutionPanel />
-      <DevQuickActions onAction={handleQuickAction} disabled={state.isLoading} />
       <ChatWindow
         messages={state.messages}
         isLoading={state.isLoading}

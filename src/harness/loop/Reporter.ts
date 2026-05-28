@@ -28,7 +28,9 @@ export class Reporter {
   /**
    * 从消息中提取最终响应
    */
-  private extractResponse(messages: Array<{ role: string; content?: string | null }>): string {
+  private extractResponse(
+    messages: Array<{ role: string; content?: string | null }>
+  ): string {
     // 从后往前找最后一条 assistant 消息
     for (let i = messages.length - 1; i >= 0; i--) {
       if (messages[i].role === 'assistant' && messages[i].content) {
@@ -64,9 +66,9 @@ export class Reporter {
       efficiency -= penalty;
     }
 
-    // 惩罚过多工具调用
-    if (budget.toolCallsUsed > 5) {
-      const penalty = 0.05 * (budget.toolCallsUsed - 5);
+    // 惩罚过多工具调用（提高阈值，工具调用往往是必要的）
+    if (budget.toolCallsUsed > 10) {
+      const penalty = 0.05 * (budget.toolCallsUsed - 10);
       efficiency -= penalty;
     }
 
@@ -76,7 +78,8 @@ export class Reporter {
     if (duration > 30000) efficiency -= 0.2;
 
     // 自然完成加分
-    const completedNaturally = trace.state !== 'budget_exceeded' && trace.state !== 'failed';
+    const completedNaturally =
+      trace.state !== 'budget_exceeded' && trace.state !== 'failed';
     if (!completedNaturally) {
       overall -= 0.3;
     }

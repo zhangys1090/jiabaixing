@@ -6,8 +6,8 @@
 import * as WebSocket from 'ws';
 
 import { JiabaixingCore } from '../core/JiabaixingCore';
-import { EVENTBUS_TO_WS_MAP } from '../shared/contracts';
 import { EventBus } from '../shared/EventBus';
+import type { EventName } from '../shared/EventBus';
 import { Logger } from '../utils/Logger';
 
 type WSServer = WebSocket.Server;
@@ -35,7 +35,7 @@ export function setupEventBus(
   ) => {
     if (registeredEvents.has(event)) return;
     registeredEvents.add(event);
-    EventBus.on(event as any, handler as any);
+    EventBus.on(event as EventName, handler as (...args: unknown[]) => void);
   };
 
   registerOnce('weight_update', (data: unknown) => {
@@ -358,7 +358,12 @@ export function setupEventBus(
     const payload = data as {
       response?: string;
       traceId?: string;
+      success?: boolean;
     };
+    Logger.info(
+      `📡 EventBus广播 response_ready: traceId=${payload.traceId}, success=${payload.success}, 响应长度=${payload.response?.length || 0}`,
+      'EventBus'
+    );
     broadcast({
       type: 'response_ready',
       data: {
@@ -369,10 +374,12 @@ export function setupEventBus(
   });
 
   Logger.on('log', (entry) => {
-    broadcast({
-      type: 'server_log',
-      data: entry,
-    });
+    if (entry.level === 'error' || entry.level === 'fatal') {
+      broadcast({
+        type: 'server_log',
+        data: entry,
+      });
+    }
   });
 
   Logger.info(

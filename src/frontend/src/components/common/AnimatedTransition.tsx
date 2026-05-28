@@ -111,7 +111,7 @@ export const AnimatedModal: React.FC<{
   children: React.ReactNode;
   className?: string;
   onClose?: () => void;
-}> = ({ isOpen, children, className = '', onClose }) => {
+}> = ({ isOpen, children, className = '' }) => {
   return (
     <AnimatedTransition show={isOpen} animation="scale" className={className}>
       {children}

@@ -2,16 +2,22 @@ import { AuditLogger } from './AuditLogger';
 import { AuthenticationManager } from './AuthenticationManager';
 import { EncryptionManager } from './EncryptionManager';
 import { SecurityPolicyEngine } from './SecurityPolicyEngine';
+import { perf } from '../utils/PerformanceMonitor';
 import type {
   User,
   OperationAudit,
   SecurityIncidentEvent,
-  RiskLevel,
   RiskAssessment,
   EncryptionOptions,
 } from './types';
 
-export type { User, OperationAudit, RiskLevel, RiskAssessment, EncryptionOptions } from './types';
+export type {
+  User,
+  OperationAudit,
+  RiskLevel,
+  RiskAssessment,
+  EncryptionOptions,
+} from './types';
 export type { SecurityIncidentEvent as SecurityEvent } from './types';
 export type { Permission, AccessControlRule } from './types';
 
@@ -79,27 +85,39 @@ export class SecurityManager {
 
   public encrypt(data: string, _options: EncryptionOptions): string {
     this.ensureInitialized();
-    const encrypted = this.encryptionManager.encrypt(data);
-    return JSON.stringify(encrypted);
+    return perf.measureSync(
+      'security.encrypt',
+      () => {
+        const encrypted = this.encryptionManager.encrypt(data);
+        return JSON.stringify(encrypted);
+      },
+      'security'
+    );
   }
 
   public decrypt(encryptedData: string): string {
     this.ensureInitialized();
-    try {
-      const parsed = JSON.parse(encryptedData) as {
-        iv: string;
-        data: string;
-        timestamp: string;
-      };
-      const encryptedDataObj: import('./types').EncryptedData = {
-        iv: parsed.iv,
-        data: parsed.data,
-        timestamp: new Date(parsed.timestamp),
-      };
-      return this.encryptionManager.decrypt(encryptedDataObj);
-    } catch {
-      return encryptedData;
-    }
+    return perf.measureSync(
+      'security.decrypt',
+      () => {
+        try {
+          const parsed = JSON.parse(encryptedData) as {
+            iv: string;
+            data: string;
+            timestamp: string;
+          };
+          const encryptedDataObj: import('./types').EncryptedData = {
+            iv: parsed.iv,
+            data: parsed.data,
+            timestamp: new Date(parsed.timestamp),
+          };
+          return this.encryptionManager.decrypt(encryptedDataObj);
+        } catch {
+          return encryptedData;
+        }
+      },
+      'security'
+    );
   }
 
   public generateEncryptionKey(length: number = 32): string {
@@ -173,15 +191,21 @@ export class SecurityManager {
     password: string
   ): Promise<User | null> {
     this.ensureInitialized();
-    const result = await this.authenticationManager.authenticate({
-      username,
-      password,
-    } as unknown as AuthRequest);
-    const authResult = result as unknown as AuthResult;
-    if (result && typeof result === 'object' && 'user' in result) {
-      return authResult.user as User;
-    }
-    return null;
+    return perf.measure(
+      'security.authenticate',
+      async () => {
+        const result = await this.authenticationManager.authenticate({
+          username,
+          password,
+        } as unknown as AuthRequest);
+        const authResult = result as unknown as AuthResult;
+        if (result && typeof result === 'object' && 'user' in result) {
+          return authResult.user as User;
+        }
+        return null;
+      },
+      'security'
+    );
   }
 
   public generateAccessToken(userId: string): string {
@@ -517,7 +541,12 @@ export class SecurityManager {
     parameters: Record<string, unknown>
   ): RiskAssessment {
     this.ensureInitialized();
-    return this.policyEngine.assessRisk(operation, resource, action, parameters);
+    return this.policyEngine.assessRisk(
+      operation,
+      resource,
+      action,
+      parameters
+    );
   }
 
   public activateEmergencyMode(reason: string): void {
@@ -548,6 +577,74 @@ export class SecurityManager {
 
   public isEmergencyMode(): boolean {
     return this.emergencyMode;
+  }
+
+  public securityHealthCheck(): {
+    healthy: boolean;
+    score: number;
+    issues: string[];
+  } {
+    const issues: string[] = [];
+    let score = 100;
+
+    try {
+      const logStats = this.auditLogger.getLogStats();
+      if (logStats.totalLogs === 0) {
+        issues.push('审计日志为空');
+        score -= 20;
+      }
+      if (logStats.totalLogs > 0) {
+        const failureRate = logStats.failureCount / logStats.totalLogs;
+        if (failureRate > 0.5) {
+          issues.push(`认证失败率过高: ${(failureRate * 100).toFixed(1)}%`);
+          score -= 30;
+        } else if (failureRate > 0.2) {
+          issues.push(`认证失败率偏高: ${(failureRate * 100).toFixed(1)}%`);
+          score -= 15;
+        }
+      }
+    } catch {
+      issues.push('审计日志服务不可用');
+      score -= 30;
+    }
+
+    try {
+      const securityStats = perf.getCategoryStats('security');
+      if (securityStats.totalCalls > 0 && securityStats.errorRate > 0.3) {
+        issues.push(
+          `安全操作错误率过高: ${(securityStats.errorRate * 100).toFixed(1)}%`
+        );
+        score -= 20;
+      }
+    } catch {
+      issues.push('性能监控服务不可用');
+      score -= 10;
+    }
+
+    try {
+      this.encryptionManager.encrypt('healthcheck');
+    } catch {
+      issues.push('加密服务不可用');
+      score -= 40;
+    }
+
+    if (this.emergencyMode) {
+      issues.push('系统处于应急模式');
+      score -= 25;
+    }
+
+    if (!this.initialized) {
+      issues.push('安全管理器未初始化');
+      score -= 50;
+    }
+
+    score = Math.max(0, Math.min(100, score));
+
+    return {
+      healthy: score >= 60,
+      score,
+      issues,
+    };
   }
 
   public async secureExecuteOperation(

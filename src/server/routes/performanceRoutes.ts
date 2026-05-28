@@ -2,7 +2,7 @@
  * 性能监控路由 - performance snapshot / metrics / errors / llm performance
  */
 
-import express, { Request, Response } from 'express';
+import express from 'express';
 
 import { JiabaixingCore } from '../../core/JiabaixingCore';
 import { Logger } from '../../utils/Logger';
@@ -63,6 +63,7 @@ export function registerPerformanceRoutes(
       await provider.initialize();
 
       const models = provider.getAvailableModels();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const healthStatus = (provider as any).modelHealthStatus || new Map();
 
       const modelStats = models.map((model) => {
@@ -135,4 +136,26 @@ export function registerPerformanceRoutes(
       res.status(500).json({ error: 'Internal server error' });
     }
   });
+
+  app.post(
+    '/api/performance/metrics',
+    express.json({ limit: '1mb' }),
+    (req, res) => {
+      try {
+        const metrics = req.body;
+        Logger.debug('收到性能指标数据', 'Performance', metrics);
+
+        res.json({
+          success: true,
+          status: 'received',
+          timestamp: new Date().toISOString(),
+        });
+      } catch (error) {
+        res.status(500).json({
+          success: false,
+          error: (error as Error).message,
+        });
+      }
+    }
+  );
 }

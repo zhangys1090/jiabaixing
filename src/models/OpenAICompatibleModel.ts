@@ -65,7 +65,11 @@ const FALLBACK_RESPONSES = [
   '网络连接有些不稳定，让我尝试用备用方案...',
 ];
 
-type ResolvedConfig = Omit<Required<OpenAICompatibleConfig>, 'thinkingMode' | 'reasoningEffort'> & Pick<OpenAICompatibleConfig, 'thinkingMode' | 'reasoningEffort'>;
+type ResolvedConfig = Omit<
+  Required<OpenAICompatibleConfig>,
+  'thinkingMode' | 'reasoningEffort'
+> &
+  Pick<OpenAICompatibleConfig, 'thinkingMode' | 'reasoningEffort'>;
 
 export class OpenAICompatibleModel implements Model {
   private config: ResolvedConfig;
@@ -90,7 +94,7 @@ export class OpenAICompatibleModel implements Model {
         process.env.OPENAI_API_BASE ||
         'http://127.0.0.1:8000/v1',
       apiKey: config.apiKey || process.env.OPENAI_API_KEY || 'not-needed',
-      modelName: config.modelName || process.env.LLM_MODEL || 'qwen2.5-vl',
+      modelName: config.modelName || process.env.LLM_MODEL || 'deepseek-chat',
       timeout: config.timeout || 30000,
       maxTokens: config.maxTokens || 4096,
       temperature: config.temperature || 0.7,
@@ -112,11 +116,24 @@ export class OpenAICompatibleModel implements Model {
       );
 
       const response = await this.fetchWithTimeout(
-        `${this.config.baseUrl}/models`
+        `${this.config.baseUrl}/models`,
+        {
+          headers: {
+            Authorization: `Bearer ${this.config.apiKey}`,
+          },
+        }
       );
 
       if (response.ok) {
-        const data = (await response.json()) as Record<string, unknown>;
+        const responseText = await response.text();
+        let data: Record<string, unknown>;
+        try {
+          data = JSON.parse(responseText);
+        } catch {
+          throw new Error(
+            `API 响应 JSON 解析失败 (${response.status}): ${responseText.substring(0, 200)}`
+          );
+        }
         const models =
           (data.data as Array<Record<string, string>> | undefined) || [];
         const modelNames =
@@ -125,6 +142,12 @@ export class OpenAICompatibleModel implements Model {
         this.initialized = true;
         Logger.info(
           `✅ OpenAI 兼容服务已初始化 - 模型: ${this.config.modelName}, 可用模型: ${modelNames}`,
+          'OpenAICompatibleModel'
+        );
+      } else if (response.status === 401) {
+        this.initialized = true;
+        Logger.warn(
+          `⚠️ OpenAI 兼容服务 /models 端点返回 401 (认证失败)，请检查 API_KEY 配置，模型仍会尝试使用`,
           'OpenAICompatibleModel'
         );
       } else {
@@ -151,13 +174,14 @@ export class OpenAICompatibleModel implements Model {
       };
     }
 
-    // 永久禁用检查 - 连接错误导致不再重试
+    // 永久禁用检查 - 但暂时禁用这个严格限制，让系统可以重试
     if (this.permanentlyDisabled) {
       Logger.warn(
-        '🚫 模型已永久禁用（连接错误），请检查 LLM 服务是否运行',
+        '⚠️ 模型曾被禁用，但允许重试（连接错误）',
         'OpenAICompatibleModel'
       );
-      throw new Error('模型已永久禁用，请检查 LLM 服务');
+      // 重置永久禁用状态，允许重试
+      this.permanentlyDisabled = false;
     }
 
     // 检查熔断状态
@@ -196,30 +220,20 @@ export class OpenAICompatibleModel implements Model {
         if (isConnectionError) {
           this.consecutiveConnectionFailures++;
           Logger.warn(
-            `🚫 连接错误 (第${this.consecutiveConnectionFailures}次)，跳过重试: ${lastError.message}`,
+            `⚠️ 连接错误 (第${this.consecutiveConnectionFailures}次)，继续重试: ${lastError.message}`,
             'OpenAICompatibleModel'
           );
-          skipRetry = true;
-          // 连接错误快速触发熔断
-          if (this.consecutiveConnectionFailures >= 1) {
+          // 连接错误也继续重试，不要跳过重试
+          skipRetry = false;
+          // 降低熔断门槛
+          if (this.consecutiveConnectionFailures >= 5) {
             this.openCircuit(true);
-            Logger.error(
-              `🔥 连接错误触发熔断`,
-              undefined,
+            Logger.warn(
+              `⚠️ 连续连接错误触发临时熔断，稍后将自动恢复`,
               'OpenAICompatibleModel'
             );
           }
-          // 连续连接错误超过3次 → 永久禁用，不再自动恢复
-          if (this.consecutiveConnectionFailures >= 3) {
-            this.permanentlyDisabled = true;
-            this.circuitOpen = false;
-            Logger.error(
-              `🔴 连续 ${this.consecutiveConnectionFailures} 次连接错误，永久禁用此模型。请确认 LLM 服务已启动后重启应用。`,
-              undefined,
-              'OpenAICompatibleModel'
-            );
-          }
-          break;
+          // 不再永久禁用模型
         }
 
         // 检查是否达到熔断阈值
@@ -276,18 +290,28 @@ export class OpenAICompatibleModel implements Model {
       stream: false,
     };
 
-    if (this.config.thinkingMode) {
-      requestBody.thinking = { type: this.config.thinkingMode };
-    }
-    if (this.config.reasoningEffort) {
-      requestBody.reasoning_effort = this.config.reasoningEffort;
+    if (this.config.thinkingMode === 'enabled') {
+      requestBody.thinking = { type: 'enabled' };
+      if (this.config.reasoningEffort) {
+        requestBody.reasoning_effort = this.config.reasoningEffort;
+      }
     }
 
     // 如果有工具定义，添加到请求中（Function Calling）
     if (input.tools && input.tools.length > 0) {
       requestBody.tools = input.tools;
+      const toolChoice = input.toolChoice || 'auto';
+      requestBody.tool_choice = toolChoice;
+      Logger.info(
+        `🔧 Function Calling: ${input.tools.length}个工具可用, tool_choice=${toolChoice}`,
+        'OpenAICompatibleModel'
+      );
     }
 
+    Logger.info(
+      `🚀 发起LLM请求: ${this.config.baseUrl}/chat/completions, model=${this.config.modelName}`,
+      'OpenAICompatibleModel'
+    );
     const response = await this.fetchWithTimeout(
       `${this.config.baseUrl}/chat/completions`,
       {
@@ -302,10 +326,27 @@ export class OpenAICompatibleModel implements Model {
 
     if (!response.ok) {
       const errorBody = await response.text();
+      Logger.error(
+        `❌ LLM API请求失败: status=${response.status}, body=${errorBody.substring(0, 200)}`,
+        undefined,
+        'OpenAICompatibleModel'
+      );
       throw new Error(`API 请求失败 (${response.status}): ${errorBody}`);
     }
 
-    const data = (await response.json()) as Record<string, unknown>;
+    const responseText = await response.text();
+    Logger.debug(
+      `📨 LLM API响应: 长度=${responseText.length}字符`,
+      'OpenAICompatibleModel'
+    );
+    let data: Record<string, unknown>;
+    try {
+      data = JSON.parse(responseText);
+    } catch {
+      throw new Error(
+        `API 响应 JSON 解析失败: ${responseText.substring(0, 200)}`
+      );
+    }
     const choices = data.choices as
       | Array<Record<string, Record<string, unknown>>>
       | undefined;
@@ -352,7 +393,9 @@ export class OpenAICompatibleModel implements Model {
    * F0-04: 规范化 tool_calls，确保所有必需字段存在
    * DeepSeek V4 Flash 等模型可能返回缺失 id/type 字段的 tool_calls
    */
-  private normalizeToolCalls(rawToolCalls: Array<Record<string, unknown>>): Array<{
+  private normalizeToolCalls(
+    rawToolCalls: Array<Record<string, unknown>>
+  ): Array<{
     id: string;
     type: string;
     function: { name: string; arguments: string };
@@ -441,7 +484,7 @@ export class OpenAICompatibleModel implements Model {
    */
   private openCircuit(isConnectionError: boolean = false): void {
     const recoveryMs = isConnectionError
-      ? 300000
+      ? 30000
       : this.config.circuitBreakerRecoveryMs;
     this.circuitOpen = true;
     this.circuitOpenUntil = Date.now() + recoveryMs;

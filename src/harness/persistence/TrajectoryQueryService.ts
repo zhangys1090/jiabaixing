@@ -4,7 +4,6 @@
  * 轨迹查询服务，提供失败执行、工具成功率、质量趋势等分析
  */
 
-import { Logger } from '../../utils/Logger';
 import type { TrajectoryDatabase } from './TrajectoryDatabase';
 import type { ExecutionRecord } from './TrajectoryDatabase';
 
@@ -39,14 +38,16 @@ export class TrajectoryQueryService {
     this.db = db;
   }
 
-  getFailedExecutions(options: FailedExecutionsOptions = {}): ExecutionRecord[] {
+  getFailedExecutions(
+    options: FailedExecutionsOptions = {}
+  ): ExecutionRecord[] {
     const limit = options.limit || 50;
     const category = options.category;
 
     if (category) {
-      const allFailed = this.db.getRecentExecutions(1000).filter(
-        (e) => e.status === 'failed' || e.status === 'aborted'
-      );
+      const allFailed = this.db
+        .getRecentExecutions(1000)
+        .filter((e) => e.status === 'failed' || e.status === 'aborted');
       return allFailed
         .filter((e) => {
           const inputLower = e.input.toLowerCase();
@@ -61,24 +62,19 @@ export class TrajectoryQueryService {
       .slice(0, limit);
   }
 
-  getToolSuccessRates(options: { since?: number } = {}): Record<string, ToolSuccessRate> {
+  getToolSuccessRates(
+    options: { since?: number } = {}
+  ): Record<string, ToolSuccessRate> {
     const since = options.since || Date.now() - 7 * 24 * 60 * 60 * 1000;
 
     const recent = this.db.getRecentExecutions(1000);
     const executionIds = new Set(
-      recent
-        .filter((e) => e.created_at >= since)
-        .map((e) => e.id)
+      recent.filter((e) => e.created_at >= since).map((e) => e.id)
     );
 
     if (executionIds.size === 0) {
       return {};
     }
-
-    const placeholders = Array.from(executionIds)
-      .map(() => '?')
-      .join(',');
-    const allInvocations = this.db.getToolInvocations('');
 
     const toolStats: Record<string, { total: number; success: number }> = {};
 
@@ -146,7 +142,10 @@ export class TrajectoryQueryService {
     const since = Date.now() - days * 24 * 60 * 60 * 1000;
     const recent = this.db.getRecentExecutions(1000);
 
-    const dayBuckets: Record<string, { totalScore: number; totalDuration: number; count: number }> = {};
+    const dayBuckets: Record<
+      string,
+      { totalScore: number; totalDuration: number; count: number }
+    > = {};
 
     for (const exec of recent) {
       if (!exec.created_at || exec.created_at < since) continue;

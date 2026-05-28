@@ -92,10 +92,7 @@ export function createFileSearchExecutor(deps: FileSearchDeps) {
       }
 
       const formatted = results
-        .map(
-          (r, i) =>
-            `${i + 1}. ${r.filePath}:${r.line} — ${r.match}`
-        )
+        .map((r, i) => `${i + 1}. ${r.filePath}:${r.line} — ${r.match}`)
         .join('\n');
 
       return {
