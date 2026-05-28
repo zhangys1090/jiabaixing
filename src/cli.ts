@@ -474,6 +474,25 @@ async function handleEnvCommand(): Promise<void> {
     } catch {
       console.log(`  ${COLORS.dim}环境检测不可用${COLORS.reset}`);
     }
+
+    // Git状态
+    console.log(`\n  ${COLORS.dim}项目Git状态:${COLORS.reset}`);
+    const dirs = [process.cwd(), path.resolve(process.cwd(), '..', 'hermes-agent-main')];
+    for (const dir of dirs) {
+      try {
+        const gitDir = path.join(dir, '.git');
+        if (!fs.existsSync(gitDir)) continue;
+        const { execSync } = require('child_process');
+        const branch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: dir, timeout: 3000, encoding: 'utf-8' }).toString().trim();
+        const status = execSync('git status --porcelain', { cwd: dir, timeout: 3000, encoding: 'utf-8' }).toString().trim();
+        const uncommitted = status ? status.split('\n').filter((l: string) => l).length : 0;
+        const lastMsg = execSync('git log -1 --format=%s', { cwd: dir, timeout: 3000, encoding: 'utf-8' }).toString().trim();
+        const name = path.basename(dir);
+        const marker = uncommitted > 0 ? c(COLORS.yellow, ` ⚡${uncommitted}个未提交`) : c(COLORS.green, ' ✅ 干净');
+        console.log(`    ${COLORS.cyan}${name}${COLORS.reset} [${branch}]${marker}`);
+        console.log(`    ${COLORS.dim}${lastMsg.substring(0, 60)}${COLORS.reset}`);
+      } catch { /* 跳过非git目录 */ }
+    }
   } catch {
     console.log(`  ${c(COLORS.red, '❌ 获取环境状态失败')}`);
   }
