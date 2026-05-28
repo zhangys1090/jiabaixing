@@ -1,11 +1,15 @@
 /**
- * 场景感知调度器 v3 — 主动环境感知版
+ * 场景感知调度器 v4 — 主动工作流版
  * 核心功能：
  * 1. 基于时间的任务调度
  * 2. 桌面环境主动感知（前台窗口、进程、状态）
- * 3. 主动推送给前端
+ * 3. Git项目变化感知（新分支、未提交、新commit）
+ * 4. 主动推送给前端/EventBus
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
+import { execSync } from 'child_process';
 import { MemoryEngine } from '../memory/MemoryEngine';
 import { EventBus } from '../shared/EventBus';
 import { Logger } from '../utils/Logger';
@@ -27,7 +31,6 @@ export interface ScheduledTask {
   averageExecutionTime: number;
 }
 
-/** 环境感知快照 */
 export interface EnvironmentSnapshot {
   timestamp: string;
   foregroundWindow: { title: string; process: string } | null;
@@ -35,64 +38,93 @@ export interface EnvironmentSnapshot {
   recentProjects: string[];
 }
 
+export interface GitSnapshot {
+  repo: string;
+  branch: string;
+  hasUncommitted: boolean;
+  uncommittedFiles: number;
+  aheadCount: number;
+  behindCount: number;
+  lastCommitMsg: string;
+  lastCommitAgo: string;
+}
+
+export interface ProjectChange {
+  type: 'git_uncommitted' | 'git_new_branch' | 'git_new_commits' | 'project_switch';
+  repo: string;
+  detail: string;
+  timestamp: string;
+}
+
 // ── 调度器主类 ──
 export class ScenarioAwareScheduler {
   private tasks: Map<string, ScheduledTask> = new Map();
   private isRunning: boolean = false;
   private checkInterval: ReturnType<typeof setInterval> | null = null;
-  private readonly CHECK_INTERVAL_MS = 30000; // 30秒检查一次
+  private readonly CHECK_INTERVAL_MS = 30000;
   private memoryEngine: MemoryEngine | null = null;
   private llmCore: JiabaixingCore | null = null;
 
   // 环境感知缓存
   private lastSnapshot: EnvironmentSnapshot | null = null;
   private lastForegroundCheck: number = 0;
-  private readonly FOREGROUND_CHECK_INTERVAL = 15000; // 15秒最小间隔
+  private readonly FOREGROUND_CHECK_INTERVAL = 15000;
+  private lastEnv: string = '';
+
+  // Git 感知
+  private readonly WATCHED_DIRS = [
+    process.cwd(),                    // jiabaixing 自身
+    path.resolve(process.cwd(), '..', 'hermes-agent-main'), // hermes
+    path.resolve(process.cwd(), '..'),                    // /c/zy 根目录
+  ];
+  private lastGitState: Map<string, { branch: string; commit: string; hasUncommitted: boolean }> = new Map();
+  private gitCheckCount: number = 0;
+  private readonly GIT_CHECK_INTERVAL = 10; // 每10次检查（约5分钟）做一次git感知
+  private projectChangeHistory: ProjectChange[] = [];
+  private readonly MAX_CHANGE_HISTORY = 50;
 
   constructor() {
     this.initializeDefaultTasks();
   }
 
-  /** 注入记忆引擎 */
   public setMemoryEngine(engine: MemoryEngine): void {
     this.memoryEngine = engine;
-    Logger.info('✅ 记忆引擎已注入到调度器', 'ScenarioAwareScheduler');
   }
 
-  /** 注入LLM核心 */
   public setLLMCore(core: JiabaixingCore): void {
     this.llmCore = core;
-    Logger.info('✅ LLM核心已注入到调度器', 'ScenarioAwareScheduler');
   }
 
-  /** 更新用户活跃状态 */
-  public updateUserActivity(): void {
-    // 由 processInput 调用，标记用户活跃
-  }
+  public updateUserActivity(): void {}
 
-  /** 获取最新环境快照 */
   public getEnvironmentSnapshot(): EnvironmentSnapshot | null {
     return this.lastSnapshot;
+  }
+
+  public getProactiveTriggers(): Array<{ type: string; reason: string; priority: number }> {
+    return [];
+  }
+
+  public getUserBehaviorPattern(): {
+    activeHours: string[];
+    frequentTopics: string[];
+    taskCompletionRate: number;
+    averageSessionDuration: number;
+  } {
+    return { activeHours: [], frequentTopics: [], taskCompletionRate: 0, averageSessionDuration: 0 };
+  }
+
+  public getProjectChanges(): ProjectChange[] {
+    return [...this.projectChangeHistory];
   }
 
   // ── 初始化 ──
   private initializeDefaultTasks(): void {
     const defaultTasks: ScheduledTask[] = [
       {
-        id: 'morning_briefing',
-        name: '早安问候',
-        description: '每天早晨提供问候',
-        schedule: '0 9 * * *',
-        priority: 1,
-        enabled: true,
-        executionCount: 0,
-        successCount: 0,
-        averageExecutionTime: 0,
-      },
-      {
         id: 'env_awareness',
         name: '环境感知',
-        description: '每30秒感知桌面环境并推送状态',
+        description: '每30秒感知桌面环境',
         schedule: '*/1 * * * *',
         priority: 2,
         enabled: true,
@@ -100,50 +132,47 @@ export class ScenarioAwareScheduler {
         successCount: 0,
         averageExecutionTime: 0,
       },
+      {
+        id: 'git_awareness',
+        name: 'Git感知',
+        description: '定期扫描项目git变化',
+        schedule: '*/5 * * * *',
+        priority: 3,
+        enabled: true,
+        executionCount: 0,
+        successCount: 0,
+        averageExecutionTime: 0,
+      },
     ];
-    defaultTasks.forEach((task) => {
-      this.tasks.set(task.id, task);
-    });
+    defaultTasks.forEach((task) => this.tasks.set(task.id, task));
   }
 
   // ── 核心调度循环 ──
   public start(): void {
-    if (this.isRunning) {
-      Logger.warn('调度器已在运行中', 'ScenarioAwareScheduler');
-      return;
-    }
+    if (this.isRunning) return;
     this.isRunning = true;
-    Logger.info('🚀 场景感知调度器已启动（含环境感知）', 'ScenarioAwareScheduler');
+    Logger.info('🚀 调度器启动（含环境感知+Git感知）', 'ScenarioAwareScheduler');
     void this.checkAndExecuteTasks();
     this.checkInterval = setInterval(() => {
       void this.checkAndExecuteTasks();
     }, this.CHECK_INTERVAL_MS);
-    void EventBus.emit('scheduler_started', {
-      timestamp: new Date().toISOString(),
-    });
+    EventBus.emit('scheduler_started', { timestamp: new Date().toISOString() });
   }
 
   public stop(): void {
     if (!this.isRunning) return;
     this.isRunning = false;
-    if (this.checkInterval) {
-      clearInterval(this.checkInterval);
-      this.checkInterval = null;
-    }
-    Logger.info('⏹ 场景感知调度器已停止', 'ScenarioAwareScheduler');
-    void EventBus.emit('scheduler_stopped', {
-      timestamp: new Date().toISOString(),
-    });
+    if (this.checkInterval) clearInterval(this.checkInterval);
+    this.checkInterval = null;
+    Logger.info('⏹ 调度器已停止', 'ScenarioAwareScheduler');
+    EventBus.emit('scheduler_stopped', { timestamp: new Date().toISOString() });
   }
 
-  public isActive(): boolean {
-    return this.isRunning;
-  }
+  public isActive(): boolean { return this.isRunning; }
 
   // ── 环境感知 ──
   private async senseEnvironment(): Promise<EnvironmentSnapshot> {
     const now = Date.now();
-    // 限频：15秒内不重复检查
     if (this.lastSnapshot && now - this.lastForegroundCheck < this.FOREGROUND_CHECK_INTERVAL) {
       return this.lastSnapshot;
     }
@@ -153,29 +182,32 @@ export class ScenarioAwareScheduler {
     let activeEnv: 'coding' | 'browsing' | 'idle' | 'unknown' = 'unknown';
 
     try {
-      const { WindowManager } = await import('../desktop/WindowManager');
-      const wm = WindowManager.getInstance();
-      const fg = wm.getForegroundWindow();
-      if (fg) {
-        foregroundWindow = { title: fg.title || '', process: fg.processName || '' };
-        // 判断环境类型
-        const title = (fg.title || '').toLowerCase();
-        const proc = (fg.processName || '').toLowerCase();
-        if (title.includes('.ts') || title.includes('.js') || title.includes('.py') ||
-            title.includes('code') || title.includes('vscode') || title.includes('idea') ||
-            proc.includes('code') || proc.includes('terminal') || proc.includes('cmd') ||
-            proc.includes('powershell') || proc.includes('bash') || proc.includes('idea') ||
-            proc.includes('cursor') || proc.includes('windsurf')) {
+      const result = execSync(
+        `powershell -NoProfile -Command "Add-Type @\\\"using System;using System.Runtime.InteropServices;using System.Text;public class WAPIS{[DllImport(\\\"user32.dll\\\")]public static extern IntPtr GetForegroundWindow();[DllImport(\\\"user32.dll\\\")]public static extern int GetWindowText(IntPtr h,StringBuilder s,int n);[DllImport(\\\"user32.dll\\\")]public static extern uint GetWindowThreadProcessId(IntPtr h,out uint p);}\\\";$h=[WAPIS]::GetForegroundWindow();$s=New-Object Text.StringBuilder 256;[WAPIS]::GetWindowText($h,$s,256)|Out-Null;$p=0;[WAPIS]::GetWindowThreadProcessId($h,[ref]$p)|Out-Null;$n=(Get-Process -Id $p -ErrorAction SilentlyContinue).ProcessName;Write-Output \\\"$n|$($s.ToString())\\\""`,
+        { timeout: 5000, encoding: 'utf-8' }
+      ).toString().trim();
+
+      const parts = result.split('|');
+      if (parts.length >= 2 && parts[0]) {
+        const proc = parts[0];
+        const title = parts.slice(1).join('|');
+        foregroundWindow = { title, process: proc };
+
+        const tl = title.toLowerCase();
+        const pl = proc.toLowerCase();
+        if (tl.includes('code') || tl.includes('vscode') || pl.includes('code') ||
+            tl.includes('terminal') || pl.includes('terminal') || pl.includes('cmd') ||
+            pl.includes('powershell') || pl.includes('bash') || tl.includes('cursor') ||
+            tl.includes('windsurf') || tl.includes('.ts') || tl.includes('.jsx')) {
           activeEnv = 'coding';
-        } else if (proc.includes('chrome') || proc.includes('edge') || proc.includes('firefox') ||
-                   proc.includes('explorer') || title.includes('http')) {
+        } else if (pl.includes('chrome') || pl.includes('edge') || pl.includes('firefox') || pl.includes('explorer') || tl.includes('http')) {
           activeEnv = 'browsing';
         } else {
           activeEnv = 'idle';
         }
       }
-    } catch (err) {
-      Logger.warn(`⚠️ 环境感知失败: ${(err as Error).message}`, 'ScenarioAwareScheduler');
+    } catch {
+      // 环境检测失败不影响
     }
 
     const snapshot: EnvironmentSnapshot = {
@@ -184,36 +216,105 @@ export class ScenarioAwareScheduler {
       activeEnv,
       recentProjects: [],
     };
-
     this.lastSnapshot = snapshot;
     return snapshot;
+  }
+
+  // ── Git感知 ──
+  private scanGitRepos(): GitSnapshot[] {
+    const results: GitSnapshot[] = [];
+    for (const dir of this.WATCHED_DIRS) {
+      try {
+        const gitDir = path.join(dir, '.git');
+        if (!fs.existsSync(gitDir)) continue;
+
+        const branch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: dir, timeout: 3000, encoding: 'utf-8' }).toString().trim();
+        const status = execSync('git status --porcelain', { cwd: dir, timeout: 3000, encoding: 'utf-8' }).toString().trim();
+        const hasUncommitted = status.length > 0;
+        const uncommittedFiles = status ? status.split('\n').filter(l => l).length : 0;
+        const aheadBehind = execSync('git rev-list --count --left-right HEAD...@{upstream} 2>/dev/null || echo "0 0"', { cwd: dir, timeout: 3000, encoding: 'utf-8' }).toString().trim();
+        const [ahead, behind] = aheadBehind.split(/\s+/).map(Number);
+        const lastCommitMsg = execSync('git log -1 --format=%s 2>/dev/null || echo "(无commit)"', { cwd: dir, timeout: 3000, encoding: 'utf-8' }).toString().trim();
+        const lastCommitTs = parseInt(execSync('git log -1 --format=%ct 2>/dev/null || echo "0"', { cwd: dir, timeout: 3000, encoding: 'utf-8' }).toString().trim());
+        const lastCommitAgo = lastCommitTs > 0
+          ? `${Math.round((Date.now() / 1000 - lastCommitTs) / 60)}分钟前`
+          : '未知';
+
+        results.push({
+          repo: path.basename(dir),
+          branch,
+          hasUncommitted,
+          uncommittedFiles,
+          aheadCount: ahead || 0,
+          behindCount: behind || 0,
+          lastCommitMsg,
+          lastCommitAgo,
+        });
+
+        // 检测变化
+        const lastState = this.lastGitState.get(dir);
+        const currentCommit = execSync('git rev-parse HEAD 2>/dev/null || echo ""', { cwd: dir, timeout: 3000, encoding: 'utf-8' }).toString().trim();
+        if (lastState) {
+          const changes: ProjectChange[] = [];
+          if (hasUncommitted && !lastState.hasUncommitted) {
+            changes.push({ type: 'git_uncommitted', repo: path.basename(dir), detail: `${uncommittedFiles}个文件未提交`, timestamp: new Date().toISOString() });
+          }
+          if (currentCommit && currentCommit !== lastState.commit) {
+            changes.push({ type: 'git_new_commits', repo: path.basename(dir), detail: `新commit: ${lastCommitMsg.substring(0, 50)}`, timestamp: new Date().toISOString() });
+          }
+          if (branch !== lastState.branch) {
+            changes.push({ type: 'git_new_branch', repo: path.basename(dir), detail: `切换到分支: ${branch}`, timestamp: new Date().toISOString() });
+          }
+          for (const c of changes) {
+            this.projectChangeHistory.push(c);
+            if (this.projectChangeHistory.length > this.MAX_CHANGE_HISTORY) {
+              this.projectChangeHistory.shift();
+            }
+            Logger.info(`📂 项目变化: ${c.type} | ${c.repo}: ${c.detail}`, 'ScenarioAwareScheduler');
+            EventBus.emit('project_change', c);
+          }
+        }
+        this.lastGitState.set(dir, { branch, commit: currentCommit, hasUncommitted });
+      } catch {
+        // 非git目录或git不可用，跳过
+      }
+    }
+    return results;
   }
 
   // ── 任务检查与执行 ──
   private async checkAndExecuteTasks(): Promise<void> {
     const now = new Date();
+
+    // 环境感知（每次）
+    const snapshot = await this.senseEnvironment();
+    const envStr = snapshot.activeEnv;
+    if (envStr !== 'idle' || this.lastEnv !== envStr) {
+      Logger.info(`👀 环境: ${envStr}${snapshot.foregroundWindow ? ' | ' + snapshot.foregroundWindow.process : ''}`, 'ScenarioAwareScheduler');
+      this.lastEnv = envStr;
+      EventBus.emit('environment_update', {
+        timestamp: snapshot.timestamp,
+        activeEnv: snapshot.activeEnv,
+        foregroundWindow: snapshot.foregroundWindow,
+      });
+    }
+
+    // Git感知（每60次 ≈ 30分钟）
+    this.gitCheckCount++;
+    if (this.gitCheckCount >= 60) {
+      this.gitCheckCount = 0;
+      const repos = this.scanGitRepos();
+      if (repos.length > 0) {
+        Logger.info(`📊 Git状态: ${repos.map(r => `${r.repo}[${r.branch}]${r.hasUncommitted ? '*' : ''}${r.aheadCount > 0 ? '↑' + r.aheadCount : ''}${r.behindCount > 0 ? '↓' + r.behindCount : ''}`).join(', ')}`, 'ScenarioAwareScheduler');
+        EventBus.emit('git_status', { timestamp: new Date().toISOString(), repos });
+      }
+    }
+
+    // 定时任务
     for (const task of this.tasks.values()) {
       if (!task.enabled) continue;
       if (this.shouldExecuteTask(task, now)) {
         await this.executeTask(task);
-      }
-    }
-
-    // 环境感知任务 — 非定时模式，每次检查都跑
-    const envTask = this.tasks.get('env_awareness');
-    if (envTask && envTask.enabled) {
-      const snapshot = await this.senseEnvironment();
-      if (snapshot.foregroundWindow) {
-        Logger.info(
-          `👀 环境: ${snapshot.activeEnv} | ${snapshot.foregroundWindow.process} - ${snapshot.foregroundWindow.title.substring(0, 40)}`,
-          'ScenarioAwareScheduler'
-        );
-        // 推送给前端
-        EventBus.emit('environment_update', {
-          timestamp: snapshot.timestamp,
-          activeEnv: snapshot.activeEnv,
-          foregroundWindow: snapshot.foregroundWindow,
-        });
       }
     }
   }
@@ -223,51 +324,21 @@ export class ScenarioAwareScheduler {
       task.nextRun = new Date(now.getTime() + 60 * 1000);
       return false;
     }
-    if (now >= task.nextRun) {
-      return true;
-    }
-    return false;
+    return now >= task.nextRun;
   }
 
   private async executeTask(task: ScheduledTask): Promise<void> {
     const startTime = Date.now();
     Logger.info(`📋 执行任务: ${task.name}`, 'ScenarioAwareScheduler');
-
     try {
-      switch (task.id) {
-        case 'morning_briefing':
-          await this.executeMorningBriefing();
-          break;
-        case 'env_awareness':
-          // 环境感知由checkAndExecuteTasks直接执行，这里只是占位
-          break;
-      }
-
       task.lastRun = new Date();
       task.nextRun = new Date(Date.now() + 60 * 60 * 1000);
       task.executionCount++;
       task.successCount++;
-      task.averageExecutionTime =
-        (task.averageExecutionTime * (task.executionCount - 1) +
-          (Date.now() - startTime)) /
-        task.executionCount;
-
-      Logger.info(`✅ 任务完成: ${task.name} (${Date.now() - startTime}ms)`, 'ScenarioAwareScheduler');
+      task.averageExecutionTime = (task.averageExecutionTime * (task.executionCount - 1) + (Date.now() - startTime)) / task.executionCount;
     } catch (error) {
-      Logger.warn(`❌ 任务执行失败: ${task.name} - ${(error as Error).message}`, 'ScenarioAwareScheduler');
+      Logger.warn(`❌ 任务执行失败: ${task.name}`, 'ScenarioAwareScheduler');
     }
-  }
-
-  private async executeMorningBriefing(): Promise<void> {
-    Logger.info('☀️ 早安问候', 'ScenarioAwareScheduler');
-    const snapshot = await this.senseEnvironment();
-    EventBus.emit('proactive_interaction', {
-      reason: '早安问候',
-      context: snapshot.foregroundWindow
-        ? `当前你在${snapshot.activeEnv === 'coding' ? '写代码' : snapshot.activeEnv === 'browsing' ? '浏览' : '其他'}, 前台窗口: ${snapshot.foregroundWindow.title}`
-        : '新的一天开始了',
-      scene: '日常',
-    });
   }
 
   // ── 公开 API ──
@@ -281,49 +352,22 @@ export class ScenarioAwareScheduler {
 
   public updateTask(taskId: string, updates: Partial<ScheduledTask>): void {
     const task = this.tasks.get(taskId);
-    if (task) {
-      Object.assign(task, updates);
-    }
+    if (task) Object.assign(task, updates);
   }
 
   public addTask(task: ScheduledTask): string {
     this.tasks.set(task.id, task);
-    Logger.info(`➕ 任务已添加: ${task.name}`, 'ScenarioAwareScheduler');
     return task.id;
   }
 
   public toggleTask(taskId: string, enabled?: boolean): void {
     const task = this.tasks.get(taskId);
-    if (task) {
-      task.enabled = enabled ?? !task.enabled;
-      Logger.info(`${task.enabled ? '启用' : '禁用'} 任务: ${task.name}`, 'ScenarioAwareScheduler');
-    }
+    if (task) task.enabled = enabled ?? !task.enabled;
   }
 
   public async executeTaskById(taskId: string): Promise<void> {
     const task = this.tasks.get(taskId);
-    if (task) {
-      await this.executeTask(task);
-    } else {
-      throw new Error(`任务不存在: ${taskId}`);
-    }
-  }
-
-  public getProactiveTriggers(): Array<{ type: string; reason: string; priority: number }> {
-    return [];
-  }
-
-  public getUserBehaviorPattern(): {
-    activeHours: string[];
-    frequentTopics: string[];
-    taskCompletionRate: number;
-    averageSessionDuration: number;
-  } {
-    return {
-      activeHours: [],
-      frequentTopics: [],
-      taskCompletionRate: 0,
-      averageSessionDuration: 0,
-    };
+    if (!task) throw new Error(`任务不存在: ${taskId}`);
+    await this.executeTask(task);
   }
 }

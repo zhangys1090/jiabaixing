@@ -56,6 +56,8 @@ export interface SchedulerEvents {
   scheduler_started: [payload: { timestamp: string }];
   scheduler_stopped: [payload: { timestamp: string }];
   environment_update: [payload: { timestamp?: string; activeEnv?: string; foregroundWindow?: { title: string; process: string } | null }];
+  project_change: [payload: { type: string; repo: string; detail: string; timestamp: string }];
+  git_status: [payload: { timestamp: string; repos: Array<{ repo: string; branch: string; hasUncommitted: boolean; uncommittedFiles: number; aheadCount: number; behindCount: number }> }];
   proactive_trigger: [
     payload: {
       type: string;

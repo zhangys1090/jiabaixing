@@ -400,6 +400,30 @@ export function setupEventBus(
     });
   });
 
+  registerOnce('project_change', (data: unknown) => {
+    const payload = data as { type: string; repo: string; detail: string; timestamp: string };
+    broadcast({
+      type: 'project_change',
+      data: {
+        type: payload.type,
+        repo: payload.repo,
+        detail: payload.detail,
+        timestamp: payload.timestamp || new Date().toISOString(),
+      },
+    });
+  });
+
+  registerOnce('git_status', (data: unknown) => {
+    const payload = data as { timestamp: string; repos: Array<Record<string, unknown>> };
+    broadcast({
+      type: 'git_status',
+      data: {
+        timestamp: payload.timestamp || new Date().toISOString(),
+        repos: payload.repos || [],
+      },
+    });
+  });
+
   Logger.on('log', (entry) => {
     if (entry.level === 'error' || entry.level === 'fatal') {
       broadcast({
