@@ -106,6 +106,10 @@ export interface EvolutionExamplesDeps {
   }>;
 }
 
+export interface EnvironmentSensorDeps {
+  getEnvironmentContext(): string;
+}
+
 export interface HarnessDeps {
   llm: LLMProviderDeps;
   constitutionalBuilder: ConstitutionalBuilderDeps;
@@ -119,5 +123,6 @@ export interface HarnessDeps {
   evolutionEngine?: EvolutionEngineDeps;
   personaCore?: PersonaCoreDeps;
   evolutionExamples?: EvolutionExamplesDeps;
+  environmentSensor?: EnvironmentSensorDeps;
   orchestratorAgent?: OrchestratorAgent;
 }

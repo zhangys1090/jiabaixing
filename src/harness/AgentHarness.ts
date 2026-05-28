@@ -211,6 +211,8 @@ export class AgentHarness {
         dynamicContext: this.deps.dynamicContext,
         historyProvider: this.deps.historyProvider,
         personaCore: this.deps.personaCore,
+        environmentSensor: this.deps.environmentSensor,
+        evolutionExamples: this.deps.evolutionExamples,
       });
       Logger.info('  📋 上下文层: 启用', 'AgentHarness');
       if (this.deps.personaCore) {

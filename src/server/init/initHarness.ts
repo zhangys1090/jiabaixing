@@ -282,6 +282,32 @@ export async function initHarness(
           return [];
         },
       },
+      environmentSensor: {
+        getEnvironmentContext: () => {
+          try {
+            // 从调度器缓存中获取最新环境快照
+            const scheduler = core.getScenarioScheduler();
+            if (scheduler) {
+              const snapshot = scheduler.getEnvironmentSnapshot?.();
+              if (snapshot?.foregroundWindow?.title) {
+                const fg = snapshot.foregroundWindow;
+                const proc = (fg.process || '').toLowerCase();
+                const title = fg.title.toLowerCase();
+                let env = 'other';
+                if (title.includes('code') || title.includes('vscode') || proc.includes('code') ||
+                    title.includes('terminal') || proc.includes('terminal') || proc.includes('cmd') ||
+                    proc.includes('powershell') || proc.includes('bash') || proc.includes('cursor')) {
+                  env = 'coding';
+                } else if (proc.includes('chrome') || proc.includes('edge') || proc.includes('firefox') || proc.includes('explorer')) {
+                  env = 'browsing';
+                }
+                return `当前环境: ${env === 'coding' ? '编程中' : env === 'browsing' ? '浏览网页' : '其他'}\n前台窗口: ${fg.title}`;
+              }
+            }
+          } catch { /* ignore */ }
+          return '';
+        },
+      },
       toolDeps: {
         retrieveRelevant: async (query) => {
           const results = await memoryEngine.preciseHybridRetrieval(

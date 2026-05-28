@@ -105,6 +105,19 @@ export interface ContextManagerDeps {
   sceneRecognizer?: {
     recognizeSceneFromInput(input: string): string;
   };
+  /** 桌面环境感知注入 */
+  environmentSensor?: {
+    getEnvironmentContext(): string;
+  };
+  /** 进化纠错示例 */
+  evolutionExamples?: {
+    getPromptExamples(): Array<{
+      trigger: string;
+      correction: string;
+      example: string;
+      frequency: number;
+    }>;
+  };
   /** LLM 提供者（用于摘要生成） */
   llm?: {
     chat(prompt: string, systemPrompt?: string): Promise<string>;
@@ -256,6 +269,48 @@ export class ContextManager {
       }
     } catch {
       // 记忆注入失败不影响主流程
+    }
+
+    // 4.5 桌面环境感知 (priority: 6)
+    try {
+      const envContext = this.deps.environmentSensor?.getEnvironmentContext?.();
+      if (envContext) {
+        const truncated = this.allocator.truncateToBudget(
+          envContext,
+          allocation.dynamicContext
+        );
+        messages.push({
+          role: 'system',
+          content: `【当前环境】\n${truncated}`,
+        });
+        this.entries.push({
+          id: 'environment',
+          type: 'dynamic',
+          content: truncated,
+          priority: 6,
+          tokenEstimate: this.allocator.estimateTokens(truncated),
+          source: 'EnvironmentSensor',
+        });
+      }
+    } catch {
+      // 环境感知失败不影响主流程
+    }
+
+    // 4.6 进化纠错提示 (priority: 6)
+    try {
+      const examples = this.deps.evolutionExamples?.getPromptExamples?.();
+      if (examples && examples.length > 0) {
+        const top = examples.sort((a, b) => b.frequency - a.frequency).slice(0, 2);
+        const hintText = top.map(
+          (e, i) => `${i + 1}. 当用户说"${e.trigger}" → 正确做法: ${e.correction}`
+        ).join('\n');
+        messages.push({
+          role: 'system',
+          content: `【进化经验】\n以下是从历史交互中学习的经验：\n${hintText}`,
+        });
+      }
+    } catch {
+      // 进化提示注入失败不影响主流程
     }
 
     // 5. Conversation History (priority: 5)
