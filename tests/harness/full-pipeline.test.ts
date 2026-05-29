@@ -18,7 +18,11 @@
 
 import { AgentHarness } from '../../src/harness/AgentHarness';
 import type { HarnessDeps } from '../../src/harness/AgentHarness';
-import { LifecycleEvent, Permission, ToolCategory } from '../../src/harness/types';
+import {
+  LifecycleEvent,
+  Permission,
+  ToolCategory,
+} from '../../src/harness/types';
 import type { UserInput, ChatMessage } from '../../src/harness/types';
 
 // ============ Mock 数据 ============
@@ -27,53 +31,84 @@ function createMockDeps(): HarnessDeps {
   const mockLlm = {
     chatWithTools: jest.fn().mockResolvedValue({
       content: '好的，我来帮你完成这个任务。',
-      toolCalls: []
+      toolCalls: [],
     }),
-    chat: jest.fn().mockResolvedValue('这是一个模拟的 LLM 回复。')
+    chat: jest.fn().mockResolvedValue('这是一个模拟的 LLM 回复。'),
   };
 
   return {
     llm: mockLlm,
     constitutionalBuilder: {
-      buildConstitutionPrompt: jest.fn().mockResolvedValue('宪法 Prompt')
+      buildConstitutionPrompt: jest.fn().mockResolvedValue('宪法 Prompt'),
     },
     memoryInjector: {
-      autoRetrieveMemories: jest.fn().mockResolvedValue(['记忆1', '记忆2'])
+      autoRetrieveMemories: jest.fn().mockResolvedValue(['记忆1', '记忆2']),
     },
     dynamicContext: {
-      getDynamicContext: jest.fn().mockReturnValue('当前时间: 2026-05-25 10:00')
+      getDynamicContext: jest
+        .fn()
+        .mockReturnValue('当前时间: 2026-05-25 10:00'),
     },
     historyProvider: {
       getAllHistory: jest.fn(),
-          getRecentHistory: jest.fn().mockReturnValue([
+      getRecentHistory: jest.fn().mockReturnValue([
         { role: 'user', content: '你好' },
-        { role: 'assistant', content: '你好！' }
-      ])
+        { role: 'assistant', content: '你好！' },
+      ]),
     },
     toolDeps: {
-      detectEmotionFromInput: jest.fn().mockReturnValue({ type: '平静', intensity: 2 }),
-      recognizeScene: jest.fn().mockResolvedValue({ type: '日常对话', context: '日常' }),
+      detectEmotionFromInput: jest
+        .fn()
+        .mockReturnValue({ type: '平静', intensity: 2 }),
+      recognizeScene: jest
+        .fn()
+        .mockResolvedValue({ type: '日常对话', context: '日常' }),
       agentSelfReflection: null,
       getHistory: jest.fn().mockResolvedValue([]),
       removeHistory: jest.fn().mockResolvedValue(null),
       addToHistory: jest.fn().mockResolvedValue(undefined),
       validateCodeSyntax: jest.fn().mockReturnValue([]),
-      taskStore: { getTasks: jest.fn().mockResolvedValue([]), saveTask: jest.fn().mockResolvedValue(undefined), deleteTask: jest.fn().mockResolvedValue(undefined) },
-      reminderStore: { getReminders: jest.fn().mockResolvedValue([]), saveReminder: jest.fn().mockResolvedValue(undefined), deleteReminder: jest.fn().mockResolvedValue(undefined) },
+      taskStore: {
+        getTasks: jest.fn().mockResolvedValue([]),
+        saveTask: jest.fn().mockResolvedValue(undefined),
+        deleteTask: jest.fn().mockResolvedValue(undefined),
+      },
+      reminderStore: {
+        getReminders: jest.fn().mockResolvedValue([]),
+        saveReminder: jest.fn().mockResolvedValue(undefined),
+        deleteReminder: jest.fn().mockResolvedValue(undefined),
+      },
       scheduleTrigger: null,
-      noteStore: { getNotes: jest.fn().mockResolvedValue([]), saveNote: jest.fn().mockResolvedValue(undefined), deleteNote: jest.fn().mockResolvedValue(undefined) },
+      noteStore: {
+        getNotes: jest.fn().mockResolvedValue([]),
+        saveNote: jest.fn().mockResolvedValue(undefined),
+        deleteNote: jest.fn().mockResolvedValue(undefined),
+      },
+      calendarStore: {
+        getEvents: jest.fn().mockResolvedValue([]),
+        saveEvent: jest.fn().mockResolvedValue(undefined),
+        deleteEvent: jest.fn().mockResolvedValue(undefined),
+      },
       getMemoryStats: jest.fn().mockReturnValue({ count: 0 }),
-      getToolStats: jest.fn().mockReturnValue({ registered: 25, byCategory: {} }),
-      getHarnessStats: jest.fn().mockReturnValue({ initialized: true, config: {} }),
+      getToolStats: jest
+        .fn()
+        .mockReturnValue({ registered: 25, byCategory: {} }),
+      getHarnessStats: jest
+        .fn()
+        .mockReturnValue({ initialized: true, config: {} }),
       getEvolutionStats: jest.fn().mockReturnValue({}),
       getSchedulerStats: jest.fn().mockReturnValue({}),
-      skillStore: { getSkills: jest.fn().mockResolvedValue([]), saveSkill: jest.fn().mockResolvedValue(undefined), deleteSkill: jest.fn().mockResolvedValue(undefined) },
+      skillStore: {
+        getSkills: jest.fn().mockResolvedValue([]),
+        saveSkill: jest.fn().mockResolvedValue(undefined),
+        deleteSkill: jest.fn().mockResolvedValue(undefined),
+      },
     },
     persistenceDeps: {
       memoryEngine: null,
       conversationHistory: null,
       userProfile: null,
-    }
+    },
   };
 }
 
@@ -82,7 +117,7 @@ function createUserInput(text: string = '帮我列出当前目录的文件'): Us
     text,
     userId: 'test-user',
     traceId: `test-trace-${Date.now()}`,
-    metadata: { testRun: true }
+    metadata: { testRun: true },
   };
 }
 
@@ -103,7 +138,7 @@ describe('Task 7: 全链路集成测试 - E-T-C-S-L-V 六层架构', () => {
         useHarnessContext: true,
         useHarnessVerification: true,
         useHarnessConstraints: true,
-        useHarnessPersistence: true
+        useHarnessPersistence: true,
       });
       harness.setDeps(deps);
       await harness.initialize();
@@ -127,7 +162,7 @@ describe('Task 7: 全链路集成测试 - E-T-C-S-L-V 六层架构', () => {
         useHarnessContext: true,
         useHarnessVerification: true,
         useHarnessConstraints: true,
-        useHarnessPersistence: true
+        useHarnessPersistence: true,
       });
       harness.setDeps(deps);
       await harness.initialize();
@@ -157,7 +192,7 @@ describe('Task 7: 全链路集成测试 - E-T-C-S-L-V 六层架构', () => {
       // 验证工具可以转换为 OpenAI 格式
       const openaiTools = toolRegistry?.toOpenAITools() || [];
       expect(openaiTools.length).toBeGreaterThan(0);
-      openaiTools.forEach(tool => {
+      openaiTools.forEach((tool) => {
         expect(tool.type).toBe('function');
         expect(tool.function.name).toBeDefined();
         expect(tool.function.description).toBeDefined();
@@ -173,8 +208,11 @@ describe('Task 7: 全链路集成测试 - E-T-C-S-L-V 六层架构', () => {
       expect(validator).not.toBeNull();
 
       const validParams = { query: '测试查询' };
-      const schema: Record<string, import('../../src/harness/types').ToolParameterDef> = {
-        query: { type: 'string', description: '查询内容' }
+      const schema: Record<
+        string,
+        import('../../src/harness/types').ToolParameterDef
+      > = {
+        query: { type: 'string', description: '查询内容' },
       };
 
       const validation = validator?.validate(validParams, schema, ['query']);
@@ -184,7 +222,7 @@ describe('Task 7: 全链路集成测试 - E-T-C-S-L-V 六层架构', () => {
     test('ConstraintsService 应该正确检查预算和权限', async () => {
       const harness = new AgentHarness({
         useHarnessTools: true,
-        useHarnessConstraints: true
+        useHarnessConstraints: true,
       });
       harness.setDeps(deps);
       await harness.initialize();
@@ -203,7 +241,7 @@ describe('Task 7: 全链路集成测试 - E-T-C-S-L-V 六层架构', () => {
         startTime: Date.now(),
         maxDurationMs: 60000,
         toolCallsUsed: 3,
-        maxToolCalls: 20
+        maxToolCalls: 20,
       });
       expect(budgetCheck?.withinBudget).toBe(true);
 
@@ -214,7 +252,7 @@ describe('Task 7: 全链路集成测试 - E-T-C-S-L-V 六层架构', () => {
         'low',
         {
           permissions: new Set([Permission.MEMORY_READ]),
-          metadata: {}
+          metadata: {},
         }
       );
       expect(permissionCheck?.allowed).toBe(true);
@@ -222,7 +260,7 @@ describe('Task 7: 全链路集成测试 - E-T-C-S-L-V 六层架构', () => {
 
     test('VerificationService 应该正确验证和评估质量', async () => {
       const harness = new AgentHarness({
-        useHarnessVerification: true
+        useHarnessVerification: true,
       });
       harness.setDeps(deps);
       await harness.initialize();
@@ -235,9 +273,12 @@ describe('Task 7: 全链路集成测试 - E-T-C-S-L-V 六层架构', () => {
         success: true,
         output: '操作成功完成',
         duration: 100,
-        validated: false
+        validated: false,
       };
-      const validation = verification?.validateToolResult('test_tool', toolResult);
+      const validation = verification?.validateToolResult(
+        'test_tool',
+        toolResult
+      );
       expect(validation?.valid).toBe(true);
 
       // 质量评分
@@ -246,7 +287,7 @@ describe('Task 7: 全链路集成测试 - E-T-C-S-L-V 六层架构', () => {
         totalToolCalls: 3,
         totalToolDuration: 500,
         totalDuration: 2000,
-        completedSuccessfully: true
+        completedSuccessfully: true,
       });
       expect(quality?.overall).toBeGreaterThan(0);
     });
@@ -258,7 +299,7 @@ describe('Task 7: 全链路集成测试 - E-T-C-S-L-V 六层架构', () => {
         useHarnessLoop: true,
         useHarnessTools: true,
         useHarnessConstraints: true,
-        useHarnessPersistence: true
+        useHarnessPersistence: true,
       });
       harness.setDeps(deps);
       await harness.initialize();
@@ -289,7 +330,7 @@ describe('Task 7: 全链路集成测试 - E-T-C-S-L-V 六层架构', () => {
       const harness = new AgentHarness({
         useHarnessLoop: true,
         useHarnessTools: true,
-        useHarnessConstraints: true
+        useHarnessConstraints: true,
       });
       harness.setDeps(deps);
       await harness.initialize();
@@ -321,7 +362,7 @@ describe('Task 7: 全链路集成测试 - E-T-C-S-L-V 六层架构', () => {
       const harness = new AgentHarness({
         useHarnessLoop: true,
         useHarnessTools: true,
-        useHarnessConstraints: true
+        useHarnessConstraints: true,
       });
       harness.setDeps(deps);
       await harness.initialize();
@@ -347,7 +388,7 @@ describe('Task 7: 全链路集成测试 - E-T-C-S-L-V 六层架构', () => {
       const harness = new AgentHarness({
         useHarnessLoop: true,
         useHarnessTools: true,
-        useHarnessPersistence: true
+        useHarnessPersistence: true,
       });
       harness.setDeps(deps);
       await harness.initialize();
@@ -363,7 +404,7 @@ describe('Task 7: 全链路集成测试 - E-T-C-S-L-V 六层架构', () => {
         status: 'in_progress' as const,
         currentStepIndex: 0,
         createdAt: Date.now(),
-        updatedAt: Date.now()
+        updatedAt: Date.now(),
       };
 
       // 保存状态
@@ -380,7 +421,7 @@ describe('Task 7: 全链路集成测试 - E-T-C-S-L-V 六层架构', () => {
       const harness = new AgentHarness({
         useHarnessLoop: true,
         useHarnessTools: true,
-        useHarnessPersistence: true
+        useHarnessPersistence: true,
       });
       harness.setDeps(deps);
       await harness.initialize();
@@ -400,7 +441,7 @@ describe('Task 7: 全链路集成测试 - E-T-C-S-L-V 六层架构', () => {
 
     test('应该记录进化指标', async () => {
       const harness = new AgentHarness({
-        useHarnessPersistence: true
+        useHarnessPersistence: true,
       });
       harness.setDeps(deps);
       await harness.initialize();
@@ -411,12 +452,13 @@ describe('Task 7: 全链路集成测试 - E-T-C-S-L-V 六层架构', () => {
       const metric = {
         metricType: 'tool_success_rate',
         value: 0.95,
-        timestamp: Date.now()
+        timestamp: Date.now(),
       };
 
       persistence?.recordEvolutionMetric(metric);
 
-      const metrics = persistence?.getEvolutionMetrics('tool_success_rate') || [];
+      const metrics =
+        persistence?.getEvolutionMetrics('tool_success_rate') || [];
       expect(metrics.length).toBeGreaterThan(0);
       expect(metrics[0].value).toBe(0.95);
     });
@@ -427,7 +469,7 @@ describe('Task 7: 全链路集成测试 - E-T-C-S-L-V 六层架构', () => {
       const harness = new AgentHarness({
         useHarnessLoop: true,
         useHarnessTools: true,
-        useHarnessVerification: true
+        useHarnessVerification: true,
       });
       harness.setDeps(deps);
       await harness.initialize();
@@ -447,7 +489,7 @@ describe('Task 7: 全链路集成测试 - E-T-C-S-L-V 六层架构', () => {
 
     test('验证服务应该能够评估目标达成度', async () => {
       const harness = new AgentHarness({
-        useHarnessVerification: true
+        useHarnessVerification: true,
       });
       harness.setDeps(deps);
       await harness.initialize();
@@ -466,7 +508,7 @@ describe('Task 7: 全链路集成测试 - E-T-C-S-L-V 六层架构', () => {
 
     test('应该能够检测安全风险', async () => {
       const harness = new AgentHarness({
-        useHarnessVerification: true
+        useHarnessVerification: true,
       });
       harness.setDeps(deps);
       await harness.initialize();
@@ -488,7 +530,7 @@ describe('Task 7: 全链路集成测试 - E-T-C-S-L-V 六层架构', () => {
     test('T-C 协作: 工具执行前检查权限和预算', async () => {
       const harness = new AgentHarness({
         useHarnessTools: true,
-        useHarnessConstraints: true
+        useHarnessConstraints: true,
       });
       harness.setDeps(deps);
       await harness.initialize();
@@ -504,7 +546,7 @@ describe('Task 7: 全链路集成测试 - E-T-C-S-L-V 六层架构', () => {
       // 模拟工具调用前的检查流程
       const context = {
         permissions: new Set([Permission.FILE_READ]),
-        metadata: {}
+        metadata: {},
       };
 
       // 权限检查
@@ -527,7 +569,7 @@ describe('Task 7: 全链路集成测试 - E-T-C-S-L-V 六层架构', () => {
         startTime: Date.now(),
         maxDurationMs: 60000,
         toolCallsUsed: 1,
-        maxToolCalls: 20
+        maxToolCalls: 20,
       });
       expect(budgetResult?.withinBudget).toBe(true);
     });
@@ -535,7 +577,7 @@ describe('Task 7: 全链路集成测试 - E-T-C-S-L-V 六层架构', () => {
     test('T-V 协作: 工具执行后验证结果', async () => {
       const harness = new AgentHarness({
         useHarnessTools: true,
-        useHarnessVerification: true
+        useHarnessVerification: true,
       });
       harness.setDeps(deps);
       await harness.initialize();
@@ -551,10 +593,13 @@ describe('Task 7: 全链路集成测试 - E-T-C-S-L-V 六层架构', () => {
         success: true,
         output: '文件读取成功',
         duration: 150,
-        validated: false
+        validated: false,
       };
 
-      const validation = verification?.validateToolResult('file_read', toolResult);
+      const validation = verification?.validateToolResult(
+        'file_read',
+        toolResult
+      );
       expect(validation?.valid).toBe(true);
     });
 
@@ -562,7 +607,7 @@ describe('Task 7: 全链路集成测试 - E-T-C-S-L-V 六层架构', () => {
       const harness = new AgentHarness({
         useHarnessLoop: true,
         useHarnessTools: true,
-        useHarnessPersistence: true
+        useHarnessPersistence: true,
       });
       harness.setDeps(deps);
       await harness.initialize();
@@ -591,7 +636,7 @@ describe('Task 7: 全链路集成测试 - E-T-C-S-L-V 六层架构', () => {
         useHarnessContext: true,
         useHarnessVerification: true,
         useHarnessConstraints: true,
-        useHarnessPersistence: true
+        useHarnessPersistence: true,
       });
       harness.setDeps(deps);
       await harness.initialize();
@@ -634,7 +679,7 @@ describe('Task 7: 全链路集成测试 - E-T-C-S-L-V 六层架构', () => {
       const harness = new AgentHarness({
         useHarnessLoop: true,
         useHarnessTools: true,
-        useHarnessConstraints: true
+        useHarnessConstraints: true,
       });
       harness.setDeps(deps);
       await harness.initialize();
@@ -663,7 +708,7 @@ describe('Task 7: 全链路集成测试 - E-T-C-S-L-V 六层架构', () => {
         useHarnessContext: true,
         useHarnessVerification: false,
         useHarnessConstraints: false,
-        useHarnessPersistence: false
+        useHarnessPersistence: false,
       });
       harness.setDeps(deps);
       await harness.initialize();

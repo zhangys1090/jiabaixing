@@ -45,16 +45,19 @@ export async function initEvolution(
             Logger.error('LLM 调用失败', error as Error, 'initEvolution');
             return JSON.stringify({ error: 'LLM call failed' });
           }
-        }
+        },
       };
       evolutionEngineV2 = new EvolutionEngineV2(llmClientAdapter);
-      Logger.info('🧬 EvolutionEngineV2 (真正自我进化) 已初始化', 'initEvolution');
+      Logger.info(
+        '🧬 EvolutionEngineV2 (真正自我进化) 已初始化',
+        'initEvolution'
+      );
     }
 
     const orchestrator = EvolutionOrchestrator.getInstance();
     orchestrator.registerEngines({
       evolutionEngine,
-      evolutionEngineV2,
+      evolutionEngineV2: evolutionEngineV2 || undefined,
       llmProvider: core?.getLLM(),
     });
     orchestrator.start();

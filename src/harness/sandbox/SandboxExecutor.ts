@@ -56,9 +56,13 @@ export const DEFAULT_SANDBOX_CONFIG: SandboxConfig = {
   maxMemoryMb: 512,
   maxCpuPercent: 50,
   allowedAPIs: [
-    'console.log', 'console.warn', 'console.error',
-    'JSON.parse', 'JSON.stringify',
-    'Date.now', 'Math.*'
+    'console.log',
+    'console.warn',
+    'console.error',
+    'JSON.parse',
+    'JSON.stringify',
+    'Date.now',
+    'Math.*',
   ],
   allowedFilePaths: [],
   networkPolicy: 'deny',
@@ -89,7 +93,10 @@ export class SandboxExecutor {
     this.logs = [];
     this.securityViolations = [];
 
-    Logger.debug(`📝 沙箱执行开始: ${code.slice(0, 100)}...`, 'SandboxExecutor');
+    Logger.debug(
+      `📝 沙箱执行开始: ${code.slice(0, 100)}...`,
+      'SandboxExecutor'
+    );
 
     try {
       // 预检查代码安全性
@@ -105,22 +112,21 @@ export class SandboxExecutor {
 
       // 在受限环境中执行
       const result = await this.executeInSandbox(code);
-      
+
       const durationMs = Date.now() - startTime;
-      
-      Logger.debug(
-        `✅ 沙箱执行完成 (${durationMs}ms)`,
-        'SandboxExecutor'
-      );
+
+      Logger.debug(`✅ 沙箱执行完成 (${durationMs}ms)`, 'SandboxExecutor');
 
       return {
         success: true,
         output: result,
         durationMs,
         logs: this.logs.length > 0 ? [...this.logs] : undefined,
-        securityViolations: this.securityViolations.length > 0 ? [...this.securityViolations] : undefined,
+        securityViolations:
+          this.securityViolations.length > 0
+            ? [...this.securityViolations]
+            : undefined,
       };
-
     } catch (error) {
       const durationMs = Date.now() - startTime;
       Logger.error(
@@ -134,7 +140,10 @@ export class SandboxExecutor {
         error: (error as Error).message,
         durationMs,
         logs: this.logs.length > 0 ? [...this.logs] : undefined,
-        securityViolations: this.securityViolations.length > 0 ? [...this.securityViolations] : undefined,
+        securityViolations:
+          this.securityViolations.length > 0
+            ? [...this.securityViolations]
+            : undefined,
       };
     }
   }
@@ -189,24 +198,26 @@ export class SandboxExecutor {
 
       try {
         // 使用严格模式和受限上下文执行
-        const asyncFunction = new Function(...Object.keys(safeContext), `
+        const asyncFunction = new Function(
+          ...Object.keys(safeContext),
+          `
           'use strict';
           return (async () => {
             ${code}
           })();
-        `);
+        `
+        );
 
         // 执行代码
         asyncFunction(...Object.values(safeContext))
-          .then((result) => {
+          .then((result: unknown) => {
             clearTimeout(timeoutId);
             resolve(result);
           })
-          .catch((error) => {
+          .catch((error: unknown) => {
             clearTimeout(timeoutId);
             reject(error);
           });
-
       } catch (error) {
         clearTimeout(timeoutId);
         reject(error);
@@ -221,13 +232,13 @@ export class SandboxExecutor {
     // 安全的 console
     const safeConsole = {
       log: (...args: unknown[]) => {
-        this.logs.push(args.map(a => String(a)).join(' '));
+        this.logs.push(args.map((a) => String(a)).join(' '));
       },
       warn: (...args: unknown[]) => {
-        this.logs.push('[WARN] ' + args.map(a => String(a)).join(' '));
+        this.logs.push('[WARN] ' + args.map((a) => String(a)).join(' '));
       },
       error: (...args: unknown[]) => {
-        this.logs.push('[ERROR] ' + args.map(a => String(a)).join(' '));
+        this.logs.push('[ERROR] ' + args.map((a) => String(a)).join(' '));
       },
     };
 
@@ -248,11 +259,17 @@ export class SandboxExecutor {
   /**
    * 检查工具执行权限
    */
-  checkToolPermission(toolName: string, params: Record<string, unknown>): PermissionCheckResult {
+  checkToolPermission(
+    toolName: string,
+    params: Record<string, unknown>
+  ): PermissionCheckResult {
     const highRiskTools = ['delete_file', 'execute_command', 'modify_system'];
     const mediumRiskTools = ['write_file', 'edit_file'];
 
-    if (highRiskTools.includes(toolName) && this.config.securityLevel !== 'low') {
+    if (
+      highRiskTools.includes(toolName) &&
+      this.config.securityLevel !== 'low'
+    ) {
       return {
         allowed: false,
         reason: `工具 ${toolName} 在当前安全级别下不可用`,
@@ -260,7 +277,10 @@ export class SandboxExecutor {
       };
     }
 
-    if (mediumRiskTools.includes(toolName) && this.config.securityLevel === 'high') {
+    if (
+      mediumRiskTools.includes(toolName) &&
+      this.config.securityLevel === 'high'
+    ) {
       return {
         allowed: false,
         reason: `工具 ${toolName} 需要降低安全级别`,

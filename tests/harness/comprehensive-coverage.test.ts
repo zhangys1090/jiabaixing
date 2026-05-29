@@ -24,7 +24,7 @@ import {
   Executor,
   Evaluator,
   Reporter,
-  PersistenceService
+  PersistenceService,
 } from '../../src/harness';
 import type { HarnessDeps } from '../../src/harness/AgentHarness';
 import type { HarnessToolDeps } from '../../src/harness/tools/registerHarnessTools';
@@ -32,12 +32,12 @@ import {
   LifecycleEvent,
   Permission,
   ToolCategory,
-  LoopState
+  LoopState,
 } from '../../src/harness/types';
 import type {
   UserInput,
   ChatMessage,
-  ToolDefinition
+  ToolDefinition,
 } from '../../src/harness/types';
 
 // ============ 25 个工具的名称列表 ============
@@ -67,14 +67,23 @@ const ALL_TOOL_NAMES = [
   'code_analyze',
   'code_fix',
   'code_generate',
-  // 日常管理工具 (4个)
+  // 日常管理工具 (9个)
   'task_manage',
   'reminder_set',
   'note_take',
   'system_status',
-  // 网络工具 (2个)
+  'batch_task',
+  'calendar',
+  'task_analytics',
+  'task_dependency',
+  'task_priority',
+  // 网络工具 (4个)
   'web_search',
-  'skill_create'
+  'skill_create',
+  'image_generate',
+  'web_fetch',
+  // 系统工具 (4个)
+  'shell_exec',
 ];
 
 // ============ Mock 数据和辅助函数 ============
@@ -83,50 +92,81 @@ function createMockDeps(): HarnessDeps & { toolDeps: HarnessToolDeps } {
   const mockLlm = {
     chatWithTools: jest.fn().mockResolvedValue({
       content: '好的，我来帮你完成这个任务。',
-      toolCalls: []
+      toolCalls: [],
     }),
-    chat: jest.fn().mockResolvedValue('这是一个模拟的 LLM 回复。')
+    chat: jest.fn().mockResolvedValue('这是一个模拟的 LLM 回复。'),
   };
 
   return {
     llm: mockLlm,
     constitutionalBuilder: {
-      buildConstitutionPrompt: jest.fn().mockResolvedValue('宪法 Prompt')
+      buildConstitutionPrompt: jest.fn().mockResolvedValue('宪法 Prompt'),
     },
     memoryInjector: {
-      autoRetrieveMemories: jest.fn().mockResolvedValue(['记忆1', '记忆2'])
+      autoRetrieveMemories: jest.fn().mockResolvedValue(['记忆1', '记忆2']),
     },
     dynamicContext: {
-      getDynamicContext: jest.fn().mockReturnValue('当前时间: 2026-05-25 10:00')
+      getDynamicContext: jest
+        .fn()
+        .mockReturnValue('当前时间: 2026-05-25 10:00'),
     },
     historyProvider: {
       getAllHistory: jest.fn(),
-          getRecentHistory: jest.fn().mockReturnValue([
+      getRecentHistory: jest.fn().mockReturnValue([
         { role: 'user', content: '你好' },
-        { role: 'assistant', content: '你好！' }
-      ])
+        { role: 'assistant', content: '你好！' },
+      ]),
     },
     toolDeps: {
-      detectEmotionFromInput: jest.fn().mockReturnValue({ type: '平静', intensity: 2 }),
-      recognizeScene: jest.fn().mockResolvedValue({ type: '日常对话', context: '日常' }),
+      detectEmotionFromInput: jest
+        .fn()
+        .mockReturnValue({ type: '平静', intensity: 2 }),
+      recognizeScene: jest
+        .fn()
+        .mockResolvedValue({ type: '日常对话', context: '日常' }),
       agentSelfReflection: null,
       getHistory: jest.fn().mockResolvedValue([]),
       removeHistory: jest.fn().mockResolvedValue(null),
       addToHistory: jest.fn().mockResolvedValue(undefined),
       validateCodeSyntax: jest.fn().mockReturnValue([]),
-      taskStore: { getTasks: jest.fn().mockResolvedValue([]), saveTask: jest.fn().mockResolvedValue(undefined), deleteTask: jest.fn().mockResolvedValue(undefined) },
-      reminderStore: { getReminders: jest.fn().mockResolvedValue([]), saveReminder: jest.fn().mockResolvedValue(undefined), deleteReminder: jest.fn().mockResolvedValue(undefined) },
+      taskStore: {
+        getTasks: jest.fn().mockResolvedValue([]),
+        saveTask: jest.fn().mockResolvedValue(undefined),
+        deleteTask: jest.fn().mockResolvedValue(undefined),
+      },
+      reminderStore: {
+        getReminders: jest.fn().mockResolvedValue([]),
+        saveReminder: jest.fn().mockResolvedValue(undefined),
+        deleteReminder: jest.fn().mockResolvedValue(undefined),
+      },
       scheduleTrigger: null,
-      noteStore: { getNotes: jest.fn().mockResolvedValue([]), saveNote: jest.fn().mockResolvedValue(undefined), deleteNote: jest.fn().mockResolvedValue(undefined) },
+      noteStore: {
+        getNotes: jest.fn().mockResolvedValue([]),
+        saveNote: jest.fn().mockResolvedValue(undefined),
+        deleteNote: jest.fn().mockResolvedValue(undefined),
+      },
+      calendarStore: {
+        getEvents: jest.fn().mockResolvedValue([]),
+        saveEvent: jest.fn().mockResolvedValue(undefined),
+        deleteEvent: jest.fn().mockResolvedValue(undefined),
+      },
       getMemoryStats: jest.fn().mockReturnValue({}),
-      getToolStats: jest.fn().mockReturnValue({ registered: 0, byCategory: {} }),
-      getHarnessStats: jest.fn().mockReturnValue({ initialized: false, config: {} }),
+      getToolStats: jest
+        .fn()
+        .mockReturnValue({ registered: 0, byCategory: {} }),
+      getHarnessStats: jest
+        .fn()
+        .mockReturnValue({ initialized: false, config: {} }),
       getEvolutionStats: jest.fn().mockReturnValue({}),
       getSchedulerStats: jest.fn().mockReturnValue({}),
-      skillStore: { getSkills: jest.fn().mockResolvedValue([]), saveSkill: jest.fn().mockResolvedValue(undefined), deleteSkill: jest.fn().mockResolvedValue(undefined) },
+      skillStore: {
+        getSkills: jest.fn().mockResolvedValue([]),
+        saveSkill: jest.fn().mockResolvedValue(undefined),
+        deleteSkill: jest.fn().mockResolvedValue(undefined),
+      },
       llm: { chat: jest.fn().mockResolvedValue('') },
     },
-    persistenceDeps: {}
+    persistenceDeps: {},
   };
 }
 
@@ -135,7 +175,7 @@ function createUserInput(text: string = '帮我列出当前目录的文件'): Us
     text,
     userId: 'test-user',
     traceId: `test-trace-${Date.now()}`,
-    metadata: { testRun: true }
+    metadata: { testRun: true },
   };
 }
 
@@ -152,9 +192,9 @@ describe('V5.0 Task 1: Harness 系统完整性验证', () => {
   describe('1. 所有 25 个 Harness 工具的注册与可用性测试', () => {
     test('应该成功注册所有 25 个工具', () => {
       const result = registerHarnessTools(deps.toolDeps);
-      
-      expect(result.registeredCount).toBe(25);
-      expect(result.toolRegistry.size).toBe(25);
+
+      expect(result.registeredCount).toBe(33);
+      expect(result.toolRegistry.size).toBe(33);
     });
 
     test('所有 25 个工具都应该可以通过名称获取', () => {
@@ -185,18 +225,18 @@ describe('V5.0 Task 1: Harness 系统完整性验证', () => {
       expect(memoryTools.length).toBe(3);
       expect(cognitionTools.length).toBe(3);
       expect(desktopTools.length).toBe(2);
-      expect(systemTools.length).toBe(3);
+      expect(systemTools.length).toBe(4);
       expect(fileTools.length).toBe(5);
       expect(codeTools.length).toBe(3);
-      expect(dailyTools.length).toBe(4);
-      expect(networkTools.length).toBe(2);
+      expect(dailyTools.length).toBe(9);
+      expect(networkTools.length).toBe(4);
     });
 
     test('所有工具应该能转换为 OpenAI 工具格式', () => {
       const result = registerHarnessTools(deps.toolDeps);
       const openaiTools = result.toolRegistry.toOpenAITools();
 
-      expect(openaiTools.length).toBe(25);
+      expect(openaiTools.length).toBe(33);
 
       for (const tool of openaiTools) {
         expect(tool.type).toBe('function');
@@ -249,7 +289,9 @@ describe('V5.0 Task 1: Harness 系统完整性验证', () => {
         for (const paramName of def.requiredParams) {
           const paramDef = def.parameters[paramName];
           if (paramDef.type === 'string') {
-            testParams[paramName] = paramDef.enum ? paramDef.enum[0] : 'test_value';
+            testParams[paramName] = paramDef.enum
+              ? paramDef.enum[0]
+              : 'test_value';
           } else if (paramDef.type === 'number') {
             testParams[paramName] = 42;
           } else if (paramDef.type === 'boolean') {
@@ -284,7 +326,7 @@ describe('V5.0 Task 1: Harness 系统完整性验证', () => {
       );
 
       expect(validation.valid).toBe(false);
-      expect(validation.errors.some(e => e.includes('query'))).toBe(true);
+      expect(validation.errors.some((e) => e.includes('query'))).toBe(true);
     });
 
     test('SchemaValidator 应该正确检测类型错误', () => {
@@ -326,12 +368,12 @@ describe('V5.0 Task 1: Harness 系统完整性验证', () => {
 
       const contextWithPermission = {
         permissions: new Set([Permission.FILE_READ]),
-        metadata: {}
+        metadata: {},
       };
 
       const contextWithoutPermission = {
         permissions: new Set<Permission>(),
-        metadata: {}
+        metadata: {},
       };
 
       // 有权限应该允许
@@ -382,7 +424,7 @@ describe('V5.0 Task 1: Harness 系统完整性验证', () => {
       const permissionGuard = result.permissionGuard;
 
       // 验证工具注册
-      expect(registry.size).toBe(25);
+      expect(registry.size).toBe(33);
 
       // 验证工具可以获取
       const memoryRecall = registry.get('memory_recall');
@@ -465,20 +507,20 @@ describe('V5.0 Task 1: Harness 系统完整性验证', () => {
         startTime: Date.now(),
         maxDurationMs: 60000,
         toolCallsUsed: 1,
-        maxToolCalls: 20
+        maxToolCalls: 20,
       });
       expect(budgetCheck.withinBudget).toBe(true);
     });
 
     test('L - 循环层: Loop 组件应该能够正确初始化', async () => {
       const toolResult = registerHarnessTools(deps.toolDeps);
-      
+
       const planner = new Planner({ llm: deps.llm });
       const executor = new Executor({
         llm: deps.llm,
         toolRegistry: toolResult.toolRegistry,
         schemaValidator: toolResult.schemaValidator,
-        permissionGuard: toolResult.permissionGuard
+        permissionGuard: toolResult.permissionGuard,
       });
       const evaluator = new Evaluator({ llm: deps.llm });
       const reporter = new Reporter();
@@ -487,7 +529,7 @@ describe('V5.0 Task 1: Harness 系统完整性验证', () => {
         planner,
         executor,
         evaluator,
-        reporter
+        reporter,
       });
 
       expect(loopController).toBeDefined();
@@ -501,9 +543,12 @@ describe('V5.0 Task 1: Harness 系统完整性验证', () => {
         success: true,
         output: '操作成功',
         duration: 100,
-        validated: false
+        validated: false,
       };
-      const validation = verification.validateToolResult('test_tool', toolResult);
+      const validation = verification.validateToolResult(
+        'test_tool',
+        toolResult
+      );
       expect(validation.valid).toBe(true);
 
       // 质量评分
@@ -512,7 +557,7 @@ describe('V5.0 Task 1: Harness 系统完整性验证', () => {
         totalToolCalls: 1,
         totalToolDuration: 100,
         totalDuration: 1000,
-        completedSuccessfully: true
+        completedSuccessfully: true,
       });
       expect(quality.overall).toBeGreaterThan(0);
       expect(quality.overall).toBeLessThanOrEqual(1);
@@ -520,7 +565,7 @@ describe('V5.0 Task 1: Harness 系统完整性验证', () => {
 
     test('E - 评估层: Evaluator 应该能够评估执行结果', async () => {
       const evaluator = new Evaluator({ llm: deps.llm });
-      
+
       // 评估器应该可以被创建
       expect(evaluator).toBeDefined();
     });
@@ -532,7 +577,7 @@ describe('V5.0 Task 1: Harness 系统完整性验证', () => {
         useHarnessContext: true,
         useHarnessVerification: true,
         useHarnessConstraints: true,
-        useHarnessPersistence: true
+        useHarnessPersistence: true,
       });
       harness.setDeps(deps);
       await harness.initialize();
@@ -557,13 +602,13 @@ describe('V5.0 Task 1: Harness 系统完整性验证', () => {
         useHarnessContext: true,
         useHarnessVerification: true,
         useHarnessConstraints: true,
-        useHarnessPersistence: true
+        useHarnessPersistence: true,
       });
       harness.setDeps(deps);
       await harness.initialize();
 
       expect(harness.getToolRegistry()).not.toBeNull();
-      expect(harness.getToolRegistry()?.size).toBe(25);
+      expect(harness.getToolRegistry()?.size).toBe(33);
     });
 
     test('processInput 应该能够处理输入并返回结果', async () => {
@@ -573,7 +618,7 @@ describe('V5.0 Task 1: Harness 系统完整性验证', () => {
         useHarnessContext: true,
         useHarnessVerification: true,
         useHarnessConstraints: true,
-        useHarnessPersistence: true
+        useHarnessPersistence: true,
       });
       harness.setDeps(deps);
       await harness.initialize();
@@ -595,7 +640,7 @@ describe('V5.0 Task 1: Harness 系统完整性验证', () => {
       const harness = new AgentHarness({
         useHarnessLoop: true,
         useHarnessTools: true,
-        useHarnessConstraints: true
+        useHarnessConstraints: true,
       });
       harness.setDeps(deps);
       await harness.initialize();
@@ -625,7 +670,7 @@ describe('V5.0 Task 1: Harness 系统完整性验证', () => {
       const harness = new AgentHarness({
         useHarnessLoop: true,
         useHarnessTools: true,
-        useHarnessContext: true
+        useHarnessContext: true,
       });
       harness.setDeps(deps);
       await harness.initialize();
@@ -637,7 +682,9 @@ describe('V5.0 Task 1: Harness 系统完整性验证', () => {
       await harness.processInput(input);
 
       // 验证依赖被调用
-      expect(deps.constitutionalBuilder.buildConstitutionPrompt).toHaveBeenCalled();
+      expect(
+        deps.constitutionalBuilder.buildConstitutionPrompt
+      ).toHaveBeenCalled();
       expect(deps.memoryInjector.autoRetrieveMemories).toHaveBeenCalled();
       expect(deps.historyProvider.getRecentHistory).toHaveBeenCalled();
     });
@@ -657,7 +704,7 @@ describe('V5.0 Task 1: Harness 系统完整性验证', () => {
         status: 'in_progress' as const,
         currentStepIndex: 0,
         createdAt: Date.now(),
-        updatedAt: Date.now()
+        updatedAt: Date.now(),
       };
 
       // 保存状态
@@ -677,7 +724,7 @@ describe('V5.0 Task 1: Harness 系统完整性验证', () => {
       const metric = {
         metricType: 'tool_success_rate',
         value: 0.95,
-        timestamp: Date.now()
+        timestamp: Date.now(),
       };
 
       persistence.recordEvolutionMetric(metric);
@@ -698,14 +745,14 @@ describe('V5.0 Task 1: Harness 系统完整性验证', () => {
       // 4. 各层协作 ✓
       // 5. 完整流程 ✓
       // 6. 持久化 ✓
-      
+
       const harness = new AgentHarness({
         useHarnessLoop: true,
         useHarnessTools: true,
         useHarnessContext: true,
         useHarnessVerification: true,
         useHarnessConstraints: true,
-        useHarnessPersistence: true
+        useHarnessPersistence: true,
       });
       harness.setDeps(deps);
       await harness.initialize();
@@ -727,7 +774,7 @@ describe('V5.0 Task 1: Harness 系统完整性验证', () => {
         useHarnessContext: true,
         useHarnessVerification: true,
         useHarnessConstraints: true,
-        useHarnessPersistence: true
+        useHarnessPersistence: true,
       });
       harness.setDeps(deps);
       await harness.initialize();
@@ -736,7 +783,7 @@ describe('V5.0 Task 1: Harness 系统完整性验证', () => {
         '你好，请介绍一下自己',
         '帮我查看一下项目中有哪些文件',
         '这个项目的结构是怎样的？',
-        '帮我生成一个简单的 Hello World 函数'
+        '帮我生成一个简单的 Hello World 函数',
       ];
 
       for (const inputText of testInputs) {
@@ -754,7 +801,7 @@ describe('V5.0 Task 1: Harness 系统完整性验证', () => {
       // 这个测试用于验证我们的测试框架本身是正常的
       expect(true).toBe(true);
       expect(1 + 1).toBe(2);
-      expect(ALL_TOOL_NAMES.length).toBe(25);
+      expect(ALL_TOOL_NAMES.length).toBe(33);
     });
   });
 });

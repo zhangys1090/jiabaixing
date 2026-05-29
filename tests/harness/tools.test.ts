@@ -102,11 +102,7 @@ describe('ToolRegistry', () => {
   });
 
   test('应该处理不存在的工具', async () => {
-    const result = await registry.execute(
-      'nonexistent',
-      {},
-      mockContext
-    );
+    const result = await registry.execute('nonexistent', {}, mockContext);
     expect(result.success).toBe(false);
     expect(result.error).toContain('工具不存在');
   });
@@ -220,9 +216,7 @@ describe('SchemaValidator', () => {
       ['status']
     );
     expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes('不在允许范围内'))).toBe(
-      true
-    );
+    expect(result.errors.some((e) => e.includes('不在允许范围内'))).toBe(true);
   });
 
   test('应该允许合法枚举值', () => {
@@ -308,22 +302,44 @@ describe('registerHarnessTools', () => {
       removeHistory: jest.fn().mockResolvedValue(null),
       addToHistory: jest.fn().mockResolvedValue(undefined),
       validateCodeSyntax: jest.fn().mockReturnValue([]),
-      taskStore: { getTasks: jest.fn().mockResolvedValue([]), saveTask: jest.fn().mockResolvedValue(undefined), deleteTask: jest.fn().mockResolvedValue(undefined) },
-      reminderStore: { getReminders: jest.fn().mockResolvedValue([]), saveReminder: jest.fn().mockResolvedValue(undefined), deleteReminder: jest.fn().mockResolvedValue(undefined) },
+      taskStore: {
+        getTasks: jest.fn().mockResolvedValue([]),
+        saveTask: jest.fn().mockResolvedValue(undefined),
+        deleteTask: jest.fn().mockResolvedValue(undefined),
+      },
+      reminderStore: {
+        getReminders: jest.fn().mockResolvedValue([]),
+        saveReminder: jest.fn().mockResolvedValue(undefined),
+        deleteReminder: jest.fn().mockResolvedValue(undefined),
+      },
       scheduleTrigger: null,
-      noteStore: { getNotes: jest.fn().mockResolvedValue([]), saveNote: jest.fn().mockResolvedValue(undefined), deleteNote: jest.fn().mockResolvedValue(undefined) },
+      noteStore: {
+        getNotes: jest.fn().mockResolvedValue([]),
+        saveNote: jest.fn().mockResolvedValue(undefined),
+        deleteNote: jest.fn().mockResolvedValue(undefined),
+      },
       getMemoryStats: jest.fn().mockReturnValue({}),
-      getToolStats: jest.fn().mockReturnValue({ registered: 0, byCategory: {} }),
-      getHarnessStats: jest.fn().mockReturnValue({ initialized: false, config: {} }),
+      getToolStats: jest
+        .fn()
+        .mockReturnValue({ registered: 0, byCategory: {} }),
+      getHarnessStats: jest
+        .fn()
+        .mockReturnValue({ initialized: false, config: {} }),
       getEvolutionStats: jest.fn().mockReturnValue({}),
       getSchedulerStats: jest.fn().mockReturnValue({}),
-      skillStore: { getSkills: jest.fn().mockResolvedValue([]), saveSkill: jest.fn().mockResolvedValue(undefined), deleteSkill: jest.fn().mockResolvedValue(undefined) },
+      skillStore: {
+        getSkills: jest.fn().mockResolvedValue([]),
+        saveSkill: jest.fn().mockResolvedValue(undefined),
+        deleteSkill: jest.fn().mockResolvedValue(undefined),
+      },
       llm: { chat: jest.fn().mockResolvedValue('') },
     };
 
-    const result = registerHarnessTools(mockDeps as unknown as import('../../src/harness/tools/registerHarnessTools').HarnessToolDeps);
-    expect(result.registeredCount).toBe(25);
-    expect(result.toolRegistry.size).toBe(25);
+    const result = registerHarnessTools(
+      mockDeps as unknown as import('../../src/harness/tools/registerHarnessTools').HarnessToolDeps
+    );
+    expect(result.registeredCount).toBe(33);
+    expect(result.toolRegistry.size).toBe(33);
   });
 
   test('所有工具应该能转换为 OpenAI 格式', () => {
@@ -341,22 +357,44 @@ describe('registerHarnessTools', () => {
       removeHistory: jest.fn().mockResolvedValue(null),
       addToHistory: jest.fn().mockResolvedValue(undefined),
       validateCodeSyntax: jest.fn().mockReturnValue([]),
-      taskStore: { getTasks: jest.fn().mockResolvedValue([]), saveTask: jest.fn().mockResolvedValue(undefined), deleteTask: jest.fn().mockResolvedValue(undefined) },
-      reminderStore: { getReminders: jest.fn().mockResolvedValue([]), saveReminder: jest.fn().mockResolvedValue(undefined), deleteReminder: jest.fn().mockResolvedValue(undefined) },
+      taskStore: {
+        getTasks: jest.fn().mockResolvedValue([]),
+        saveTask: jest.fn().mockResolvedValue(undefined),
+        deleteTask: jest.fn().mockResolvedValue(undefined),
+      },
+      reminderStore: {
+        getReminders: jest.fn().mockResolvedValue([]),
+        saveReminder: jest.fn().mockResolvedValue(undefined),
+        deleteReminder: jest.fn().mockResolvedValue(undefined),
+      },
       scheduleTrigger: null,
-      noteStore: { getNotes: jest.fn().mockResolvedValue([]), saveNote: jest.fn().mockResolvedValue(undefined), deleteNote: jest.fn().mockResolvedValue(undefined) },
+      noteStore: {
+        getNotes: jest.fn().mockResolvedValue([]),
+        saveNote: jest.fn().mockResolvedValue(undefined),
+        deleteNote: jest.fn().mockResolvedValue(undefined),
+      },
       getMemoryStats: jest.fn().mockReturnValue({}),
-      getToolStats: jest.fn().mockReturnValue({ registered: 0, byCategory: {} }),
-      getHarnessStats: jest.fn().mockReturnValue({ initialized: false, config: {} }),
+      getToolStats: jest
+        .fn()
+        .mockReturnValue({ registered: 0, byCategory: {} }),
+      getHarnessStats: jest
+        .fn()
+        .mockReturnValue({ initialized: false, config: {} }),
       getEvolutionStats: jest.fn().mockReturnValue({}),
       getSchedulerStats: jest.fn().mockReturnValue({}),
-      skillStore: { getSkills: jest.fn().mockResolvedValue([]), saveSkill: jest.fn().mockResolvedValue(undefined), deleteSkill: jest.fn().mockResolvedValue(undefined) },
+      skillStore: {
+        getSkills: jest.fn().mockResolvedValue([]),
+        saveSkill: jest.fn().mockResolvedValue(undefined),
+        deleteSkill: jest.fn().mockResolvedValue(undefined),
+      },
       llm: { chat: jest.fn().mockResolvedValue('') },
     };
 
-    const result = registerHarnessTools(mockDeps as unknown as import('../../src/harness/tools/registerHarnessTools').HarnessToolDeps);
+    const result = registerHarnessTools(
+      mockDeps as unknown as import('../../src/harness/tools/registerHarnessTools').HarnessToolDeps
+    );
     const openaiTools = result.toolRegistry.toOpenAITools();
-    expect(openaiTools.length).toBe(25);
+    expect(openaiTools.length).toBe(33);
 
     for (const tool of openaiTools) {
       expect(tool.type).toBe('function');

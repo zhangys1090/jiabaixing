@@ -1,0 +1,512 @@
+[
+  {
+    "snapshotId": "snap_mpr0ro4u_2lwxv4",
+    "timestamp": 1780065061522,
+    "triggerType": "pre_action",
+    "description": "操作前检查点: 截图",
+    "status": "active",
+    "filePath": "snapshots\\snap_mpr0ro4u_2lwxv4.json.gz",
+    "checksum": "50ffdd603c3b892f2646b3cf57cc6d3f615c52aa06ea58bb1cd60d89cf1eacd8",
+    "sizeBytes": 363,
+    "windowCount": 0,
+    "processCount": 0,
+    "uiTreeNodeCount": 0,
+    "tags": [
+      "checkpoint",
+      "pre-action"
+    ]
+  },
+  {
+    "snapshotId": "snap_mpr0sg97_rq21eu",
+    "timestamp": 1780065097852,
+    "triggerType": "pre_action",
+    "description": "操作前检查点: 点击屏幕中央",
+    "status": "active",
+    "filePath": "snapshots\\snap_mpr0sg97_rq21eu.json.gz",
+    "checksum": "64aecd90f701303a78d27c109fba2fb4cfaed1f07c42e41d576e57024ae890ea",
+    "sizeBytes": 377,
+    "windowCount": 0,
+    "processCount": 0,
+    "uiTreeNodeCount": 0,
+    "tags": [
+      "checkpoint",
+      "pre-action"
+    ]
+  },
+  {
+    "snapshotId": "snap_mpr0sryw_p1m7dn",
+    "timestamp": 1780065113141,
+    "triggerType": "pre_action",
+    "description": "操作前检查点: 打开记事本",
+    "status": "active",
+    "filePath": "snapshots\\snap_mpr0sryw_p1m7dn.json.gz",
+    "checksum": "cbda6218fd054e29a05f9dbd8b26b3fcfa6a5af028bf46c9c4deae0857ac119e",
+    "sizeBytes": 371,
+    "windowCount": 0,
+    "processCount": 0,
+    "uiTreeNodeCount": 0,
+    "tags": [
+      "checkpoint",
+      "pre-action"
+    ]
+  },
+  {
+    "snapshotId": "snap_mpr0ut1x_hguqij",
+    "timestamp": 1780065207964,
+    "triggerType": "pre_action",
+    "description": "操作前检查点: 截图",
+    "status": "active",
+    "filePath": "snapshots\\snap_mpr0ut1x_hguqij.json.gz",
+    "checksum": "54282b6d89bea2b6c13b4ec9fe451a37645c9f194e884bb792e6929fc08ce867",
+    "sizeBytes": 361,
+    "windowCount": 0,
+    "processCount": 0,
+    "uiTreeNodeCount": 0,
+    "tags": [
+      "checkpoint",
+      "pre-action"
+    ]
+  },
+  {
+    "snapshotId": "snap_mpr0vc9e_hvzfa3",
+    "timestamp": 1780065232664,
+    "triggerType": "pre_action",
+    "description": "操作前检查点: 打开记事本",
+    "status": "active",
+    "filePath": "snapshots\\snap_mpr0vc9e_hvzfa3.json.gz",
+    "checksum": "25890bd4326244300dba15be63c1295ef526976a6865b86d6d3061a630db78c7",
+    "sizeBytes": 373,
+    "windowCount": 0,
+    "processCount": 0,
+    "uiTreeNodeCount": 0,
+    "tags": [
+      "checkpoint",
+      "pre-action"
+    ]
+  },
+  {
+    "snapshotId": "snap_mpr0w3zu_8anbi4",
+    "timestamp": 1780065255638,
+    "triggerType": "pre_action",
+    "description": "操作前检查点: 点击屏幕中央",
+    "status": "active",
+    "filePath": "snapshots\\snap_mpr0w3zu_8anbi4.json.gz",
+    "checksum": "7c6255c3cd2374c300ff9649e812cc40c114e31d9c47691173d21c7f122836be",
+    "sizeBytes": 1866,
+    "windowCount": 0,
+    "processCount": 0,
+    "uiTreeNodeCount": 38,
+    "tags": [
+      "checkpoint",
+      "pre-action"
+    ]
+  },
+  {
+    "snapshotId": "snap_mpr10imp_ntcsnq",
+    "timestamp": 1780065463243,
+    "triggerType": "pre_action",
+    "description": "操作前检查点: 截图",
+    "status": "active",
+    "filePath": "snapshots\\snap_mpr10imp_ntcsnq.json.gz",
+    "checksum": "212f57db96b621b17995cf3881152bf22aa64d03754d3f6f4a099f411d028a7c",
+    "sizeBytes": 1930,
+    "windowCount": 0,
+    "processCount": 0,
+    "uiTreeNodeCount": 45,
+    "tags": [
+      "checkpoint",
+      "pre-action"
+    ]
+  },
+  {
+    "snapshotId": "snap_mpr10s8z_4sve3j",
+    "timestamp": 1780065474544,
+    "triggerType": "pre_action",
+    "description": "操作前检查点: 打开记事本",
+    "status": "active",
+    "filePath": "snapshots\\snap_mpr10s8z_4sve3j.json.gz",
+    "checksum": "0854bfe2d53e385e6db2204ac17b9d91a23a3cced2c6f01ed79143d363922821",
+    "sizeBytes": 1946,
+    "windowCount": 0,
+    "processCount": 0,
+    "uiTreeNodeCount": 45,
+    "tags": [
+      "checkpoint",
+      "pre-action"
+    ]
+  },
+  {
+    "snapshotId": "snap_mpr10uml_kz0d3h",
+    "timestamp": 1780065477898,
+    "triggerType": "pre_action",
+    "description": "操作前检查点: 点击屏幕中央",
+    "status": "active",
+    "filePath": "snapshots\\snap_mpr10uml_kz0d3h.json.gz",
+    "checksum": "9589d4b64ff8f792bcfd670bded8d177340ad14d0f1cfe022ecdc809f15bc56b",
+    "sizeBytes": 1953,
+    "windowCount": 0,
+    "processCount": 0,
+    "uiTreeNodeCount": 45,
+    "tags": [
+      "checkpoint",
+      "pre-action"
+    ]
+  },
+  {
+    "snapshotId": "snap_mpr12hnk_nii0fv",
+    "timestamp": 1780065553567,
+    "triggerType": "pre_action",
+    "description": "操作前检查点: 截图",
+    "status": "active",
+    "filePath": "snapshots\\snap_mpr12hnk_nii0fv.json.gz",
+    "checksum": "6f9c4b19182f089d93ba9faeb786a1d8d5d495b84e6a44974469f73bbe161c41",
+    "sizeBytes": 1935,
+    "windowCount": 0,
+    "processCount": 0,
+    "uiTreeNodeCount": 45,
+    "tags": [
+      "checkpoint",
+      "pre-action"
+    ]
+  },
+  {
+    "snapshotId": "snap_mpr12m7m_60jkrk",
+    "timestamp": 1780065559469,
+    "triggerType": "pre_action",
+    "description": "操作前检查点: 打开记事本",
+    "status": "active",
+    "filePath": "snapshots\\snap_mpr12m7m_60jkrk.json.gz",
+    "checksum": "8b51f3185b83e567df9633dfed4a7190411df77837f0acb6d60bd4ce1a06afc6",
+    "sizeBytes": 1947,
+    "windowCount": 0,
+    "processCount": 0,
+    "uiTreeNodeCount": 45,
+    "tags": [
+      "checkpoint",
+      "pre-action"
+    ]
+  },
+  {
+    "snapshotId": "snap_mpr12tzm_iylrqd",
+    "timestamp": 1780065569688,
+    "triggerType": "pre_action",
+    "description": "操作前检查点: 点击屏幕中央",
+    "status": "active",
+    "filePath": "snapshots\\snap_mpr12tzm_iylrqd.json.gz",
+    "checksum": "ada0915659f0d2cc625970bcadc3e6cb410a48e4a4b8fd51035cdd9dc1d0c22c",
+    "sizeBytes": 1953,
+    "windowCount": 0,
+    "processCount": 0,
+    "uiTreeNodeCount": 45,
+    "tags": [
+      "checkpoint",
+      "pre-action"
+    ]
+  },
+  {
+    "snapshotId": "snap_mpr14dp1_8jis6u",
+    "timestamp": 1780065641866,
+    "triggerType": "pre_action",
+    "description": "操作前检查点: 截图",
+    "status": "active",
+    "filePath": "snapshots\\snap_mpr14dp1_8jis6u.json.gz",
+    "checksum": "3bc4fdeef406bc7cc58b3e77e7abc76fc30c951ce77607b35fb46d5ce9a81595",
+    "sizeBytes": 1934,
+    "windowCount": 0,
+    "processCount": 0,
+    "uiTreeNodeCount": 45,
+    "tags": [
+      "checkpoint",
+      "pre-action"
+    ]
+  },
+  {
+    "snapshotId": "snap_mpr14ins_64nwc2",
+    "timestamp": 1780065648161,
+    "triggerType": "pre_action",
+    "description": "操作前检查点: 打开记事本",
+    "status": "active",
+    "filePath": "snapshots\\snap_mpr14ins_64nwc2.json.gz",
+    "checksum": "2efefa0bff90524351fafa760f7da9cceb796cbb83e7466f7b87df94446e4246",
+    "sizeBytes": 1945,
+    "windowCount": 0,
+    "processCount": 0,
+    "uiTreeNodeCount": 45,
+    "tags": [
+      "checkpoint",
+      "pre-action"
+    ]
+  },
+  {
+    "snapshotId": "snap_mpr14qhx_atedeg",
+    "timestamp": 1780065658334,
+    "triggerType": "pre_action",
+    "description": "操作前检查点: 点击屏幕中央",
+    "status": "active",
+    "filePath": "snapshots\\snap_mpr14qhx_atedeg.json.gz",
+    "checksum": "45450fb64f27ce9b6471021b2e36922f3fd9103c7ff74caf778f54f3fcc015af",
+    "sizeBytes": 1953,
+    "windowCount": 0,
+    "processCount": 0,
+    "uiTreeNodeCount": 45,
+    "tags": [
+      "checkpoint",
+      "pre-action"
+    ]
+  },
+  {
+    "snapshotId": "snap_mpr17dus_rjjnr6",
+    "timestamp": 1780065781943,
+    "triggerType": "pre_action",
+    "description": "操作前检查点: 截图",
+    "status": "active",
+    "filePath": "snapshots\\snap_mpr17dus_rjjnr6.json.gz",
+    "checksum": "12215594c503a0e7a0cfe52f28c18d81499563981af5d195b5b736378716d02c",
+    "sizeBytes": 1935,
+    "windowCount": 0,
+    "processCount": 0,
+    "uiTreeNodeCount": 45,
+    "tags": [
+      "checkpoint",
+      "pre-action"
+    ]
+  },
+  {
+    "snapshotId": "snap_mpr17ifv_b5rr8b",
+    "timestamp": 1780065787835,
+    "triggerType": "pre_action",
+    "description": "操作前检查点: 打开记事本",
+    "status": "active",
+    "filePath": "snapshots\\snap_mpr17ifv_b5rr8b.json.gz",
+    "checksum": "c2fb63d902032497a097c1fb021704adcb0b88f483aa5cdbeac150f5437cdf2c",
+    "sizeBytes": 1947,
+    "windowCount": 0,
+    "processCount": 0,
+    "uiTreeNodeCount": 45,
+    "tags": [
+      "checkpoint",
+      "pre-action"
+    ]
+  },
+  {
+    "snapshotId": "snap_mpr17q4b_jtwxiw",
+    "timestamp": 1780065797675,
+    "triggerType": "pre_action",
+    "description": "操作前检查点: 点击屏幕中央",
+    "status": "active",
+    "filePath": "snapshots\\snap_mpr17q4b_jtwxiw.json.gz",
+    "checksum": "0683514649ee09ab29b054642d65423b9837beb5db6de63a284ed9da54e68ac0",
+    "sizeBytes": 1955,
+    "windowCount": 0,
+    "processCount": 0,
+    "uiTreeNodeCount": 45,
+    "tags": [
+      "checkpoint",
+      "pre-action"
+    ]
+  },
+  {
+    "snapshotId": "snap_mpr1agx6_ld2l6h",
+    "timestamp": 1780065925967,
+    "triggerType": "pre_action",
+    "description": "操作前检查点: 截图",
+    "status": "active",
+    "filePath": "snapshots\\snap_mpr1agx6_ld2l6h.json.gz",
+    "checksum": "cfc57c63facb5b3027a339b7a1771d312274ccaeb933fce53e160104d5c5ae0b",
+    "sizeBytes": 1935,
+    "windowCount": 0,
+    "processCount": 0,
+    "uiTreeNodeCount": 45,
+    "tags": [
+      "checkpoint",
+      "pre-action"
+    ]
+  },
+  {
+    "snapshotId": "snap_mpr1alh0_e4wvra",
+    "timestamp": 1780065931825,
+    "triggerType": "pre_action",
+    "description": "操作前检查点: 打开记事本",
+    "status": "active",
+    "filePath": "snapshots\\snap_mpr1alh0_e4wvra.json.gz",
+    "checksum": "d4badf24aea17723e1e1d71a771db71789531eda9c8ad3551d7ab410edae00f9",
+    "sizeBytes": 1946,
+    "windowCount": 0,
+    "processCount": 0,
+    "uiTreeNodeCount": 45,
+    "tags": [
+      "checkpoint",
+      "pre-action"
+    ]
+  },
+  {
+    "snapshotId": "snap_mpr1atqu_vsbvyf",
+    "timestamp": 1780065942650,
+    "triggerType": "pre_action",
+    "description": "操作前检查点: 点击屏幕中央",
+    "status": "active",
+    "filePath": "snapshots\\snap_mpr1atqu_vsbvyf.json.gz",
+    "checksum": "0e3a9883ac280feb39350674280de0ce4bb9cb8d640e15d68bb26b47dcc609ec",
+    "sizeBytes": 1954,
+    "windowCount": 0,
+    "processCount": 0,
+    "uiTreeNodeCount": 45,
+    "tags": [
+      "checkpoint",
+      "pre-action"
+    ]
+  },
+  {
+    "snapshotId": "snap_mpr1dnzd_moizps",
+    "timestamp": 1780066074919,
+    "triggerType": "pre_action",
+    "description": "操作前检查点: 截图",
+    "status": "active",
+    "filePath": "snapshots\\snap_mpr1dnzd_moizps.json.gz",
+    "checksum": "a14d948caac617e777fc3ad5fcd9a08763817a72d32e677679a2eea78f5491a8",
+    "sizeBytes": 1935,
+    "windowCount": 0,
+    "processCount": 0,
+    "uiTreeNodeCount": 45,
+    "tags": [
+      "checkpoint",
+      "pre-action"
+    ]
+  },
+  {
+    "snapshotId": "snap_mpr1dso0_z5l4ea",
+    "timestamp": 1780066081052,
+    "triggerType": "pre_action",
+    "description": "操作前检查点: 打开记事本",
+    "status": "active",
+    "filePath": "snapshots\\snap_mpr1dso0_z5l4ea.json.gz",
+    "checksum": "3023a9c211225e8a77c1291ccd8c3cda1c5329163006ab7a58879bf634ae8835",
+    "sizeBytes": 1946,
+    "windowCount": 0,
+    "processCount": 0,
+    "uiTreeNodeCount": 45,
+    "tags": [
+      "checkpoint",
+      "pre-action"
+    ]
+  },
+  {
+    "snapshotId": "snap_mpr1e0ug_nefxs1",
+    "timestamp": 1780066091599,
+    "triggerType": "pre_action",
+    "description": "操作前检查点: 点击屏幕中央",
+    "status": "active",
+    "filePath": "snapshots\\snap_mpr1e0ug_nefxs1.json.gz",
+    "checksum": "fecf89ce18e87584a5fa0b8db0bff3e17c776bb47dd4836fef6afe5483962ec3",
+    "sizeBytes": 1952,
+    "windowCount": 0,
+    "processCount": 0,
+    "uiTreeNodeCount": 45,
+    "tags": [
+      "checkpoint",
+      "pre-action"
+    ]
+  },
+  {
+    "snapshotId": "snap_mpr1fj3l_zf607d",
+    "timestamp": 1780066162113,
+    "triggerType": "pre_action",
+    "description": "操作前检查点: 截图",
+    "status": "active",
+    "filePath": "snapshots\\snap_mpr1fj3l_zf607d.json.gz",
+    "checksum": "8ea7c3bacaec050d37ba22e0a5d0e11401b9aaa3e3a88e196fab126fe3366fe1",
+    "sizeBytes": 1935,
+    "windowCount": 0,
+    "processCount": 0,
+    "uiTreeNodeCount": 45,
+    "tags": [
+      "checkpoint",
+      "pre-action"
+    ]
+  },
+  {
+    "snapshotId": "snap_mpr1fnzf_rp2xin",
+    "timestamp": 1780066168308,
+    "triggerType": "pre_action",
+    "description": "操作前检查点: 打开记事本",
+    "status": "active",
+    "filePath": "snapshots\\snap_mpr1fnzf_rp2xin.json.gz",
+    "checksum": "52660e5eccadedc56296da369763ef54e085af5cbb39e1cf6a650703fe5c2185",
+    "sizeBytes": 1946,
+    "windowCount": 0,
+    "processCount": 0,
+    "uiTreeNodeCount": 45,
+    "tags": [
+      "checkpoint",
+      "pre-action"
+    ]
+  },
+  {
+    "snapshotId": "snap_mpr1fvmz_ye6uet",
+    "timestamp": 1780066178148,
+    "triggerType": "pre_action",
+    "description": "操作前检查点: 点击屏幕中央",
+    "status": "active",
+    "filePath": "snapshots\\snap_mpr1fvmz_ye6uet.json.gz",
+    "checksum": "ae37e92e4547b32d41e37ee2aa7aaa1aa6891be12a8b2437be57e37f62966ca3",
+    "sizeBytes": 1955,
+    "windowCount": 0,
+    "processCount": 0,
+    "uiTreeNodeCount": 45,
+    "tags": [
+      "checkpoint",
+      "pre-action"
+    ]
+  },
+  {
+    "snapshotId": "snap_mpr1l8m0_wm341b",
+    "timestamp": 1780066428321,
+    "triggerType": "pre_action",
+    "description": "操作前检查点: 截图",
+    "status": "active",
+    "filePath": "snapshots\\snap_mpr1l8m0_wm341b.json.gz",
+    "checksum": "b27e78482691d21c6c8182ee73966231901d61be09c4d8651dadba98de81d75c",
+    "sizeBytes": 1934,
+    "windowCount": 0,
+    "processCount": 0,
+    "uiTreeNodeCount": 45,
+    "tags": [
+      "checkpoint",
+      "pre-action"
+    ]
+  },
+  {
+    "snapshotId": "snap_mpr1ld4d_1nu4x0",
+    "timestamp": 1780066434044,
+    "triggerType": "pre_action",
+    "description": "操作前检查点: 打开记事本",
+    "status": "active",
+    "filePath": "snapshots\\snap_mpr1ld4d_1nu4x0.json.gz",
+    "checksum": "3b94431243c5ebaf5772cc50210385c9857602db558668e3fd14db984a7c7c23",
+    "sizeBytes": 1946,
+    "windowCount": 0,
+    "processCount": 0,
+    "uiTreeNodeCount": 45,
+    "tags": [
+      "checkpoint",
+      "pre-action"
+    ]
+  },
+  {
+    "snapshotId": "snap_mpr1lkm4_1uk52i",
+    "timestamp": 1780066443778,
+    "triggerType": "pre_action",
+    "description": "操作前检查点: 点击屏幕中央",
+    "status": "active",
+    "filePath": "snapshots\\snap_mpr1lkm4_1uk52i.json.gz",
+    "checksum": "dc9c27afbdcc9250646105738ecbfa0003768a7e2ef326c20b0a392d166d0a77",
+    "sizeBytes": 1953,
+    "windowCount": 0,
+    "processCount": 0,
+    "uiTreeNodeCount": 45,
+    "tags": [
+      "checkpoint",
+      "pre-action"
+    ]
+  }
+]

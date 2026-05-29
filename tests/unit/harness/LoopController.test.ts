@@ -28,6 +28,8 @@ function createPlan(overrides: Partial<ExecutionPlan> = {}): ExecutionPlan {
     ],
     dependencies: new Map(),
     estimatedBudget: { maxRounds: 4, maxToolCalls: 10, maxTokens: 4000, maxDurationMs: 30000 },
+    toolCallMode: 'auto' as const,
+    recommendedTools: [],
     simple: false,
     planReasoning: '测试推理',
     ...overrides,

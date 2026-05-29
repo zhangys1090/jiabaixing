@@ -270,7 +270,7 @@ export class AgentHarness {
                 };
               }
             }
-            
+
             // 1. 执行生命周期钩子（约束层）
             if (this.constraintsService) {
               const hookResult = await this.constraintsService.executeHooks(

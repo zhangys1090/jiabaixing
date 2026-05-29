@@ -594,19 +594,20 @@ export class Executor {
                 duration: toolDuration,
                 validated: false,
               };
-              const hookResult = await this.deps.constraintsService.executeHooks(
-                LifecycleEvent.AFTER_TOOL_CALL,
-                {
-                  event: LifecycleEvent.AFTER_TOOL_CALL,
-                  toolName,
-                  result: toolResult,
-                  loopState: LoopState.EXECUTING,
-                  metadata: {
-                    traceId: context.trace.traceId,
-                    loopCount,
-                  },
-                }
-              );
+              const hookResult =
+                await this.deps.constraintsService.executeHooks(
+                  LifecycleEvent.AFTER_TOOL_CALL,
+                  {
+                    event: LifecycleEvent.AFTER_TOOL_CALL,
+                    toolName,
+                    result: toolResult,
+                    loopState: LoopState.EXECUTING,
+                    metadata: {
+                      traceId: context.trace.traceId,
+                      loopCount,
+                    },
+                  }
+                );
               if (hookResult?.replacementResult?.output) {
                 output =
                   typeof hookResult.replacementResult.output === 'string'
@@ -1111,10 +1112,16 @@ export class Executor {
         (code >= 0x3000 && code <= 0x303f)
       ) {
         chineseChars++;
-      } else if ((code >= 0x0041 && code <= 0x005a) || (code >= 0x0061 && code <= 0x007a)) {
+      } else if (
+        (code >= 0x0041 && code <= 0x005a) ||
+        (code >= 0x0061 && code <= 0x007a)
+      ) {
         if (i > 0 && englishChars > 0) {
           const prevCode = text.charCodeAt(i - 1);
-          if ((prevCode >= 0x0041 && prevCode <= 0x005a) || (prevCode >= 0x0061 && prevCode <= 0x007a)) {
+          if (
+            (prevCode >= 0x0041 && prevCode <= 0x005a) ||
+            (prevCode >= 0x0061 && prevCode <= 0x007a)
+          ) {
           } else {
             englishChars++;
           }
@@ -1138,7 +1145,9 @@ export class Executor {
     const codeTokens = Math.ceil(codeChars / 2);
     const otherTokens = Math.ceil(otherChars / 3);
 
-    return chineseTokens + englishTokens + digitTokens + codeTokens + otherTokens;
+    return (
+      chineseTokens + englishTokens + digitTokens + codeTokens + otherTokens
+    );
   }
 
   /**

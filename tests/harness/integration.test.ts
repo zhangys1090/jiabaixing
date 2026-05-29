@@ -11,7 +11,11 @@
 
 import { AgentHarness } from '../../src/harness/AgentHarness';
 import type { HarnessDeps } from '../../src/harness/AgentHarness';
-import { Permission, ToolCategory, LifecycleEvent } from '../../src/harness/types';
+import {
+  Permission,
+  ToolCategory,
+  LifecycleEvent,
+} from '../../src/harness/types';
 import type { ToolContext, ToolResult } from '../../src/harness/types';
 import { SkillRegistry } from '../../src/skills/SkillRegistry';
 
@@ -31,11 +35,13 @@ function createMockDeps(toolDeps?: Record<string, unknown>): HarnessDeps {
       autoRetrieveMemories: jest.fn().mockResolvedValue(['记忆1', '记忆2']),
     },
     dynamicContext: {
-      getDynamicContext: jest.fn().mockReturnValue('当前时间: 2026-05-23 10:00，时段: 上午'),
+      getDynamicContext: jest
+        .fn()
+        .mockReturnValue('当前时间: 2026-05-23 10:00，时段: 上午'),
     },
     historyProvider: {
       getAllHistory: jest.fn(),
-          getRecentHistory: jest.fn().mockReturnValue([
+      getRecentHistory: jest.fn().mockReturnValue([
         { role: 'user' as const, content: '你好' },
         { role: 'assistant' as const, content: '你好！' },
       ]),
@@ -51,23 +57,45 @@ function createMockDeps(toolDeps?: Record<string, unknown>): HarnessDeps {
 
 function createMockToolDeps(): Record<string, unknown> {
   return {
-    detectEmotionFromInput: jest.fn().mockReturnValue({ type: '平静', intensity: 2 }),
-    recognizeScene: jest.fn().mockResolvedValue({ type: '日常对话', context: '日常' }),
+    detectEmotionFromInput: jest
+      .fn()
+      .mockReturnValue({ type: '平静', intensity: 2 }),
+    recognizeScene: jest
+      .fn()
+      .mockResolvedValue({ type: '日常对话', context: '日常' }),
     agentSelfReflection: null,
     getHistory: jest.fn().mockResolvedValue([]),
     removeHistory: jest.fn().mockResolvedValue(null),
     addToHistory: jest.fn().mockResolvedValue(undefined),
     validateCodeSyntax: jest.fn().mockReturnValue([]),
-    taskStore: { getTasks: jest.fn().mockResolvedValue([]), saveTask: jest.fn().mockResolvedValue(undefined), deleteTask: jest.fn().mockResolvedValue(undefined) },
-    reminderStore: { getReminders: jest.fn().mockResolvedValue([]), saveReminder: jest.fn().mockResolvedValue(undefined), deleteReminder: jest.fn().mockResolvedValue(undefined) },
+    taskStore: {
+      getTasks: jest.fn().mockResolvedValue([]),
+      saveTask: jest.fn().mockResolvedValue(undefined),
+      deleteTask: jest.fn().mockResolvedValue(undefined),
+    },
+    reminderStore: {
+      getReminders: jest.fn().mockResolvedValue([]),
+      saveReminder: jest.fn().mockResolvedValue(undefined),
+      deleteReminder: jest.fn().mockResolvedValue(undefined),
+    },
     scheduleTrigger: null,
-    noteStore: { getNotes: jest.fn().mockResolvedValue([]), saveNote: jest.fn().mockResolvedValue(undefined), deleteNote: jest.fn().mockResolvedValue(undefined) },
+    noteStore: {
+      getNotes: jest.fn().mockResolvedValue([]),
+      saveNote: jest.fn().mockResolvedValue(undefined),
+      deleteNote: jest.fn().mockResolvedValue(undefined),
+    },
     getMemoryStats: jest.fn().mockReturnValue({ count: 0 }),
     getToolStats: jest.fn().mockReturnValue({ registered: 25, byCategory: {} }),
-    getHarnessStats: jest.fn().mockReturnValue({ initialized: true, config: {} }),
+    getHarnessStats: jest
+      .fn()
+      .mockReturnValue({ initialized: true, config: {} }),
     getEvolutionStats: jest.fn().mockReturnValue({}),
     getSchedulerStats: jest.fn().mockReturnValue({}),
-    skillStore: { getSkills: jest.fn().mockResolvedValue([]), saveSkill: jest.fn().mockResolvedValue(undefined), deleteSkill: jest.fn().mockResolvedValue(undefined) },
+    skillStore: {
+      getSkills: jest.fn().mockResolvedValue([]),
+      saveSkill: jest.fn().mockResolvedValue(undefined),
+      deleteSkill: jest.fn().mockResolvedValue(undefined),
+    },
   };
 }
 
@@ -96,7 +124,7 @@ describe('AgentHarness 初始化', () => {
     const harness = new AgentHarness({ useHarnessTools: true });
     await harness.initialize();
     expect(harness.getToolRegistry()).not.toBeNull();
-    expect(harness.getToolRegistry()!.size).toBe(25);
+    expect(harness.getToolRegistry()!.size).toBe(33);
   });
 
   test('注入 deps + 启用工具层后应创建 ToolRegistry', async () => {
@@ -197,7 +225,7 @@ describe('工具层集成', () => {
 
     const registry = harness.getToolRegistry();
     expect(registry).not.toBeNull();
-    expect(registry!.size).toBe(25);
+    expect(registry!.size).toBe(33);
   });
 
   test('所有工具应能转换为 OpenAI 格式', async () => {
@@ -209,7 +237,7 @@ describe('工具层集成', () => {
 
     const registry = harness.getToolRegistry();
     const openaiTools = registry!.toOpenAITools();
-    expect(openaiTools.length).toBe(25);
+    expect(openaiTools.length).toBe(33);
 
     for (const tool of openaiTools) {
       expect(tool.type).toBe('function');
@@ -529,8 +557,15 @@ describe('多层协作', () => {
       metadata: {},
     };
 
-    const result = await registry.execute('ask_clarification', { question: '测试问题' }, context);
-    const validation = verification.validateToolResult('ask_clarification', result);
+    const result = await registry.execute(
+      'ask_clarification',
+      { question: '测试问题' },
+      context
+    );
+    const validation = verification.validateToolResult(
+      'ask_clarification',
+      result
+    );
     expect(validation.valid).toBe(true);
   });
 
@@ -613,13 +648,16 @@ describe('降级容错', () => {
 
   test('未启用循环层时 processInput 应抛错', async () => {
     const deps = createMockDeps();
-    const harness = new AgentHarness({ useHarnessTools: true, useHarnessLoop: false });
+    const harness = new AgentHarness({
+      useHarnessTools: true,
+      useHarnessLoop: false,
+    });
     harness.setDeps(deps);
     await harness.initialize();
 
-    await expect(
-      harness.processInput({ text: '你好' })
-    ).rejects.toThrow('循环层未启用');
+    await expect(harness.processInput({ text: '你好' })).rejects.toThrow(
+      '循环层未启用'
+    );
   });
 
   test('shutdown 应清理状态', async () => {
@@ -654,7 +692,7 @@ describe('双写兼容', () => {
     await harness.initialize();
 
     const registry = harness.getToolRegistry()!;
-    expect(registry.size).toBe(25);
-    expect(registeredTools.length).toBe(25);
+    expect(registry.size).toBe(33);
+    expect(registeredTools.length).toBe(33);
   });
 });
