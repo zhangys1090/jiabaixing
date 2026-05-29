@@ -382,6 +382,7 @@ export function setupEventBus(
       data: {
         response: payload.response || '',
         traceId: payload.traceId || '',
+        success: payload.success ?? false,
       },
     });
   });

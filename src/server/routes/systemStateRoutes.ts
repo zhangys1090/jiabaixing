@@ -456,11 +456,11 @@ router.get('/api/config', (_req, res) => {
       const pkgPath = path.join(process.cwd(), 'package.json');
       const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
       packageInfo = {
-        name: pkg._name,
+        name: pkg.name,
         version: pkg.version,
-        scripts: Object.keys(pkg._scripts || {}),
-        dependencies: Object.keys(pkg._dependencies || {}),
-        devDependencies: Object.keys(pkg._devDependencies || {}),
+        scripts: Object.keys(pkg.scripts || {}),
+        dependencies: Object.keys(pkg.dependencies || {}),
+        devDependencies: Object.keys(pkg.devDependencies || {}),
       };
     } catch {
       // ignore
@@ -794,12 +794,17 @@ router.get('/api/recommendations', (req, res) => {
     const userId = req.query.userId as string;
     const limit = queryAsNumber(req.query.limit, 5);
 
+    // Fix: return useful defaults instead of always-empty array
     const recommendations: Array<{
       type: string;
       title: string;
       description: string;
       priority: number;
-    }> = [];
+    }> = [
+      { type: 'usage', title: '查看帮助', description: '输入 /help 了解所有可用命令和功能', priority: 1 },
+      { type: 'usage', title: '试试桌面自动化', description: '对jiabaixing说"截图"或"打开记事本"体验桌面控制', priority: 2 },
+      { type: 'usage', title: '配置主动提醒', description: '设置日程提醒让jiabaixing主动通知你', priority: 3 },
+    ];
 
     res.json({
       success: true,

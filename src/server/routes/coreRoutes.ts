@@ -305,7 +305,8 @@ export function registerCoreRoutes(
     }
   });
 
-  app.get('/api/logs', (req, res) => {
+  // Renamed from /api/logs to avoid shadowing systemStateRoutes file-based logs
+  app.get('/api/logs/stream', (req, res) => {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
