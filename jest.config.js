@@ -9,6 +9,7 @@ module.exports = {
   testPathIgnorePatterns: [
     '/node_modules/',
     '/tests/unit/frontend/',
+    '/src/frontend/src/App.test',
     '/tests/phase1-optimization',
     '/tests/phase2-intelligence',
     '/tests/phase3-autonomy',

@@ -508,5 +508,39 @@
       "checkpoint",
       "pre-action"
     ]
+  },
+  {
+    "snapshotId": "snap_mpr1usmo_nd2zy6",
+    "timestamp": 1780066873926,
+    "triggerType": "pre_action",
+    "description": "操作前检查点: 截图",
+    "status": "active",
+    "filePath": "snapshots\\snap_mpr1usmo_nd2zy6.json.gz",
+    "checksum": "2ba0e592383f93c47bcd05bf06683a71c52d615fbc0bae69a011f0f04e113782",
+    "sizeBytes": 1935,
+    "windowCount": 0,
+    "processCount": 0,
+    "uiTreeNodeCount": 45,
+    "tags": [
+      "checkpoint",
+      "pre-action"
+    ]
+  },
+  {
+    "snapshotId": "snap_mpr1ux31_dimkvs",
+    "timestamp": 1780066879727,
+    "triggerType": "pre_action",
+    "description": "操作前检查点: 打开记事本",
+    "status": "active",
+    "filePath": "snapshots\\snap_mpr1ux31_dimkvs.json.gz",
+    "checksum": "c4543a548863872917007be37fc0d32cf08f5c110481ef2c33b5a573d102c34d",
+    "sizeBytes": 1948,
+    "windowCount": 0,
+    "processCount": 0,
+    "uiTreeNodeCount": 45,
+    "tags": [
+      "checkpoint",
+      "pre-action"
+    ]
   }
 ]

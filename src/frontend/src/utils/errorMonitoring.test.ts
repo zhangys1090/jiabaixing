@@ -1,5 +1,21 @@
 import { errorMonitor, ErrorLevel } from './errorMonitoring';
 
+// 在 Node.js 测试环境中模拟浏览器 API
+// 有些测试环境可能已经定义了 window（如 jsdom），合并而不是替换
+const existingWindow = (globalThis as Record<string, unknown>).window as Record<string, unknown> | undefined;
+(globalThis as Record<string, unknown>).window = {
+  addEventListener: existingWindow?.addEventListener || jest.fn(),
+  removeEventListener: existingWindow?.removeEventListener || jest.fn(),
+  location: { href: 'http://localhost:3000/', origin: 'http://localhost:3000' },
+  ...(existingWindow || {}),
+};
+(globalThis as Record<string, unknown>).navigator = {
+  userAgent: 'jest-test-runner',
+};
+
+// 设置测试环境变量
+process.env.REACT_APP_API_BASE_URL = 'http://test-api.jiabaixing.com/api';
+
 // 模拟 fetch 函数
 global.fetch = jest.fn();
 
@@ -11,7 +27,10 @@ describe('ErrorMonitor', () => {
 
   test('should initialize error monitoring', () => {
     // 模拟 window.addEventListener
-    const addEventListenerSpy = jest.spyOn(window, 'addEventListener');
+    const addEventListenerSpy = jest.spyOn(
+      window as unknown as { addEventListener: jest.Mock },
+      'addEventListener'
+    );
 
     // 初始化错误监控
     errorMonitor.initialize();

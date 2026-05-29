@@ -58,6 +58,27 @@ jest.mock('../../../src/desktop/SystemInput', () => ({
   },
 }));
 
+jest.mock('../../../src/desktop/DesktopUIInspector', () => ({
+  DesktopUIInspector: {
+    getInstance: jest.fn().mockReturnValue({
+      initialize: jest.fn().mockResolvedValue(undefined),
+      inspect: jest.fn().mockResolvedValue({ elements: [], summary: '' }),
+      shutdown: jest.fn().mockResolvedValue(undefined),
+    }),
+  },
+}));
+
+jest.mock('../../../src/desktop/StateSnapshotManager', () => ({
+  StateSnapshotManager: {
+    getInstance: jest.fn().mockReturnValue({
+      initialize: jest.fn().mockResolvedValue(undefined),
+      checkpointBeforeAction: jest.fn().mockResolvedValue('checkpoint-1'),
+      restoreSnapshot: jest.fn().mockResolvedValue(true),
+      shutdown: jest.fn().mockResolvedValue(undefined),
+    }),
+  },
+}));
+
 describe('DesktopAgentLoop', () => {
   let agentLoop: DesktopAgentLoop;
 

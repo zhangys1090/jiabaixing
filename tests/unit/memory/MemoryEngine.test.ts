@@ -44,10 +44,41 @@ jest.mock('better-sqlite3', () => {
     prepare: jest.fn().mockReturnValue(new MockStatement()),
     pragma: jest.fn().mockReturnValue([]),
     exec: jest.fn(),
-    transaction: jest.fn((fn) => fn()),
+    transaction: jest.fn((fn: () => unknown) => fn()),
     close: jest.fn(),
   }));
 });
+
+jest.mock('../../../src/memory/VectorDatabaseFactory', () => ({
+  VectorDatabaseFactory: {
+    createVectorDatabase: jest.fn().mockResolvedValue({
+      storeVector: jest.fn().mockResolvedValue(undefined),
+      searchVectors: jest.fn().mockResolvedValue([]),
+      deleteVector: jest.fn().mockResolvedValue(undefined),
+      search: jest.fn().mockResolvedValue([]),
+      insert: jest.fn().mockResolvedValue(undefined),
+      delete: jest.fn().mockResolvedValue(undefined),
+    }),
+  },
+}));
+
+jest.mock('../../../src/memory/LongTermMemory', () => ({
+  LongTermMemory: jest.fn().mockImplementation(() => ({
+    initialize: jest.fn().mockResolvedValue(undefined),
+    store: jest.fn().mockResolvedValue(undefined),
+    retrieve: jest.fn().mockResolvedValue([]),
+    getAll: jest.fn().mockReturnValue([]),
+    shutdown: jest.fn().mockResolvedValue(undefined),
+  })),
+}));
+
+jest.mock('../../../src/memory/MemoryEncryption', () => ({
+  MemoryEncryption: jest.fn().mockImplementation(() => ({
+    initialize: jest.fn().mockResolvedValue(undefined),
+    encrypt: jest.fn((d: string) => d),
+    decrypt: jest.fn((d: string) => d),
+  })),
+}));
 
 describe('MemoryEngine', () => {
   let memoryEngine: MemoryEngine;
@@ -69,7 +100,9 @@ describe('MemoryEngine', () => {
       const engine = memoryEngine as any;
       expect(engine.userProfile).toBeInstanceOf(UserProfile);
       expect(engine.shortTermMemory).toBeInstanceOf(ShortTermMemory);
-      expect(engine.longTermMemory).toBeInstanceOf(LongTermMemory);
+      // LongTermMemory is module-mocked → constructor replaced
+      expect(engine.longTermMemory).toBeDefined();
+      expect(typeof engine.longTermMemory.initialize).toBe('function');
       expect(engine.instantMemory).toBeInstanceOf(Array);
 
       // 验证关闭功能
