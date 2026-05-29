@@ -1,18 +1,8 @@
 /**
- * Evolution 模块统一导出
+ * Evolution 模块统一导出 (V2 only)
  */
 
-export { EvolutionEngine } from './EvolutionEngine';
-export { FeedbackCollector, FeedbackRecord } from './FeedbackCollector';
-export {
-  OptimizationLog,
-  PromptExample,
-  SkillWeightAdjustment,
-  StrategyOptimizer,
-  ToneAdjustment,
-} from './StrategyOptimizer';
-
-// 新增 V2 真正自我进化引擎
+// V2 真正自我进化引擎
 export { EvolutionEngineV2 } from './v2/EvolutionEngineV2';
 export { EvolutionRollback } from './v2/EvolutionRollback';
 export { SelfModificationEngine } from './v2/SelfModificationEngine';

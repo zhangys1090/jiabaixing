@@ -63,7 +63,7 @@ export function registerEvolutionRoutes(
         }
         const reason = (req.body as { reason?: string }).reason || '手动触发';
         const log = await evolutionEngine.triggerManualOptimization(reason);
-        res.json({ success: true, data: { id: log.id, reason: log.reason } });
+        res.json({ success: true, data: { id: log?.id ?? 'none', reason: log?.reason ?? '手动触发' } });
       } catch (error) {
         res
           .status(500)

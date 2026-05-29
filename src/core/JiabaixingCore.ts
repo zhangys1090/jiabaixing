@@ -1,5 +1,6 @@
 import path from 'path';
 import { EvolutionOrchestrator } from '../evolution/EvolutionOrchestrator';
+import { EvolutionEngine } from '../evolution/EvolutionEngine';
 import { LLMProvider } from '../models/LLMProvider';
 import { PerformanceMonitor } from '../monitoring/PerformanceMonitor';
 import { SecurityAuditor } from '../monitoring/SecurityAuditor';
@@ -8,10 +9,7 @@ import { PersonaRules } from '../persona/PersonaRules';
 import { EventBus } from '../shared/EventBus';
 import { Logger } from '../utils/Logger';
 import { SYSTEM_CONSTANTS } from '../shared/contracts';
-import {
-  IEvolutionEngine,
-  ITRAEOptimizationIntegrator,
-} from '../server/init/types';
+import { ITRAEOptimizationIntegrator } from '../server/init/types';
 import {
   ConstitutionPromptBuilder,
   type PromptBuilderDependencies,
@@ -112,8 +110,9 @@ export class JiabaixingCore {
   private memoryEngine: IMemoryEngine | null = null;
   private performanceMonitor: PerformanceMonitor;
   private securityAuditor: SecurityAuditor;
-  private evolutionEngine: IEvolutionEngine | null = null;
   private traeOptimizationIntegrator: ITRAEOptimizationIntegrator | null = null;
+  // V1 stub for evolution routes backward compat (V2 EvolutionEngineV2 is active)
+  public evolutionEngine: EvolutionEngine = new EvolutionEngine();
   private optimizationSchedulerManager!: OptimizationScheduler;
   private scenarioScheduler: ScenarioAwareScheduler | null = null;
 
@@ -139,11 +138,11 @@ export class JiabaixingCore {
       ),
     });
 
-    // 初始化宪法 prompt 构建器
+    // 初始化宪法 prompt 构建器 (V1 evolution removed)
     this.constitutionPromptBuilder = new ConstitutionPromptBuilder({
       memoryEngine: this
         .memoryEngine as unknown as PromptBuilderDependencies['memoryEngine'],
-      evolutionEngine: this.evolutionEngine,
+      evolutionEngine: undefined,
     });
 
     // 初始化进化编排器
@@ -246,7 +245,7 @@ export class JiabaixingCore {
     this.constitutionPromptBuilder = new ConstitutionPromptBuilder({
       memoryEngine: this
         .memoryEngine as unknown as PromptBuilderDependencies['memoryEngine'],
-      evolutionEngine: this.evolutionEngine,
+      evolutionEngine: undefined,
     });
   }
 
@@ -262,20 +261,6 @@ export class JiabaixingCore {
    */
   getConversationHistoryManager(): ConversationHistoryManager {
     return this.conversationHistoryManager;
-  }
-
-  /**
-   * 获取进化引擎
-   */
-  getEvolutionEngineInternal(): IEvolutionEngine | null {
-    return this.evolutionEngine;
-  }
-
-  /**
-   * 设置进化引擎
-   */
-  setEvolutionEngine(engine: IEvolutionEngine): void {
-    this.evolutionEngine = engine;
   }
 
   /**

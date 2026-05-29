@@ -133,23 +133,47 @@ export class EvolutionEngineV2 {
   }
 
   /**
-   * 验证进化效果
-   * 在真实场景中，这里应该运行测试、检查编译等
-   * 为了测试，我们根据计划的 estimatedRisk 来决定是否验证通过
+   * 验证进化效果 — 真正跑 tsc 编译检查
+   * HIGH 风险计划额外跑 jest 测试
    */
-  private async validateEvolution(plan: EvolutionPlan): Promise<{ passed: boolean; details: string }> {
-    // 高风险的进化需要更严格的验证
-    if (plan.estimatedRisk === 'HIGH') {
-      return {
-        passed: true,
-        details: 'High risk plan - validation passed (placeholder for real validation)'
-      };
+  private async validateEvolution(
+    plan: EvolutionPlan
+  ): Promise<{ passed: boolean; details: string }> {
+    const { execSync } = await import('child_process');
+    const failures: string[] = [];
+
+    // Step 1: TypeScript 编译检查（必须通过）
+    try {
+      execSync('npx tsc --noEmit --project tsconfig.fast.json', {
+        cwd: process.cwd(),
+        timeout: 60000,
+        stdio: 'pipe',
+      });
+    } catch (err) {
+      const stderr = (err as { stderr?: Buffer }).stderr?.toString() || '';
+      failures.push(`TypeScript 编译失败: ${stderr.slice(0, 300)}`);
     }
-    
-    // 默认通过
+
+    // Step 2: HIGH 风险计划额外跑测试
+    if (plan.estimatedRisk === 'HIGH') {
+      try {
+        execSync('npx jest --forceExit --no-coverage --passWithNoTests', {
+          cwd: process.cwd(),
+          timeout: 120000,
+          stdio: 'pipe',
+        });
+      } catch (err) {
+        const stderr = (err as { stderr?: Buffer }).stderr?.toString() || '';
+        failures.push(`测试失败: ${stderr.slice(0, 300)}`);
+      }
+    }
+
+    if (failures.length > 0) {
+      return { passed: false, details: failures.join('; ') };
+    }
     return {
       passed: true,
-      details: 'Validation passed (placeholder)'
+      details: `验证通过 (tsc${plan.estimatedRisk === 'HIGH' ? ' + jest' : ''})`,
     };
   }
 

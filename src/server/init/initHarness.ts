@@ -31,7 +31,8 @@ export async function initHarness(
 
     const constitutionPromptBuilder = core.getConstitutionPromptBuilder();
     const conversationHistoryManager = core.getConversationHistoryManager();
-    const evolutionEngine = core.getEvolutionEngineInternal();
+    // V1 removed; V2 EvolutionOrchestrator handles evolution directly
+    const evolutionEngine = core.evolutionEngine;
 
     const harnessDeps: HarnessDeps = {
       llm: {

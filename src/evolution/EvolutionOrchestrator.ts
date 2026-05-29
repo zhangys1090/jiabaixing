@@ -261,7 +261,7 @@ export class EvolutionOrchestrator {
   /**
    * 触发真正的自我进化（EvolutionEngineV2）
    */
-  private async triggerTrueEvolution(record: InteractionRecord): Promise<void> {
+  public async triggerTrueEvolution(record: InteractionRecord): Promise<void> {
     if (!this.evolutionEngineV2) return;
 
     const cause: EvolutionCause = {
@@ -405,7 +405,7 @@ export class EvolutionOrchestrator {
           results.push({
             engineName: 'EvolutionEngine',
             triggered: true,
-            detail: `优化ID: ${optLog.id}`,
+            detail: `优化ID: ${optLog?.id ?? 'none'}`,
           });
         } catch (error) {
           results.push({
