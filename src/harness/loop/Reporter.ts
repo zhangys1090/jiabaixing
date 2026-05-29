@@ -88,13 +88,31 @@ export class Reporter {
     overall = Math.max(0.1, Math.min(1.0, overall));
     efficiency = Math.max(0.1, Math.min(1.0, efficiency));
 
+    // Fix: quality dimensions now have independent signals instead of being pure derivatives
+    // accuracy: penalized by tool failures in stepResults
+    const stepFailures = [...(context.stepResults?.values() || [])].filter(
+      (s) => !s.success
+    ).length;
+    const stepTotal = context.stepResults?.size || 1;
+    const stepSuccessRate = (stepTotal - stepFailures) / stepTotal;
+
+    // friendliness: penalized if response is very short (likely terse/error)
+    const responseText = this.extractResponse(context.messages);
+    const friendlinessFactor =
+      responseText.length < 50
+        ? 0.3
+        : responseText.length < 100
+          ? 0.6
+          : 0.8;
+
     return {
       overall,
-      accuracy: Math.max(0.1, overall * 0.9),
-      usefulness: Math.max(0.1, overall * 0.95),
-      friendliness: Math.max(0.1, Math.min(1.0, 0.8)),
+      accuracy: Math.max(0.1, overall * (0.5 + 0.5 * stepSuccessRate)),
+      usefulness: Math.max(0.1, overall * (0.5 + 0.5 * stepSuccessRate)),
+      friendliness: Math.max(0.1, Math.min(1.0, friendlinessFactor)),
       efficiency,
-      details: `轮次=${budget.roundsUsed} 工具=${budget.toolCallsUsed} 时长=${duration}ms 自然完成=${completedNaturally}`,
+      details: `轮次=${budget.roundsUsed} 工具=${budget.toolCallsUsed} 时长=${duration}ms 步骤成功率=${(stepSuccessRate * 100).toFixed(0)}%`,
     };
   }
+
 }

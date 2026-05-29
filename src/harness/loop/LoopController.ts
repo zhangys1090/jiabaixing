@@ -67,6 +67,7 @@ export interface ExecutorOutput {
   toolCallsCount: number;
   toolDuration: number;
   completedNaturally: boolean;
+  estimatedTokens?: number;
 }
 
 /** 评估器输出 */
@@ -121,7 +122,7 @@ export class LoopController {
           id: traceId,
           user_id: input.userId,
           input: input.text,
-          status: 'failed',
+          status: 'in_progress',
           loop_rounds: 0,
           total_tool_calls: 0,
           total_duration: 0,
@@ -310,10 +311,11 @@ export class LoopController {
           }
         }
 
-        // 更新上下文
+        // 更新上下文（含token估算）
         context.messages = executorOutput.messages;
         context.budget.roundsUsed++;
         context.budget.toolCallsUsed += executorOutput.toolCallsCount;
+        context.budget.tokensUsed += executorOutput.estimatedTokens || 0;
         context.trace.totalToolCalls += executorOutput.toolCallsCount;
 
         // ─── Phase 3: EVALUATING ───
@@ -587,6 +589,14 @@ export class LoopController {
    */
   abort(): void {
     this.aborted = true;
+    // Fix: notify frontend on abort
+    void EventBus.emit('agent_execution_update', {
+      traceId: '',
+      phase: 'aborted',
+      status: 'aborted',
+      message: '执行已被中止',
+      timestamp: new Date().toISOString(),
+    });
     Logger.info('🛑 LoopController 中止', 'LoopController');
   }
 
@@ -600,8 +610,30 @@ export class LoopController {
   /**
    * 状态转换
    */
+  // Fix: valid state transitions — blocks impossible transitions
+  private static readonly VALID_TRANSITIONS: Map<LoopState, LoopState[]> = new Map([
+    [LoopState.PLANNING, [LoopState.EXECUTING, LoopState.FAILED, LoopState.ABORTED]],
+    [LoopState.EXECUTING, [LoopState.EVALUATING, LoopState.FAILED, LoopState.ABORTED]],
+    [LoopState.EVALUATING, [LoopState.REPORTING, LoopState.PLANNING, LoopState.ABORTED, LoopState.BUDGET_EXCEEDED]],
+    [LoopState.REPORTING, [LoopState.COMPLETED, LoopState.FAILED]],
+    [LoopState.COMPLETED, []],
+    [LoopState.FAILED, []],
+    [LoopState.ABORTED, []],
+    [LoopState.BUDGET_EXCEEDED, [LoopState.COMPLETED, LoopState.FAILED]],
+  ]);
+
   private transition(newState: LoopState, context: LoopContext): void {
     const prev = this.state;
+    if (prev !== LoopState.COMPLETED) {
+      const allowed = LoopController.VALID_TRANSITIONS.get(prev);
+      if (allowed && !allowed.includes(newState) && allowed.length > 0) {
+        Logger.warn(
+          `⚠️ 非法状态转换: ${prev} → ${newState}，已阻止`,
+          'LoopController'
+        );
+        return;
+      }
+    }
     this.state = newState;
     context.trace.state = newState;
     context.trace.stateTransitions.push({
@@ -890,10 +922,10 @@ export class LoopController {
   ): void {
     if (plan.simple || plan.steps.length === 0) return;
 
-    const hasExistingPlanMsg = context.messages.some(
-      (m) => m.role === 'system' && m.content?.startsWith('【执行计划】')
+    // Fix: remove old plan messages before injecting new plan (enables replan)
+    context.messages = context.messages.filter(
+      (m) => !(m.role === 'system' && m.content?.startsWith('【执行计划】'))
     );
-    if (hasExistingPlanMsg) return;
 
     const steps = plan.steps
       .map(

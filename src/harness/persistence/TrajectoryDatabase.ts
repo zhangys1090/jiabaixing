@@ -15,7 +15,7 @@ export interface ExecutionRecord {
   input: string;
   response?: string;
   intent?: string;
-  status: 'success' | 'failed' | 'aborted';
+  status: 'success' | 'failed' | 'aborted' | 'in_progress';
   quality_overall?: number;
   loop_rounds?: number;
   total_tool_calls?: number;

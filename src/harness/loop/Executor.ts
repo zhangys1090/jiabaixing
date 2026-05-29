@@ -291,6 +291,16 @@ export class Executor {
         `🔄 第${loopCount}轮: LLM 调用了 ${fcResponse.toolCalls.length} 个工具 [${toolNames}]`,
         'Executor'
       );
+      // Fix: push per-round progress to frontend
+      void EventBus.emit('agent_execution_update', {
+        traceId: context.trace.traceId,
+        phase: 'executing',
+        status: 'in_progress',
+        message: `第${loopCount}轮: 调用 ${fcResponse.toolCalls.length} 个工具 [${toolNames}]`,
+        roundsUsed: loopCount,
+        toolCallsCount: fcResponse.toolCalls.length,
+        timestamp: new Date().toISOString(),
+      });
 
       // 无进展检测：相同工具名集合
       const toolNameSet = fcResponse.toolCalls
@@ -621,8 +631,8 @@ export class Executor {
               );
             }
           }
-          // 通过 hooks 接口的兼容处理
-          if (this.deps.hooks?.afterToolCall) {
+          // Fix: skip hooks if constraintsService already ran (avoid double-sanitization)
+          if (this.deps.hooks?.afterToolCall && !this.deps.constraintsService) {
             try {
               const toolResult: ToolResult = {
                 success: result.success,
@@ -799,6 +809,20 @@ export class Executor {
 
       const toolResults = await Promise.all(toolPromises);
 
+      // Fix: push per-tool progress to frontend
+      for (const tr of toolResults) {
+        void EventBus.emit('agent_execution_update', {
+          traceId: context.trace.traceId,
+          phase: 'executing',
+          status: tr.success ? 'tool_completed' : 'tool_failed',
+          message: `${tr.success ? '✅' : '❌'} ${tr.toolCall?.function?.name || 'unknown'}: ${tr.success ? '完成' : tr.error || '失败'}`,
+          toolName: tr.toolCall?.function?.name,
+          toolSuccess: tr.success,
+          duration: tr.duration,
+          timestamp: new Date().toISOString(),
+        });
+      }
+
       // 将工具结果注入消息
       for (const tr of toolResults) {
         const toolCallId =
@@ -847,11 +871,14 @@ export class Executor {
       });
     }
 
+    const estimatedTokens = this.estimateMessagesTokens(messages);
+
     return {
       messages,
       toolCallsCount: totalToolCalls,
       toolDuration: totalToolDuration,
       completedNaturally: loopCount < HARD_TOOL_LIMIT,
+      estimatedTokens,
     };
   }
 

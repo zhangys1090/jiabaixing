@@ -53,6 +53,13 @@ export function setupEventBus(
       status?: string;
       result?: unknown;
       timestamp?: string;
+      message?: string;
+      roundsUsed?: number;
+      toolCallsCount?: number;
+      toolName?: string;
+      toolSuccess?: boolean;
+      duration?: number;
+      attempt?: number;
     };
     broadcast({
       type: 'agent_execution_update',
@@ -62,6 +69,12 @@ export function setupEventBus(
         status: payload.status || 'unknown',
         result: payload.result,
         timestamp: payload.timestamp || new Date().toISOString(),
+        message: payload.message,
+        roundsUsed: payload.roundsUsed,
+        toolCallsCount: payload.toolCallsCount,
+        toolName: payload.toolName,
+        toolSuccess: payload.toolSuccess,
+        duration: payload.duration,
       },
     });
   });

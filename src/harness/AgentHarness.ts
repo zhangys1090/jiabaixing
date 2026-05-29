@@ -343,30 +343,10 @@ export class AgentHarness {
               );
             }
           },
-          recordTrajectory: (step) => {
-            if (this.trajectoryDatabase) {
-              try {
-                const toolResult = step.toolResult;
-                if (toolResult && step.metadata) {
-                  const meta = step.metadata as Record<string, unknown>;
-                  this.trajectoryDatabase.recordToolInvocation({
-                    execution_id: String(meta.execution_id || ''),
-                    step_index: 0,
-                    tool_name: step.toolName || '',
-                    args_json: '{}',
-                    result_success: toolResult.success ? 1 : 0,
-                    duration: step.duration || 0,
-                    created_at: Date.now(),
-                  });
-                }
-              } catch (err) {
-                Logger.warn(
-                  `⚠️ 轨迹记录失败: ${(err as Error).message}`,
-                  'AgentHarness'
-                );
-              }
-            }
-          },
+          // Fix: delegate to Executor's proper fallback instead of broken hook
+          // The Executor has correct step_index and args_json; this hook was
+          // writing hardcoded garbage (step_index:0, args_json:'{}')
+          recordTrajectory: undefined,
         },
       });
       // H1 fix: rule-based evaluation by default, LLM eval only for ambiguous cases
@@ -662,6 +642,21 @@ export class AgentHarness {
     Logger.info('🏗️ Agent Harness 关闭', 'AgentHarness');
     this.initialized = false;
     this.loopController = null;
+
+    // Fix: close resources to prevent leaks
+    if (this.trajectoryDatabase) {
+      try { this.trajectoryDatabase.close(); } catch { /* best-effort */ }
+      this.trajectoryDatabase = null;
+    }
+    if (this.persistenceService) {
+      try {
+        (this.persistenceService as unknown as { shutdown?: () => Promise<void> }).shutdown?.();
+      } catch { /* best-effort */ }
+      this.persistenceService = null;
+    }
+    if (this.sandboxExecutor) {
+      this.sandboxExecutor = null;
+    }
   }
 
   /**

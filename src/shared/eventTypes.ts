@@ -268,9 +268,13 @@ export interface AgentExecutionEvents {
       timestamp: string;
       roundsUsed?: number;
       toolCallsUsed?: number;
+      toolCallsCount?: number;
       elapsedMs?: number;
       message?: string;
       attempt?: number;
+      toolName?: string;
+      toolSuccess?: boolean;
+      duration?: number;
     },
   ];
   perception_update: [
