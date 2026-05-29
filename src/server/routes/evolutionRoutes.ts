@@ -134,23 +134,12 @@ export function registerEvolutionRoutes(
     express.json({ limit: '1mb' }),
     async (req, res) => {
       try {
-        const evolutionEngine = (core as unknown as Record<string, unknown>)
-          .evolutionEngine as
-          | import('../../evolution/EvolutionEngine').EvolutionEngine
-          | undefined;
-
-        if (!evolutionEngine) {
-          return res
-            .status(503)
-            .json({ success: false, error: '进化引擎未启动' });
-        }
-
-        const results: unknown[] = [];
-
+        const reason = (req.body as { reason?: string }).reason || '手动触发自愈';
+        const orchestrator = EvolutionOrchestrator.getInstance();
+        void orchestrator.triggerOptimizationCycleWithVerification(reason);
         res.json({
           success: true,
-          message: '自愈操作已执行',
-          results,
+          message: `自愈优化已触发: ${reason}`,
           timestamp: new Date().toISOString(),
         });
       } catch (error) {
@@ -166,25 +155,12 @@ export function registerEvolutionRoutes(
     express.json({ limit: '1mb' }),
     async (req, res) => {
       try {
-        const evolutionEngine = (core as unknown as Record<string, unknown>)
-          .evolutionEngine as
-          | import('../../evolution/EvolutionEngine').EvolutionEngine
-          | undefined;
-
-        if (!evolutionEngine) {
-          return res
-            .status(503)
-            .json({ success: false, error: '进化引擎未启动' });
-        }
-
-        const _reason =
-          (req.body as { reason?: string }).reason || '手动触发重构';
-        void _reason;
-
+        const reason = (req.body as { reason?: string }).reason || '手动触发重构';
+        const orchestrator = EvolutionOrchestrator.getInstance();
+        void orchestrator.triggerOptimizationCycleWithVerification(reason);
         res.json({
           success: true,
-          message: '重构操作已执行',
-          result: null,
+          message: `重构优化已触发: ${reason}`,
           timestamp: new Date().toISOString(),
         });
       } catch (error) {
@@ -200,26 +176,12 @@ export function registerEvolutionRoutes(
     express.json({ limit: '1mb' }),
     async (req, res) => {
       try {
-        const evolutionEngine = (core as unknown as Record<string, unknown>)
-          .evolutionEngine as
-          | import('../../evolution/EvolutionEngine').EvolutionEngine
-          | undefined;
-
-        if (!evolutionEngine) {
-          return res
-            .status(503)
-            .json({ success: false, error: '进化引擎未启动' });
-        }
-
-        const _reason =
-          (req.body as { reason?: string }).reason || '手动触发增强';
-        void _reason;
-        const opportunities: unknown[] = [];
-
+        const reason = (req.body as { reason?: string }).reason || '手动触发增强';
+        const orchestrator = EvolutionOrchestrator.getInstance();
+        void orchestrator.triggerOptimizationCycleWithVerification(reason);
         res.json({
           success: true,
-          message: '增强操作已执行',
-          opportunities,
+          message: `增强优化已触发: ${reason}`,
           timestamp: new Date().toISOString(),
         });
       } catch (error) {

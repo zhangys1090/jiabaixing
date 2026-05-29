@@ -287,26 +287,39 @@ export function setupWebSocket(
           );
         } else if (data.type === 'clarification_response') {
           Logger.info(`💬 收到澄清回答: ${data.response}`, 'WebSocket');
+          void EventBus.emit('clarification_response', data);
         } else if (data.type === 'execution_confirm') {
           Logger.info(
             `✅ 收到执行确认: ${data.confirmed ? '确认' : '取消'}`,
             'WebSocket'
           );
+          void EventBus.emit('execution_confirm', data);
         } else if (data.type === 'automation_task_toggle') {
           Logger.info(
             `⚡ 自动化任务切换: ${data.taskId} -> ${data.enabled ? '启用' : '禁用'}`,
             'WebSocket'
           );
+          if (core?.getScenarioScheduler()) {
+            const scheduler = core.getScenarioScheduler()!;
+            if (data.enabled) scheduler.toggleTask?.(data.taskId, true);
+            else scheduler.toggleTask?.(data.taskId, false);
+          }
+          void EventBus.emit('automation_task_toggle', data);
         } else if (data.type === 'automation_task_create') {
           Logger.info(
             `⚡ 自动化任务创建: ${JSON.stringify(data.task)}`,
             'WebSocket'
           );
+          if (core?.getScenarioScheduler()) {
+            core.getScenarioScheduler()!.addTask(data.task);
+          }
+          void EventBus.emit('automation_task_create', data);
         } else if (data.type === 'automation_trigger_execute') {
           Logger.info(
             `⚡ 自动化触发执行: ${JSON.stringify(data.trigger)}`,
             'WebSocket'
           );
+          void EventBus.emit('automation_trigger_execute', data);
         } else {
           Logger.info(`📨 WebSocket收到未知类型: ${data.type}`, 'WebSocket');
         }

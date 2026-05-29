@@ -4,6 +4,11 @@ import * as path from 'path';
 import { EvolutionEngineV2 } from '../EvolutionEngineV2';
 import { EvolutionCause, EvolutionType, EvolutionPriority } from '../types';
 
+// Mock child_process for validateEvolution (runs tsc/jest in production)
+jest.mock('child_process', () => ({
+  execSync: jest.fn().mockReturnValue(Buffer.from('')),
+}));
+
 describe('EvolutionEngineV2 - 真正自我进化', () => {
   let tempDir: string;
   let engine: EvolutionEngineV2;

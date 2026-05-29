@@ -209,7 +209,8 @@ export function registerCoreRoutes(
         const result: ProcessInputResult = await core.processInput(
           processedInput,
           userId,
-          traceId
+          traceId,
+          images as Array<{ url: string; mimeType?: string }> | undefined
         );
 
         res.json({

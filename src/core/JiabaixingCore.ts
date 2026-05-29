@@ -336,7 +336,8 @@ export class JiabaixingCore {
   async processInput(
     input: string,
     userId?: string,
-    traceId?: string
+    traceId?: string,
+    images?: Array<{ url: string; mimeType?: string }>
   ): Promise<ProcessInputResult> {
     if (!this.initialized) {
       await this.initialize();
@@ -384,6 +385,7 @@ export class JiabaixingCore {
           text: input,
           userId,
           traceId: finalTraceId,
+          images, // Fix: pass images through to harness
         });
 
         const safeResponse = harnessResult.response;

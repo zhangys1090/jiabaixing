@@ -392,6 +392,15 @@ export interface VibeCodingEvents {
 }
 
 export interface AutomationEvents {
+  automation_task_toggle: [
+    payload: { taskId: string; enabled: boolean; timestamp: string },
+  ];
+  automation_task_create: [
+    payload: { task: Record<string, unknown>; timestamp: string },
+  ];
+  automation_trigger_execute: [
+    payload: { trigger: Record<string, unknown>; timestamp: string },
+  ];
   automation_task_update: [
     payload: {
       taskId: string;
