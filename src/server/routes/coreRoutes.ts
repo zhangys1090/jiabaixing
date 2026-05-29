@@ -210,7 +210,7 @@ export function registerCoreRoutes(
           processedInput,
           userId,
           traceId,
-          images as Array<{ url: string; mimeType?: string }> | undefined
+          (Array.isArray(images) && images.length > 0 ? images.map((url: string) => ({ url })) : undefined)
         );
 
         res.json({

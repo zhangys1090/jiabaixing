@@ -1,4 +1,4 @@
-#!/usr/bin/env npx ts-node -r ts-node/register
+// @ts-nocheck
 /**
  * Jiabaixing V5.0 Eval Framework - CLI 入口
  *
