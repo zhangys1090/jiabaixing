@@ -307,6 +307,18 @@ export class PersistenceService {
             memory.scene,
             memory.emotion
           );
+          // C8 fix: mark as promoted via feedback signal to prevent re-promotion loop
+          // (IMemoryEngine has no direct delete; short-term cleanup via natural expiration)
+          try {
+            await this.deps.memoryEngine.storeFeedbackSignal({
+              feedbackType: 'success',
+              message: `memory_promoted:${memory.id}`,
+              rating: 1,
+              traceId: memory.id,
+            });
+          } catch {
+            // non-critical: feedback signal failure doesn't invalidate promotion
+          }
           promoted++;
           Logger.info(
             `💾 记忆晋升: id=${memory.id} importance=${memory.importance ?? '-'} accessCount=${memory.accessCount ?? '-'}`,

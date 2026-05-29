@@ -544,21 +544,27 @@ export class TrajectoryFlywheel {
   }
 
   /**
-   * 获取最近执行记录（模拟方法）
+   * 获取最近执行记录（从数据库）
    */
   private getRecentExecutions(cutoffTime: number): ExecutionRecord[] {
-    // 实际项目中应该从数据库查询
-    // 这里返回空数组作为示例
-    return [];
+    // C7 fix: wire to real database instead of returning empty []
+    return this.trajectoryDB
+      .getRecentExecutions(500)
+      .filter((e) => e.created_at >= cutoffTime);
   }
 
   /**
-   * 获取最近工具调用（模拟方法）
+   * 获取最近工具调用（从数据库）
    */
-  private getRecentToolInvocations(cutoffTime: number): ToolInvocationRecord[] {
-    // 实际项目中应该从数据库查询
-    // 这里返回空数组作为示例
-    return [];
+  private getRecentToolInvocations(
+    cutoffTime: number
+  ): ToolInvocationRecord[] {
+    const executions = this.getRecentExecutions(cutoffTime);
+    return executions.flatMap((exec) =>
+      this.trajectoryDB
+        .getToolInvocations(exec.id)
+        .filter((inv) => inv.created_at >= cutoffTime)
+    );
   }
 
   /**

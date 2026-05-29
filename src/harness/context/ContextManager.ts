@@ -382,13 +382,129 @@ export class ContextManager {
       // 历史加载失败不影响主流程
     }
 
-    // 6. User Input
-    messages.push({ role: 'user', content: input.text });
+    // 6. User Input (skip if already added by compression path above)
+    const userInputAlreadyAdded = messages.some(
+      (m) => m.role === 'user' && m.content === input.text
+    );
+    if (!userInputAlreadyAdded) {
+      messages.push({ role: 'user', content: input.text });
+    }
 
     Logger.info(
       `📋 上下文构建完成: ${messages.length} 条消息, ${this.entries.length} 个上下文条目`,
       'ContextManager'
     );
+
+    return messages;
+  }
+
+  /**
+   * H2: 按阶段构建优化上下文——每个阶段只注入所需信息，避免token浪费
+   *
+   * - planning: 宪法 + 最近对话 + 输入（不含环境、语气、记忆）
+   * - execution: 宪法 + 语气 + 环境 + 记忆 + 完整对话（含进化经验）
+   */
+  async buildPhaseContext(
+    input: UserInput,
+    phase: 'planning' | 'execution'
+  ): Promise<ChatMessage[]> {
+    const messages: ChatMessage[] = [];
+    this.entries.length = 0;
+
+    // Constitution prompt (both phases)
+    if (this.deps.constitutionalBuilder) {
+      try {
+        const constitution =
+          await this.deps.constitutionalBuilder.buildConstitutionPrompt();
+        messages.push({ role: 'system', content: constitution });
+      } catch {
+        messages.push({ role: 'system', content: '你是一个智能助手。' });
+      }
+    } else {
+      messages.push({ role: 'system', content: '你是一个智能助手。' });
+    }
+
+    if (phase === 'execution') {
+      // Persona summary (only for execution, not planning)
+      if (this.deps.personaCore) {
+        try {
+          const persona = this.deps.personaCore.buildPersonaSummary();
+          if (persona) {
+            messages.push({ role: 'system', content: `[语气基调]\n${persona}` });
+          }
+        } catch {
+          // non-critical
+        }
+      }
+
+      // Environment context (only for execution)
+      if (this.deps.dynamicContext) {
+        try {
+          const env = this.deps.dynamicContext.getDynamicContext();
+          if (env) {
+            messages.push({ role: 'system', content: `[当前环境]\n${env}` });
+          }
+        } catch {
+          // non-critical
+        }
+      }
+
+      // Evolution examples (only for execution)
+      if (this.deps.evolutionExamples) {
+        try {
+          const examples = this.deps.evolutionExamples.getPromptExamples();
+          if (examples?.length) {
+            const text = examples
+              .slice(0, 2)
+              .map((e) => `- 触发: ${e.trigger} → 修正: ${e.correction}`)
+              .join('\n');
+            if (text) {
+              messages.push({ role: 'system', content: `[进化经验]\n${text}` });
+            }
+          }
+        } catch {
+          // non-critical
+        }
+      }
+
+      // Memory injection (only for execution)
+      if (this.deps.memoryInjector) {
+        try {
+          const memories = await this.deps.memoryInjector.autoRetrieveMemories(
+            input.text
+          );
+          if (memories?.length) {
+            const memoryContext = memories.slice(0, 3).join('\n');
+            if (memoryContext) {
+              messages.push({
+                role: 'system',
+                content: `[相关记忆]\n${memoryContext}`,
+              });
+            }
+          }
+        } catch {
+          // non-critical
+        }
+      }
+    }
+
+    // Conversation history (planning=less, execution=more)
+    if (this.deps.historyProvider) {
+      try {
+        const history =
+          phase === 'planning'
+            ? this.deps.historyProvider.getRecentHistory(3)
+            : this.deps.historyProvider.getRecentHistory(10);
+        if (history?.length) {
+          messages.push(...history);
+        }
+      } catch {
+        // non-critical
+      }
+    }
+
+    // User input
+    messages.push({ role: 'user', content: input.text });
 
     return messages;
   }

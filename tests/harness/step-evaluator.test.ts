@@ -372,23 +372,29 @@ describe('Evaluator 与 StepEvaluator 集成', () => {
     expect(result.suggestedAction).toBe('continue');
   });
 
-  test('达到最大重新规划次数后应该 abort', async () => {
+  test('每次evaluate独立——replanCount不跨调用泄漏 (C6 fix)', async () => {
+    // Arrange: partial failures → should return 'replan' (within MAX_REPLAN)
     const stepResults = new Map<string, StepResult>([
       ['step1', { stepId: 'step1', success: false, output: '错误', duration: 100, toolName: 'tool1', error: '失败' }],
       ['step2', { stepId: 'step2', success: true, output: '结果2', duration: 100, toolName: 'tool2' }],
-      ['step3', { stepId: 'step3', success: true, output: '结果3', duration: 100, toolName: 'tool3' }],
     ]);
 
     const evaluator = new Evaluator({});
 
-    const context1 = createMockContext(new Map(stepResults), false);
-    await evaluator.evaluate({ text: '测试任务' }, context1);
+    // First call: 2 steps, 1 failed → replan (replanCount=0<MAX_REPLAN=1)
+    const result1 = await evaluator.evaluate(
+      { text: '测试任务' },
+      createMockContext(new Map(stepResults), false)
+    );
+    expect(result1.suggestedAction).toBe('replan');
 
-    const context2 = createMockContext(new Map(stepResults), false);
-    const result = await evaluator.evaluate({ text: '测试任务' }, context2);
-
-    expect(result.goalProgress).toBe(0.5);
-    expect(result.suggestedAction).toBe('abort');
-    expect(result.reason).toContain('最大重新规划次数');
+    // Second call with SAME evaluator: should STILL return 'replan' because
+    // C6 fix resets replanCount per invocation (no cross-call state leak)
+    const result2 = await evaluator.evaluate(
+      { text: '测试任务' },
+      createMockContext(new Map(stepResults), false)
+    );
+    expect(result2.suggestedAction).toBe('replan');
+    expect(result2.reason).toContain('部分工具调用失败');
   });
 });

@@ -298,8 +298,8 @@ export class VerificationService {
         )
         // 密码/密钥
         .replace(
-          /(?:password|密码|pwd|passwd|secret|密钥|api[_-]?key|token)\s*[:=]\s*\S+/gi,
-          '$& [已脱敏]'
+          /((?:password|密码|pwd|passwd|secret|密钥|api[_-]?key|token)\s*[:=]\s*)\S+/gi,
+          '$1[已脱敏]'
         )
         // 身份证号
         .replace(/\b\d{6}\d{4}\d{2}\d{2}\d{4}\b/g, '[身份证-已脱敏]');

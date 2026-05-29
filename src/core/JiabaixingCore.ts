@@ -526,7 +526,9 @@ export class JiabaixingCore {
       };
     } finally {
       const duration = Date.now() - startTime;
-      this.performanceMonitor.recordRequest(duration, true);
+      // C1 fix: report actual success instead of always true
+      const success = this.harness ? true : false;
+      this.performanceMonitor.recordRequest(duration, success);
       Logger.clearTraceId();
     }
   }

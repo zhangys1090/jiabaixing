@@ -696,8 +696,7 @@ export class Executor {
           };
         } catch (err) {
           const toolDuration = Date.now() - toolStart;
-          totalToolDuration += toolDuration;
-          totalToolCalls++;
+          // C4 fix: counters already incremented in try block, skip double-count
 
           this.traceToolCall(
             toolCall,

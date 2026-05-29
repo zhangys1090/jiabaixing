@@ -593,16 +593,27 @@ ${content}
       function: { name: string; arguments: string };
     }>;
   }> {
-    const targetModel = this.model;
+    // C2 fix: add retry + fallback to chatWithTools (matching chat() resilience)
+    const primaryModel = this.model;
 
-    if (!targetModel) {
+    if (!primaryModel) {
       throw new Error('没有可用的 LLM 模型');
     }
 
     const sanitizedMessages = this.sanitizeMessagesForAPI(messages);
 
-    try {
-      const response = await targetModel.generate({
+    const tryGenerate = async (
+      model: Model,
+      modelLabel: string
+    ): Promise<{
+      content: string;
+      toolCalls?: Array<{
+        id: string;
+        type: string;
+        function: { name: string; arguments: string };
+      }>;
+    }> => {
+      const response = await model.generate({
         messages: sanitizedMessages,
         tools,
         maxTokens,
@@ -616,14 +627,55 @@ ${content}
           ? this.normalizeToolCalls(response.toolCalls)
           : undefined,
       };
-    } catch (error) {
-      Logger.error(
-        `❌ Function Calling 失败: ${(error as Error).message}`,
-        error as Error,
-        'LLMProvider'
+    };
+
+    // Retry loop: primary model with retries, then zhipu fallback
+    let lastError: Error | null = null;
+    const isConnectionError = (err: Error): boolean =>
+      LLMProvider.CONNECTION_ERRORS.some((pattern) =>
+        err.message.toLowerCase().includes(pattern.toLowerCase())
       );
-      throw error;
+
+    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+      try {
+        return await tryGenerate(primaryModel, 'primary');
+      } catch (error) {
+        lastError = error as Error;
+        if (!isConnectionError(lastError)) {
+          break; // non-retryable error, don't retry
+        }
+        if (attempt < this.maxRetries) {
+          const delay = this.baseRetryInterval * Math.pow(2, attempt);
+          Logger.warn(
+            `🔄 chatWithTools 重试 ${attempt + 1}/${this.maxRetries}, ${delay}ms 后重试`,
+            'LLMProvider'
+          );
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        }
+      }
     }
+
+    // Zhipu fallback
+    if (lastError && isConnectionError(lastError) && this.zhipuModel) {
+      Logger.info('🚀 chatWithTools 降级到智谱模型', 'LLMProvider');
+      this.localUnavailable = true;
+      try {
+        return await tryGenerate(this.zhipuModel, 'zhipu');
+      } catch (zhipuError) {
+        Logger.error(
+          `❌ 智谱降级也失败: ${(zhipuError as Error).message}`,
+          zhipuError as Error,
+          'LLMProvider'
+        );
+      }
+    }
+
+    Logger.error(
+      `❌ Function Calling 失败: ${lastError?.message}`,
+      lastError as Error,
+      'LLMProvider'
+    );
+    throw lastError || new Error('LLM 调用失败');
   }
 
   /**

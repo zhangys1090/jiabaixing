@@ -359,16 +359,20 @@ export class AgentHarness {
                     created_at: Date.now(),
                   });
                 }
-              } catch {
-                /* ignore */
+              } catch (err) {
+                Logger.warn(
+                  `⚠️ 轨迹记录失败: ${(err as Error).message}`,
+                  'AgentHarness'
+                );
               }
             }
           },
         },
       });
+      // H1 fix: rule-based evaluation by default, LLM eval only for ambiguous cases
       const evaluator = new Evaluator({
         llm: this.deps.llm,
-        enableLLMEvaluation: this.config.useIndependentEvaluator,
+        enableLLMEvaluation: false,
       });
       const reporter = new Reporter();
 

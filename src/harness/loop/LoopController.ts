@@ -461,7 +461,7 @@ export class LoopController {
         );
       }
 
-      // 轨迹数据库更新
+      // H3 fix: 轨迹数据库同步更新（before returning response, not fire-and-forget）
       if (this.deps.trajectoryDatabase) {
         try {
           this.deps.trajectoryDatabase.updateExecutionStatus(
@@ -478,10 +478,31 @@ export class LoopController {
             this.deps.trajectoryDatabase.recordExecution(exec);
           }
         } catch (err) {
+          // H3: single retry on failure
           Logger.warn(
-            `⚠️ 轨迹更新失败: ${(err as Error).message}`,
+            `⚠️ 轨迹更新失败，重试中: ${(err as Error).message}`,
             'LoopController'
           );
+          try {
+            this.deps.trajectoryDatabase.recordExecution({
+              id: traceId,
+              input: context.metadata.input as string || '',
+              response: report.response,
+              status: 'success',
+              loop_rounds: context.budget.roundsUsed,
+              total_tool_calls: context.trace.totalToolCalls,
+              total_duration: context.trace.totalDuration,
+              quality_overall: finalQuality.overall,
+              created_at: Date.now(),
+              updated_at: Date.now(),
+            });
+          } catch (retryErr) {
+            Logger.error(
+              `❌ 轨迹持久化最终失败: ${(retryErr as Error).message}`,
+              retryErr as Error,
+              'LoopController'
+            );
+          }
         }
       }
 

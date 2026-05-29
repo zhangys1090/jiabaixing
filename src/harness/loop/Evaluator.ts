@@ -74,6 +74,8 @@ export class Evaluator {
     input: UserInput,
     context: LoopContext
   ): Promise<EvaluatorOutput> {
+    // C6 fix: reset replanCount per invocation to prevent state leak
+    this.replanCount = 0;
     const budget = context.budget;
 
     if (budget.roundsUsed >= budget.hardRoundLimit) {

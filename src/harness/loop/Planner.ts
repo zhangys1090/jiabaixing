@@ -37,10 +37,7 @@ const ACTION_SIMPLE_PATTERNS: Array<{ pattern: RegExp; tools: string[] }> = [
     pattern: /^(运行|执行).*(命令|脚本|程序)/,
     tools: ['system_status', 'file_list'],
   },
-  {
-    pattern: /^(帮我|请|能不能|可以)/,
-    tools: ['file_list', 'file_search', 'incremental_edit'],
-  },
+  // H1+P-B1 fix: removed overly-broad /^(帮我|请|能不能|可以)/ that was catching complex tasks
   {
     pattern: /^(分析|检查).*(代码|文件)/,
     tools: ['code_analyze', 'file_list', 'file_search'],
@@ -92,8 +89,10 @@ export class Planner {
     this.totalPlans++;
     const text = input.text.trim();
 
-    // 1. 快速判断：简单任务直接执行
-    if (this.isSimpleTask(text)) {
+    // H1 fix: 复杂任务优先判断，避免简单模式误匹配复杂请求
+    // 然后判断简单任务，最后才让 LLM 判断中间地带
+    const isComplex = this.isComplexTask(text);
+    if (!isComplex && this.isSimpleTask(text)) {
       Logger.info(`📋 简单任务: "${text.substring(0, 50)}"`, 'Planner');
       return {
         steps: [
