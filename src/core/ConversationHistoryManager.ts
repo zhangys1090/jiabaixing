@@ -6,6 +6,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { Logger } from '../utils/Logger';
+import { SYSTEM_CONSTANTS } from '../shared/contracts';
 
 export interface ConversationEntry {
   role: 'user' | 'assistant' | 'system';
@@ -33,6 +34,7 @@ export class ConversationHistoryManager {
   private stateFilePath: string;
   private history: ConversationEntry[] = [];
   private userId: string = 'default';
+  private saveDebounceTimer: NodeJS.Timeout | null = null;
 
   constructor(userId?: string) {
     this.userId = userId || 'default';
@@ -71,6 +73,8 @@ export class ConversationHistoryManager {
         -ConversationHistoryManager.MAX_HISTORY
       );
     }
+
+    this.scheduleSave();
   }
 
   public addTurn(userContent: string, assistantContent: string): void {
@@ -88,11 +92,38 @@ export class ConversationHistoryManager {
 
   public async clear(): Promise<void> {
     this.history = [];
-    await this.saveState();
+    await this.flushSave();
   }
 
   public setHistory(history: ConversationEntry[]): void {
     this.history = history.slice(-ConversationHistoryManager.MAX_HISTORY);
+    this.scheduleSave();
+  }
+
+  /**
+   * 调度保存（debounce）
+   */
+  private scheduleSave(): void {
+    if (this.saveDebounceTimer !== null) {
+      clearTimeout(this.saveDebounceTimer);
+    }
+    this.saveDebounceTimer = setTimeout(() => {
+      this.saveState().catch(() => {
+        // 忽略
+      });
+      this.saveDebounceTimer = null;
+    }, SYSTEM_CONSTANTS.HISTORY_SAVE_DEBOUNCE_MS);
+  }
+
+  /**
+   * 立即保存（用于退出/清理场景）
+   */
+  public async flushSave(): Promise<void> {
+    if (this.saveDebounceTimer !== null) {
+      clearTimeout(this.saveDebounceTimer);
+      this.saveDebounceTimer = null;
+    }
+    await this.saveState();
   }
 
   public getLength(): number {

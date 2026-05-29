@@ -119,6 +119,9 @@ export class VerificationService {
         risk: 'high',
       },
       { pattern: /\b\d{10,12}\b/g, name: '可能的社保号', risk: 'high' },
+      { pattern: /\b\d{4}[/\-]?\d{2}[/\-]?\d{2}\b/g, name: '银行卡有效期', risk: 'medium' },
+      { pattern: /\bCVV[:\s]*\d{3,4}\b/gi, name: 'CVV码', risk: 'critical' },
+      { pattern: /\b\d{3,4}[-\s]?\d{3,4}[-\s]?\d{3,4}\b/g, name: '信用卡安全码', risk: 'high' },
 
       // 认证凭据
       {
@@ -132,16 +135,31 @@ export class VerificationService {
         risk: 'critical',
       },
       { pattern: /(?:bearer|basic)\s+\S+/gi, name: '认证头泄露', risk: 'high' },
+      { pattern: /\b(?:sk-|api_)[a-zA-Z0-9]{20,}/g, name: 'API密钥', risk: 'critical' },
+      { pattern: /\bAKIA[A-Z0-9]{16}\b/g, name: 'AWS访问密钥', risk: 'critical' },
+      { pattern: /\bghp_[a-zA-Z0-9]{36}\b/g, name: 'GitHub个人访问令牌', risk: 'critical' },
+      { pattern: /\bgho_[a-zA-Z0-9]{36}\b/g, name: 'GitHub OAuth令牌', risk: 'critical' },
+      { pattern: /\bxox[baprs]-[a-zA-Z0-9]{10,}/g, name: 'Slack令牌', risk: 'critical' },
 
-      // 通信联系方式
+      // 通信联系方式 - 手机号（多种格式）
       { pattern: /\b1[3-9]\d{9}\b/g, name: '手机号码', risk: 'medium' },
+      { pattern: /\b1[3-9]\d{2}[-\s]?\d{4}[-\s]?\d{4}\b/g, name: '手机号码(带分隔符)', risk: 'medium' },
+      { pattern: /\+86[-\s]?1[3-9]\d{9}\b/g, name: '中国手机号码', risk: 'medium' },
+      { pattern: /\b1[3-9]\d{1}[-\s]?\d{4}[-\s]?\d{4}\b/g, name: '手机号码(简写)', risk: 'medium' },
+      // 固话号码
+      { pattern: /\b0\d{2,3}[-\s]?\d{7,8}\b/g, name: '国内固话号码', risk: 'medium' },
+      { pattern: /\b0\d{2,3}[-\s]?\d{3,4}[-\s]?\d{3,4}\b/g, name: '固话号码', risk: 'medium' },
+
+      // 邮箱地址 - 多种格式
       {
         pattern: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g,
         name: '邮箱地址',
         risk: 'medium',
       },
+      { pattern: /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/gi, name: '邮箱地址(宽松)', risk: 'medium' },
+      { pattern: /\b[\w.+-]+@[\w-]+\.[\w.-]+\b/g, name: '邮箱地址(标准)', risk: 'medium' },
 
-      // 网络标识
+      // IP地址 - IPv4 和 IPv6
       {
         pattern: /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/g,
         name: 'IPv4地址',
@@ -204,14 +222,20 @@ export class VerificationService {
         name: 'IPv6链路本地地址',
         risk: 'low',
       },
+      // MAC地址
+      { pattern: /\b[0-9a-fA-F]{2}(?:[:-][0-9a-fA-F]{2}){5}\b/g, name: 'MAC地址', risk: 'low' },
+      { pattern: /\b[0-9a-fA-F]{4}(?:[.][0-9a-fA-F]{4}){2}\b/g, name: 'MAC地址(IEEE格式)', risk: 'low' },
 
-      // 地址和位置
+      // 物理地址和位置
       { pattern: /家庭地址[:：]\S+/gi, name: '家庭地址', risk: 'medium' },
       {
         pattern: /(?:家庭|公司)电话[:：]\S+/gi,
         name: '电话号码',
         risk: 'medium',
       },
+      // GPS坐标
+      { pattern: /\b[-+]?[0-9]*\.?[0-9]+[,，]\s*[-+]?[0-9]*\.?[0-9]+\b/g, name: 'GPS坐标', risk: 'medium' },
+      { pattern: /\b(?:纬度|经度)[:：]\s*[-+]?[0-9]*\.?[0-9]+/gi, name: 'GPS坐标', risk: 'medium' },
 
       // 医疗健康
       {
@@ -224,6 +248,11 @@ export class VerificationService {
         name: '医疗信息',
         risk: 'high',
       },
+      // 护照号
+      { pattern: /\b[A-Z]\d{8,9}\b/g, name: '护照号', risk: 'high' },
+      { pattern: /\b\d{8,9}[A-Z]\b/g, name: '护照号', risk: 'high' },
+      // 驾驶证号
+      { pattern: /\b\d{15,18}\b/g, name: '证件号码', risk: 'medium' },
     ];
 
     for (const { pattern, name, risk } of sensitivePatterns) {

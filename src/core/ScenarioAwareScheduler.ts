@@ -50,7 +50,11 @@ export interface GitSnapshot {
 }
 
 export interface ProjectChange {
-  type: 'git_uncommitted' | 'git_new_branch' | 'git_new_commits' | 'project_switch';
+  type:
+    | 'git_uncommitted'
+    | 'git_new_branch'
+    | 'git_new_commits'
+    | 'project_switch';
   repo: string;
   detail: string;
   timestamp: string;
@@ -73,11 +77,14 @@ export class ScenarioAwareScheduler {
 
   // Git 感知
   private readonly WATCHED_DIRS = [
-    process.cwd(),                    // jiabaixing 自身
+    process.cwd(), // jiabaixing 自身
     path.resolve(process.cwd(), '..', 'hermes-agent-main'), // hermes
-    path.resolve(process.cwd(), '..'),                    // /c/zy 根目录
+    path.resolve(process.cwd(), '..'), // /c/zy 根目录
   ];
-  private lastGitState: Map<string, { branch: string; commit: string; hasUncommitted: boolean }> = new Map();
+  private lastGitState: Map<
+    string,
+    { branch: string; commit: string; hasUncommitted: boolean }
+  > = new Map();
   private gitCheckCount: number = 0;
   private readonly GIT_CHECK_INTERVAL = 10; // 每10次检查（约5分钟）做一次git感知
   private projectChangeHistory: ProjectChange[] = [];
@@ -101,7 +108,11 @@ export class ScenarioAwareScheduler {
     return this.lastSnapshot;
   }
 
-  public getProactiveTriggers(): Array<{ type: string; reason: string; priority: number }> {
+  public getProactiveTriggers(): Array<{
+    type: string;
+    reason: string;
+    priority: number;
+  }> {
     return [];
   }
 
@@ -111,7 +122,12 @@ export class ScenarioAwareScheduler {
     taskCompletionRate: number;
     averageSessionDuration: number;
   } {
-    return { activeHours: [], frequentTopics: [], taskCompletionRate: 0, averageSessionDuration: 0 };
+    return {
+      activeHours: [],
+      frequentTopics: [],
+      taskCompletionRate: 0,
+      averageSessionDuration: 0,
+    };
   }
 
   public getProjectChanges(): ProjectChange[] {
@@ -151,7 +167,10 @@ export class ScenarioAwareScheduler {
   public start(): void {
     if (this.isRunning) return;
     this.isRunning = true;
-    Logger.info('🚀 调度器启动（含环境感知+Git感知）', 'ScenarioAwareScheduler');
+    Logger.info(
+      '🚀 调度器启动（含环境感知+Git感知）',
+      'ScenarioAwareScheduler'
+    );
     void this.checkAndExecuteTasks();
     this.checkInterval = setInterval(() => {
       void this.checkAndExecuteTasks();
@@ -168,12 +187,17 @@ export class ScenarioAwareScheduler {
     EventBus.emit('scheduler_stopped', { timestamp: new Date().toISOString() });
   }
 
-  public isActive(): boolean { return this.isRunning; }
+  public isActive(): boolean {
+    return this.isRunning;
+  }
 
   // ── 环境感知 ──
   private async senseEnvironment(): Promise<EnvironmentSnapshot> {
     const now = Date.now();
-    if (this.lastSnapshot && now - this.lastForegroundCheck < this.FOREGROUND_CHECK_INTERVAL) {
+    if (
+      this.lastSnapshot &&
+      now - this.lastForegroundCheck < this.FOREGROUND_CHECK_INTERVAL
+    ) {
       return this.lastSnapshot;
     }
     this.lastForegroundCheck = now;
@@ -185,7 +209,9 @@ export class ScenarioAwareScheduler {
       const result = execSync(
         `powershell -NoProfile -Command "Add-Type @\\\"using System;using System.Runtime.InteropServices;using System.Text;public class WAPIS{[DllImport(\\\"user32.dll\\\")]public static extern IntPtr GetForegroundWindow();[DllImport(\\\"user32.dll\\\")]public static extern int GetWindowText(IntPtr h,StringBuilder s,int n);[DllImport(\\\"user32.dll\\\")]public static extern uint GetWindowThreadProcessId(IntPtr h,out uint p);}\\\";$h=[WAPIS]::GetForegroundWindow();$s=New-Object Text.StringBuilder 256;[WAPIS]::GetWindowText($h,$s,256)|Out-Null;$p=0;[WAPIS]::GetWindowThreadProcessId($h,[ref]$p)|Out-Null;$n=(Get-Process -Id $p -ErrorAction SilentlyContinue).ProcessName;Write-Output \\\"$n|$($s.ToString())\\\""`,
         { timeout: 5000, encoding: 'utf-8' }
-      ).toString().trim();
+      )
+        .toString()
+        .trim();
 
       const parts = result.split('|');
       if (parts.length >= 2 && parts[0]) {
@@ -195,12 +221,28 @@ export class ScenarioAwareScheduler {
 
         const tl = title.toLowerCase();
         const pl = proc.toLowerCase();
-        if (tl.includes('code') || tl.includes('vscode') || pl.includes('code') ||
-            tl.includes('terminal') || pl.includes('terminal') || pl.includes('cmd') ||
-            pl.includes('powershell') || pl.includes('bash') || tl.includes('cursor') ||
-            tl.includes('windsurf') || tl.includes('.ts') || tl.includes('.jsx')) {
+        if (
+          tl.includes('code') ||
+          tl.includes('vscode') ||
+          pl.includes('code') ||
+          tl.includes('terminal') ||
+          pl.includes('terminal') ||
+          pl.includes('cmd') ||
+          pl.includes('powershell') ||
+          pl.includes('bash') ||
+          tl.includes('cursor') ||
+          tl.includes('windsurf') ||
+          tl.includes('.ts') ||
+          tl.includes('.jsx')
+        ) {
           activeEnv = 'coding';
-        } else if (pl.includes('chrome') || pl.includes('edge') || pl.includes('firefox') || pl.includes('explorer') || tl.includes('http')) {
+        } else if (
+          pl.includes('chrome') ||
+          pl.includes('edge') ||
+          pl.includes('firefox') ||
+          pl.includes('explorer') ||
+          tl.includes('http')
+        ) {
           activeEnv = 'browsing';
         } else {
           activeEnv = 'idle';
@@ -228,17 +270,65 @@ export class ScenarioAwareScheduler {
         const gitDir = path.join(dir, '.git');
         if (!fs.existsSync(gitDir)) continue;
 
-        const branch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: dir, timeout: 3000, encoding: 'utf-8' }).toString().trim();
-        const status = execSync('git status --porcelain', { cwd: dir, timeout: 3000, encoding: 'utf-8' }).toString().trim();
+        const branch = execSync('git rev-parse --abbrev-ref HEAD', {
+          cwd: dir,
+          timeout: 3000,
+          encoding: 'utf-8',
+        })
+          .toString()
+          .trim();
+        const status = execSync('git status --porcelain', {
+          cwd: dir,
+          timeout: 3000,
+          encoding: 'utf-8',
+        })
+          .toString()
+          .trim();
         const hasUncommitted = status.length > 0;
-        const uncommittedFiles = status ? status.split('\n').filter(l => l).length : 0;
-        const aheadBehind = execSync('git rev-list --count --left-right HEAD...@{upstream} 2>/dev/null || echo "0 0"', { cwd: dir, timeout: 3000, encoding: 'utf-8' }).toString().trim();
+        const uncommittedFiles = status
+          ? status.split('\n').filter((l) => l).length
+          : 0;
+        let aheadBehind = '0 0';
+        try {
+          aheadBehind = execSync(
+            'git rev-list --count --left-right HEAD...@{upstream}',
+            { cwd: dir, timeout: 3000, encoding: 'utf-8' }
+          )
+            .toString()
+            .trim();
+        } catch {
+          aheadBehind = '0 0';
+        }
         const [ahead, behind] = aheadBehind.split(/\s+/).map(Number);
-        const lastCommitMsg = execSync('git log -1 --format=%s 2>/dev/null || echo "(无commit)"', { cwd: dir, timeout: 3000, encoding: 'utf-8' }).toString().trim();
-        const lastCommitTs = parseInt(execSync('git log -1 --format=%ct 2>/dev/null || echo "0"', { cwd: dir, timeout: 3000, encoding: 'utf-8' }).toString().trim());
-        const lastCommitAgo = lastCommitTs > 0
-          ? `${Math.round((Date.now() / 1000 - lastCommitTs) / 60)}分钟前`
-          : '未知';
+        let lastCommitMsg = '(无commit)';
+        try {
+          lastCommitMsg = execSync(
+            'git log -1 --format=%s',
+            { cwd: dir, timeout: 3000, encoding: 'utf-8' }
+          )
+            .toString()
+            .trim();
+        } catch {
+          lastCommitMsg = '(无commit)';
+        }
+        let lastCommitTs = 0;
+        try {
+          lastCommitTs = parseInt(
+            execSync('git log -1 --format=%ct', {
+              cwd: dir,
+              timeout: 3000,
+              encoding: 'utf-8',
+            })
+              .toString()
+              .trim()
+          );
+        } catch {
+          lastCommitTs = 0;
+        }
+        const lastCommitAgo =
+          lastCommitTs > 0
+            ? `${Math.round((Date.now() / 1000 - lastCommitTs) / 60)}分钟前`
+            : '未知';
 
         results.push({
           repo: path.basename(dir),
@@ -253,28 +343,60 @@ export class ScenarioAwareScheduler {
 
         // 检测变化
         const lastState = this.lastGitState.get(dir);
-        const currentCommit = execSync('git rev-parse HEAD 2>/dev/null || echo ""', { cwd: dir, timeout: 3000, encoding: 'utf-8' }).toString().trim();
+        let currentCommit = '';
+        try {
+          currentCommit = execSync(
+            'git rev-parse HEAD',
+            { cwd: dir, timeout: 3000, encoding: 'utf-8' }
+          )
+            .toString()
+            .trim();
+        } catch {
+          currentCommit = '';
+        }
         if (lastState) {
           const changes: ProjectChange[] = [];
           if (hasUncommitted && !lastState.hasUncommitted) {
-            changes.push({ type: 'git_uncommitted', repo: path.basename(dir), detail: `${uncommittedFiles}个文件未提交`, timestamp: new Date().toISOString() });
+            changes.push({
+              type: 'git_uncommitted',
+              repo: path.basename(dir),
+              detail: `${uncommittedFiles}个文件未提交`,
+              timestamp: new Date().toISOString(),
+            });
           }
           if (currentCommit && currentCommit !== lastState.commit) {
-            changes.push({ type: 'git_new_commits', repo: path.basename(dir), detail: `新commit: ${lastCommitMsg.substring(0, 50)}`, timestamp: new Date().toISOString() });
+            changes.push({
+              type: 'git_new_commits',
+              repo: path.basename(dir),
+              detail: `新commit: ${lastCommitMsg.substring(0, 50)}`,
+              timestamp: new Date().toISOString(),
+            });
           }
           if (branch !== lastState.branch) {
-            changes.push({ type: 'git_new_branch', repo: path.basename(dir), detail: `切换到分支: ${branch}`, timestamp: new Date().toISOString() });
+            changes.push({
+              type: 'git_new_branch',
+              repo: path.basename(dir),
+              detail: `切换到分支: ${branch}`,
+              timestamp: new Date().toISOString(),
+            });
           }
           for (const c of changes) {
             this.projectChangeHistory.push(c);
             if (this.projectChangeHistory.length > this.MAX_CHANGE_HISTORY) {
               this.projectChangeHistory.shift();
             }
-            Logger.info(`📂 项目变化: ${c.type} | ${c.repo}: ${c.detail}`, 'ScenarioAwareScheduler');
+            Logger.info(
+              `📂 项目变化: ${c.type} | ${c.repo}: ${c.detail}`,
+              'ScenarioAwareScheduler'
+            );
             EventBus.emit('project_change', c);
           }
         }
-        this.lastGitState.set(dir, { branch, commit: currentCommit, hasUncommitted });
+        this.lastGitState.set(dir, {
+          branch,
+          commit: currentCommit,
+          hasUncommitted,
+        });
       } catch {
         // 非git目录或git不可用，跳过
       }
@@ -290,7 +412,10 @@ export class ScenarioAwareScheduler {
     const snapshot = await this.senseEnvironment();
     const envStr = snapshot.activeEnv;
     if (envStr !== 'idle' || this.lastEnv !== envStr) {
-      Logger.info(`👀 环境: ${envStr}${snapshot.foregroundWindow ? ' | ' + snapshot.foregroundWindow.process : ''}`, 'ScenarioAwareScheduler');
+      Logger.info(
+        `👀 环境: ${envStr}${snapshot.foregroundWindow ? ' | ' + snapshot.foregroundWindow.process : ''}`,
+        'ScenarioAwareScheduler'
+      );
       this.lastEnv = envStr;
       EventBus.emit('environment_update', {
         timestamp: snapshot.timestamp,
@@ -305,8 +430,14 @@ export class ScenarioAwareScheduler {
       this.gitCheckCount = 0;
       const repos = this.scanGitRepos();
       if (repos.length > 0) {
-        Logger.info(`📊 Git状态: ${repos.map(r => `${r.repo}[${r.branch}]${r.hasUncommitted ? '*' : ''}${r.aheadCount > 0 ? '↑' + r.aheadCount : ''}${r.behindCount > 0 ? '↓' + r.behindCount : ''}`).join(', ')}`, 'ScenarioAwareScheduler');
-        EventBus.emit('git_status', { timestamp: new Date().toISOString(), repos });
+        Logger.info(
+          `📊 Git状态: ${repos.map((r) => `${r.repo}[${r.branch}]${r.hasUncommitted ? '*' : ''}${r.aheadCount > 0 ? '↑' + r.aheadCount : ''}${r.behindCount > 0 ? '↓' + r.behindCount : ''}`).join(', ')}`,
+          'ScenarioAwareScheduler'
+        );
+        EventBus.emit('git_status', {
+          timestamp: new Date().toISOString(),
+          repos,
+        });
       }
     }
 
@@ -335,7 +466,10 @@ export class ScenarioAwareScheduler {
       task.nextRun = new Date(Date.now() + 60 * 60 * 1000);
       task.executionCount++;
       task.successCount++;
-      task.averageExecutionTime = (task.averageExecutionTime * (task.executionCount - 1) + (Date.now() - startTime)) / task.executionCount;
+      task.averageExecutionTime =
+        (task.averageExecutionTime * (task.executionCount - 1) +
+          (Date.now() - startTime)) /
+        task.executionCount;
     } catch (error) {
       Logger.warn(`❌ 任务执行失败: ${task.name}`, 'ScenarioAwareScheduler');
     }

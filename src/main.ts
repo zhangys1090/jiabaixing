@@ -54,6 +54,7 @@ import { registerPerformanceRoutes } from './server/routes/performanceRoutes';
 import { registerSecurityRoutes } from './server/routes/securityRoutes';
 import { registerSkillRoutes } from './server/routes/skillRoutes';
 import { registerTraeRoutes } from './server/routes/traeRoutes';
+import { registerMCPRoutes } from './server/routes/mcpRoutes';
 
 import { bootstrap } from './server/bootstrap';
 import { setupEventBus } from './server/eventBusSetup';
@@ -96,6 +97,7 @@ function setupRoutes(broadcast: (data: Record<string, unknown>) => void): void {
   registerMemoryRoutes(app, core);
   registerSkillRoutes(app, core);
   registerTraeRoutes(app, core);
+  registerMCPRoutes(app);
   registerDebugRoutes(app, core, broadcast);
 }
 

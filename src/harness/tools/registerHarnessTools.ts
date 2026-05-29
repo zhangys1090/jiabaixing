@@ -48,10 +48,20 @@ import { NOTE_TAKE_DEF } from './daily/note_take';
 import { REMINDER_SET_DEF } from './daily/reminder_set';
 import { SYSTEM_STATUS_DEF } from './daily/system_status';
 import { TASK_MANAGE_DEF } from './daily/task_manage';
+import { TASK_PRIORITY_DEF } from './daily/task_priority';
+import { TASK_DEPENDENCY_DEF } from './daily/task_dependency';
+import { BATCH_TASK_DEF } from './daily/batch_task';
+import { TASK_ANALYTICS_DEF } from './daily/task_analytics';
+import { CALENDAR_DEF } from './daily/calendar';
 
 // === 网络工具 ===
 import { WEB_SEARCH_DEF } from './network/web_search';
 import { SKILL_CREATE_DEF } from './network/skill_create';
+import { WEB_FETCH_DEF } from './network/web_fetch';
+import { IMAGE_GENERATE_DEF } from './network/image_generate';
+
+// === 系统工具(扩展) ===
+import { SHELL_EXEC_DEF } from './system/shell_exec';
 
 // === 工具执行器工厂 ===
 import {
@@ -130,6 +140,23 @@ import {
   createTaskManageExecutor,
   type TaskManageDeps,
 } from './daily/task_manage';
+import {
+  createTaskPriorityExecutor,
+  type TaskPriorityDeps,
+} from './daily/task_priority';
+import {
+  createTaskDependencyExecutor,
+  type TaskDependencyDeps,
+} from './daily/task_dependency';
+import {
+  createBatchTaskExecutor,
+  type BatchTaskDeps,
+} from './daily/batch_task';
+import {
+  createTaskAnalyticsExecutor,
+  type TaskAnalyticsDeps,
+} from './daily/task_analytics';
+import { createCalendarExecutor, type CalendarDeps } from './daily/calendar';
 
 // === 网络工具执行器工厂 ===
 import {
@@ -140,6 +167,18 @@ import {
   createSkillCreateExecutor,
   type SkillCreateDeps,
 } from './network/skill_create';
+import {
+  createWebFetchExecutor,
+  type WebFetchDeps,
+} from './network/web_fetch';
+import {
+  createImageGenerateExecutor,
+  type ImageGenerateDeps,
+} from './network/image_generate';
+import {
+  createShellExecExecutor,
+  type ShellExecDeps,
+} from './system/shell_exec';
 
 /** 所有工具依赖的聚合接口 */
 export interface HarnessToolDeps
@@ -161,11 +200,19 @@ export interface HarnessToolDeps
     CodeAnalyzeDeps,
     CodeFixDeps,
     TaskManageDeps,
+    TaskPriorityDeps,
+    TaskDependencyDeps,
+    BatchTaskDeps,
+    TaskAnalyticsDeps,
+    CalendarDeps,
     ReminderSetDeps,
     NoteTakeDeps,
     SystemStatusDeps,
     WebSearchDeps,
-    SkillCreateDeps {}
+    SkillCreateDeps,
+    WebFetchDeps,
+    ImageGenerateDeps,
+    ShellExecDeps {}
 
 /** 工具注册结果 */
 export interface ToolRegistrationResult {
@@ -202,20 +249,6 @@ export function registerHarnessTools(
     createDesktopScreenshotExecutor(deps)
   );
 
-  // 系统工具 (3)
-  toolRegistry.register(
-    ASK_CLARIFICATION_DEF,
-    createAskClarificationExecutor()
-  );
-  toolRegistry.register(
-    PREVIEW_EXECUTION_DEF,
-    createPreviewExecutionExecutor()
-  );
-  toolRegistry.register(
-    ROLLBACK_CHANGES_DEF,
-    createRollbackChangesExecutor(deps)
-  );
-
   // 文件工具 (5)
   toolRegistry.register(GET_ACTIVE_FILE_DEF, createGetActiveFileExecutor(deps));
   toolRegistry.register(
@@ -231,15 +264,40 @@ export function registerHarnessTools(
   toolRegistry.register(CODE_ANALYZE_DEF, createCodeAnalyzeExecutor(deps));
   toolRegistry.register(CODE_FIX_DEF, createCodeFixExecutor(deps));
 
-  // 日常管理工具 (4)
+  // 日常管理工具 (9)
   toolRegistry.register(TASK_MANAGE_DEF, createTaskManageExecutor(deps));
+  toolRegistry.register(TASK_PRIORITY_DEF, createTaskPriorityExecutor(deps));
+  toolRegistry.register(
+    TASK_DEPENDENCY_DEF,
+    createTaskDependencyExecutor(deps)
+  );
+  toolRegistry.register(BATCH_TASK_DEF, createBatchTaskExecutor(deps));
+  toolRegistry.register(TASK_ANALYTICS_DEF, createTaskAnalyticsExecutor(deps));
+  toolRegistry.register(CALENDAR_DEF, createCalendarExecutor(deps));
   toolRegistry.register(REMINDER_SET_DEF, createReminderSetExecutor(deps));
   toolRegistry.register(NOTE_TAKE_DEF, createNoteTakeExecutor(deps));
   toolRegistry.register(SYSTEM_STATUS_DEF, createSystemStatusExecutor(deps));
 
-  // 网络工具 (2)
+  // 网络工具 (2→4)
   toolRegistry.register(WEB_SEARCH_DEF, createWebSearchExecutor(deps));
   toolRegistry.register(SKILL_CREATE_DEF, createSkillCreateExecutor(deps));
+  toolRegistry.register(WEB_FETCH_DEF, createWebFetchExecutor(deps));
+  toolRegistry.register(IMAGE_GENERATE_DEF, createImageGenerateExecutor(deps));
+
+  // 系统工具(扩展) (3→4)
+  toolRegistry.register(
+    ASK_CLARIFICATION_DEF,
+    createAskClarificationExecutor()
+  );
+  toolRegistry.register(
+    PREVIEW_EXECUTION_DEF,
+    createPreviewExecutionExecutor()
+  );
+  toolRegistry.register(
+    ROLLBACK_CHANGES_DEF,
+    createRollbackChangesExecutor(deps)
+  );
+  toolRegistry.register(SHELL_EXEC_DEF, createShellExecExecutor(deps));
 
   Logger.info(
     `🔧 Harness 工具注册完成: ${toolRegistry.size} 个工具`,

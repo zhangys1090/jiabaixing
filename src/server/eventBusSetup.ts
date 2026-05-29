@@ -401,7 +401,12 @@ export function setupEventBus(
   });
 
   registerOnce('project_change', (data: unknown) => {
-    const payload = data as { type: string; repo: string; detail: string; timestamp: string };
+    const payload = data as {
+      type: string;
+      repo: string;
+      detail: string;
+      timestamp: string;
+    };
     broadcast({
       type: 'project_change',
       data: {
@@ -414,7 +419,10 @@ export function setupEventBus(
   });
 
   registerOnce('git_status', (data: unknown) => {
-    const payload = data as { timestamp: string; repos: Array<Record<string, unknown>> };
+    const payload = data as {
+      timestamp: string;
+      repos: Array<Record<string, unknown>>;
+    };
     broadcast({
       type: 'git_status',
       data: {

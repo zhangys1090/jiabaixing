@@ -1,22 +1,26 @@
 /**
  * DesktopActionExecutor - 桌面操作执行器
- * 统一封装：截图 + 窗口管理 + 鼠标键盘操作
- * 实现"打开记事本，输入文字，保存"等复合操作
+ * 统一封装：截图 + 窗口管理 + 鼠标键盘操作 + UI元素交互 + 剪贴板
+ * v2: 新增 rightClick, keyCombo, clipboardRead, clipboardWrite,
+ *     clickElement, typeIntoElement, getElementText
  */
 
 import { ScreenCapture } from './ScreenCapture';
 import { WindowManager } from './WindowManager';
 import { SystemInput } from './SystemInput';
 import { DesktopVisionEngine, DesktopObservation } from './DesktopVisionEngine';
+import { DesktopUIInspector } from './DesktopUIInspector';
 import { Logger } from '../utils/Logger';
-import { execSync } from 'child_process';
+import { exec, execSync } from 'child_process';
 
 export interface DesktopAction {
   type:
     | 'screenshot'
     | 'click'
+    | 'rightClick'
     | 'type'
     | 'key'
+    | 'keyCombo'
     | 'moveMouse'
     | 'scroll'
     | 'drag'
@@ -27,7 +31,12 @@ export interface DesktopAction {
     | 'minimize'
     | 'observe'
     | 'wait'
-    | 'shell';
+    | 'shell'
+    | 'clipboardRead'
+    | 'clipboardWrite'
+    | 'clickElement'
+    | 'typeIntoElement'
+    | 'getElementText';
   params: Record<string, unknown>;
   description?: string;
 }
@@ -54,6 +63,7 @@ export class DesktopActionExecutor {
   private windowManager: WindowManager;
   private systemInput: SystemInput;
   private visionEngine: DesktopVisionEngine;
+  private uiInspector: DesktopUIInspector;
   private initialized: boolean = false;
 
   private constructor() {
@@ -61,6 +71,7 @@ export class DesktopActionExecutor {
     this.windowManager = WindowManager.getInstance();
     this.systemInput = SystemInput.getInstance();
     this.visionEngine = DesktopVisionEngine.getInstance();
+    this.uiInspector = DesktopUIInspector.getInstance();
   }
 
   public static getInstance(): DesktopActionExecutor {
@@ -78,6 +89,7 @@ export class DesktopActionExecutor {
     await this.windowManager.initialize();
     await this.systemInput.initialize();
     await this.visionEngine.initialize();
+    await this.uiInspector.initialize();
 
     this.initialized = true;
     Logger.info('🎮 DesktopActionExecutor 初始化完成', 'DesktopActionExecutor');
@@ -101,10 +113,14 @@ export class DesktopActionExecutor {
           return await this.handleScreenshot(action);
         case 'click':
           return this.handleClick(action);
+        case 'rightClick':
+          return this.handleRightClick(action);
         case 'type':
           return this.handleType(action);
         case 'key':
           return this.handleKey(action);
+        case 'keyCombo':
+          return this.handleKeyCombo(action);
         case 'moveMouse':
           return this.handleMoveMouse(action);
         case 'scroll':
@@ -127,6 +143,16 @@ export class DesktopActionExecutor {
           return this.handleWait(action);
         case 'shell':
           return this.handleShell(action);
+        case 'clipboardRead':
+          return this.handleClipboardRead(action);
+        case 'clipboardWrite':
+          return this.handleClipboardWrite(action);
+        case 'clickElement':
+          return await this.handleClickElement(action);
+        case 'typeIntoElement':
+          return await this.handleTypeIntoElement(action);
+        case 'getElementText':
+          return await this.handleGetElementText(action);
         default:
           return {
             success: false,
@@ -222,10 +248,10 @@ export class DesktopActionExecutor {
     };
   }
 
-  private handleClick(action: DesktopAction): DesktopActionResult {
+  private async handleClick(action: DesktopAction): Promise<DesktopActionResult> {
     const x = action.params.x as number | undefined;
     const y = action.params.y as number | undefined;
-    const result = this.systemInput.click(x, y);
+    const result = await this.systemInput.click(x, y);
     return {
       success: result.success,
       action,
@@ -234,9 +260,9 @@ export class DesktopActionExecutor {
     };
   }
 
-  private handleType(action: DesktopAction): DesktopActionResult {
+  private async handleType(action: DesktopAction): Promise<DesktopActionResult> {
     const text = action.params.text as string;
-    const result = this.systemInput.typeText(text);
+    const result = await this.systemInput.typeText(text);
     return {
       success: result.success,
       action,
@@ -245,13 +271,13 @@ export class DesktopActionExecutor {
     };
   }
 
-  private handleKey(action: DesktopAction): DesktopActionResult {
+  private async handleKey(action: DesktopAction): Promise<DesktopActionResult> {
     const key = action.params.key as string;
     const keyCode = (SystemInput.Keys as Record<string, number>)[key];
     if (!keyCode) {
       return { success: false, action, error: `未知按键: ${key}` };
     }
-    const result = this.systemInput.keyPress(keyCode);
+    const result = await this.systemInput.keyPress(keyCode);
     return {
       success: result.success,
       action,
@@ -260,10 +286,10 @@ export class DesktopActionExecutor {
     };
   }
 
-  private handleMoveMouse(action: DesktopAction): DesktopActionResult {
+  private async handleMoveMouse(action: DesktopAction): Promise<DesktopActionResult> {
     const x = action.params.x as number;
     const y = action.params.y as number;
-    const result = this.systemInput.moveMouse(x, y);
+    const result = await this.systemInput.moveMouse(x, y);
     return {
       success: result.success,
       action,
@@ -272,9 +298,9 @@ export class DesktopActionExecutor {
     };
   }
 
-  private handleScroll(action: DesktopAction): DesktopActionResult {
+  private async handleScroll(action: DesktopAction): Promise<DesktopActionResult> {
     const delta = action.params.delta as number;
-    const result = this.systemInput.scroll(delta);
+    const result = await this.systemInput.scroll(delta);
     return {
       success: result.success,
       action,
@@ -283,12 +309,12 @@ export class DesktopActionExecutor {
     };
   }
 
-  private handleDrag(action: DesktopAction): DesktopActionResult {
+  private async handleDrag(action: DesktopAction): Promise<DesktopActionResult> {
     const fromX = action.params.fromX as number;
     const fromY = action.params.fromY as number;
     const toX = action.params.toX as number;
     const toY = action.params.toY as number;
-    const result = this.systemInput.drag(fromX, fromY, toX, toY);
+    const result = await this.systemInput.drag(fromX, fromY, toX, toY);
     return {
       success: result.success,
       action,
@@ -399,12 +425,9 @@ $hwnd = [IntPtr]::new(${window.handle})
     };
   }
 
-  private handleWait(action: DesktopAction): DesktopActionResult {
+  private async handleWait(action: DesktopAction): Promise<DesktopActionResult> {
     const ms = action.params.ms as number;
-    const start = Date.now();
-    while (Date.now() - start < ms) {
-      // 忙等待简化实现
-    }
+    await this.sleep(ms);
     return {
       success: true,
       action,
@@ -412,10 +435,167 @@ $hwnd = [IntPtr]::new(${window.handle})
     };
   }
 
-  private handleShell(action: DesktopAction): DesktopActionResult {
+  private async handleRightClick(action: DesktopAction): Promise<DesktopActionResult> {
+    const x = action.params.x as number | undefined;
+    const y = action.params.y as number | undefined;
+    const result = await this.systemInput.rightClick(x, y);
+    return {
+      success: result.success,
+      action,
+      output: `右键点击 (${x ?? '当前位置'}, ${y ?? '当前位置'})`,
+      error: result.error,
+    };
+  }
+
+  private async handleKeyCombo(action: DesktopAction): Promise<DesktopActionResult> {
+    const keys = action.params.keys as string[];
+    if (!keys || !Array.isArray(keys) || keys.length < 2) {
+      return { success: false, action, error: 'keyCombo 需要至少2个按键' };
+    }
+    try {
+      const keyCodes = keys.map((k) => {
+        const code = (SystemInput.Keys as Record<string, number>)[k.toUpperCase()];
+        if (!code) throw new Error(`未知按键: ${k}`);
+        return code;
+      });
+      const result = await this.systemInput.keyCombo(...keyCodes);
+      return {
+        success: result.success,
+        action,
+        output: `组合键: ${keys.join('+')}`,
+        error: result.error,
+      };
+    } catch (error) {
+      return { success: false, action, error: (error as Error).message };
+    }
+  }
+
+  private handleClipboardRead(action: DesktopAction): DesktopActionResult {
+    try {
+      const content = execSync(
+        'powershell -NoProfile -Command "Get-Clipboard"',
+        { encoding: 'utf-8', timeout: 5000 }
+      );
+      return {
+        success: true,
+        action,
+        output: content.substring(0, 500),
+      };
+    } catch (error) {
+      return { success: false, action, error: (error as Error).message };
+    }
+  }
+
+  private handleClipboardWrite(action: DesktopAction): DesktopActionResult {
+    const text = action.params.text as string;
+    try {
+      const escaped = text.replace(/'/g, "''");
+      execSync(
+        `powershell -NoProfile -Command "Set-Clipboard -Value '${escaped}'"`,
+        { encoding: 'utf-8', timeout: 5000 }
+      );
+      return {
+        success: true,
+        action,
+        output: `写入剪贴板: ${text.substring(0, 50)}`,
+      };
+    } catch (error) {
+      return { success: false, action, error: (error as Error).message };
+    }
+  }
+
+  private async handleClickElement(
+    action: DesktopAction
+  ): Promise<DesktopActionResult> {
+    const description = action.params.description as string;
+    try {
+      const element = this.uiInspector.findElementByDescription(description);
+      if (!element) {
+        return {
+          success: false,
+          action,
+          error: `未找到UI元素: ${description}`,
+        };
+      }
+      const clickX = element.boundingRect.x + Math.floor(element.boundingRect.width / 2);
+      const clickY = element.boundingRect.y + Math.floor(element.boundingRect.height / 2);
+      const result = await this.systemInput.click(clickX, clickY);
+      return {
+        success: result.success,
+        action,
+        output: `点击元素 "${description}" 于 (${clickX}, ${clickY})`,
+        error: result.error,
+      };
+    } catch (error) {
+      return { success: false, action, error: (error as Error).message };
+    }
+  }
+
+  private async handleTypeIntoElement(
+    action: DesktopAction
+  ): Promise<DesktopActionResult> {
+    const description = action.params.description as string;
+    const text = action.params.text as string;
+    try {
+      const element = this.uiInspector.findElementByDescription(description);
+      if (!element) {
+        return {
+          success: false,
+          action,
+          error: `未找到UI元素: ${description}`,
+        };
+      }
+      const clickX = element.boundingRect.x + Math.floor(element.boundingRect.width / 2);
+      const clickY = element.boundingRect.y + Math.floor(element.boundingRect.height / 2);
+      await this.systemInput.click(clickX, clickY);
+      await this.sleep(200);
+      const result = await this.systemInput.typeText(text);
+      return {
+        success: result.success,
+        action,
+        output: `在 "${description}" 中输入: ${text.substring(0, 50)}`,
+        error: result.error,
+      };
+    } catch (error) {
+      return { success: false, action, error: (error as Error).message };
+    }
+  }
+
+  private async handleGetElementText(
+    action: DesktopAction
+  ): Promise<DesktopActionResult> {
+    const description = action.params.description as string;
+    try {
+      const element = this.uiInspector.findElementByDescription(description);
+      if (!element) {
+        return {
+          success: false,
+          action,
+          error: `未找到UI元素: ${description}`,
+        };
+      }
+      return {
+        success: true,
+        action,
+        output: element.name || '(无文本)',
+      };
+    } catch (error) {
+      return { success: false, action, error: (error as Error).message };
+    }
+  }
+
+  private async handleShell(action: DesktopAction): Promise<DesktopActionResult> {
     const command = action.params.command as string;
     try {
-      const output = execSync(command, { encoding: 'utf-8', timeout: 30000 });
+      const output = await new Promise<string>((resolve, reject) => {
+        exec(command, { encoding: 'utf-8', timeout: 30000, maxBuffer: 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
+          if (err) {
+            reject(err);
+          } else {
+            resolve(stdout || stderr || '(无输出)');
+          }
+        });
+      });
       return {
         success: true,
         action,

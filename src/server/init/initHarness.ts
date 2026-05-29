@@ -8,6 +8,8 @@ import { MemoryEngine, type MemoryItem } from '../../memory/MemoryEngine';
 import { SceneRecognizer } from '../../multimodal/SceneRecognizer';
 import type { JiabaixingCore } from '../../core/JiabaixingCore';
 import { Logger } from '../../utils/Logger';
+import { MCPToolBridge } from '../../harness/tools/registry/MCPToolBridge';
+import { AutonomousTrigger } from '../../harness/loop/AutonomousTrigger';
 import fs from 'fs';
 import path from 'path';
 
@@ -268,7 +270,12 @@ export async function initHarness(
         },
         assessQuality: (traceId, success, qualityScore, duration) => {
           if (evolutionEngine?.assessQuality) {
-            evolutionEngine.assessQuality(traceId, success, qualityScore, duration);
+            evolutionEngine.assessQuality(
+              traceId,
+              success,
+              qualityScore,
+              duration
+            );
           }
         },
       },
@@ -294,17 +301,32 @@ export async function initHarness(
                 const proc = (fg.process || '').toLowerCase();
                 const title = fg.title.toLowerCase();
                 let env = 'other';
-                if (title.includes('code') || title.includes('vscode') || proc.includes('code') ||
-                    title.includes('terminal') || proc.includes('terminal') || proc.includes('cmd') ||
-                    proc.includes('powershell') || proc.includes('bash') || proc.includes('cursor')) {
+                if (
+                  title.includes('code') ||
+                  title.includes('vscode') ||
+                  proc.includes('code') ||
+                  title.includes('terminal') ||
+                  proc.includes('terminal') ||
+                  proc.includes('cmd') ||
+                  proc.includes('powershell') ||
+                  proc.includes('bash') ||
+                  proc.includes('cursor')
+                ) {
                   env = 'coding';
-                } else if (proc.includes('chrome') || proc.includes('edge') || proc.includes('firefox') || proc.includes('explorer')) {
+                } else if (
+                  proc.includes('chrome') ||
+                  proc.includes('edge') ||
+                  proc.includes('firefox') ||
+                  proc.includes('explorer')
+                ) {
                   env = 'browsing';
                 }
                 return `当前环境: ${env === 'coding' ? '编程中' : env === 'browsing' ? '浏览网页' : '其他'}\n前台窗口: ${fg.title}`;
               }
             }
-          } catch { /* ignore */ }
+          } catch {
+            /* ignore */
+          }
           return '';
         },
       },
@@ -381,28 +403,86 @@ export async function initHarness(
         detectEmotionFromInput: (text: string) => {
           // 扩展情感词库 + 上下文强度分析
           const negativeWords = [
-            '烦', '累', '难过', '焦虑', '生气', '失望', '沮丧',
-            '压力', '崩溃', '愤怒', '烦躁', '郁闷', '无语', '恶心',
-            '讨厌', '恨', '怕', '担心', '紧张', '慌', '痛苦',
-            '伤心', '委屈', '憋屈', '无奈', '绝望', '烦躁',
-            '头疼', '受不了', '烦死了', '气死', '完蛋',
+            '烦',
+            '累',
+            '难过',
+            '焦虑',
+            '生气',
+            '失望',
+            '沮丧',
+            '压力',
+            '崩溃',
+            '愤怒',
+            '烦躁',
+            '郁闷',
+            '无语',
+            '恶心',
+            '讨厌',
+            '恨',
+            '怕',
+            '担心',
+            '紧张',
+            '慌',
+            '痛苦',
+            '伤心',
+            '委屈',
+            '憋屈',
+            '无奈',
+            '绝望',
+            '烦躁',
+            '头疼',
+            '受不了',
+            '烦死了',
+            '气死',
+            '完蛋',
           ];
           const positiveWords = [
-            '开心', '高兴', '喜欢', '棒', '好', '谢谢', '感谢',
-            '幸福', '赞', '牛逼', '厉害', '完美', '爽', '舒服',
-            '期待', '兴奋', '感动', '满足', '轻松', '放心',
-            '太好了', '真棒', '优秀', '漂亮', '绝了', '有意思',
+            '开心',
+            '高兴',
+            '喜欢',
+            '棒',
+            '好',
+            '谢谢',
+            '感谢',
+            '幸福',
+            '赞',
+            '牛逼',
+            '厉害',
+            '完美',
+            '爽',
+            '舒服',
+            '期待',
+            '兴奋',
+            '感动',
+            '满足',
+            '轻松',
+            '放心',
+            '太好了',
+            '真棒',
+            '优秀',
+            '漂亮',
+            '绝了',
+            '有意思',
           ];
           const intensifiers = [
-            '太', '非常', '特别', '超级', '极其', '很', '真的',
-            '简直', '实在是', '无比', '极其',
+            '太',
+            '非常',
+            '特别',
+            '超级',
+            '极其',
+            '很',
+            '真的',
+            '简直',
+            '实在是',
+            '无比',
+            '极其',
           ];
-          const negations = [
-            '不', '没', '别', '不要', '不是', '没有',
-          ];
+          const negations = ['不', '没', '别', '不要', '不是', '没有'];
           let words: string[] = [];
           try {
-            words = text.split(/[\s,，。！？、；：""''（）()！？\n]+/).filter(Boolean);
+            words = text
+              .split(/[\s,，。！？、；：""''（）()！？\n]+/)
+              .filter(Boolean);
           } catch {
             words = [text];
           }
@@ -414,21 +494,35 @@ export async function initHarness(
           let hasNegation = false;
 
           for (const w of intensifiers) {
-            if (text.includes(w)) { hasIntensifier = true; break; }
+            if (text.includes(w)) {
+              hasIntensifier = true;
+              break;
+            }
           }
           for (const w of negations) {
-            if (text.includes(w)) { hasNegation = true; break; }
+            if (text.includes(w)) {
+              hasNegation = true;
+              break;
+            }
           }
 
           for (const w of negativeWords) {
-            const count = (text.match(new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
+            const count = (
+              text.match(
+                new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')
+              ) || []
+            ).length;
             if (count > 0) {
               matchedNeg += count;
               score -= count * (hasIntensifier ? 2 : 1);
             }
           }
           for (const w of positiveWords) {
-            const count = (text.match(new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
+            const count = (
+              text.match(
+                new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')
+              ) || []
+            ).length;
             if (count > 0) {
               matchedPos += count;
               score += count * (hasIntensifier ? 2 : 1);
@@ -442,13 +536,15 @@ export async function initHarness(
           }
 
           // 感叹号增强强度
-          const exclaimCount = (text.match(/！/g) || []).length + (text.match(/!/g) || []).length;
+          const exclaimCount =
+            (text.match(/！/g) || []).length + (text.match(/!/g) || []).length;
           if (exclaimCount >= 2) {
             score *= 1.5;
           }
 
           // 问号表示困惑/中性偏负
-          const questionCount = (text.match(/？/g) || []).length + (text.match(/\?/g) || []).length;
+          const questionCount =
+            (text.match(/？/g) || []).length + (text.match(/\?/g) || []).length;
           if (questionCount >= 3 && matchedNeg === 0 && matchedPos === 0) {
             score -= 1;
           }
@@ -479,17 +575,32 @@ export async function initHarness(
         agentSelfReflection: {
           recordExecution: async (entry: unknown) => {
             try {
-              const entryStr = typeof entry === 'string' ? entry : JSON.stringify(entry);
+              const entryStr =
+                typeof entry === 'string' ? entry : JSON.stringify(entry);
               const refDir = path.join(process.cwd(), 'data', 'reflections');
               fs.mkdirSync(refDir, { recursive: true });
-              const refFile = path.join(refDir, `reflection_${Date.now()}.json`);
-              fs.writeFileSync(refFile, JSON.stringify({
-                timestamp: new Date().toISOString(),
-                entry: entryStr,
-              }, null, 2), 'utf-8');
+              const refFile = path.join(
+                refDir,
+                `reflection_${Date.now()}.json`
+              );
+              fs.writeFileSync(
+                refFile,
+                JSON.stringify(
+                  {
+                    timestamp: new Date().toISOString(),
+                    entry: entryStr,
+                  },
+                  null,
+                  2
+                ),
+                'utf-8'
+              );
               Logger.info(`📝 自我反思已持久化: ${refFile}`, 'SelfReflect');
             } catch (err) {
-              Logger.warn(`⚠️ 自我反思持久化失败: ${(err as Error).message}`, 'SelfReflect');
+              Logger.warn(
+                `⚠️ 自我反思持久化失败: ${(err as Error).message}`,
+                'SelfReflect'
+              );
             }
           },
         },
@@ -669,11 +780,37 @@ export async function initHarness(
           },
           deleteTask: async (taskId: string) => {
             await memoryEngine.storeShortTermMemory(
-              JSON.stringify({ _deleted: true, id: taskId, deletedAt: Date.now() }),
+              JSON.stringify({
+                _deleted: true,
+                id: taskId,
+                deletedAt: Date.now(),
+              }),
               'task',
               'neutral'
             );
             Logger.info(`🗑️ 任务已标记删除: ${taskId}`, 'TaskStore');
+          },
+        },
+        calendarStore: {
+          getEvents: async () => [],
+          saveEvent: async (event) => {
+            await memoryEngine.storeShortTermMemory(
+              JSON.stringify(event),
+              'calendar',
+              'neutral'
+            );
+          },
+          deleteEvent: async (eventId: string) => {
+            await memoryEngine.storeShortTermMemory(
+              JSON.stringify({
+                _deleted: true,
+                id: eventId,
+                deletedAt: Date.now(),
+              }),
+              'calendar',
+              'neutral'
+            );
+            Logger.info(`🗑️ 日程已标记删除: ${eventId}`, 'CalendarStore');
           },
         },
         reminderStore: {
@@ -687,7 +824,11 @@ export async function initHarness(
           },
           deleteReminder: async (reminderId: string) => {
             await memoryEngine.storeShortTermMemory(
-              JSON.stringify({ _deleted: true, id: reminderId, deletedAt: Date.now() }),
+              JSON.stringify({
+                _deleted: true,
+                id: reminderId,
+                deletedAt: Date.now(),
+              }),
               'reminder',
               'neutral'
             );
@@ -746,7 +887,11 @@ export async function initHarness(
           },
           deleteNote: async (noteId: string) => {
             await memoryEngine.storeShortTermMemory(
-              JSON.stringify({ _deleted: true, id: noteId, deletedAt: Date.now() }),
+              JSON.stringify({
+                _deleted: true,
+                id: noteId,
+                deletedAt: Date.now(),
+              }),
               'note',
               'neutral'
             );
@@ -761,16 +906,28 @@ export async function initHarness(
             const shortTermFile = path.join(memDir, 'short_term_memory.json');
             if (fs.existsSync(shortTermFile)) {
               const content = fs.readFileSync(shortTermFile, 'utf-8');
-              const lines = content.trim().split('\n').filter((l: string) => !!l);
+              const lines = content
+                .trim()
+                .split('\n')
+                .filter((l: string) => !!l);
               shortTermSize = content.length;
               totalMemories += lines.length;
             }
             const profileFile = path.join(memDir, 'user_profile.json');
             if (fs.existsSync(profileFile)) {
-              totalMemories += JSON.parse(fs.readFileSync(profileFile, 'utf-8')).interactions?.length || 0;
+              totalMemories +=
+                JSON.parse(fs.readFileSync(profileFile, 'utf-8')).interactions
+                  ?.length || 0;
             }
-          } catch { /* 忽略读取错误 */ }
-          return { status: 'active', totalMemories, shortTermSize, dbPath: path.join(memDir, 'jiabaixing_memory.db') };
+          } catch {
+            /* 忽略读取错误 */
+          }
+          return {
+            status: 'active',
+            totalMemories,
+            shortTermSize,
+            dbPath: path.join(memDir, 'jiabaixing_memory.db'),
+          };
         },
         getToolStats: () => {
           const tools = harness?.getToolRegistry();
@@ -791,8 +948,11 @@ export async function initHarness(
         }),
         getEvolutionStats: () => {
           const orchestrator = (() => {
-            try { return require('../../evolution/EvolutionOrchestrator').EvolutionOrchestrator.getInstance(); }
-            catch { return null; }
+            try {
+              return require('../../evolution/EvolutionOrchestrator').EvolutionOrchestrator.getInstance();
+            } catch {
+              return null;
+            }
           })();
           if (!orchestrator) return {};
           const metrics = orchestrator.getUnifiedMetrics();
@@ -844,7 +1004,11 @@ export async function initHarness(
           },
           deleteSkill: async (skillName: string) => {
             await memoryEngine.storeShortTermMemory(
-              JSON.stringify({ _deleted: true, name: skillName, deletedAt: Date.now() }),
+              JSON.stringify({
+                _deleted: true,
+                name: skillName,
+                deletedAt: Date.now(),
+              }),
               'skill',
               'neutral'
             );
@@ -895,6 +1059,22 @@ export async function initHarness(
     await harness.initialize();
 
     core.setHarness(harness);
+
+    const mcpBridge = MCPToolBridge.getInstance();
+    if (harness.getToolRegistry) {
+      const registry = harness.getToolRegistry();
+      if (registry) {
+        mcpBridge.startAutoSync(registry);
+        Logger.info('🌉 MCP工具桥接已启动', 'Bootstrap');
+      }
+    }
+
+    const autoTrigger = AutonomousTrigger.getInstance();
+    if (harness) {
+      autoTrigger.setHarness(harness);
+      autoTrigger.start();
+      Logger.info('🤖 自主触发器已启动', 'Bootstrap');
+    }
 
     Logger.info('Harness 框架初始化完成', 'Bootstrap');
   } catch (err) {

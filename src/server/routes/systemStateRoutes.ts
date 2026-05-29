@@ -708,7 +708,9 @@ router.get('/api/conversations', (req, res) => {
 
     try {
       if (fs.existsSync(dataDir)) {
-        const files = fs.readdirSync(dataDir).filter((f: string) => f.endsWith('.json'));
+        const files = fs
+          .readdirSync(dataDir)
+          .filter((f: string) => f.endsWith('.json'));
         files.sort().reverse();
 
         for (const file of files.slice(0, limit)) {
@@ -726,7 +728,10 @@ router.get('/api/conversations', (req, res) => {
         }
       }
     } catch (err) {
-      Logger.warn(`⚠️ 读取对话历史失败: ${(err as Error).message}`, 'SystemStateRoutes');
+      Logger.warn(
+        `⚠️ 读取对话历史失败: ${(err as Error).message}`,
+        'SystemStateRoutes'
+      );
     }
 
     res.json({

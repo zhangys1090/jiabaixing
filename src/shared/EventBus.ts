@@ -132,10 +132,14 @@ class JiabaixingEventBus extends EventEmitter {
     eventName: T,
     ...args: EventPayload<T>
   ): boolean {
+    // 异步持久化，不阻塞事件广播
     if (this.persistentEvents.has(eventName)) {
-      this.persistEvent(eventName, args);
+      setImmediate(() => {
+        this.persistEvent(eventName, args);
+      });
     }
 
+    // 事件广播本身是同步的，但我们已经把持久化移到异步了
     return super.emit(eventName, ...args);
   }
 

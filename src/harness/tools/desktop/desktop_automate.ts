@@ -9,20 +9,20 @@ import { Permission, ToolCategory } from '../../types';
 export const DESKTOP_AUTOMATE_DEF: ToolDefinition = {
   name: 'desktop_automate',
   description:
-    '在用户电脑上执行桌面自动化操作。适用场景：用户要求操作电脑（打开应用、截图、点击、输入文字、移动鼠标、管理窗口等）。不适用：纯文字对话、信息查询。',
+    '在用户电脑上执行桌面自动化操作。支持的操作类型：截图(screenshot)、点击(click/rightClick)、输入文字(type)、按键(key/keyCombo)、移动鼠标(moveMouse)、滚动(scroll)、拖拽(drag)、等待(wait)、读取/写入剪贴板(clipboardRead/clipboardWrite)、执行Shell命令(shell)、点击UI元素(clickElement/typeIntoElement/getElementText)。系统会自动截图分析屏幕、规划操作步骤、执行并验证结果。适用场景：用户要求操作电脑（打开应用、截图、点击、输入文字、管理窗口等）。不适用：纯文字对话、信息查询。',
   category: ToolCategory.DESKTOP,
   parameters: {
     task: {
       type: 'string',
       description:
-        '桌面操作描述，如"打开记事本"、"截图"、"点击(100,200)"、"输入Hello"',
+        '桌面操作描述，如"打开记事本并输入Hello World"、"截图保存桌面"、"点击屏幕上的确定按钮"、"在搜索框中输入关键词"',
     },
   },
   requiredParams: ['task'],
   requiredPermissions: [Permission.DESKTOP_CONTROL],
   riskLevel: 'high',
   idempotent: false,
-  timeout: 30000,
+  timeout: 60000,
   requiresConfirmation: true,
 };
 

@@ -322,7 +322,9 @@ async function handleModelCommand(): Promise<void> {
   const health = await checkBackendHealth();
   console.log(`\n  ${COLORS.bold}当前模型${COLORS.reset}\n`);
   console.log(`  模型: ${health.model || 'deepseek-chat'}`);
-  console.log(`  LLM: ${health.llm?.available ? c(COLORS.green, '✅ 可用') : c(COLORS.red, '❌ 不可用')}`);
+  console.log(
+    `  LLM: ${health.llm?.available ? c(COLORS.green, '✅ 可用') : c(COLORS.red, '❌ 不可用')}`
+  );
   if (health.llm?.message) console.log(`  信息: ${health.llm.message}`);
   console.log();
 }
@@ -330,13 +332,24 @@ async function handleModelCommand(): Promise<void> {
 async function handleSkillsCommand(): Promise<void> {
   try {
     const resp = await fetch(`${backendUrl}/api/skills/list`);
-    const data = await resp.json() as { skills?: Array<{ name: string; description: string; category: string }>; count?: number };
-    console.log(`\n  ${COLORS.bold}技能列表 (${data.count || 0})${COLORS.reset}\n`);
+    const data = (await resp.json()) as {
+      skills?: Array<{ name: string; description: string; category: string }>;
+      count?: number;
+    };
+    console.log(
+      `\n  ${COLORS.bold}技能列表 (${data.count || 0})${COLORS.reset}\n`
+    );
     if (data.skills) {
       for (const skill of data.skills) {
-        console.log(`  ${COLORS.cyan}■${COLORS.reset} ${COLORS.bold}${skill.name}${COLORS.reset}`);
-        console.log(`    ${COLORS.dim}${skill.description.substring(0, 80)}${skill.description.length > 80 ? '...' : ''}${COLORS.reset}`);
-        console.log(`    ${COLORS.yellow}分类: ${skill.category}${COLORS.reset}\n`);
+        console.log(
+          `  ${COLORS.cyan}■${COLORS.reset} ${COLORS.bold}${skill.name}${COLORS.reset}`
+        );
+        console.log(
+          `    ${COLORS.dim}${skill.description.substring(0, 80)}${skill.description.length > 80 ? '...' : ''}${COLORS.reset}`
+        );
+        console.log(
+          `    ${COLORS.yellow}分类: ${skill.category}${COLORS.reset}\n`
+        );
       }
     }
   } catch {
@@ -348,7 +361,13 @@ async function handleSkillsCommand(): Promise<void> {
 async function handleMemoryCommand(): Promise<void> {
   try {
     const resp = await fetch(`${backendUrl}/api/memory/stats`);
-    const data = await resp.json() as { data?: { totalMemories?: number; shortTermSize?: number; dbPath?: string } };
+    const data = (await resp.json()) as {
+      data?: {
+        totalMemories?: number;
+        shortTermSize?: number;
+        dbPath?: string;
+      };
+    };
     console.log(`\n  ${COLORS.bold}记忆统计${COLORS.reset}\n`);
     if (data.data) {
       console.log(`  记忆条数: ${data.data.totalMemories || 0}`);
@@ -366,7 +385,20 @@ async function handleMemoryCommand(): Promise<void> {
 async function handleEvolutionCommand(): Promise<void> {
   try {
     const resp = await fetch(`${backendUrl}/api/evolution/status`);
-    const data = await resp.json() as { orchestrator?: { totalInteractions?: number; totalOptimizations?: number; averageQualityScore?: number; qualityTrend?: string; failureRate?: number; cyclesToday?: number; totalCycles?: number; userProfileConfidence?: number; lastCycleTime?: number }; enginesActive?: string[] };
+    const data = (await resp.json()) as {
+      orchestrator?: {
+        totalInteractions?: number;
+        totalOptimizations?: number;
+        averageQualityScore?: number;
+        qualityTrend?: string;
+        failureRate?: number;
+        cyclesToday?: number;
+        totalCycles?: number;
+        userProfileConfidence?: number;
+        lastCycleTime?: number;
+      };
+      enginesActive?: string[];
+    };
     console.log(`\n  ${COLORS.bold}进化数据${COLORS.reset}\n`);
     if (data.orchestrator) {
       const o = data.orchestrator;
@@ -382,7 +414,9 @@ async function handleEvolutionCommand(): Promise<void> {
         console.log(`  上次优化: ${ago} 分钟前`);
       }
       if (o.userProfileConfidence) {
-        console.log(`  画像置信度: ${(o.userProfileConfidence * 100).toFixed(0)}%`);
+        console.log(
+          `  画像置信度: ${(o.userProfileConfidence * 100).toFixed(0)}%`
+        );
       }
     } else {
       console.log(`  ${COLORS.dim}进化引擎未启动${COLORS.reset}`);
@@ -394,7 +428,17 @@ async function handleEvolutionCommand(): Promise<void> {
     // 额外获取优化结果详情
     try {
       const metricsResp = await fetch(`${backendUrl}/api/evolution/metrics`);
-      const metricsData = await metricsResp.json() as { data?: { optimizationHistory?: Array<{ id: string; reason: string; toneAdjustments: Array<unknown>; skillAdjustments: Array<unknown>; promptExamples: Array<unknown> }> } };
+      const metricsData = (await metricsResp.json()) as {
+        data?: {
+          optimizationHistory?: Array<{
+            id: string;
+            reason: string;
+            toneAdjustments: Array<unknown>;
+            skillAdjustments: Array<unknown>;
+            promptExamples: Array<unknown>;
+          }>;
+        };
+      };
       const history = metricsData.data?.optimizationHistory;
       if (history && history.length > 0) {
         console.log(`\n  ${COLORS.dim}最近优化:${COLORS.reset}`);
@@ -402,10 +446,14 @@ async function handleEvolutionCommand(): Promise<void> {
           const tone = h.toneAdjustments?.length || 0;
           const skill = h.skillAdjustments?.length || 0;
           const prompt = h.promptExamples?.length || 0;
-          console.log(`    ${COLORS.cyan}●${COLORS.reset} ${h.reason.substring(0, 40)} → 语气${tone} 技能${skill} 示例${prompt}`);
+          console.log(
+            `    ${COLORS.cyan}●${COLORS.reset} ${h.reason.substring(0, 40)} → 语气${tone} 技能${skill} 示例${prompt}`
+          );
         }
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   } catch {
     console.log(`  ${c(COLORS.red, '❌ 获取进化数据失败')}`);
   }
@@ -422,12 +470,28 @@ async function handleGatewayStatus(): Promise<void> {
     console.log(`  已配置 ${platforms.length} 个平台:\n`);
     for (const p of platforms) {
       const s = (p.status?.status as string) || 'disconnected';
-      const mark = s === 'connected' ? '🟢' : s === 'connecting' ? '🟡' : s === 'error' ? '🔴' : '⚪';
-      const statusText = s === 'connected' ? c(COLORS.green, '已连接') : s === 'connecting' ? c(COLORS.yellow, '连接中') : s === 'error' ? c(COLORS.red, '错误') : c(COLORS.dim, '未连接');
+      const mark =
+        s === 'connected'
+          ? '🟢'
+          : s === 'connecting'
+            ? '🟡'
+            : s === 'error'
+              ? '🔴'
+              : '⚪';
+      const statusText =
+        s === 'connected'
+          ? c(COLORS.green, '已连接')
+          : s === 'connecting'
+            ? c(COLORS.yellow, '连接中')
+            : s === 'error'
+              ? c(COLORS.red, '错误')
+              : c(COLORS.dim, '未连接');
       console.log(`    ${mark} ${p.icon} ${p.name}: ${statusText}`);
     }
   }
-  console.log(`\n  输入 ${COLORS.cyan}/gateway menu${COLORS.reset} 进入配置菜单`);
+  console.log(
+    `\n  输入 ${COLORS.cyan}/gateway menu${COLORS.reset} 进入配置菜单`
+  );
   console.log();
 }
 
@@ -444,25 +508,41 @@ async function handleEnvCommand(): Promise<void> {
     try {
       const { execSync } = require('child_process');
       const psCmd = `powershell -Command "Add-Type @\\\"using System;using System.Runtime.InteropServices;using System.Text;public class W { [DllImport(\\\"user32.dll\\\")]public static extern IntPtr GetForegroundWindow();[DllImport(\\\"user32.dll\\\")]public static extern int GetWindowText(IntPtr hWnd,StringBuilder lpString,int nMaxCount);[DllImport(\\\"user32.dll\\\")]public static extern uint GetWindowThreadProcessId(IntPtr hWnd,out uint lpdwProcessId);} \\\";$h=[W]::GetForegroundWindow();$s=New-Object Text.StringBuilder 256;[W]::GetWindowText($h,$s,256)|Out-Null;$p=0;[W]::GetWindowThreadProcessId($h,[ref]$p)|Out-Null;$t=$s.ToString();$n=(Get-Process -Id $p -ErrorAction SilentlyContinue).ProcessName;Write-Output \\\"$n|$t\\\""`;
-      const result = execSync(psCmd, { timeout: 5000, encoding: 'utf-8' }).toString().trim();
+      const result = execSync(psCmd, { timeout: 5000, encoding: 'utf-8' })
+        .toString()
+        .trim();
       const parts = result.split('|');
       if (parts.length >= 2 && parts[0]) {
         const proc = parts[0];
         const title = parts.slice(1).join('|');
         console.log(`  前台窗口:`);
         console.log(`    ${COLORS.cyan}进程:${COLORS.reset} ${proc}`);
-        console.log(`    ${COLORS.cyan}标题:${COLORS.reset} ${title.substring(0, 80)}`);
+        console.log(
+          `    ${COLORS.cyan}标题:${COLORS.reset} ${title.substring(0, 80)}`
+        );
 
         const envType = (() => {
           const t = title.toLowerCase();
           const p = proc.toLowerCase();
-          if (t.includes('code') || t.includes('vscode') || p.includes('code') ||
-              t.includes('terminal') || p.includes('terminal') || p.includes('cmd') ||
-              p.includes('powershell') || p.includes('bash') || t.includes('cursor')) {
+          if (
+            t.includes('code') ||
+            t.includes('vscode') ||
+            p.includes('code') ||
+            t.includes('terminal') ||
+            p.includes('terminal') ||
+            p.includes('cmd') ||
+            p.includes('powershell') ||
+            p.includes('bash') ||
+            t.includes('cursor')
+          ) {
             return c(COLORS.green, '💻 编程');
           }
-          if (p.includes('chrome') || p.includes('edge') || p.includes('firefox') ||
-              p.includes('explorer')) {
+          if (
+            p.includes('chrome') ||
+            p.includes('edge') ||
+            p.includes('firefox') ||
+            p.includes('explorer')
+          ) {
             return c(COLORS.yellow, '🌐 浏览');
           }
           return c(COLORS.dim, '其他');
@@ -477,21 +557,53 @@ async function handleEnvCommand(): Promise<void> {
 
     // Git状态
     console.log(`\n  ${COLORS.dim}项目Git状态:${COLORS.reset}`);
-    const dirs = [process.cwd(), path.resolve(process.cwd(), '..', 'hermes-agent-main')];
+    const dirs = [
+      process.cwd(),
+      path.resolve(process.cwd(), '..', 'hermes-agent-main'),
+    ];
     for (const dir of dirs) {
       try {
         const gitDir = path.join(dir, '.git');
         if (!fs.existsSync(gitDir)) continue;
         const { execSync } = require('child_process');
-        const branch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: dir, timeout: 3000, encoding: 'utf-8' }).toString().trim();
-        const status = execSync('git status --porcelain', { cwd: dir, timeout: 3000, encoding: 'utf-8' }).toString().trim();
-        const uncommitted = status ? status.split('\n').filter((l: string) => l).length : 0;
-        const lastMsg = execSync('git log -1 --format=%s', { cwd: dir, timeout: 3000, encoding: 'utf-8' }).toString().trim();
+        const branch = execSync('git rev-parse --abbrev-ref HEAD', {
+          cwd: dir,
+          timeout: 3000,
+          encoding: 'utf-8',
+        })
+          .toString()
+          .trim();
+        const status = execSync('git status --porcelain', {
+          cwd: dir,
+          timeout: 3000,
+          encoding: 'utf-8',
+        })
+          .toString()
+          .trim();
+        const uncommitted = status
+          ? status.split('\n').filter((l: string) => l).length
+          : 0;
+        const lastMsg = execSync('git log -1 --format=%s', {
+          cwd: dir,
+          timeout: 3000,
+          encoding: 'utf-8',
+        })
+          .toString()
+          .trim();
         const name = path.basename(dir);
-        const marker = uncommitted > 0 ? c(COLORS.yellow, ` ⚡${uncommitted}个未提交`) : c(COLORS.green, ' ✅ 干净');
-        console.log(`    ${COLORS.cyan}${name}${COLORS.reset} [${branch}]${marker}`);
-        console.log(`    ${COLORS.dim}${lastMsg.substring(0, 60)}${COLORS.reset}`);
-      } catch { /* 跳过非git目录 */ }
+        const marker =
+          uncommitted > 0
+            ? c(COLORS.yellow, ` ⚡${uncommitted}个未提交`)
+            : c(COLORS.green, ' ✅ 干净');
+        console.log(
+          `    ${COLORS.cyan}${name}${COLORS.reset} [${branch}]${marker}`
+        );
+        console.log(
+          `    ${COLORS.dim}${lastMsg.substring(0, 60)}${COLORS.reset}`
+        );
+      } catch {
+        /* 跳过非git目录 */
+      }
     }
   } catch {
     console.log(`  ${c(COLORS.red, '❌ 获取环境状态失败')}`);

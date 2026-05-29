@@ -186,19 +186,21 @@ export class SkillRegistry {
         description: p.description,
       })),
     }));
-    const infraMetas = Array.from(this.infrastructureTools.values()).map((tool) => ({
-      name: tool.name,
-      description: tool.description,
-      category: 'infrastructure',
-      version: '1.0.0',
-      tags: [],
-      parameters: tool.parameters.map((p) => ({
-        name: p.name,
-        type: p.type,
-        required: p.required,
-        description: p.description,
-      })),
-    }));
+    const infraMetas = Array.from(this.infrastructureTools.values()).map(
+      (tool) => ({
+        name: tool.name,
+        description: tool.description,
+        category: 'infrastructure',
+        version: '1.0.0',
+        tags: [],
+        parameters: tool.parameters.map((p) => ({
+          name: p.name,
+          type: p.type,
+          required: p.required,
+          description: p.description,
+        })),
+      })
+    );
     return [...infraMetas, ...skillMetas];
   }
 

@@ -98,7 +98,30 @@ export const API_ENDPOINTS = {
 
 export type ApiEndpoint = (typeof API_ENDPOINTS)[keyof typeof API_ENDPOINTS];
 
-// ====================== API 请求/响应类型 ======================
+// ====================== 全局系统常量 ======================
+/**
+ * 全局系统常量（前后端共用）
+ */
+export const SYSTEM_CONSTANTS = {
+  /** 用户输入最大长度（字符数） */
+  MAX_INPUT_LENGTH: 2000,
+  /** WebSocket 去重缓存容量上限 */
+  MAX_DEDUP_CACHE_SIZE: 1000,
+  /** 活跃任务自动清理超时（毫秒） */
+  ACTIVE_TASK_TIMEOUT_MS: 10 * 60 * 1000, // 10分钟
+  /** 图片上传最大大小（字节，10MB） */
+  MAX_IMAGE_SIZE_BYTES: 10 * 1024 * 1024,
+  /** 允许的图片类型 */
+  ALLOWED_IMAGE_TYPES: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'],
+  /** 对话历史保存 debounce 时间 */
+  HISTORY_SAVE_DEBOUNCE_MS: 2000,
+  /** WebSocket 重连初始延迟 */
+  WS_RECONNECT_INITIAL_DELAY_MS: 1000,
+  /** WebSocket 最大重连延迟 */
+  WS_RECONNECT_MAX_DELAY_MS: 30000,
+};
+
+// ====================== WebSocket 事件定义 ======================
 
 // --- Health ---
 
@@ -461,6 +484,9 @@ export const WS_EVENTS = {
     TTS_CHUNK: 'tts_chunk',
     DIALOG_STATE: 'dialog_state',
     CANCEL: 'cancel',
+    ENVIRONMENT_UPDATE: 'environment_update',
+    PROJECT_CHANGE: 'project_change',
+    GIT_STATUS: 'git_status',
   },
 } as const;
 
@@ -669,6 +695,24 @@ export interface WsServerLogData {
   traceId?: string;
 }
 
+export interface WsEnvironmentUpdateData {
+  timestamp: string;
+  activeEnv: string;
+  foregroundWindow: { title: string; process: string } | null;
+}
+
+export interface WsProjectChangeData {
+  type: string;
+  repo: string;
+  detail: string;
+  timestamp: string;
+}
+
+export interface WsGitStatusData {
+  timestamp: string;
+  repos: Array<Record<string, unknown>>;
+}
+
 // ====================== EventBus → WebSocket 桥接映射 ======================
 
 export const EVENTBUS_TO_WS_MAP: Record<string, WsServerEventType> = {
@@ -688,6 +732,9 @@ export const EVENTBUS_TO_WS_MAP: Record<string, WsServerEventType> = {
   file_rollback: 'file_rollback',
   multi_file_modified: 'multi_file_modified',
   tool_trace: 'tool_trace',
+  environment_update: 'environment_update',
+  project_change: 'project_change',
+  git_status: 'git_status',
 };
 
 // ====================== 连接状态 ======================

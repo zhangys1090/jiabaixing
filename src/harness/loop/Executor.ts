@@ -8,7 +8,7 @@
 
 import { Logger } from '../../utils/Logger';
 import { EventBus } from '../../shared/EventBus';
-import { LifecycleEvent } from '../types';
+import { LifecycleEvent, LoopState } from '../types';
 import type {
   ChatMessage,
   LoopContext,
@@ -30,14 +30,26 @@ import type { TrajectoryDatabase } from '../persistence/TrajectoryDatabase';
 
 /** 工具调用拦截器 — 非侵入式钩子接口 */
 export interface ToolCallHooks {
-  beforeToolCall?(toolName: string, params: Record<string, unknown>, ctx: { traceId: string; loopCount: number }): Promise<{
+  beforeToolCall?(
+    toolName: string,
+    params: Record<string, unknown>,
+    ctx: { traceId: string; loopCount: number }
+  ): Promise<{
     proceed: boolean;
     modifiedParams?: Record<string, unknown>;
     replacementResult?: ToolResult;
     reason?: string;
   }>;
-  afterToolCall?(toolName: string, result: ToolResult, ctx: { traceId: string; loopCount: number }): Promise<ToolResult>;
-  onToolError?(toolName: string, error: string, ctx: { traceId: string; loopCount: number }): Promise<void>;
+  afterToolCall?(
+    toolName: string,
+    result: ToolResult,
+    ctx: { traceId: string; loopCount: number }
+  ): Promise<ToolResult>;
+  onToolError?(
+    toolName: string,
+    error: string,
+    ctx: { traceId: string; loopCount: number }
+  ): Promise<void>;
   recordTrajectory?(step: TrajectoryStep): void;
 }
 
@@ -79,7 +91,15 @@ export interface ExecutorDeps {
   constraintsService?: {
     executeHooks(
       event: LifecycleEvent,
-      context: { event: LifecycleEvent; toolName?: string; params?: Record<string, unknown>; result?: ToolResult; loopState?: string; budgetState?: BudgetState; metadata: Record<string, unknown> }
+      context: {
+        event: LifecycleEvent;
+        toolName?: string;
+        params?: Record<string, unknown>;
+        result?: ToolResult;
+        loopState?: string;
+        budgetState?: BudgetState;
+        metadata: Record<string, unknown>;
+      }
     ): Promise<{
       proceed: boolean;
       modifiedParams?: Record<string, unknown>;
@@ -133,7 +153,8 @@ export class Executor {
     const effectiveTools =
       recommendedSet.size > 0
         ? allTools.filter((t) => {
-            const name = (t as { function?: { name?: string } }).function?.name || '';
+            const name =
+              (t as { function?: { name?: string } }).function?.name || '';
             return recommendedSet.has(name);
           })
         : allTools;
@@ -148,7 +169,9 @@ export class Executor {
 
     if (plan.toolCallMode === 'required') {
       const toolNames = effectiveTools
-        .map((t) => (t as { function?: { name?: string } }).function?.name || '')
+        .map(
+          (t) => (t as { function?: { name?: string } }).function?.name || ''
+        )
         .join('、');
       messages.push({
         role: 'system',
@@ -158,6 +181,14 @@ export class Executor {
 1. 分析用户想要做什么
 2. 选择合适的工具并调用
 3. 如果需要先获取信息再操作，请分步调用多个工具
+
+工具组合策略：
+- 信息获取链: file_search → file_read → code_analyze
+- 桌面操作链: desktop_automate → screenshot → desktop_automate
+- 网络研究链: web_fetch → memory_write → file_write
+- 浏览器自动化: mcp_browser_* 系列工具
+- 定时任务: mcp_cron_* 系列工具
+- 创造性组合: 你可以自由组合工具实现用户未明确要求但合理的增强操作
 
 注意：工具调用是完成任务的唯一方式。直接告诉我你要调用的工具和参数。`,
       });
@@ -181,7 +212,12 @@ export class Executor {
         `🤖 Executor: 开始首次 LLM 调用 (消息数=${messages.length}, 工具数=${effectiveTools.length}, tool_choice=${toolChoice})`,
         'Executor'
       );
-      fcResponse = await this.deps.llm.chatWithTools(messages, effectiveTools, 4096, toolChoice);
+      fcResponse = await this.deps.llm.chatWithTools(
+        messages,
+        effectiveTools,
+        4096,
+        toolChoice
+      );
       Logger.info(`✅ Executor: LLM 调用成功`, 'Executor');
     } catch (error) {
       Logger.error(
@@ -218,10 +254,16 @@ export class Executor {
         );
         messages.push({
           role: 'user',
-          content: '请调用工具来完成操作。可用的工具已在系统提示中列出。请返回一个具体的工具调用。',
+          content:
+            '请调用工具来完成操作。可用的工具已在系统提示中列出。请返回一个具体的工具调用。',
         });
         try {
-          fcResponse = await this.deps.llm.chatWithTools(messages, effectiveTools, 4096, 'auto');
+          fcResponse = await this.deps.llm.chatWithTools(
+            messages,
+            effectiveTools,
+            4096,
+            'auto'
+          );
         } catch {
           fcResponse = { content: null, toolCalls: undefined };
         }
@@ -232,7 +274,7 @@ export class Executor {
     // 无进展打断检测
     let lastToolNames = '';
     let stallCount = 0;
-    const MAX_STALL = 3;        // 连续3轮相同工具 → 打断
+    const MAX_STALL = 3; // 连续3轮相同工具 → 打断
     const MAX_CONSECUTIVE_SAME = 3;
     const CONSECUTIVE_SAME_WINDOW = 5; // 最近5轮中相同工具超限 → 打断
 
@@ -251,7 +293,10 @@ export class Executor {
       );
 
       // 无进展检测：相同工具名集合
-      const toolNameSet = fcResponse.toolCalls.map(t => t.function.name).sort().join(',');
+      const toolNameSet = fcResponse.toolCalls
+        .map((t) => t.function.name)
+        .sort()
+        .join(',');
       if (toolNameSet === lastToolNames) {
         stallCount++;
         if (stallCount >= MAX_STALL) {
@@ -291,7 +336,10 @@ export class Executor {
       messages.push({
         role: 'assistant',
         content: fcResponse.content || null,
-        tool_calls: fcResponse.toolCalls && fcResponse.toolCalls.length > 0 ? fcResponse.toolCalls : undefined,
+        tool_calls:
+          fcResponse.toolCalls && fcResponse.toolCalls.length > 0
+            ? fcResponse.toolCalls
+            : undefined,
       });
 
       // 并行执行工具调用
@@ -310,14 +358,23 @@ export class Executor {
           args = {};
         }
 
-        // BEFORE_TOOL_CALL 钩子（通过 hooks 接口，非侵入式）
+        // BEFORE_TOOL_CALL 钩子（直接调用 constraintsService）
         let modifiedArgs = args;
-        if (this.deps.hooks?.beforeToolCall) {
+        if (this.deps.constraintsService) {
           try {
-            const hookResult = await this.deps.hooks.beforeToolCall(toolName, args, {
-              traceId: context.trace.traceId,
-              loopCount,
-            });
+            const hookResult = await this.deps.constraintsService.executeHooks(
+              LifecycleEvent.BEFORE_TOOL_CALL,
+              {
+                event: LifecycleEvent.BEFORE_TOOL_CALL,
+                toolName,
+                params: args,
+                loopState: LoopState.EXECUTING,
+                metadata: {
+                  traceId: context.trace.traceId,
+                  loopCount,
+                },
+              }
+            );
             if (!hookResult.proceed) {
               Logger.info(
                 `🛑 BEFORE_TOOL_CALL 钩子拦截: ${toolName} - ${hookResult.reason}`,
@@ -338,10 +395,55 @@ export class Executor {
             }
             if (hookResult.modifiedParams) {
               modifiedArgs = hookResult.modifiedParams;
-              Logger.debug(`📝 BEFORE_TOOL_CALL 修改参数: ${toolName}`, 'Executor');
+              Logger.debug(
+                `📝 BEFORE_TOOL_CALL 修改参数: ${toolName}`,
+                'Executor'
+              );
             }
           } catch (hookErr) {
-            Logger.warn(`⚠️ BEFORE_TOOL_CALL 钩子执行失败: ${(hookErr as Error).message}`, 'Executor');
+            Logger.warn(
+              `⚠️ BEFORE_TOOL_CALL 钩子执行失败: ${(hookErr as Error).message}`,
+              'Executor'
+            );
+          }
+        }
+        // 通过 hooks 接口的兼容处理
+        if (this.deps.hooks?.beforeToolCall) {
+          try {
+            const hookResult = await this.deps.hooks.beforeToolCall(
+              toolName,
+              modifiedArgs,
+              {
+                traceId: context.trace.traceId,
+                loopCount,
+              }
+            );
+            if (!hookResult.proceed) {
+              Logger.info(
+                `🛑 hooks.beforeToolCall 拦截: ${toolName} - ${hookResult.reason}`,
+                'Executor'
+              );
+              const hookResultOutput = hookResult.replacementResult?.output
+                ? typeof hookResult.replacementResult.output === 'string'
+                  ? hookResult.replacementResult.output
+                  : JSON.stringify(hookResult.replacementResult.output)
+                : `工具调用被拦截: ${hookResult.reason}`;
+              return {
+                toolCall,
+                result: hookResultOutput,
+                success: false,
+                error: hookResult.reason || '钩子拦截',
+                duration: Date.now() - toolStart,
+              };
+            }
+            if (hookResult.modifiedParams) {
+              modifiedArgs = hookResult.modifiedParams;
+            }
+          } catch (hookErr) {
+            Logger.warn(
+              `⚠️ hooks.beforeToolCall 执行失败: ${(hookErr as Error).message}`,
+              'Executor'
+            );
           }
         }
 
@@ -445,13 +547,18 @@ export class Executor {
                 duration: toolDuration,
                 validated: false,
               };
-              const hookResult = await this.deps.hooks.afterToolCall(toolName, toolResult, {
-                traceId: context.trace.traceId,
-                loopCount,
-              });
-              output = typeof hookResult.output === 'string'
-                ? hookResult.output
-                : JSON.stringify(hookResult.output);
+              const hookResult = await this.deps.hooks.afterToolCall(
+                toolName,
+                toolResult,
+                {
+                  traceId: context.trace.traceId,
+                  loopCount,
+                }
+              );
+              output =
+                typeof hookResult.output === 'string'
+                  ? hookResult.output
+                  : JSON.stringify(hookResult.output);
             } else if (this.deps.verificationService) {
               const safetyCheck =
                 this.deps.verificationService.checkOutputSafety(rawOutput);
@@ -477,7 +584,43 @@ export class Executor {
             result.success
           );
 
-          // AFTER_TOOL_CALL 钩子（通过 hooks 接口）
+          // AFTER_TOOL_CALL 钩子（直接调用 constraintsService）
+          if (this.deps.constraintsService) {
+            try {
+              const toolResult: ToolResult = {
+                success: result.success,
+                output,
+                error: result.error,
+                duration: toolDuration,
+                validated: false,
+              };
+              const hookResult = await this.deps.constraintsService.executeHooks(
+                LifecycleEvent.AFTER_TOOL_CALL,
+                {
+                  event: LifecycleEvent.AFTER_TOOL_CALL,
+                  toolName,
+                  result: toolResult,
+                  loopState: LoopState.EXECUTING,
+                  metadata: {
+                    traceId: context.trace.traceId,
+                    loopCount,
+                  },
+                }
+              );
+              if (hookResult?.replacementResult?.output) {
+                output =
+                  typeof hookResult.replacementResult.output === 'string'
+                    ? hookResult.replacementResult.output
+                    : JSON.stringify(hookResult.replacementResult.output);
+              }
+            } catch (hookErr) {
+              Logger.warn(
+                `⚠️ AFTER_TOOL_CALL 钩子执行失败: ${(hookErr as Error).message}`,
+                'Executor'
+              );
+            }
+          }
+          // 通过 hooks 接口的兼容处理
           if (this.deps.hooks?.afterToolCall) {
             try {
               const toolResult: ToolResult = {
@@ -487,15 +630,22 @@ export class Executor {
                 duration: toolDuration,
                 validated: false,
               };
-              const hookResult = await this.deps.hooks.afterToolCall(toolName, toolResult, {
-                traceId: context.trace.traceId,
-                loopCount,
-              });
+              const hookResult = await this.deps.hooks.afterToolCall(
+                toolName,
+                toolResult,
+                {
+                  traceId: context.trace.traceId,
+                  loopCount,
+                }
+              );
               if (hookResult?.output && typeof hookResult.output === 'string') {
                 output = hookResult.output;
               }
             } catch (hookErr) {
-              Logger.warn(`⚠️ AFTER_TOOL_CALL 钩子执行失败: ${(hookErr as Error).message}`, 'Executor');
+              Logger.warn(
+                `⚠️ hooks.afterToolCall 执行失败: ${(hookErr as Error).message}`,
+                'Executor'
+              );
             }
           }
 
@@ -557,15 +707,46 @@ export class Executor {
             (err as Error).message
           );
 
-          // ON_ERROR 钩子（通过 hooks 接口）
+          // ON_ERROR 钩子（直接调用 constraintsService）
+          if (this.deps.constraintsService) {
+            try {
+              await this.deps.constraintsService.executeHooks(
+                LifecycleEvent.ON_ERROR,
+                {
+                  event: LifecycleEvent.ON_ERROR,
+                  toolName,
+                  params: modifiedArgs,
+                  loopState: LoopState.EXECUTING,
+                  metadata: {
+                    traceId: context.trace.traceId,
+                    loopCount,
+                    error: (err as Error).message,
+                  },
+                }
+              );
+            } catch (hookErr) {
+              Logger.warn(
+                `⚠️ ON_ERROR 钩子执行失败: ${(hookErr as Error).message}`,
+                'Executor'
+              );
+            }
+          }
+          // 通过 hooks 接口的兼容处理
           if (this.deps.hooks?.onToolError) {
             try {
-              await this.deps.hooks.onToolError(toolName, (err as Error).message, {
-                traceId: context.trace.traceId,
-                loopCount,
-              });
+              await this.deps.hooks.onToolError(
+                toolName,
+                (err as Error).message,
+                {
+                  traceId: context.trace.traceId,
+                  loopCount,
+                }
+              );
             } catch (hookErr) {
-              Logger.warn(`⚠️ ON_ERROR 钩子执行失败: ${(hookErr as Error).message}`, 'Executor');
+              Logger.warn(
+                `⚠️ hooks.onToolError 执行失败: ${(hookErr as Error).message}`,
+                'Executor'
+              );
             }
           }
 
@@ -620,7 +801,9 @@ export class Executor {
 
       // 将工具结果注入消息
       for (const tr of toolResults) {
-        const toolCallId = tr.toolCall?.id || `tc_fallback_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        const toolCallId =
+          tr.toolCall?.id ||
+          `tc_fallback_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
         messages.push({
           role: 'tool' as const,
           tool_call_id: toolCallId,
@@ -635,7 +818,12 @@ export class Executor {
           `🤖 Executor: 开始第${loopCount + 1}轮 LLM 调用`,
           'Executor'
         );
-        fcResponse = await this.deps.llm.chatWithTools(messages, effectiveTools, 4096, toolChoice);
+        fcResponse = await this.deps.llm.chatWithTools(
+          messages,
+          effectiveTools,
+          4096,
+          toolChoice
+        );
         Logger.info(
           `✅ Executor: 第${loopCount + 1}轮 LLM 调用成功`,
           'Executor'
@@ -853,16 +1041,26 @@ export class Executor {
 
   /**
    * 计算文本的 token 估算数
+   *
+   * 改进版估算算法，区分中英文和特殊内容：
+   * - 中文（CJK统一表意文字）：约 2 字符 ≈ 1 token
+   * - 英文单词：约 4 字符 ≈ 1 token
+   * - 数字：约 4 字符 ≈ 1 token
+   * - 代码/符号：约 2 字符 ≈ 1 token
+   * - JSON字符串：特殊处理
    */
   private countTokens(text: string): number {
     if (!text || text.length === 0) return 0;
 
     let chineseChars = 0;
     let englishChars = 0;
+    let digitChars = 0;
     let codeChars = 0;
     let otherChars = 0;
 
     let inCodeBlock = false;
+    let inJson = false;
+    let jsonDepth = 0;
 
     for (let i = 0; i < text.length; i++) {
       const char = text[i];
@@ -878,37 +1076,69 @@ export class Executor {
         continue;
       }
 
-      if (inCodeBlock || (char === '`' && text.substring(i, i + 2) === '``')) {
+      if (inCodeBlock) {
         codeChars++;
-        if (char === '`') i++;
+        continue;
+      }
+
+      if (char === '{' || char === '[') {
+        jsonDepth++;
+        inJson = jsonDepth > 0;
+      } else if (char === '}' || char === ']') {
+        jsonDepth--;
+        if (jsonDepth <= 0) {
+          inJson = false;
+          jsonDepth = 0;
+        }
+      }
+
+      if (inJson && (char === ':' || char === ',' || char === '"')) {
+        codeChars++;
+        continue;
+      }
+
+      if (char === '`' && i < text.length - 1 && text[i + 1] === '`') {
+        codeChars++;
+        i++;
         continue;
       }
 
       if (
         (code >= 0x4e00 && code <= 0x9fff) ||
         (code >= 0x3400 && code <= 0x4dbf) ||
-        (code >= 0xf900 && code <= 0xfaff)
+        (code >= 0xf900 && code <= 0xfaff) ||
+        (code >= 0x2e80 && code <= 0x2eff) ||
+        (code >= 0x3000 && code <= 0x303f)
       ) {
         chineseChars++;
-      } else if (
-        (code >= 0x0041 && code <= 0x007a) ||
-        (code >= 0x0041 && code <= 0x005a) ||
-        (code >= 0x0030 && code <= 0x0039)
-      ) {
-        englishChars++;
-      } else if (/[{}()[\];,.<>:\+\-\*\/\\|&\s]/.test(char)) {
-        otherChars++;
-      } else {
+      } else if ((code >= 0x0041 && code <= 0x005a) || (code >= 0x0061 && code <= 0x007a)) {
+        if (i > 0 && englishChars > 0) {
+          const prevCode = text.charCodeAt(i - 1);
+          if ((prevCode >= 0x0041 && prevCode <= 0x005a) || (prevCode >= 0x0061 && prevCode <= 0x007a)) {
+          } else {
+            englishChars++;
+          }
+        } else {
+          englishChars++;
+        }
+      } else if (code >= 0x0030 && code <= 0x0039) {
+        digitChars++;
+      } else if (/[{}()[\];,.<>:\+\-\*\/\\|&\s=]/.test(char)) {
         codeChars++;
+      } else if (char === '-' || char === '_' || char === '.') {
+        codeChars++;
+      } else {
+        otherChars++;
       }
     }
 
     const chineseTokens = Math.ceil(chineseChars / 2);
     const englishTokens = Math.ceil(englishChars / 4);
-    const codeTokens = Math.ceil(codeChars / 4);
+    const digitTokens = Math.ceil(digitChars / 4);
+    const codeTokens = Math.ceil(codeChars / 2);
     const otherTokens = Math.ceil(otherChars / 3);
 
-    return chineseTokens + englishTokens + codeTokens + otherTokens;
+    return chineseTokens + englishTokens + digitTokens + codeTokens + otherTokens;
   }
 
   /**
@@ -1104,7 +1334,9 @@ export class Executor {
             type: 'function',
             function: {
               name,
-              arguments: JSON.stringify(parsed.arguments || parsed.params || parsed.args || {}),
+              arguments: JSON.stringify(
+                parsed.arguments || parsed.params || parsed.args || {}
+              ),
             },
           });
         }
@@ -1116,17 +1348,30 @@ export class Executor {
     if (results.length > 0) return results;
 
     // 模式2: 行内模式 - 调用 file_read("path/to/file")
-    const inlinePattern = /(?:调用|使用)\s*(\w+)\s*[\(\（]\s*["\u2018\u201c]?([^"\)\）]+)["\u2019\u201d]?\s*[\)\）]/g;
+    const inlinePattern =
+      /(?:调用|使用)\s*(\w+)\s*[\(\（]\s*["\u2018\u201c]?([^"\)\）]+)["\u2019\u201d]?\s*[\)\）]/g;
     while ((match = inlinePattern.exec(text)) !== null) {
       const toolName = match[1];
       const arg = match[2]?.trim();
       if (toolNames.includes(toolName)) {
         const toolDef = availableTools.find(
-          (t) => (t as { function?: { name?: string } }).function?.name === toolName
-        ) as { function?: { parameters?: { properties?: Record<string, unknown>; required?: string[] } } } | undefined;
+          (t) =>
+            (t as { function?: { name?: string } }).function?.name === toolName
+        ) as
+          | {
+              function?: {
+                parameters?: {
+                  properties?: Record<string, unknown>;
+                  required?: string[];
+                };
+              };
+            }
+          | undefined;
         let args: Record<string, unknown> = {};
         if (toolDef?.function?.parameters?.properties) {
-          const firstParam = Object.keys(toolDef.function.parameters.properties)[0];
+          const firstParam = Object.keys(
+            toolDef.function.parameters.properties
+          )[0];
           if (firstParam && arg) {
             args[firstParam] = arg;
           }
@@ -1148,7 +1393,8 @@ export class Executor {
     if (results.length > 0) return results;
 
     // 模式3: 格式调用 - read_file(path="xxx") 或 search(query="xxx")
-    const fmtPattern = /(\w+)\s*\(\s*(\w+)\s*=\s*["\u2018\u201c]([^"\)\）]+)["\u2019\u201d]\s*\)/g;
+    const fmtPattern =
+      /(\w+)\s*\(\s*(\w+)\s*=\s*["\u2018\u201c]([^"\)\）]+)["\u2019\u201d]\s*\)/g;
     while ((match = fmtPattern.exec(text)) !== null) {
       const toolName = match[1];
       const paramName = match[2];

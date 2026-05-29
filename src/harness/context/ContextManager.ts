@@ -300,10 +300,15 @@ export class ContextManager {
     try {
       const examples = this.deps.evolutionExamples?.getPromptExamples?.();
       if (examples && examples.length > 0) {
-        const top = examples.sort((a, b) => b.frequency - a.frequency).slice(0, 2);
-        const hintText = top.map(
-          (e, i) => `${i + 1}. 当用户说"${e.trigger}" → 正确做法: ${e.correction}`
-        ).join('\n');
+        const top = examples
+          .sort((a, b) => b.frequency - a.frequency)
+          .slice(0, 2);
+        const hintText = top
+          .map(
+            (e, i) =>
+              `${i + 1}. 当用户说"${e.trigger}" → 正确做法: ${e.correction}`
+          )
+          .join('\n');
         messages.push({
           role: 'system',
           content: `【进化经验】\n以下是从历史交互中学习的经验：\n${hintText}`,

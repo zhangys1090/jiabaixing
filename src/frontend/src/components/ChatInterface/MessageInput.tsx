@@ -1,5 +1,6 @@
 import React, { ChangeEvent, KeyboardEvent, useRef, useState } from 'react';
 import './ChatInterface.css';
+import { SYSTEM_CONSTANTS } from '@shared/contracts';
 
 interface MessageInputProps {
   inputText: string;
@@ -7,10 +8,12 @@ interface MessageInputProps {
   isLoading: boolean;
   onSend: (images?: string[]) => void;
   isTyping: boolean;
+  onError?: (message: string) => void;
 }
 
-const MessageInput: React.FC<MessageInputProps> = ({ inputText, setInputText, isLoading, onSend, isTyping }) => {
+const MessageInput: React.FC<MessageInputProps> = ({ inputText, setInputText, isLoading, onSend, isTyping, onError }) => {
   const [previewImages, setPreviewImages] = useState<string[]>([]);
+  const [imageError, setImageError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -26,14 +29,35 @@ const MessageInput: React.FC<MessageInputProps> = ({ inputText, setInputText, is
     if (!files) return;
 
     Array.from(files).forEach((file) => {
-      if (file.type.startsWith('image/')) {
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          const base64 = event.target?.result as string;
-          setPreviewImages((prev) => [...prev, base64]);
-        };
-        reader.readAsDataURL(file);
+      // 检查图片类型
+      if (!SYSTEM_CONSTANTS.ALLOWED_IMAGE_TYPES.includes(file.type)) {
+        const error = `不支持的图片类型: ${file.type}，仅支持 ${SYSTEM_CONSTANTS.ALLOWED_IMAGE_TYPES.join(', ')}`;
+        setImageError(error);
+        if (onError) onError(error);
+        return;
       }
+      // 检查图片大小
+      if (file.size > SYSTEM_CONSTANTS.MAX_IMAGE_SIZE_BYTES) {
+        const maxMB = (SYSTEM_CONSTANTS.MAX_IMAGE_SIZE_BYTES / (1024 * 1024)).toFixed(1);
+        const fileMB = (file.size / (1024 * 1024)).toFixed(1);
+        const error = `图片过大: ${fileMB}MB，最大限制 ${maxMB}MB`;
+        setImageError(error);
+        if (onError) onError(error);
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const base64 = event.target?.result as string;
+        setPreviewImages((prev) => [...prev, base64]);
+        setImageError(null);
+      };
+      reader.onerror = () => {
+        const error = '图片读取失败，请重新选择';
+        setImageError(error);
+        if (onError) onError(error);
+      };
+      reader.readAsDataURL(file);
     });
 
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -41,12 +65,14 @@ const MessageInput: React.FC<MessageInputProps> = ({ inputText, setInputText, is
 
   const removeImage = (index: number) => {
     setPreviewImages((prev) => prev.filter((_, i) => i !== index));
+    setImageError(null);
   };
 
   const handleSend = () => {
     const images = previewImages.length > 0 ? [...previewImages] : undefined;
     onSend(images);
     setPreviewImages([]);
+    setImageError(null);
     setInputText('');
     setTimeout(() => {
       textareaRef.current?.focus();
@@ -75,6 +101,11 @@ const MessageInput: React.FC<MessageInputProps> = ({ inputText, setInputText, is
 
   return (
     <div className="chat-input-area">
+      {imageError && (
+        <div className="image-error-message" style={{ color: '#ef4444', fontSize: '12px', marginBottom: '8px' }}>
+          ⚠️ {imageError}
+        </div>
+      )}
       {previewImages.length > 0 && (
         <div className="image-preview-container">
           {previewImages.map((img, index) => (

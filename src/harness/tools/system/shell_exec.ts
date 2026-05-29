@@ -1,0 +1,124 @@
+import type { ToolContext, ToolDefinition, ToolResult } from '../../types';
+import { Permission, ToolCategory } from '../../types';
+import { Logger } from '../../../utils/Logger';
+import { execSync } from 'child_process';
+
+export const SHELL_EXEC_DEF: ToolDefinition = {
+  name: 'shell_exec',
+  description:
+    'Shell命令执行工具。在系统终端中执行命令并返回输出。适用场景：运行脚本、管理系统、安装依赖。不适用：需要交互式输入的命令。',
+  category: ToolCategory.SYSTEM,
+  parameters: {
+    command: {
+      type: 'string',
+      description: '要执行的命令',
+    },
+    timeout: {
+      type: 'number',
+      description: '超时时间（毫秒）',
+      default: 30000,
+    },
+    cwd: {
+      type: 'string',
+      description: '工作目录（可选）',
+    },
+  },
+  requiredParams: ['command'],
+  requiredPermissions: [Permission.SYSTEM_ADMIN],
+  riskLevel: 'high',
+  idempotent: false,
+  timeout: 35000,
+};
+
+const FORBIDDEN_COMMANDS = [
+  'format',
+  'del /s /q C:',
+  'rm -rf /',
+  'rm -rf /*',
+  'shutdown',
+  'restart',
+  'reg delete',
+  'reg add HKLM',
+  'net user',
+  'net localgroup',
+  'cipher /w',
+  'diskpart',
+  'bcdedit',
+  'taskkill /f /im svchost',
+];
+
+export interface ShellExecDeps {
+  shellRunner?: (command: string, options: {
+    timeout: number;
+    cwd?: string;
+  }) => Promise<{ stdout: string; stderr: string; exitCode: number }>;
+}
+
+function ok(output: string, duration: number, metadata?: Record<string, unknown>): ToolResult {
+  return { success: true, output, duration, validated: false, metadata };
+}
+
+function fail(error: string, duration: number, output: string = ''): ToolResult {
+  return { success: false, output, error, duration, validated: false };
+}
+
+export function createShellExecExecutor(deps: ShellExecDeps = {}) {
+  return async (
+    params: Record<string, unknown>,
+    _context?: ToolContext
+  ): Promise<ToolResult> => {
+    const startTime = Date.now();
+    const command = params.command as string;
+    const timeout = (params.timeout as number) || 30000;
+    const cwd = params.cwd as string | undefined;
+
+    try {
+      const lowerCommand = command.toLowerCase().trim();
+      for (const forbidden of FORBIDDEN_COMMANDS) {
+        if (lowerCommand.includes(forbidden.toLowerCase())) {
+          Logger.warn(`🛡️ shell_exec 拦截危险命令: "${command}"`, 'ShellExec');
+          return fail(
+            `命令被安全策略拦截: 包含禁止的操作 "${forbidden}"`,
+            Date.now() - startTime
+          );
+        }
+      }
+
+      if (deps.shellRunner) {
+        const result = await deps.shellRunner(command, { timeout, cwd });
+        const output = result.stdout || result.stderr || '(无输出)';
+        if (result.exitCode === 0) {
+          return ok(output.substring(0, 10000), Date.now() - startTime, { exitCode: 0, command });
+        }
+        return fail(`命令退出码: ${result.exitCode}`, Date.now() - startTime, output.substring(0, 5000));
+      }
+
+      const result = execSync(command, {
+        encoding: 'utf-8',
+        timeout,
+        cwd: cwd || process.cwd(),
+        maxBuffer: 1024 * 1024,
+        windowsHide: true,
+      });
+
+      Logger.info(`⚡ shell_exec 成功: "${command.substring(0, 50)}"`, 'ShellExec');
+
+      return ok(
+        (result || '(无输出)').substring(0, 10000),
+        Date.now() - startTime,
+        { exitCode: 0, command }
+      );
+    } catch (error) {
+      const err = error as Error & { stdout?: string; stderr?: string; status?: number };
+      const output = err.stdout || err.stderr || err.message || '执行失败';
+
+      Logger.warn(`⚠️ shell_exec 失败: "${command.substring(0, 50)}"`, 'ShellExec');
+
+      return fail(
+        `命令执行失败 (exit code: ${err.status || 1}): ${err.message.substring(0, 200)}`,
+        Date.now() - startTime,
+        output.substring(0, 5000)
+      );
+    }
+  };
+}

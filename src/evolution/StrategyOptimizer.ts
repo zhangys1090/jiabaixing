@@ -82,7 +82,10 @@ export class StrategyOptimizer {
     // 达到阈值自动触发优化
     if (this.feedbackBuffer.length >= this.autoTriggerThreshold) {
       setImmediate(() => {
-        this.runOptimization('auto', `积累 ${this.feedbackBuffer.length} 条反馈`).catch(() => {});
+        this.runOptimization(
+          'auto',
+          `积累 ${this.feedbackBuffer.length} 条反馈`
+        ).catch(() => {});
       });
     }
   }
@@ -152,7 +155,10 @@ export class StrategyOptimizer {
 
     // 调试：输出反馈的满意度分布
     if (toneAdjustments.length === 0 && this.feedbackBuffer.length > 0) {
-      const scenes = new Map<string, { pos: number; neg: number; total: number }>();
+      const scenes = new Map<
+        string,
+        { pos: number; neg: number; total: number }
+      >();
       for (const r of this.feedbackBuffer) {
         const s = r.scene || 'daily';
         if (!scenes.has(s)) scenes.set(s, { pos: 0, neg: 0, total: 0 });
@@ -161,7 +167,10 @@ export class StrategyOptimizer {
         if (r.inferredSatisfaction > 0.6) d.pos++;
         if (r.inferredSatisfaction < 0.4) d.neg++;
       }
-      Logger.info(`📋 反馈分布: ${JSON.stringify([...scenes.entries()].map(([k,v]) => `${k}:${v.total}条(pos=${v.pos}/neg=${v.neg})`))}`, 'StrategyOptimizer');
+      Logger.info(
+        `📋 反馈分布: ${JSON.stringify([...scenes.entries()].map(([k, v]) => `${k}:${v.total}条(pos=${v.pos}/neg=${v.neg})`))}`,
+        'StrategyOptimizer'
+      );
     }
 
     const log: OptimizationLog = {

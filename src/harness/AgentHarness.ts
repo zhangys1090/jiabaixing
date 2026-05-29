@@ -20,6 +20,7 @@ import { VerificationService } from './verification/VerificationService';
 import { ConstraintsService } from './constraints/ConstraintsService';
 import { PersistenceService } from './persistence/PersistenceService';
 import { TrajectoryDatabase } from './persistence/TrajectoryDatabase';
+import { SandboxExecutor } from './sandbox/SandboxExecutor';
 import {
   registerHarnessTools,
   syncToLegacySkillRegistry,
@@ -106,6 +107,8 @@ export class AgentHarness {
   // 独立评估服务（P0 核心功能）
   private independentEvaluationService: IndependentEvaluationService | null =
     null;
+  // 沙箱执行器（安全隔离）
+  private sandboxExecutor: SandboxExecutor | null = null;
 
   constructor(config?: Partial<HarnessConfig>) {
     const envConfig = getEnvConfig();
@@ -164,6 +167,13 @@ export class AgentHarness {
       });
       Logger.info('  🛡️ 约束层: 启用', 'AgentHarness');
     }
+
+    // Phase 2.5: 沙箱执行器初始化
+    this.sandboxExecutor = new SandboxExecutor({
+      securityLevel: 'high',
+      timeoutMs: 30000,
+    });
+    Logger.info('  🔒 沙箱执行器: 启用 (安全级别: high)', 'AgentHarness');
 
     // Phase 3: 验证层初始化
     if (this.config.useHarnessVerification) {
@@ -240,6 +250,27 @@ export class AgentHarness {
         // 非侵入式 hooks 适配器 —— 桥接约束/验证/轨迹到 Executor
         hooks: {
           beforeToolCall: async (toolName, params, ctx) => {
+            // 0. 沙箱权限检查
+            if (this.sandboxExecutor) {
+              const sandboxCheck = this.sandboxExecutor.checkToolPermission(
+                toolName,
+                params
+              );
+              if (!sandboxCheck.allowed) {
+                return {
+                  proceed: false,
+                  reason: sandboxCheck.reason,
+                  replacementResult: {
+                    success: false,
+                    output: `🛡️ 沙箱拦截: ${sandboxCheck.reason}`,
+                    error: sandboxCheck.reason,
+                    duration: 0,
+                    validated: false,
+                  },
+                };
+              }
+            }
+            
             // 1. 执行生命周期钩子（约束层）
             if (this.constraintsService) {
               const hookResult = await this.constraintsService.executeHooks(
@@ -248,15 +279,23 @@ export class AgentHarness {
                   event: LifecycleEvent.BEFORE_TOOL_CALL,
                   toolName,
                   params,
-                  loopState: LifecycleEvent.BEFORE_TOOL_CALL as unknown as LoopState,
+                  loopState:
+                    LifecycleEvent.BEFORE_TOOL_CALL as unknown as LoopState,
                   metadata: { traceId: ctx.traceId, loopCount: ctx.loopCount },
                 }
               );
               if (!hookResult.proceed) {
-                return { proceed: false, reason: hookResult.reason, replacementResult: hookResult.replacementResult };
+                return {
+                  proceed: false,
+                  reason: hookResult.reason,
+                  replacementResult: hookResult.replacementResult,
+                };
               }
               if (hookResult.modifiedParams) {
-                return { proceed: true, modifiedParams: hookResult.modifiedParams };
+                return {
+                  proceed: true,
+                  modifiedParams: hookResult.modifiedParams,
+                };
               }
             }
             // 2. Schema 验证（工具层）
@@ -268,16 +307,23 @@ export class AgentHarness {
                 registeredTool.definition.requiredParams
               );
               if (!validation.valid && validation.sanitizedParams) {
-                return { proceed: true, modifiedParams: validation.sanitizedParams };
+                return {
+                  proceed: true,
+                  modifiedParams: validation.sanitizedParams,
+                };
               }
             }
             return { proceed: true };
           },
           afterToolCall: async (toolName, result) => {
             // 安全检查（验证层）
-            let safeOutput = typeof result.output === 'string' ? result.output : JSON.stringify(result.output);
+            let safeOutput =
+              typeof result.output === 'string'
+                ? result.output
+                : JSON.stringify(result.output);
             if (this.verificationService) {
-              const safetyCheck = this.verificationService.checkOutputSafety(safeOutput);
+              const safetyCheck =
+                this.verificationService.checkOutputSafety(safeOutput);
               if (safetyCheck.sanitizedOutput) {
                 safeOutput = safetyCheck.sanitizedOutput;
               }
@@ -313,7 +359,9 @@ export class AgentHarness {
                     created_at: Date.now(),
                   });
                 }
-              } catch { /* ignore */ }
+              } catch {
+                /* ignore */
+              }
             }
           },
         },
@@ -569,6 +617,13 @@ export class AgentHarness {
    */
   getIndependentEvaluationService(): IndependentEvaluationService | null {
     return this.independentEvaluationService;
+  }
+
+  /**
+   * 获取沙箱执行器
+   */
+  getSandboxExecutor(): SandboxExecutor | null {
+    return this.sandboxExecutor;
   }
 
   /**

@@ -27,12 +27,24 @@ export interface PlannerDeps {
 
 /** 简单任务关键词 — 直接执行不需要规划，但需要工具调用 */
 const ACTION_SIMPLE_PATTERNS: Array<{ pattern: RegExp; tools: string[] }> = [
-  { pattern: /^(读|查|查看|打开|显示).*(文件|目录|内容)/, tools: ['file_list', 'file_search'] },
+  {
+    pattern: /^(读|查|查看|打开|显示).*(文件|目录|内容)/,
+    tools: ['file_list', 'file_search'],
+  },
   { pattern: /^(搜索|查找|找).*(文件|内容|代码)/, tools: ['file_search'] },
   { pattern: /^(写|创建|新建|添加).*(文件|代码)/, tools: ['incremental_edit'] },
-  { pattern: /^(运行|执行).*(命令|脚本|程序)/, tools: ['system_status', 'file_list'] },
-  { pattern: /^(帮我|请|能不能|可以)/, tools: ['file_list', 'file_search', 'incremental_edit'] },
-  { pattern: /^(分析|检查).*(代码|文件)/, tools: ['code_analyze', 'file_list', 'file_search'] },
+  {
+    pattern: /^(运行|执行).*(命令|脚本|程序)/,
+    tools: ['system_status', 'file_list'],
+  },
+  {
+    pattern: /^(帮我|请|能不能|可以)/,
+    tools: ['file_list', 'file_search', 'incremental_edit'],
+  },
+  {
+    pattern: /^(分析|检查).*(代码|文件)/,
+    tools: ['code_analyze', 'file_list', 'file_search'],
+  },
 ];
 
 const SIMPLE_TASK_PATTERNS = [
@@ -44,7 +56,7 @@ const SIMPLE_TASK_PATTERNS = [
 
 const ALL_SIMPLE_PATTERNS = [
   ...SIMPLE_TASK_PATTERNS,
-  ...ACTION_SIMPLE_PATTERNS.map(a => a.pattern),
+  ...ACTION_SIMPLE_PATTERNS.map((a) => a.pattern),
 ];
 
 /** 复杂任务关键词 — 需要规划 */

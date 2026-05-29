@@ -23,6 +23,9 @@ import {
   MultiFileModified,
   UserCorrection,
   TaskCancelled,
+  EnvironmentUpdate,
+  ProjectChange,
+  GitStatus,
 } from './types';
 
 const DEFAULT_WS_URL = `ws://localhost:3111`;
@@ -54,6 +57,9 @@ export function useWebSocket(options: UseWebSocketOptions = {}): WebSocketState 
   const [multiFileModifiedEvents, setMultiFileModifiedEvents] = useState<MultiFileModified[]>([]);
   const [userCorrections, setUserCorrections] = useState<UserCorrection[]>([]);
   const [taskCancelledEvents, setTaskCancelledEvents] = useState<TaskCancelled[]>([]);
+  const [environmentUpdates, setEnvironmentUpdates] = useState<EnvironmentUpdate[]>([]);
+  const [projectChanges, setProjectChanges] = useState<ProjectChange[]>([]);
+  const [gitStatuses, setGitStatuses] = useState<GitStatus[]>([]);
 
   const cleanupRef = useRef<(() => void)[]>([]);
   const optionsRef = useRef(options);
@@ -174,6 +180,21 @@ export function useWebSocket(options: UseWebSocketOptions = {}): WebSocketState 
       optionsRef.current.onTaskCancelled?.(data);
     };
 
+    const handleEnvironmentUpdate = (data: EnvironmentUpdate) => {
+      setEnvironmentUpdates((prev) => [...prev.slice(-19), data]);
+      optionsRef.current.onEnvironmentUpdate?.(data);
+    };
+
+    const handleProjectChange = (data: ProjectChange) => {
+      setProjectChanges((prev) => [...prev.slice(-19), data]);
+      optionsRef.current.onProjectChange?.(data);
+    };
+
+    const handleGitStatus = (data: GitStatus) => {
+      setGitStatuses((prev) => [...prev.slice(-9), data]);
+      optionsRef.current.onGitStatus?.(data);
+    };
+
     connectionManager.onStateChange(handleStateChange);
     connectionManager.onConnectionStatus(handleConnectionStatus);
     connectionManager.onDialogState(handleDialogState);
@@ -197,6 +218,9 @@ export function useWebSocket(options: UseWebSocketOptions = {}): WebSocketState 
     connectionManager.onUserCorrection(handleUserCorrection);
     connectionManager.onProcessingStatus(handleProcessingStatus);
     connectionManager.onTaskCancelled(handleTaskCancelled);
+    connectionManager.onEnvironmentUpdate(handleEnvironmentUpdate);
+    connectionManager.onProjectChange(handleProjectChange);
+    connectionManager.onGitStatus(handleGitStatus);
 
     cleanupRef.current = [
       () => connectionManager.offStateChange(handleStateChange),
@@ -222,6 +246,9 @@ export function useWebSocket(options: UseWebSocketOptions = {}): WebSocketState 
       () => connectionManager.offUserCorrection(handleUserCorrection),
       () => connectionManager.offProcessingStatus(handleProcessingStatus),
       () => connectionManager.offTaskCancelled(handleTaskCancelled),
+      () => connectionManager.offEnvironmentUpdate(handleEnvironmentUpdate),
+      () => connectionManager.offProjectChange(handleProjectChange),
+      () => connectionManager.offGitStatus(handleGitStatus),
     ];
 
     return () => {
@@ -263,6 +290,9 @@ export function useWebSocket(options: UseWebSocketOptions = {}): WebSocketState 
     multiFileModifiedEvents,
     userCorrections,
     taskCancelledEvents,
+    environmentUpdates,
+    projectChanges,
+    gitStatuses,
     sendMessage,
     send,
     reconnect,

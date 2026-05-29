@@ -7,6 +7,7 @@ import { initInteraction } from './init/initInteraction';
 import { initEvolution } from './init/initEvolution';
 import { initHarness } from './init/initHarness';
 import { initGateway } from './init/initGateway';
+import { MCPServerManager } from '../mcp/MCPServerManager';
 
 export function printBanner(): void {
   console.log('\n');
@@ -73,6 +74,11 @@ export async function bootstrap(): Promise<JiabaixingCore> {
 
     process.stdout.write('  📡 网关隔离... ');
     await initGateway(core, harness);
+    console.log('✅');
+
+    process.stdout.write('  🔌 MCP Host... ');
+    const mcpManager = MCPServerManager.getInstance();
+    await mcpManager.startAutoStartServers();
     console.log('✅');
 
     console.log('\n  ✅ 系统就绪\n');

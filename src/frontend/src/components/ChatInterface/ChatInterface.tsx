@@ -18,17 +18,17 @@ import './ChatInterface.css';
 import ChatWindow from './ChatWindow';
 import MessageInput from './MessageInput';
 import VoiceInteraction from './VoiceInteraction';
-import type {
+import {
   WsBrainStageUpdateData,
   WsPerceptionUpdateData,
   WsSkillExecutionUpdateData,
   WsEvolutionEventData,
+  SYSTEM_CONSTANTS,
 } from '@shared/contracts';
 
-const WS_URL = (window as Record<string, unknown>).REACT_APP_WS_URL as string || `ws://${window.location.hostname}:3111`;
-const API_BASE = (window as Record<string, unknown>).REACT_APP_API_URL as string || `http://${window.location.hostname}:3111`;
+const WS_URL = (window as unknown as Record<string, string>).REACT_APP_WS_URL || `ws://${window.location.hostname}:3111`;
+const API_BASE = (window as unknown as Record<string, string>).REACT_APP_API_URL || `http://${window.location.hostname}:3111`;
 const RESPONSE_TIMEOUT_MS = 0;
-const MAX_INPUT_LENGTH = 500;
 
 const ChatHeader: React.FC<{
   isConnected: boolean;
@@ -201,7 +201,7 @@ const ChatInterface: React.FC = () => {
         });
       }
 
-      const fallbackMessages: Record<string, string> = {
+      const _fallbackMessages: Record<string, string> = {
         planning: '正在分析需求...',
         plan: '正在制定方案...',
         executing: `正在执行中... (${update.toolCallsUsed || 0} 次工具调用)`,
@@ -489,7 +489,7 @@ const ChatInterface: React.FC = () => {
       if (text.startsWith('/')) {
         const parts = text.slice(1).split(/\s+/);
         const cmd = parts[0].toLowerCase();
-        const args = parts.slice(1).join(' ');
+        const _args = parts.slice(1).join(' ');
 
         // 本地命令（不请求后端）
         if (cmd === 'clear') {
@@ -557,20 +557,20 @@ const ChatInterface: React.FC = () => {
         }
       }
 
-      if (text.length > MAX_INPUT_LENGTH) {
-        dispatch({
-          type: 'ADD_MESSAGE',
-          payload: {
-            id: generateMessageId(),
-            content: `消息过长（${state.inputText.length}字），请控制在${MAX_INPUT_LENGTH}字以内`,
-            sender: 'assistant',
-            timestamp: new Date(),
-            status: 'sent',
-            emoji: '⚠️',
-          },
-        });
-        return;
-      }
+      if (text.length > SYSTEM_CONSTANTS.MAX_INPUT_LENGTH) {
+      dispatch({
+        type: 'ADD_MESSAGE',
+        payload: {
+          id: generateMessageId(),
+          content: `消息过长（${state.inputText.length}字），请控制在${SYSTEM_CONSTANTS.MAX_INPUT_LENGTH}字以内`,
+          sender: 'assistant',
+          timestamp: new Date(),
+          status: 'sent',
+          emoji: '⚠️',
+        },
+      });
+      return;
+    }
 
       const pendingId = generateMessageId();
       dispatch({

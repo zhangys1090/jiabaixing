@@ -10,11 +10,14 @@ import {
   WsBrainStageUpdateData,
   WsClarificationRequestData,
   WsErrorData,
+  WsEnvironmentUpdateData,
   WsEvolutionEventData,
   WsExecutionPreviewData,
   WsFileModifiedData,
+  WsGitStatusData,
   WsPerceptionUpdateData,
   WsProactiveMessageData,
+  WsProjectChangeData,
   WsServerLogData,
   WsSkillExecutionUpdateData,
   WsToolTraceData,
@@ -75,6 +78,9 @@ export type TaskCancelled = {
   message?: string;
   timestamp?: number;
 };
+export type EnvironmentUpdate = WsEnvironmentUpdateData;
+export type ProjectChange = WsProjectChangeData;
+export type GitStatus = WsGitStatusData;
 
 export interface WebSocketMessage {
   type: WsServerEventType;
@@ -108,6 +114,9 @@ export type FileRollbackListener = (event: FileRollback) => void;
 export type MultiFileModifiedListener = (event: MultiFileModified) => void;
 export type UserCorrectionListener = (data: UserCorrection) => void;
 export type TaskCancelledListener = (data: TaskCancelled) => void;
+export type EnvironmentUpdateListener = (data: EnvironmentUpdate) => void;
+export type ProjectChangeListener = (data: ProjectChange) => void;
+export type GitStatusListener = (data: GitStatus) => void;
 
 export interface UseWebSocketOptions {
   url?: string;
@@ -134,6 +143,9 @@ export interface UseWebSocketOptions {
   onUserCorrection?: (data: UserCorrection) => void;
   onProcessingStatus?: (data: { status: string; message: string; traceId?: string }) => void;
   onTaskCancelled?: (data: TaskCancelled) => void;
+  onEnvironmentUpdate?: (data: EnvironmentUpdate) => void;
+  onProjectChange?: (data: ProjectChange) => void;
+  onGitStatus?: (data: GitStatus) => void;
 }
 
 export interface WebSocketState {
@@ -158,6 +170,9 @@ export interface WebSocketState {
   multiFileModifiedEvents: MultiFileModified[];
   userCorrections: UserCorrection[];
   taskCancelledEvents: TaskCancelled[];
+  environmentUpdates: EnvironmentUpdate[];
+  projectChanges: ProjectChange[];
+  gitStatuses: GitStatus[];
 }
 
 export type { WS_EVENTS, WsServerEventType };

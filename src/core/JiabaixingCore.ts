@@ -7,6 +7,7 @@ import { PersonaCore } from '../persona/PersonaCore';
 import { PersonaRules } from '../persona/PersonaRules';
 import { EventBus } from '../shared/EventBus';
 import { Logger } from '../utils/Logger';
+import { SYSTEM_CONSTANTS } from '../shared/contracts';
 import {
   IEvolutionEngine,
   ITRAEOptimizationIntegrator,
@@ -456,10 +457,8 @@ export class JiabaixingCore {
           `✅ response_ready已发射: traceId=${finalTraceId}, 响应长度=${safeResponse.length}, 质量=${qualityScore.toFixed(2)}`,
           'JiabaixingCore'
         );
-
-        await this.conversationHistoryManager.saveState();
-        Logger.info(
-          `💾 对话历史已保存，当前 ${this.conversationHistoryManager.getLength()} 条`,
+        Logger.debug(
+          `📦 对话历史已更新，当前 ${this.conversationHistoryManager.getLength()} 条，将在 ${SYSTEM_CONSTANTS.HISTORY_SAVE_DEBOUNCE_MS}ms 内批量保存`,
           'JiabaixingCore'
         );
 
@@ -488,10 +487,8 @@ export class JiabaixingCore {
         `⚠️ response_ready已发射(降级): traceId=${finalTraceId}`,
         'JiabaixingCore'
       );
-
-      await this.conversationHistoryManager.saveState();
-      Logger.info(
-        `💾 对话历史已保存，当前 ${this.conversationHistoryManager.getLength()} 条`,
+      Logger.debug(
+        `📦 对话历史已更新，当前 ${this.conversationHistoryManager.getLength()} 条，将在 ${SYSTEM_CONSTANTS.HISTORY_SAVE_DEBOUNCE_MS}ms 内批量保存`,
         'JiabaixingCore'
       );
 
@@ -517,10 +514,8 @@ export class JiabaixingCore {
         error as Error,
         'JiabaixingCore'
       );
-
-      await this.conversationHistoryManager.saveState();
-      Logger.info(
-        `💾 对话历史已保存，当前 ${this.conversationHistoryManager.getLength()} 条`,
+      Logger.debug(
+        `📦 对话历史已更新，当前 ${this.conversationHistoryManager.getLength()} 条，将在 ${SYSTEM_CONSTANTS.HISTORY_SAVE_DEBOUNCE_MS}ms 内批量保存`,
         'JiabaixingCore'
       );
 

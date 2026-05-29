@@ -41,7 +41,14 @@ import {
   UserCorrection,
   TaskCancelled,
   TaskCancelledListener,
+  EnvironmentUpdate,
+  EnvironmentUpdateListener,
+  ProjectChange,
+  ProjectChangeListener,
+  GitStatus,
+  GitStatusListener,
 } from './types';
+import { SYSTEM_CONSTANTS } from '@shared/contracts';
 
 type ServerLogListener = (entry: ServerLogEntry) => void;
 type ResponseReadyListener = (response: unknown, traceId?: string) => void;
@@ -76,6 +83,9 @@ class WebSocketConnectionManager {
   private multiFileModifiedListeners = new Set<MultiFileModifiedListener>();
   private userCorrectionListeners = new Set<UserCorrectionListener>();
   private taskCancelledListeners = new Set<TaskCancelledListener>();
+  private environmentUpdateListeners = new Set<EnvironmentUpdateListener>();
+  private projectChangeListeners = new Set<ProjectChangeListener>();
+  private gitStatusListeners = new Set<GitStatusListener>();
   private processingStatusListeners = new Set<(data: { status: string; message: string; traceId?: string }) => void>();
 
   private currentDialogState: DialogStateValue = 'idle';
@@ -139,7 +149,10 @@ class WebSocketConnectionManager {
         }
 
         if (this.isActive && this.reconnectAttempts < this.maxReconnectAttempts) {
-          const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
+          const delay = Math.min(
+            SYSTEM_CONSTANTS.WS_RECONNECT_INITIAL_DELAY_MS * Math.pow(2, this.reconnectAttempts),
+            SYSTEM_CONSTANTS.WS_RECONNECT_MAX_DELAY_MS
+          );
           this.updateConnectionStatus('reconnecting');
           this.reconnectTimer = setTimeout(() => {
             this.reconnectAttempts++;
@@ -183,6 +196,18 @@ class WebSocketConnectionManager {
             // 静默
           }
         });
+        // 出错后也尝试重连
+        if (this.isActive && this.reconnectAttempts < this.maxReconnectAttempts) {
+          const delay = Math.min(
+            SYSTEM_CONSTANTS.WS_RECONNECT_INITIAL_DELAY_MS * Math.pow(2, this.reconnectAttempts),
+            SYSTEM_CONSTANTS.WS_RECONNECT_MAX_DELAY_MS
+          );
+          this.updateConnectionStatus('reconnecting');
+          this.reconnectTimer = setTimeout(() => {
+            this.reconnectAttempts++;
+            this.connect();
+          }, delay);
+        }
       };
     } catch {
       this.updateConnectionState(false);
@@ -452,6 +477,40 @@ class WebSocketConnectionManager {
         });
         break;
       }
+      case 'environment_update': {
+        const envData = message.data as unknown as EnvironmentUpdate;
+        this.environmentUpdateListeners.forEach((listener) => {
+          try {
+            listener(envData);
+          } catch {
+            // 静默处理
+          }
+        });
+        break;
+      }
+      case 'project_change': {
+        const changeData = message.data as unknown as ProjectChange;
+        console.log('📂 项目变更:', changeData.repo, changeData.type);
+        this.projectChangeListeners.forEach((listener) => {
+          try {
+            listener(changeData);
+          } catch {
+            // 静默处理
+          }
+        });
+        break;
+      }
+      case 'git_status': {
+        const gitData = message.data as unknown as GitStatus;
+        this.gitStatusListeners.forEach((listener) => {
+          try {
+            listener(gitData);
+          } catch {
+            // 静默处理
+          }
+        });
+        break;
+      }
       default:
         console.warn(`⚠️ 未知的WebSocket消息类型: ${message.type}`);
         break;
@@ -691,6 +750,30 @@ class WebSocketConnectionManager {
 
   offTaskCancelled(listener: TaskCancelledListener): void {
     this.taskCancelledListeners.delete(listener);
+  }
+
+  onEnvironmentUpdate(listener: EnvironmentUpdateListener): void {
+    this.environmentUpdateListeners.add(listener);
+  }
+
+  offEnvironmentUpdate(listener: EnvironmentUpdateListener): void {
+    this.environmentUpdateListeners.delete(listener);
+  }
+
+  onProjectChange(listener: ProjectChangeListener): void {
+    this.projectChangeListeners.add(listener);
+  }
+
+  offProjectChange(listener: ProjectChangeListener): void {
+    this.projectChangeListeners.delete(listener);
+  }
+
+  onGitStatus(listener: GitStatusListener): void {
+    this.gitStatusListeners.add(listener);
+  }
+
+  offGitStatus(listener: GitStatusListener): void {
+    this.gitStatusListeners.delete(listener);
   }
 
   onProcessingStatus(listener: (data: { status: string; message: string; traceId?: string }) => void): void {

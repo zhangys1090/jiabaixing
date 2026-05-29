@@ -5,7 +5,7 @@
 import type { ToolContext, ToolDefinition, ToolResult } from '../../types';
 import { Permission, ToolCategory } from '../../types';
 
-interface TaskEntry {
+export interface TaskEntry {
   id: string;
   title: string;
   description?: string;
@@ -15,6 +15,7 @@ interface TaskEntry {
   tags: string[];
   createdAt: number;
   completedAt?: number;
+  dependencies?: string[];
 }
 
 export const TASK_MANAGE_DEF: ToolDefinition = {

@@ -10,10 +10,47 @@ import { JiabaixingCore, ProcessInputResult } from '../core/JiabaixingCore';
 import { Logger } from '../utils/Logger';
 import { SecurityPolicyEngine } from '../security/SecurityPolicyEngine';
 import { EventBus } from '../shared/EventBus';
+import { SYSTEM_CONSTANTS } from '../shared/contracts';
 
 type WSServer = WebSocket.Server;
 
-const processedResponses = new Set<string>();
+// LRU风格去重缓存（带容量限制）
+class DedupCache {
+  private cache: Map<string, number>;
+  private readonly maxSize: number;
+
+  constructor(maxSize: number) {
+    this.cache = new Map();
+    this.maxSize = maxSize;
+  }
+
+  has(traceId: string): boolean {
+    return this.cache.has(traceId);
+  }
+
+  add(traceId: string): void {
+    // 如果已存在，先删除以更新"最后访问时间"（用Map的插入顺序模拟）
+    if (this.cache.has(traceId)) {
+      this.cache.delete(traceId);
+    }
+    // 如果达到容量上限，删除最早的
+    if (this.cache.size >= this.maxSize) {
+      const firstKey = this.cache.keys().next().value;
+      if (firstKey !== undefined) {
+        this.cache.delete(firstKey);
+      }
+    }
+    this.cache.set(traceId, Date.now());
+  }
+
+  delete(traceId: string): void {
+    this.cache.delete(traceId);
+  }
+}
+
+const processedResponses = new DedupCache(
+  SYSTEM_CONSTANTS.MAX_DEDUP_CACHE_SIZE
+);
 function checkAndMarkResponse(traceId: string): boolean {
   if (processedResponses.has(traceId)) {
     return true;
@@ -30,10 +67,13 @@ function checkAndMarkResponse(traceId: string): boolean {
   return false;
 }
 
-const activeTasks = new Map<
-  string,
-  { aborted: boolean; loopController?: { abort(): void } }
->();
+interface ActiveTask {
+  aborted: boolean;
+  loopController?: { abort(): void };
+  clientIp: string;
+  createdAt: number;
+}
+const activeTasks = new Map<string, ActiveTask>();
 
 function isRetryableError(error: Error): boolean {
   const msg = error.message || '';
@@ -57,10 +97,36 @@ function isRetryableError(error: Error): boolean {
   );
 }
 
+// 活跃任务自动清理定时器
+let activeTaskCleanupInterval: NodeJS.Timeout | null = null;
+
 export function setupWebSocket(
   wss: WSServer | null,
   core: JiabaixingCore | null
 ): void {
+  // 启动活跃任务自动清理定时器
+  if (activeTaskCleanupInterval === null) {
+    activeTaskCleanupInterval = setInterval(() => {
+      const now = Date.now();
+      for (const [traceId, task] of activeTasks.entries()) {
+        if (now - task.createdAt > SYSTEM_CONSTANTS.ACTIVE_TASK_TIMEOUT_MS) {
+          if (!task.aborted && task.loopController) {
+            try {
+              task.loopController.abort();
+            } catch (e) {
+              // 忽略
+            }
+          }
+          activeTasks.delete(traceId);
+          Logger.debug(
+            `🗑️ 自动清理超时活跃任务: traceId=${traceId}`,
+            'WebSocket'
+          );
+        }
+      }
+    }, 60 * 1000); // 每分钟检查一次
+  }
+
   wss?.on('connection', (ws, req) => {
     const clientIp = req.socket.remoteAddress || 'unknown';
     Logger.info(`💖 新客户端连接: ${clientIp}`, 'WebSocket');
@@ -98,13 +164,12 @@ export function setupWebSocket(
             return;
           }
 
-          const MAX_BACKEND_INPUT_LENGTH = 2000;
-          if (input.length > MAX_BACKEND_INPUT_LENGTH) {
+          if (input.length > SYSTEM_CONSTANTS.MAX_INPUT_LENGTH) {
             ws.send(
               JSON.stringify({
                 type: 'error',
                 data: {
-                  message: `消息过长（${input.length}字），请控制在${MAX_BACKEND_INPUT_LENGTH}字以内`,
+                  message: `消息过长（${input.length}字），请控制在${SYSTEM_CONSTANTS.MAX_INPUT_LENGTH}字以内`,
                 },
               })
             );
@@ -164,7 +229,8 @@ export function setupWebSocket(
             userId,
             traceId,
             ws,
-            core
+            core,
+            clientIp
           ).catch((err: Error) => {
             Logger.error('❌ 处理输入失败（重试耗尽）', err, 'WebSocket');
             if (ws.readyState === 1) {
@@ -251,6 +317,23 @@ export function setupWebSocket(
 
     ws.on('close', () => {
       Logger.info(`👋 客户端断开: ${clientIp}`, 'WebSocket');
+      // 清理该用户的所有活跃任务
+      for (const [traceId, task] of activeTasks.entries()) {
+        if (task.clientIp === clientIp) {
+          if (!task.aborted && task.loopController) {
+            try {
+              task.loopController.abort();
+            } catch (e) {
+              // 忽略
+            }
+          }
+          activeTasks.delete(traceId);
+          Logger.debug(
+            `🗑️ 清理客户端断开关联任务: traceId=${traceId}`,
+            'WebSocket'
+          );
+        }
+      }
     });
 
     ws.send(
@@ -275,16 +358,19 @@ async function processInputWithRetry(
   userId: string,
   traceId: string,
   ws: WebSocket.WebSocket,
-  core: JiabaixingCore | null
+  core: JiabaixingCore | null,
+  clientIp: string
 ): Promise<void> {
   if (checkAndMarkResponse(traceId)) {
     Logger.info(`⚠️ traceId ${traceId} 已处理，跳过重复请求`, 'WebSocket');
     return;
   }
 
-  const taskHandle = {
+  const taskHandle: ActiveTask = {
     aborted: false,
-    loopController: undefined as { abort(): void } | undefined,
+    loopController: undefined,
+    clientIp,
+    createdAt: Date.now(),
   };
   activeTasks.set(traceId, taskHandle);
 
@@ -428,7 +514,10 @@ async function processInputOnce(
     const PROCESSING_TIMEOUT_MS = 120000;
     const timeoutId = setTimeout(() => {
       if (!taskHandle.aborted && ws.readyState === 1) {
-        Logger.warn(`⚠️ 处理超时 (${PROCESSING_TIMEOUT_MS}ms): traceId=${traceId}`, 'WebSocket');
+        Logger.warn(
+          `⚠️ 处理超时 (${PROCESSING_TIMEOUT_MS}ms): traceId=${traceId}`,
+          'WebSocket'
+        );
         ws.send(
           JSON.stringify({
             type: 'response_ready',
@@ -447,7 +536,10 @@ async function processInputOnce(
       }
     }, PROCESSING_TIMEOUT_MS);
 
-    Logger.info(`🚀 开始处理输入 [${traceId}]: "${input.substring(0, 50)}..."`, 'WebSocket');
+    Logger.info(
+      `🚀 开始处理输入 [${traceId}]: "${input.substring(0, 50)}..."`,
+      'WebSocket'
+    );
 
     const result: ProcessInputResult = await core.processInput(
       input,
@@ -481,7 +573,11 @@ async function processInputOnce(
         userFriendlyMessage = `抱歉，无法连接到 AI 服务。\n\n请检查：\n1. 网络连接是否正常\n2. API Key 是否正确配置\n3. LLM 服务是否可用`;
       } else if (errorMsg.includes('timeout') || errorMsg.includes('超时')) {
         userFriendlyMessage = `抱歉，AI 服务响应超时。\n\n可能原因：\n1. 服务器负载过高\n2. 网络延迟\n3. 请求队列拥堵\n\n请稍后重试。`;
-      } else if (errorMsg.includes('API') || errorMsg.includes('401') || errorMsg.includes('认证')) {
+      } else if (
+        errorMsg.includes('API') ||
+        errorMsg.includes('401') ||
+        errorMsg.includes('认证')
+      ) {
         userFriendlyMessage = `抱歉，API 认证失败。\n\n请检查 .env 文件中的 API Key 配置是否正确。`;
       }
 

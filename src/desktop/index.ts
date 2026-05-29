@@ -52,3 +52,10 @@ export {
   SnapshotRestoreResult,
   SnapshotListOptions,
 } from './StateSnapshotManager';
+export {
+  DesktopDecisionEngine,
+  DecisionState,
+  DecisionAction,
+  DecisionExperience,
+  DecisionPolicy,
+} from './DesktopDecisionEngine';

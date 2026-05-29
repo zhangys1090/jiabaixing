@@ -1,5 +1,6 @@
 import { EvolutionOrchestrator } from '../../evolution/EvolutionOrchestrator';
 import { EvolutionEngine } from '../../evolution/EvolutionEngine';
+import { EvolutionEngineV2 } from '../../evolution';
 import { EvaluationPipeline } from '../../harness/evaluation/EvaluationPipeline';
 import { OptimizationFeedbackLoop } from '../../harness/evaluation/OptimizationFeedbackLoop';
 import { TRAEOptimizationIntegrator } from '../../integration/TRAEOptimizationIntegrator';
@@ -26,9 +27,34 @@ export async function initEvolution(
 
     core.setEvolutionEngine(evolutionEngine);
 
+    // 创建真正的自我进化引擎 V2
+    let evolutionEngineV2: EvolutionEngineV2 | null = null;
+    const llmProvider = core?.getLLM();
+    if (llmProvider) {
+      // 创建一个适配器来适配 LLMProvider 到 EvolutionEngineV2 需要的 LLMClient 接口
+      const llmClientAdapter = {
+        chat: async (systemPrompt: string, userPrompt: string) => {
+          try {
+            const response = await llmProvider.chat(
+              userPrompt,
+              [],
+              systemPrompt
+            );
+            return response || JSON.stringify({ text: response });
+          } catch (error) {
+            Logger.error('LLM 调用失败', error as Error, 'initEvolution');
+            return JSON.stringify({ error: 'LLM call failed' });
+          }
+        }
+      };
+      evolutionEngineV2 = new EvolutionEngineV2(llmClientAdapter);
+      Logger.info('🧬 EvolutionEngineV2 (真正自我进化) 已初始化', 'initEvolution');
+    }
+
     const orchestrator = EvolutionOrchestrator.getInstance();
     orchestrator.registerEngines({
       evolutionEngine,
+      evolutionEngineV2,
       llmProvider: core?.getLLM(),
     });
     orchestrator.start();
@@ -62,7 +88,9 @@ export async function initEvolution(
             'Bootstrap'
           );
 
-          void orchestrator.triggerOptimizationCycleWithVerification('定时优化检查');
+          void orchestrator.triggerOptimizationCycleWithVerification(
+            '定时优化检查'
+          );
         }
       }
     }, OPTIMIZATION_INTERVAL_MS);

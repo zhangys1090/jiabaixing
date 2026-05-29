@@ -17,6 +17,7 @@ import EventBus from '../shared/EventBus';
 import { ProfileEvolutionManager } from '../user/ProfileEvolutionManager';
 import { Logger } from '../utils/Logger';
 import { EvolutionEngine, EvolutionMetrics } from './EvolutionEngine';
+import { EvolutionEngineV2, EvolutionCause, EvolutionPriority, EvolutionType } from './';
 
 /** 自我增强结果（原 SelfEnhancementEngine 已删除，本地定义） */
 export interface EnhancementResult {
@@ -112,6 +113,7 @@ export class EvolutionOrchestrator {
   private static instance: EvolutionOrchestrator;
 
   private evolutionEngine: EvolutionEngine | null = null;
+  private evolutionEngineV2: EvolutionEngineV2 | null = null;
   private profileEvolution: ProfileEvolutionManager | null = null;
   private taskAdjuster: DynamicTaskAdjuster | null = null;
 
@@ -150,16 +152,19 @@ export class EvolutionOrchestrator {
    */
   registerEngines(engines: {
     evolutionEngine?: EvolutionEngine;
+    evolutionEngineV2?: EvolutionEngineV2;
     profileEvolution?: ProfileEvolutionManager;
     taskAdjuster?: DynamicTaskAdjuster;
     llmProvider?: import('../models/LLMProvider').LLMProvider;
   }): void {
     this.evolutionEngine = engines.evolutionEngine || null;
+    this.evolutionEngineV2 = engines.evolutionEngineV2 || null;
     this.profileEvolution = engines.profileEvolution || null;
     this.taskAdjuster = engines.taskAdjuster || null;
 
     const activeEngines: string[] = [];
     if (this.evolutionEngine) activeEngines.push('EvolutionEngine');
+    if (this.evolutionEngineV2) activeEngines.push('EvolutionEngineV2 (真正自我进化)');
     if (this.profileEvolution) activeEngines.push('ProfileEvolution');
     if (this.taskAdjuster) activeEngines.push('DynamicTaskAdjuster');
 
@@ -218,6 +223,15 @@ export class EvolutionOrchestrator {
     // 并行驱动所有子引擎
     this.driveEvolutionEngine(record);
     this.driveProfileEvolution(record);
+    
+    // 检测低质量交互，触发真正的自我进化
+    if (record.qualityScore < 0.5 && this.evolutionEngineV2) {
+      Logger.info(
+        `🧬 检测到低质量交互 (${record.qualityScore.toFixed(2)})，触发真正的自我进化`,
+        'EvolutionOrchestrator'
+      );
+      void this.triggerTrueEvolution(record);
+    }
 
     // 统一验证：每20次交互自动记录before快照，10次交互后自动对比
     if (this.interactionCount % 20 === 0) {
@@ -242,6 +256,41 @@ export class EvolutionOrchestrator {
 
     // 更新每日周期计数
     this.updateDailyCycleCount();
+  }
+
+  /**
+   * 触发真正的自我进化（EvolutionEngineV2）
+   */
+  private async triggerTrueEvolution(record: InteractionRecord): Promise<void> {
+    if (!this.evolutionEngineV2) return;
+
+    const cause: EvolutionCause = {
+      type: record.success ? 'LOW_SATISFACTION' : 'FAILURE',
+      description: record.success 
+        ? `低质量交互: ${record.input.substring(0, 100)}` 
+        : `执行失败: ${record.input.substring(0, 100)}`,
+      context: {
+        failureInfo: record.success ? undefined : '执行未成功',
+        satisfactionScore: record.qualityScore,
+      },
+      timestamp: Date.now(),
+    };
+
+    try {
+      const result = await this.evolutionEngineV2.triggerEvolution(cause);
+      if (result) {
+        Logger.info(
+          `🧬 真正自我进化完成: ${result.success ? '成功' : '失败'} | 执行了 ${result.executedActions} 个动作`,
+          'EvolutionOrchestrator'
+        );
+      }
+    } catch (error) {
+      Logger.error(
+        '真正自我进化触发失败',
+        error as Error,
+        'EvolutionOrchestrator'
+      );
+    }
   }
 
   private driveEvolutionEngine(record: InteractionRecord): void {
@@ -667,6 +716,7 @@ export class EvolutionOrchestrator {
           evolutionMetrics?.weeklyOptimizationStats?.successRate || 0,
         enginesActive: [
           ...(this.evolutionEngine ? ['EvolutionEngine'] : []),
+          ...(this.evolutionEngineV2 ? ['EvolutionEngineV2 (真正自我进化)'] : []),
           ...(this.profileEvolution ? ['ProfileEvolution'] : []),
           ...(this.taskAdjuster ? ['DynamicTaskAdjuster'] : []),
         ],

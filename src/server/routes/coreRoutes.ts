@@ -337,27 +337,44 @@ export function registerCoreRoutes(
     try {
       const harness = core?.getHarness();
       if (!harness) {
-        return res.json({ success: false, error: 'Harness 未初始化', mock: true, data: { screenshot: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMDAiIGhlaWdodD0iMTUwIj48cmVjdCBmaWxsPSIjMjIyMjQ2IiB3aWR0aD0iMjAwIiBoZWlnaHQ9IjE1MCIvPjx0ZXh0IGZpbGw9IiM2MDYwYTAiIHg9IjUwJSIgeT0iNTAlIiBkb21pbmFudC1iYXNlbGluZT0ibWlkZGxlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5EZXNrdG9wIFBhbmVsIC0g5bqT55SoIEhhcm5lc3Mg5bel5YW354K55Ye7PC90ZXh0Pjwvc3ZnPg==' } });
+        return res.json({
+          success: false,
+          error: 'Harness 未初始化',
+          mock: true,
+          data: {
+            screenshot:
+              'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMDAiIGhlaWdodD0iMTUwIj48cmVjdCBmaWxsPSIjMjIyMjQ2IiB3aWR0aD0iMjAwIiBoZWlnaHQ9IjE1MCIvPjx0ZXh0IGZpbGw9IiM2MDYwYTAiIHg9IjUwJSIgeT0iNTAlIiBkb21pbmFudC1iYXNlbGluZT0ibWlkZGxlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5EZXNrdG9wIFBhbmVsIC0g5bqT55SoIEhhcm5lc3Mg5bel5YW354K55Ye7PC90ZXh0Pjwvc3ZnPg==',
+          },
+        });
       }
       const registry = harness.getToolRegistry();
       if (!registry) {
         return res.json({ success: false, error: '工具注册表不可用' });
       }
-      const result = await registry.execute('desktop_screenshot', { screenIndex: 0 }, {
-        userId: 'api',
-        traceId: `screenshot_${Date.now()}`,
-        permissions: new Set(),
-        metadata: {},
-      });
+      const result = await registry.execute(
+        'desktop_screenshot',
+        { screenIndex: 0 },
+        {
+          userId: 'api',
+          traceId: `screenshot_${Date.now()}`,
+          permissions: new Set(),
+          metadata: {},
+        }
+      );
       // 截图工具返回 buffer，需要转 base64
-      const buffer = result.output as { buffer?: Buffer; width?: number; height?: number };
+      const buffer = result.output as {
+        buffer?: Buffer;
+        width?: number;
+        height?: number;
+      };
       let screenshotData: string;
       if (buffer?.buffer) {
         const base64 = Buffer.from(buffer.buffer).toString('base64');
         screenshotData = `data:image/png;base64,${base64}`;
       } else {
         // fallback: 返回 mock 图
-        screenshotData = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMDAiIGhlaWdodD0iMTUwIj48cmVjdCBmaWxsPSIjMjIyMjQ2IiB3aWR0aD0iMjAwIiBoZWlnaHQ9IjE1MCIvPjx0ZXh0IGZpbGw9IiM2MDYwYTAiIHg9IjUwJSIgeT0iNTAlIiBkb21pbmFudC1iYXNlbGluZT0ibWlkZGxlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj7mjqXlnovlt6Xlhbs8L3RleHQ+PC9zdmc+';
+        screenshotData =
+          'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMDAiIGhlaWdodD0iMTUwIj48cmVjdCBmaWxsPSIjMjIyMjQ2IiB3aWR0aD0iMjAwIiBoZWlnaHQ9IjE1MCIvPjx0ZXh0IGZpbGw9IiM2MDYwYTAiIHg9IjUwJSIgeT0iNTAlIiBkb21pbmFudC1iYXNlbGluZT0ibWlkZGxlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj7mjqXlnovlt6Xlhbs8L3RleHQ+PC9zdmc+';
       }
       res.json({ success: true, data: { screenshot: screenshotData } });
     } catch (error) {
@@ -366,23 +383,33 @@ export function registerCoreRoutes(
     }
   });
 
-  app.post('/api/desktop/automate', express.json({ limit: '1mb' }), async (req, res) => {
-    try {
-      const { task } = req.body as { task?: string };
-      if (!task) return res.json({ success: false, error: '缺少 task 参数' });
-      const harness = core?.getHarness();
-      if (!harness) return res.json({ success: false, error: 'Harness 未初始化' });
-      const registry = harness.getToolRegistry();
-      if (!registry) return res.json({ success: false, error: '工具注册表不可用' });
-      const result = await registry.execute('desktop_automate', { task }, {
-        userId: 'api',
-        traceId: `auto_${Date.now()}`,
-        permissions: new Set(),
-        metadata: {},
-      });
-      res.json({ success: true, data: { output: result.output } });
-    } catch (error) {
-      res.json({ success: false, error: (error as Error).message });
+  app.post(
+    '/api/desktop/automate',
+    express.json({ limit: '1mb' }),
+    async (req, res) => {
+      try {
+        const { task } = req.body as { task?: string };
+        if (!task) return res.json({ success: false, error: '缺少 task 参数' });
+        const harness = core?.getHarness();
+        if (!harness)
+          return res.json({ success: false, error: 'Harness 未初始化' });
+        const registry = harness.getToolRegistry();
+        if (!registry)
+          return res.json({ success: false, error: '工具注册表不可用' });
+        const result = await registry.execute(
+          'desktop_automate',
+          { task },
+          {
+            userId: 'api',
+            traceId: `auto_${Date.now()}`,
+            permissions: new Set(),
+            metadata: {},
+          }
+        );
+        res.json({ success: true, data: { output: result.output } });
+      } catch (error) {
+        res.json({ success: false, error: (error as Error).message });
+      }
     }
-  });
+  );
 }

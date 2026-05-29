@@ -60,6 +60,29 @@ export class DesktopUIInspector {
     return this.parser.findElement(description, allElements);
   }
 
+  /**
+   * 按描述查找UI元素，返回单个元素或null
+   * 供 DesktopActionExecutor 的 clickElement/typeIntoElement/getElementText 使用
+   */
+  public findElementByDescription(description: string): UIElement | null {
+    const result = this.findElement(description);
+    if (result.success && result.elements.length > 0) {
+      return result.elements[0];
+    }
+    const allElements = this.getInteractiveElements();
+    const lower = description.toLowerCase();
+    const interactiveElements = allElements.filter(
+      (e) => e.isClickable || e.isEditable || e.controlTypeName === 'Edit' || e.controlTypeName === 'Button'
+    );
+    const byName = interactiveElements.find(
+      (e) =>
+        e.name &&
+        (e.name.toLowerCase().includes(lower) || lower.includes(e.name.toLowerCase()))
+    );
+    if (byName) return byName;
+    return null;
+  }
+
   public getControlTree(): UIElementNode[] {
     try {
       const json = this.runUIAScript(this.buildTreeScript());

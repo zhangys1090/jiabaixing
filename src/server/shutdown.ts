@@ -7,6 +7,7 @@ import * as WebSocket from 'ws';
 
 import { JiabaixingCore } from '../core/JiabaixingCore';
 import { Logger } from '../utils/Logger';
+import { MCPServerManager } from '../mcp/MCPServerManager';
 
 type WSServer = WebSocket.Server;
 
@@ -24,6 +25,14 @@ export async function gracefulShutdown(
       scheduler.stop();
       Logger.info('✅ 场景感知调度器已停止', 'Main');
     }
+  }
+
+  try {
+    const mcpManager = MCPServerManager.getInstance();
+    mcpManager.stopAllServers();
+    Logger.info('✅ MCP服务器已停止', 'Main');
+  } catch {
+    // MCP 清理失败不影响关闭流程
   }
 
   if (wss) {
