@@ -57,7 +57,7 @@
     "typescript": "^6.0.2"
   },
   "scripts": {
-    "start": "concurrently \"npm run start:backend\" \"npm run start:frontend\"",
+    "start": "node kill-port.mjs && concurrently \"npm run start:backend\" \"npm run start:frontend\"",
     "fix:native": "npm rebuild better-sqlite3",
     "postinstall": "npm rebuild better-sqlite3 || node -e \"console.warn('[postinstall] better-sqlite3 rebuild skipped; run npm run fix:native if startup fails')\"",
     "start:backend": "set CONSOLE_LOG_LEVEL=warn&& chcp 65001 >nul 2>&1 && ts-node --transpileOnly -r dotenv/config src/main.ts",
