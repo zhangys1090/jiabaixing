@@ -17,7 +17,7 @@
 import { EmotionTag, SceneTag } from '../interfaces';
 import { MultimodalInput } from '../multimodal/MultimodalInput';
 import Logger from '../utils/Logger';
-import { perf } from '../utils/PerformanceMonitor';
+import { perf } from '../monitoring/PerformanceMonitor';
 import { ConversationCompressor } from './ConversationCompressor';
 import { MemoryDatabase, MemoryRecord } from './Database';
 import { KnowledgeGraphBuilder } from './KnowledgeGraphBuilder';
@@ -118,7 +118,10 @@ export class MemoryEngine {
   }> = [];
   private isWriting: boolean = false;
   private readonly MAX_WRITE_QUEUE_SIZE = 1000;
+  private readonly HIGH_WATERMARK = 800;
   private readonly MAX_RETRY_COUNT = 3;
+  private writeQueueBackpressureResolvers: Array<() => void> = [];
+  private writeQueueDrainWaiters: Array<() => void> = [];
   private vectorDatabase: CloseableVectorDatabase | null = null;
   private memoryTierMap: Map<string, MemoryTier> = new Map();
   private memoryAccessCount: Map<string, number> = new Map();
@@ -208,6 +211,8 @@ export class MemoryEngine {
     scene?: string,
     emotion?: string
   ): Promise<MemoryItem> {
+    await this.waitForBackpressure();
+
     return perf.measure(
       'memory.storeShortTerm',
       async () => {
@@ -247,6 +252,8 @@ export class MemoryEngine {
     scene?: string,
     emotion?: string
   ): Promise<MemoryItem> {
+    await this.waitForBackpressure();
+
     return perf.measure(
       'memory.storeLongTerm',
       async () => {
@@ -579,6 +586,63 @@ export class MemoryEngine {
     );
   }
 
+  private async waitForBackpressure(): Promise<void> {
+    if (this.writeQueue.length < this.HIGH_WATERMARK) {
+      return;
+    }
+
+    Logger.warn(
+      `写入队列水位过高(${this.writeQueue.length}/${this.MAX_WRITE_QUEUE_SIZE})，启动背压等待`,
+      'MemoryEngine'
+    );
+
+    return new Promise<void>((resolve) => {
+      this.writeQueueBackpressureResolvers.push(resolve);
+    });
+  }
+
+  private notifyBackpressureRelieved(): void {
+    if (this.writeQueue.length >= this.HIGH_WATERMARK) {
+      return;
+    }
+
+    const resolvers = this.writeQueueBackpressureResolvers;
+    this.writeQueueBackpressureResolvers = [];
+    resolvers.forEach((resolve) => resolve());
+
+    if (this.writeQueue.length === 0) {
+      const drainWaiters = this.writeQueueDrainWaiters;
+      this.writeQueueDrainWaiters = [];
+      drainWaiters.forEach((resolve) => resolve());
+    }
+  }
+
+  public getWriteQueueStats(): {
+    queueLength: number;
+    maxQueueSize: number;
+    highWatermark: number;
+    isWriting: boolean;
+    backpressureActive: boolean;
+  } {
+    return {
+      queueLength: this.writeQueue.length,
+      maxQueueSize: this.MAX_WRITE_QUEUE_SIZE,
+      highWatermark: this.HIGH_WATERMARK,
+      isWriting: this.isWriting,
+      backpressureActive: this.writeQueue.length >= this.HIGH_WATERMARK,
+    };
+  }
+
+  public async waitForDrain(): Promise<void> {
+    if (this.writeQueue.length === 0 && !this.isWriting) {
+      return;
+    }
+
+    return new Promise<void>((resolve) => {
+      this.writeQueueDrainWaiters.push(resolve);
+    });
+  }
+
   private async processWriteQueue(): Promise<void> {
     if (this.writeQueue.length === 0 || this.isWriting) return;
     this.isWriting = true;
@@ -614,11 +678,14 @@ export class MemoryEngine {
             Logger.error('处理写入请求失败', error as Error, 'MemoryEngine');
           }
         }
+
+        this.notifyBackpressureRelieved();
       }
     } catch (error) {
       Logger.error('写入队列处理失败:', error as Error, 'MemoryEngine');
     } finally {
       this.isWriting = false;
+      this.notifyBackpressureRelieved();
       if (this.writeQueue.length > 0) {
         this.processWriteQueue().catch((err: Error) =>
           Logger.error('重新处理写入队列失败', err, 'MemoryEngine')

@@ -2,7 +2,7 @@ import React, { useCallback, useState } from 'react';
 import './DesktopPanel.css';
 import { useDesktopStore } from '../../stores/useDesktopStore';
 
-const API_BASE = `http://${window.location.hostname}:3111`;
+const API_BASE = (window as Record<string, unknown>).REACT_APP_API_URL as string || `http://${window.location.hostname}:3111`;
 
 export const DesktopPanel: React.FC = () => {
   const {

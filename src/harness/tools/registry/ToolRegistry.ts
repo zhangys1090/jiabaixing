@@ -6,7 +6,7 @@
  */
 
 import { Logger } from '../../../utils/Logger';
-import { perf } from '../../../utils/PerformanceMonitor';
+import { perf } from '../../../monitoring/PerformanceMonitor';
 import { ToolCategory } from '../../types';
 import type {
   ToolDefinition,

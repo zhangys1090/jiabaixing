@@ -25,8 +25,8 @@ import type {
   WsEvolutionEventData,
 } from '@shared/contracts';
 
-const WS_URL = `ws://${window.location.hostname}:3111`;
-const API_BASE = `http://${window.location.hostname}:3111`;
+const WS_URL = (window as Record<string, unknown>).REACT_APP_WS_URL as string || `ws://${window.location.hostname}:3111`;
+const API_BASE = (window as Record<string, unknown>).REACT_APP_API_URL as string || `http://${window.location.hostname}:3111`;
 const RESPONSE_TIMEOUT_MS = 0;
 const MAX_INPUT_LENGTH = 500;
 

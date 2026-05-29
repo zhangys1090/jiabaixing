@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import { Logger } from '../utils/Logger';
 import { RedisCache } from './RedisCache';
-import { perf } from '../utils/PerformanceMonitor';
+import { perf } from '../monitoring/PerformanceMonitor';
 
 export class LLMResponseCache {
   private cache: RedisCache<string>;

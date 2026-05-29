@@ -2,7 +2,8 @@ import { AuditLogger } from './AuditLogger';
 import { AuthenticationManager } from './AuthenticationManager';
 import { EncryptionManager } from './EncryptionManager';
 import { SecurityPolicyEngine } from './SecurityPolicyEngine';
-import { perf } from '../utils/PerformanceMonitor';
+import { perf } from '../monitoring/PerformanceMonitor';
+import jwt from 'jsonwebtoken';
 import type {
   User,
   OperationAudit,
@@ -210,7 +211,6 @@ export class SecurityManager {
 
   public generateAccessToken(userId: string): string {
     this.ensureInitialized();
-    const jwt = require('jsonwebtoken');
     const secret = process.env.JWT_SECRET;
     if (!secret) {
       throw new Error('JWT_SECRET 环境变量未配置，拒绝生成令牌');

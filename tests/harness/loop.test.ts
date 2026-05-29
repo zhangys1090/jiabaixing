@@ -190,6 +190,8 @@ describe('LoopController', () => {
       dependencies: new Map(),
       estimatedBudget: { maxRounds: 4, maxToolCalls: 5, maxTokens: 3000, maxDurationMs: 30000 },
       simple: true,
+      toolCallMode: 'auto',
+      recommendedTools: [],
     };
 
     const controller = new LoopController({

@@ -6,7 +6,7 @@
  */
 
 import { Logger } from '../../utils/Logger';
-import { perf } from '../../utils/PerformanceMonitor';
+import { perf } from '../../monitoring/PerformanceMonitor';
 import { LoopState, LifecycleEvent } from '../types';
 import { EventBus } from '../../shared/EventBus';
 import type {

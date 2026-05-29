@@ -1,36 +1,17 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import './App.css';
 import ChatInterface from './components/ChatInterface/ChatInterface';
 import SkillConsole from './components/SkillConsole/SkillConsole';
 import { ChatProvider } from './contexts/ChatContext';
-
-const API_BASE = `http://${window.location.hostname}:3111`;
+import { useWebSocket } from './hooks/useWebSocket';
 
 type View = 'chat' | 'skills';
 
 const App: React.FC = () => {
   const [view, setView] = useState<View>('chat');
-  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'connecting'>('connecting');
-  const [ws, setWs] = useState<WebSocket | null>(null);
-
-  useEffect(() => {
-    const WS_URL = `ws://${window.location.hostname}:3111`;
-    const socket = new WebSocket(WS_URL);
-    socket.onopen = () => {
-      setConnectionStatus('connected');
-      setWs(socket);
-    };
-    socket.onclose = () => {
-      setConnectionStatus('disconnected');
-      setWs(null);
-    };
-    socket.onerror = () => {
-      setConnectionStatus('disconnected');
-    };
-    return () => {
-      socket.close();
-    };
-  }, []);
+  const { connectionStatus } = useWebSocket({
+    url: `ws://${window.location.hostname}:3111`,
+  });
 
   return (
     <ChatProvider>

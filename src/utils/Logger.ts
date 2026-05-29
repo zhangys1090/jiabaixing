@@ -7,6 +7,7 @@
 import { EventEmitter } from 'events';
 import path from 'path';
 import winston from 'winston';
+import { AsyncLocalStorage } from 'async_hooks';
 
 if (process.platform === 'win32') {
   process.stdout.setDefaultEncoding?.('utf8');
@@ -38,7 +39,9 @@ interface LogEntry {
   stack?: string;
 }
 
-const currentTraceId: { id: string | null } = { id: null };
+const traceIdStore = new AsyncLocalStorage<string | null>();
+
+const _globalFallbackTraceId: { id: string | null } = { id: null };
 
 function generateTraceId(): string {
   const timestamp = Date.now().toString(36);
@@ -47,15 +50,19 @@ function generateTraceId(): string {
 }
 
 function getTraceId(): string | null {
-  return currentTraceId.id;
+  const storeValue = traceIdStore.getStore();
+  if (storeValue !== undefined) {
+    return storeValue;
+  }
+  return _globalFallbackTraceId.id;
 }
 
 function setTraceId(traceId: string | null): void {
-  currentTraceId.id = traceId;
+  _globalFallbackTraceId.id = traceId;
 }
 
 function clearTraceId(): void {
-  currentTraceId.id = null;
+  _globalFallbackTraceId.id = null;
 }
 
 const logger = winston.createLogger({
@@ -258,12 +265,16 @@ export class Logger {
   }
 
   public static withTrace(traceId: string, fn: () => void): void {
-    setTraceId(traceId);
-    try {
+    traceIdStore.run(traceId, () => {
       fn();
-    } finally {
-      clearTraceId();
-    }
+    });
+  }
+
+  public static withTraceAsync<T>(
+    traceId: string,
+    fn: () => Promise<T>
+  ): Promise<T> {
+    return traceIdStore.run(traceId, fn);
   }
 }
 

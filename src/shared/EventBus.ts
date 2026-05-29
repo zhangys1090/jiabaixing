@@ -527,7 +527,23 @@ class JiabaixingEventBus extends EventEmitter {
   }
 }
 
-const eventBus = JiabaixingEventBus.getInstance();
+let _eventBusInstance: JiabaixingEventBus | null = null;
+
+export function getEventBus(options?: EventBusOptions): JiabaixingEventBus {
+  if (!_eventBusInstance) {
+    _eventBusInstance = JiabaixingEventBus.getInstance(options);
+  }
+  return _eventBusInstance;
+}
+
+export function resetEventBus(): void {
+  if (_eventBusInstance) {
+    JiabaixingEventBus.resetInstance();
+    _eventBusInstance = null;
+  }
+}
+
+const eventBus = getEventBus();
 
 export { eventBus as EventBus, JiabaixingEventBus };
 export type { EventBusOptions, PersistedEvent };
