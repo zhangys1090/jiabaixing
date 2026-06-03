@@ -17,7 +17,12 @@ import EventBus from '../shared/EventBus';
 import { ProfileEvolutionManager } from '../user/ProfileEvolutionManager';
 import { Logger } from '../utils/Logger';
 import { EvolutionEngine, EvolutionMetrics } from './EvolutionEngine';
-import { EvolutionEngineV2, EvolutionCause, EvolutionPriority, EvolutionType } from './';
+import {
+  EvolutionEngineV2,
+  EvolutionCause,
+  EvolutionPriority,
+  EvolutionType,
+} from './';
 
 /** 自我增强结果（原 SelfEnhancementEngine 已删除，本地定义） */
 export interface EnhancementResult {
@@ -164,7 +169,8 @@ export class EvolutionOrchestrator {
 
     const activeEngines: string[] = [];
     if (this.evolutionEngine) activeEngines.push('EvolutionEngine');
-    if (this.evolutionEngineV2) activeEngines.push('EvolutionEngineV2 (真正自我进化)');
+    if (this.evolutionEngineV2)
+      activeEngines.push('EvolutionEngineV2 (真正自我进化)');
     if (this.profileEvolution) activeEngines.push('ProfileEvolution');
     if (this.taskAdjuster) activeEngines.push('DynamicTaskAdjuster');
 
@@ -186,8 +192,8 @@ export class EvolutionOrchestrator {
     this.isRunning = true;
     Logger.info('🎯 进化编排器已启动', 'EvolutionOrchestrator');
 
-    // 注册 EventBus 监听器以接收全局事件
     this.setupEventListeners();
+    this.startAutoDetection();
   }
 
   /**
@@ -199,6 +205,7 @@ export class EvolutionOrchestrator {
       clearInterval(this.unifiedTimer);
       this.unifiedTimer = null;
     }
+    this.stopAutoDetection();
     Logger.info('🎯 进化编排器已停止', 'EvolutionOrchestrator');
   }
 
@@ -223,7 +230,10 @@ export class EvolutionOrchestrator {
     // 并行驱动所有子引擎
     this.driveEvolutionEngine(record);
     this.driveProfileEvolution(record);
-    
+
+    // 正向进化闭环：追踪连续模式
+    this.trackConsecutivePatterns(record);
+
     // 检测低质量交互，触发真正的自我进化
     if (record.qualityScore < 0.5 && this.evolutionEngineV2) {
       Logger.info(
@@ -266,8 +276,8 @@ export class EvolutionOrchestrator {
 
     const cause: EvolutionCause = {
       type: record.success ? 'LOW_SATISFACTION' : 'FAILURE',
-      description: record.success 
-        ? `低质量交互: ${record.input.substring(0, 100)}` 
+      description: record.success
+        ? `低质量交互: ${record.input.substring(0, 100)}`
         : `执行失败: ${record.input.substring(0, 100)}`,
       context: {
         failureInfo: record.success ? undefined : '执行未成功',
@@ -716,7 +726,9 @@ export class EvolutionOrchestrator {
           evolutionMetrics?.weeklyOptimizationStats?.successRate || 0,
         enginesActive: [
           ...(this.evolutionEngine ? ['EvolutionEngine'] : []),
-          ...(this.evolutionEngineV2 ? ['EvolutionEngineV2 (真正自我进化)'] : []),
+          ...(this.evolutionEngineV2
+            ? ['EvolutionEngineV2 (真正自我进化)']
+            : []),
           ...(this.profileEvolution ? ['ProfileEvolution'] : []),
           ...(this.taskAdjuster ? ['DynamicTaskAdjuster'] : []),
         ],
@@ -798,10 +810,16 @@ export class EvolutionOrchestrator {
 
   private startTime = Date.now();
 
+  private autoDetectionTimer: NodeJS.Timeout | null = null;
+  private readonly AUTO_DETECTION_INTERVAL_MS = 5 * 60 * 1000;
+  private consecutiveLowQualityCount = 0;
+  private consecutiveFailureCount = 0;
+  private lastAutoDetectionTime = 0;
+  private readonly AUTO_DETECTION_COOLDOWN_MS = 10 * 60 * 1000;
+
   private setupEventListeners(): void {
     void EventBus.on('feedback_collected', async () => {
       if (this.isRunning && this.interactionCount % 20 === 0) {
-        // 每20次交互触发一次检查性优化
         this.scheduleDeferredOptimization('周期性检查');
       }
     });
@@ -818,6 +836,181 @@ export class EvolutionOrchestrator {
         }
       }
     );
+  }
+
+  /**
+   * 启动自动检测定时器
+   * 每5分钟扫描一次系统状态，自动发现改进点并触发进化
+   */
+  startAutoDetection(): void {
+    if (this.autoDetectionTimer) return;
+
+    Logger.info('🔍 正向进化闭环: 自动检测已启动', 'EvolutionOrchestrator');
+
+    this.autoDetectionTimer = setInterval(() => {
+      void this.runAutoDetection();
+    }, this.AUTO_DETECTION_INTERVAL_MS);
+  }
+
+  stopAutoDetection(): void {
+    if (this.autoDetectionTimer) {
+      clearInterval(this.autoDetectionTimer);
+      this.autoDetectionTimer = null;
+    }
+  }
+
+  /**
+   * 正向进化闭环核心：自动检测改进点
+   * 扫描质量趋势、失败模式、性能瓶颈、技能使用统计
+   * 发现问题后自动触发 EvolutionEngineV2
+   */
+  private async runAutoDetection(): Promise<void> {
+    if (!this.isRunning) return;
+
+    const now = Date.now();
+    if (now - this.lastAutoDetectionTime < this.AUTO_DETECTION_COOLDOWN_MS) {
+      return;
+    }
+
+    const detectedCause = this.detectEvolutionCause();
+    if (!detectedCause) return;
+
+    this.lastAutoDetectionTime = now;
+    Logger.info(
+      `🔍 正向进化闭环: 自动检测到改进点 → ${detectedCause.type}: ${detectedCause.description}`,
+      'EvolutionOrchestrator'
+    );
+
+    if (this.evolutionEngineV2) {
+      try {
+        const result =
+          await this.evolutionEngineV2.triggerEvolution(detectedCause);
+        if (result) {
+          Logger.info(
+            `🧬 正向进化闭环: 进化完成 → ${result.success ? '成功' : '失败'} | ${result.executedActions} 个动作`,
+            'EvolutionOrchestrator'
+          );
+
+          if (result.success && !result.rollbackNeeded) {
+            void EventBus.emit('proactive_evolution_completed', {
+              cause: detectedCause.type,
+              action: detectedCause.description,
+              result: `执行${result.executedActions}个动作`,
+              timestamp: new Date().toISOString(),
+            });
+          }
+        }
+      } catch (error) {
+        Logger.error(
+          '正向进化闭环触发失败',
+          error as Error,
+          'EvolutionOrchestrator'
+        );
+      }
+    } else {
+      await this.triggerOptimizationCycle(detectedCause.description);
+    }
+  }
+
+  /**
+   * 检测进化原因 — 正向进化闭环的关键
+   * 综合分析质量趋势、失败模式、性能瓶颈、技能使用
+   */
+  private detectEvolutionCause(): EvolutionCause | null {
+    const recentQuality = this.qualityHistory.slice(-30);
+    if (recentQuality.length < 5) return null;
+
+    const avgQuality =
+      recentQuality.reduce((s, v) => s + v, 0) / recentQuality.length;
+    const trend = this.calculateQualityTrend();
+
+    if (trend === 'declining' && avgQuality < 0.5) {
+      return {
+        type: 'LOW_SATISFACTION',
+        description: `质量持续下降: 近30次平均${avgQuality.toFixed(2)}，趋势declining`,
+        context: { satisfactionScore: avgQuality },
+        timestamp: Date.now(),
+      };
+    }
+
+    if (this.consecutiveFailureCount >= 3) {
+      this.consecutiveFailureCount = 0;
+      return {
+        type: 'FAILURE',
+        description: `连续${this.consecutiveFailureCount}次交互失败`,
+        context: { failureInfo: 'consecutive_failures' },
+        timestamp: Date.now(),
+      };
+    }
+
+    const recentResponseTimes = this.responseTimeHistory.slice(-20);
+    if (recentResponseTimes.length >= 10) {
+      const avgTime =
+        recentResponseTimes.reduce((s, v) => s + v, 0) /
+        recentResponseTimes.length;
+      const olderTimes = this.responseTimeHistory.slice(-40, -20);
+      if (olderTimes.length >= 5) {
+        const olderAvg =
+          olderTimes.reduce((s, v) => s + v, 0) / olderTimes.length;
+        if (avgTime > olderAvg * 1.5 && avgTime > 5000) {
+          return {
+            type: 'PERFORMANCE_ISSUE',
+            description: `响应时间退化: ${olderAvg.toFixed(0)}ms → ${avgTime.toFixed(0)}ms`,
+            context: {
+              performanceMetric: {
+                name: 'response_time',
+                value: avgTime,
+                threshold: olderAvg * 1.3,
+              },
+            },
+            timestamp: Date.now(),
+          };
+        }
+      }
+    }
+
+    if (this.interactionCount > 50 && avgQuality > 0.7 && trend === 'stable') {
+      const lastOptTime =
+        this.optimizationCycles.length > 0
+          ? this.optimizationCycles[this.optimizationCycles.length - 1]
+              .timestamp
+          : 0;
+      if (Date.now() - lastOptTime > 60 * 60 * 1000) {
+        return {
+          type: 'PROACTIVE_IMPROVEMENT',
+          description: `系统稳定运行(${avgQuality.toFixed(2)})，可主动优化提升`,
+          context: { satisfactionScore: avgQuality },
+          timestamp: Date.now(),
+        };
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * 增强的 recordInteraction — 正向进化闭环感知
+   * 追踪连续低质量/失败交互，触发自动检测
+   */
+  private trackConsecutivePatterns(record: InteractionRecord): void {
+    if (record.qualityScore < 0.4) {
+      this.consecutiveLowQualityCount++;
+    } else {
+      this.consecutiveLowQualityCount = 0;
+    }
+
+    if (!record.success) {
+      this.consecutiveFailureCount++;
+    } else {
+      this.consecutiveFailureCount = 0;
+    }
+
+    if (
+      this.consecutiveLowQualityCount >= 3 ||
+      this.consecutiveFailureCount >= 2
+    ) {
+      void this.runAutoDetection();
+    }
   }
 
   private scheduleDeferredOptimization(reason: string): void {

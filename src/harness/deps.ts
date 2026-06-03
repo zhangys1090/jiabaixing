@@ -83,6 +83,15 @@ export interface EvolutionEngineDeps {
     qualityScore: number,
     duration: number
   ): void;
+  generateSkill(params: {
+    input: string;
+    response: string;
+    toolsUsed: string[];
+    totalDuration: number;
+    qualityScore: number;
+    traceId: string;
+  }): string | null;
+  nudgeKnowledgePersistence(input: string, toolsUsed: string[]): string | null;
 }
 
 export interface PersonaCoreDeps {

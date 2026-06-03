@@ -52,9 +52,94 @@ export interface AgentResult {
 
 // ============ Layer 1: Loop（循环层）============
 
+/** 任务状态枚举 - 统一版本 */
+export enum UnifiedTaskStatus {
+  PENDING = 'pending',
+  RUNNING = 'running',
+  SUCCESS = 'success',
+  FAILED = 'failed',
+  SKIPPED = 'skipped',
+  RETRYING = 'retrying',
+  CANCELLED = 'cancelled',
+}
+
+/** 任务优先级枚举 - 统一版本 */
+export enum UnifiedTaskPriority {
+  LOW = 1,
+  MEDIUM = 5,
+  HIGH = 8,
+  CRITICAL = 10,
+}
+
+/** 统一任务节点 - 合并所有三种任务模型 */
+export interface UnifiedTaskNode {
+  /** 任务唯一标识 */
+  id: string;
+  /** 任务描述 */
+  description: string;
+  /** 任务目标（可选，兼容TaskDispatcher） */
+  goal?: string;
+  /** 指定的Agent ID（可选） */
+  agentId?: string;
+  /** 分配给哪个Agent（运行时） */
+  assignedTo?: string;
+  /** 要调用的工具名称 */
+  toolName?: string;
+  /** 工具参数 */
+  toolParams?: Record<string, unknown>;
+  /** 所需工具列表（可选，兼容TaskDispatcher） */
+  tools?: string[];
+  /** 当前状态 */
+  status: UnifiedTaskStatus;
+  /** 依赖的任务ID列表 */
+  dependencies: string[];
+  /** 执行结果 */
+  result?: unknown;
+  /** 错误信息 */
+  error?: string;
+  /** 开始执行时间 */
+  startTime?: number;
+  /** 结束执行时间 */
+  endTime?: number;
+  /** 预计执行时间（秒） */
+  estimatedTime?: number;
+  /** 任务优先级 1-10 */
+  priority: UnifiedTaskPriority;
+  /** 最大重试次数 */
+  maxRetries: number;
+  /** 当前重试次数 */
+  currentRetry: number;
+  /** 超时时间（秒） */
+  timeout: number;
+  /** 重试延迟（秒） */
+  retryDelay: number;
+  /** 任务元数据 */
+  metadata: Record<string, unknown>;
+  /** 是否为关键步骤 */
+  isEssential: boolean;
+  /** 上下文信息（可选，兼容TaskDispatcher） */
+  context?: string;
+  /** 预期输出（可选） */
+  expectedOutput?: string;
+}
+
+/** 计划步骤 - 保持向后兼容，内部使用UnifiedTaskNode */
+export interface PlanStep {
+  id: string;
+  description: string;
+  toolName?: string;
+  toolParams?: Record<string, unknown>;
+  expectedOutput?: string;
+  retryCount: number;
+  maxRetries: number;
+  /** 转换为UnifiedTaskNode的便捷方法 */
+  toUnifiedTaskNode(): UnifiedTaskNode;
+}
+
 /** 循环状态 */
 export enum LoopState {
   PLANNING = 'planning',
+  DEBATING = 'debating',
   EXECUTING = 'executing',
   EVALUATING = 'evaluating',
   REPORTING = 'reporting',
@@ -80,16 +165,7 @@ export interface ExecutionPlan {
   recommendedTools: string[];
 }
 
-/** 计划步骤 */
-export interface PlanStep {
-  id: string;
-  description: string;
-  toolName?: string;
-  toolParams?: Record<string, unknown>;
-  expectedOutput?: string;
-  retryCount: number;
-  maxRetries: number;
-}
+
 
 /** 预算分配 */
 export interface BudgetAllocation {
@@ -253,7 +329,56 @@ export interface ToolResult {
   error?: string;
   duration: number;
   validated: boolean;
+  /** 是否需要用户确认 */
+  needsConfirmation?: boolean;
   metadata?: Record<string, unknown>;
+  /** 结构化输出：将 output 标准化为可被 LLM 精确引用的格式 */
+  structuredOutput?: StructuredToolOutput;
+  /** 内容哈希锚点：用于 LLM 精确定位输出中的特定行/段 */
+  contentHash?: string;
+}
+
+/**
+ * 结构化工具输出 — 统一格式
+ * 借鉴 Harness Engineering 的 Hashline 格式：
+ * 将工具输出标准化为带锚点的结构化数据，LLM 可精确引用
+ */
+export interface StructuredToolOutput {
+  /** 输出类型标识 */
+  type: 'text' | 'json' | 'file_content' | 'list' | 'error' | 'binary_info';
+  /** 主要内容 */
+  content: string;
+  /** 摘要（用于上下文窗口受限时替换完整内容） */
+  summary?: string;
+  /** 带锚点的行内容（类似 Hashline: 行号+内容哈希） */
+  anchoredLines?: Array<{
+    /** 行号（从1开始） */
+    line: number;
+    /** 内容哈希（前8位） */
+    hash: string;
+    /** 行内容 */
+    content: string;
+  }>;
+  /** 总行数/总条目数 */
+  totalLines?: number;
+  /** 截断信息 */
+  truncation?: {
+    /** 是否已截断 */
+    truncated: boolean;
+    /** 原始总长度 */
+    originalLength: number;
+    /** 截断后长度 */
+    truncatedLength: number;
+  };
+  /** 输出 schema 类型名（用于 LLM 理解输出结构） */
+  schemaType?: string;
+}
+
+/** 工具调用 */
+export interface ToolCall {
+  id?: string;
+  name: string;
+  params: Record<string, unknown>;
 }
 
 /** 已注册工具 */
@@ -379,9 +504,226 @@ export interface BudgetCheckResult {
   };
 }
 
+/** 约束等级 — 区分硬约束和软约束 */
+export type ConstraintLevel = 'hard' | 'soft' | 'advisory';
+
+/** 约束定义 */
+export interface ConstraintDefinition {
+  /** 约束名称 */
+  name: string;
+  /** 约束等级：hard=不可违反（安全），soft=建议遵守，advisory=仅供参考 */
+  level: ConstraintLevel;
+  /** 约束描述 */
+  description: string;
+}
+
+/** 自适应预算配置 — 根据任务复杂度动态调整 */
+export interface AdaptiveBudgetConfig {
+  /** 简单任务的预算 */
+  simple: BudgetAllocation;
+  /** 中等任务的预算 */
+  moderate: BudgetAllocation;
+  /** 复杂任务的预算 */
+  complex: BudgetAllocation;
+  /** 创造性探索模式的额外预算 */
+  creativeBonus: Partial<BudgetAllocation>;
+}
+
+/** 创造性探索模式配置 */
+export interface CreativeExplorationConfig {
+  /** 是否启用创造性探索 */
+  enabled: boolean;
+  /** 允许的最大额外工具调用次数 */
+  maxExtraToolCalls: number;
+  /** 允许的最大额外轮次 */
+  maxExtraRounds: number;
+  /** 触发条件：当任务评分高于此值时允许探索 */
+  qualityThreshold: number;
+  /** 探索提示词（注入给 LLM） */
+  explorationPrompt: string;
+}
+
 /** 权限检查结果 */
 export interface PermissionResult {
   allowed: boolean;
   missing: Permission[];
   reason?: string;
+}
+
+// ============ 任务模型转换辅助函数 ============
+
+/**
+ * 将PlanStep转换为UnifiedTaskNode
+ */
+export function planStepToUnifiedTaskNode(step: PlanStep): UnifiedTaskNode {
+  return {
+    id: step.id,
+    description: step.description,
+    goal: step.description,
+    toolName: step.toolName,
+    toolParams: step.toolParams,
+    expectedOutput: step.expectedOutput,
+    status: UnifiedTaskStatus.PENDING,
+    dependencies: [],
+    priority: UnifiedTaskPriority.MEDIUM,
+    maxRetries: step.maxRetries,
+    currentRetry: step.retryCount,
+    timeout: 300,
+    retryDelay: 1,
+    metadata: {},
+    isEssential: true,
+  };
+}
+
+/**
+ * 将DAGTask中的TaskNode转换为UnifiedTaskNode
+ */
+export function dagTaskNodeToUnifiedTaskNode(
+  node: import('../core/DAGTask').TaskNode
+): UnifiedTaskNode {
+  const statusMap: Record<
+    import('../core/DAGTask').TaskStatus,
+    UnifiedTaskStatus
+  > = {
+    pending: UnifiedTaskStatus.PENDING,
+    running: UnifiedTaskStatus.RUNNING,
+    success: UnifiedTaskStatus.SUCCESS,
+    failed: UnifiedTaskStatus.FAILED,
+    skipped: UnifiedTaskStatus.SKIPPED,
+    retrying: UnifiedTaskStatus.RETRYING,
+  };
+  const priorityMap: Record<
+    import('../core/DAGTask').TaskPriority,
+    UnifiedTaskPriority
+  > = {
+    low: UnifiedTaskPriority.LOW,
+    medium: UnifiedTaskPriority.MEDIUM,
+    high: UnifiedTaskPriority.HIGH,
+    critical: UnifiedTaskPriority.CRITICAL,
+  };
+  return {
+    id: node.id,
+    description: node.description,
+    goal: node.description,
+    toolName: node.toolName,
+    toolParams: node.params,
+    status: statusMap[node.status] || UnifiedTaskStatus.PENDING,
+    dependencies: node.dependencies,
+    result: node.result,
+    error: node.error?.message,
+    startTime: node.startTime?.getTime(),
+    endTime: node.endTime?.getTime(),
+    estimatedTime: node.estimatedTime,
+    priority: priorityMap[node.priority] || UnifiedTaskPriority.MEDIUM,
+    maxRetries: node.maxRetries,
+    currentRetry: node.currentRetry,
+    timeout: node.timeout,
+    retryDelay: node.retryDelay,
+    metadata: node.metadata,
+    isEssential: node.isEssential,
+  };
+}
+
+/**
+ * 将TaskDispatcher的TaskNode转换为UnifiedTaskNode
+ */
+export function dispatcherTaskNodeToUnifiedTaskNode(
+  node: import('./orchestration/TaskDispatcher').TaskNode
+): UnifiedTaskNode {
+  const statusMap: Record<string, UnifiedTaskStatus> = {
+    pending: UnifiedTaskStatus.PENDING,
+    running: UnifiedTaskStatus.RUNNING,
+    completed: UnifiedTaskStatus.SUCCESS,
+    failed: UnifiedTaskStatus.FAILED,
+    cancelled: UnifiedTaskStatus.CANCELLED,
+  };
+  return {
+    id: node.id,
+    description: node.goal,
+    goal: node.goal,
+    agentId: node.agentId,
+    assignedTo: node.assignedTo,
+    tools: node.tools,
+    status: statusMap[node.status] || UnifiedTaskStatus.PENDING,
+    dependencies: node.dependencies,
+    result: node.result,
+    error: node.error,
+    priority: node.priority as unknown as UnifiedTaskPriority,
+    maxRetries: 2,
+    currentRetry: 0,
+    timeout: 300,
+    retryDelay: 1,
+    metadata: {},
+    isEssential: true,
+    context: node.context,
+  };
+}
+
+/**
+ * 将UnifiedTaskNode转换为PlanStep（向后兼容）
+ */
+export function unifiedTaskNodeToPlanStep(node: UnifiedTaskNode): PlanStep {
+  return {
+    id: node.id,
+    description: node.description,
+    toolName: node.toolName,
+    toolParams: node.toolParams,
+    expectedOutput: node.expectedOutput,
+    retryCount: node.currentRetry,
+    maxRetries: node.maxRetries,
+    toUnifiedTaskNode: () => node,
+  };
+}
+
+/**
+ * 将UnifiedTaskNode转换为DAGTask的TaskNode
+ */
+export function unifiedTaskNodeToDagTaskNode(
+  node: UnifiedTaskNode
+): import('../core/DAGTask').TaskNode {
+  const { TaskStatus, TaskPriority, TaskNode } = require('../core/DAGTask');
+  const statusMap: Record<UnifiedTaskStatus, any> = {
+    [UnifiedTaskStatus.PENDING]: TaskStatus.PENDING,
+    [UnifiedTaskStatus.RUNNING]: TaskStatus.RUNNING,
+    [UnifiedTaskStatus.SUCCESS]: TaskStatus.SUCCESS,
+    [UnifiedTaskStatus.FAILED]: TaskStatus.FAILED,
+    [UnifiedTaskStatus.SKIPPED]: TaskStatus.SKIPPED,
+    [UnifiedTaskStatus.RETRYING]: TaskStatus.RETRYING,
+    [UnifiedTaskStatus.CANCELLED]: TaskStatus.FAILED,
+  };
+  const priorityMap: Record<UnifiedTaskPriority, any> = {
+    [UnifiedTaskPriority.LOW]: TaskPriority.LOW,
+    [UnifiedTaskPriority.MEDIUM]: TaskPriority.MEDIUM,
+    [UnifiedTaskPriority.HIGH]: TaskPriority.HIGH,
+    [UnifiedTaskPriority.CRITICAL]: TaskPriority.CRITICAL,
+  };
+  const dagNode = new TaskNode(
+    node.id,
+    node.description,
+    node.toolName || '',
+    node.toolParams || {},
+    statusMap[node.status],
+    node.dependencies,
+    priorityMap[node.priority]
+  );
+  dagNode.estimatedTime = node.estimatedTime || 0;
+  dagNode.maxRetries = node.maxRetries;
+  dagNode.currentRetry = node.currentRetry;
+  dagNode.timeout = node.timeout;
+  dagNode.retryDelay = node.retryDelay;
+  dagNode.metadata = node.metadata;
+  dagNode.isEssential = node.isEssential;
+  if (node.startTime) {
+    dagNode.startTime = new Date(node.startTime);
+  }
+  if (node.endTime) {
+    dagNode.endTime = new Date(node.endTime);
+  }
+  if (node.result) {
+    dagNode.result = node.result;
+  }
+  if (node.error) {
+    dagNode.error = new Error(node.error);
+  }
+  return dagNode;
 }

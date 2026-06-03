@@ -5,7 +5,7 @@ import { Logger } from '../../../utils/Logger';
 export const WEB_FETCH_DEF: ToolDefinition = {
   name: 'web_fetch',
   description:
-    '网页内容抓取工具。获取指定URL的网页内容并转为可读文本。适用场景：读取网页文章、获取API响应、抓取页面内容。不适用：需要交互的网页（用browser工具）。',
+    '抓取指定URL的网页内容，转为可读文本。USE WHEN: 需要读取某个网页的完整内容、获取API响应、抓取文章正文。DO NOT USE WHEN: 需要搜索信息（先用web_search找到URL再用此工具）、需要交互的网页（用desktop工具）。返回截断后的文本，默认最多10000字符。',
   category: ToolCategory.NETWORK,
   parameters: {
     url: {

@@ -504,6 +504,34 @@ export class GatewayBridge {
         description: '通过 Mirai 连接 QQ 机器人',
         enabled: true,
       },
+      telegram: {
+        id: 'telegram',
+        name: 'Telegram',
+        icon: '✈️',
+        description: '通过 Bot API 连接 Telegram',
+        enabled: true,
+      },
+      discord: {
+        id: 'discord',
+        name: 'Discord',
+        icon: '🎮',
+        description: '通过 Webhook 连接 Discord',
+        enabled: true,
+      },
+      slack: {
+        id: 'slack',
+        name: 'Slack',
+        icon: '📱',
+        description: '通过 Webhook 连接 Slack',
+        enabled: true,
+      },
+      signal: {
+        id: 'signal',
+        name: 'Signal',
+        icon: '🔒',
+        description: '连接到 Signal',
+        enabled: true,
+      },
     };
 
     return Object.entries(PLATFORM_INFO).map(([key, info]) => ({

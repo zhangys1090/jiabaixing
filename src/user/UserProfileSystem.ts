@@ -82,7 +82,27 @@ export class UserProfileSystem {
       );
     }
 
+    this.trendAnalyzer.recordAndAnalyze(behavior.userId, behavior);
     this.updateProfile(behavior.userId);
+  }
+
+  /**
+   * P1增强：获取辩证式用户分析
+   */
+  getDialecticalAnalysis(userId: string) {
+    return this.trendAnalyzer.generateDialecticalAnalysis(userId);
+  }
+
+  /**
+   * P1增强：获取用户画像置信度（结合辩证式分析）
+   */
+  getEnhancedConfidenceScore(userId: string): number {
+    const profile = this.profiles.get(userId);
+    const dialecticalConfidence = this.trendAnalyzer.getConfidenceScore(userId);
+    
+    if (!profile) return 0.5;
+    
+    return (profile.metadata.confidenceScore + dialecticalConfidence) / 2;
   }
 
   recordBehaviors(behaviors: UserBehavior[]): void {

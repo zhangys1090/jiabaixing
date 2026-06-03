@@ -45,19 +45,23 @@ export function registerCoreRoutes(
 
   app.get('/api/models/status', async (_req, res) => {
     try {
-      const { MultiModelLLMProvider } =
-        await import('../../models/MultiModelLLMProvider');
-      const provider = MultiModelLLMProvider.getInstance();
-      await provider.initialize();
+      const { getProviderManager } = await import('../../models/ProviderManager');
+      const pm = getProviderManager();
 
-      const currentModel = process.env.LLM_MODEL || 'deepseek-chat';
-      const models = provider.getAvailableModels();
+      const currentModel = pm.getPrimary();
+      const models = pm.getAll();
 
       res.json({
         success: true,
         data: {
-          currentModel,
-          models,
+          currentModel: currentModel?.model || 'unknown',
+          currentProvider: currentModel?.name || '',
+          models: models.map(p => ({
+            name: p.name,
+            displayName: p.displayName,
+            model: p.model,
+            healthy: p.healthy,
+          })),
           status: 'running',
           timestamp: new Date().toISOString(),
         },

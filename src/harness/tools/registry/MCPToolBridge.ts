@@ -49,7 +49,7 @@ export class MCPToolBridge {
             category: this.inferCategory(serverName),
             parameters: this.convertSchema(tool.inputSchema),
             requiredParams: this.extractRequired(tool.inputSchema),
-            requiredPermissions: [Permission.SYSTEM_ADMIN],
+            requiredPermissions: this.inferPermissions(serverName, tool.name),
             riskLevel: this.inferRiskLevel(serverName, tool.name),
             idempotent: false,
             timeout: 30000,
@@ -175,6 +175,30 @@ export class MCPToolBridge {
     if (toolName.includes('delete') || toolName.includes('remove')) return 'high';
     if (toolName.includes('write') || toolName.includes('create')) return 'medium';
     return 'low';
+  }
+
+  private inferPermissions(
+    serverName: string,
+    toolName: string
+  ): Permission[] {
+    switch (serverName) {
+      case 'browser':
+        return [Permission.NETWORK_ACCESS];
+      case 'filesystem':
+        if (toolName.includes('write') || toolName.includes('create') || toolName.includes('delete')) {
+          return [Permission.FILE_WRITE];
+        }
+        return [Permission.FILE_READ];
+      case 'cron':
+        return [Permission.SYSTEM_ADMIN];
+      case 'sqlite':
+        return [Permission.MEMORY_READ, Permission.MEMORY_WRITE];
+      default:
+        if (toolName.includes('delete') || toolName.includes('admin')) {
+          return [Permission.SYSTEM_ADMIN];
+        }
+        return [Permission.CODE_EXECUTE];
+    }
   }
 
   public startAutoSync(registry: ToolRegistry): void {

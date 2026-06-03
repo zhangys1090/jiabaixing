@@ -3,10 +3,12 @@
  *
  * 增强功能：
  * - 访问追踪：召回记忆后更新 accessCount 和 lastAccessedAt
+ * - 依赖注入：支持注入 MemoryAssistant 实例作为备用检索源
  */
 
 import type { ToolContext, ToolDefinition, ToolResult } from '../../types';
 import { Permission, ToolCategory } from '../../types';
+import type { MemoryAssistant } from '../../../core/MemoryAssistant';
 
 export const MEMORY_RECALL_DEF: ToolDefinition = {
   name: 'memory_recall',
@@ -38,10 +40,12 @@ export interface MemoryRecallDeps {
     limit: number;
   }) => Promise<unknown[]>;
   updateAccessStats?: (query: string) => Promise<void>;
+  /** 可选的 MemoryAssistant 实例，当 retrieveRelevant 不可用时作为备用 */
+  memoryAssistant?: MemoryAssistant;
 }
 
 /** 创建 memory_recall 执行器 */
-export function createMemoryRecallExecutor(deps: MemoryRecallDeps) {
+export function createMemoryRecallExecutor(deps: MemoryRecallDeps = {}) {
   return async (
     params: Record<string, unknown>,
     _context?: ToolContext
@@ -49,47 +53,97 @@ export function createMemoryRecallExecutor(deps: MemoryRecallDeps) {
     const query = String(params.query || '');
     const limit = Number(params.limit) || 5;
 
-    if (!deps.retrieveRelevant) {
+    if (!query) {
       return {
         success: true,
-        output: '暂无可用记忆',
+        output: '请输入搜索关键词',
         duration: 0,
         validated: false,
       };
     }
 
-    try {
-      const memories = await deps.retrieveRelevant({ query, limit });
+    // 尝试使用 deps.retrieveRelevant（生产环境注入）
+    if (deps.retrieveRelevant) {
+      try {
+        const memories = await deps.retrieveRelevant({ query, limit });
 
-      if (deps.updateAccessStats && memories.length > 0) {
-        deps.updateAccessStats(query).catch(() => {});
+        if (deps.updateAccessStats && memories.length > 0) {
+          deps.updateAccessStats(query).catch(() => {});
+        }
+
+        const formatted = memories
+          .map((m, i) => {
+            const item = m as {
+              content: string;
+              importance?: number;
+              accessCount?: number;
+            };
+            const meta =
+              item.importance != null ? ` [重要性:${item.importance}]` : '';
+            return `${i + 1}. ${item.content}${meta}`;
+          })
+          .join('\n');
+        return {
+          success: true,
+          output: formatted || '未找到相关记忆',
+          duration: 0,
+          validated: false,
+        };
+      } catch {
+        return {
+          success: true,
+          output: '记忆检索暂不可用',
+          duration: 0,
+          validated: false,
+        };
       }
-
-      const formatted = memories
-        .map((m, i) => {
-          const item = m as {
-            content: string;
-            importance?: number;
-            accessCount?: number;
-          };
-          const meta =
-            item.importance != null ? ` [重要性:${item.importance}]` : '';
-          return `${i + 1}. ${item.content}${meta}`;
-        })
-        .join('\n');
-      return {
-        success: true,
-        output: formatted || '未找到相关记忆',
-        duration: 0,
-        validated: false,
-      };
-    } catch {
-      return {
-        success: true,
-        output: '记忆检索暂不可用',
-        duration: 0,
-        validated: false,
-      };
     }
+
+    // 备用方案：通过 MemoryAssistant.retrieveContext 检索
+    if (deps.memoryAssistant) {
+      try {
+        const result = await deps.memoryAssistant.retrieveContext(query);
+        const memories = result.memories || [];
+
+        if (memories.length === 0) {
+          return {
+            success: true,
+            output: '未找到相关记忆',
+            duration: 0,
+            validated: false,
+          };
+        }
+
+        const filtered = memories.slice(0, limit);
+        const formatted = filtered
+          .map(
+            (m, i) =>
+              `${i + 1}. ${m.content} [类型:${m.type}, 相关度:${(m.relevance * 100).toFixed(0)}%]`
+          )
+          .join('\n');
+
+        return {
+          success: true,
+          output: formatted,
+          duration: 0,
+          validated: false,
+        };
+      } catch {
+        return {
+          success: true,
+          output: '记忆检索暂不可用',
+          duration: 0,
+          validated: false,
+        };
+      }
+    }
+
+    // 无任何检索源可用
+    return {
+      success: true,
+      output: '暂无可用记忆',
+      duration: 0,
+      validated: false,
+    };
   };
 }

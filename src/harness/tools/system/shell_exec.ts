@@ -6,7 +6,7 @@ import { execSync } from 'child_process';
 export const SHELL_EXEC_DEF: ToolDefinition = {
   name: 'shell_exec',
   description:
-    'Shell命令执行工具。在系统终端中执行命令并返回输出。适用场景：运行脚本、管理系统、安装依赖。不适用：需要交互式输入的命令。',
+    'Shell命令执行工具。在系统终端中执行命令并返回输出。适用场景：运行脚本、管理系统、安装依赖。不适用：需要交互式输入的命令。设置 interpret=true 可让 AI 解读命令输出。',
   category: ToolCategory.SYSTEM,
   parameters: {
     command: {
@@ -21,6 +21,11 @@ export const SHELL_EXEC_DEF: ToolDefinition = {
     cwd: {
       type: 'string',
       description: '工作目录（可选）',
+    },
+    interpret: {
+      type: 'boolean',
+      description: '是否让 AI 解读命令输出结果',
+      default: false,
     },
   },
   requiredParams: ['command'],
@@ -52,6 +57,9 @@ export interface ShellExecDeps {
     timeout: number;
     cwd?: string;
   }) => Promise<{ stdout: string; stderr: string; exitCode: number }>;
+  llm?: {
+    chat(prompt: string, history?: unknown[], systemPrompt?: string): Promise<string>;
+  };
 }
 
 function ok(output: string, duration: number, metadata?: Record<string, unknown>): ToolResult {
@@ -62,6 +70,32 @@ function fail(error: string, duration: number, output: string = ''): ToolResult 
   return { success: false, output, error, duration, validated: false };
 }
 
+async function interpretOutput(
+  llm: { chat(prompt: string, history?: unknown[], systemPrompt?: string): Promise<string> },
+  command: string,
+  output: string
+): Promise<string> {
+  try {
+    const prompt = `以下是命令执行的输出结果，请用简洁的中文解读关键信息。
+
+命令: ${command}
+输出:
+\`\`\`
+${output.substring(0, 3000)}
+\`\`\`
+
+要求:
+1. 用 1-3 句话总结关键信息
+2. 如果是错误，指出原因和建议
+3. 如果是列表/表格，提取最重要的几项
+4. 不要重复原始输出`;
+
+    return await llm.chat(prompt, [], '你是一个命令行输出解读专家。简洁回答。');
+  } catch {
+    return '';
+  }
+}
+
 export function createShellExecExecutor(deps: ShellExecDeps = {}) {
   return async (
     params: Record<string, unknown>,
@@ -70,7 +104,29 @@ export function createShellExecExecutor(deps: ShellExecDeps = {}) {
     const startTime = Date.now();
     const command = params.command as string;
     const timeout = (params.timeout as number) || 30000;
-    const cwd = params.cwd as string | undefined;
+    let cwd = params.cwd as string | undefined;
+    const interpret = params.interpret === true;
+
+    // 中文命令检测：纯中文开头的命令在系统终端无法执行
+    if (command && /^[\u4e00-\u9fff]/.test(command.trim())) {
+      // 允许包含中文但以合法命令开头的混合命令（如 echo "中文"）
+      const commandPart = command.trim().split(/\s+/)[0];
+      const knownCommands = /^(npm|node|python|python3|git|docker|echo|ls|cat|cd|mkdir|rm|cp|mv|curl|wget|ping|ipconfig|netstat|dir|type|findstr|java|go|rustc|cargo|make|gcc|g\+\+|clang|dotnet|ruby|php|perl|bash|sh|zsh|powershell|cmd|winget|choco|scoop|pip|conda|yarn|pnpm|npx|tsc|eslint|prettier|jest|mocha)/i;
+      if (!knownCommands.test(commandPart)) {
+        Logger.warn(`🛡️ shell_exec 拦截中文命令: "${command.substring(0, 50)}"`, 'ShellExec');
+        return fail(
+          `命令以中文开头，不是有效的系统命令: "${command.substring(0, 50)}"。如需执行系统命令，请使用英文命令名，如 "dir" 或 "ping baidu.com"。如需AI帮助，请直接描述你的需求。`,
+          Date.now() - startTime
+        );
+      }
+    }
+
+    // Windows 路径兼容：将 /tmp/ 转换为 Windows 临时目录
+    if (cwd && /^\/tmp\//.test(cwd)) {
+      const os = await import('os');
+      cwd = cwd.replace(/^\/tmp\//, os.tmpdir().replace(/\\/g, '/') + '/');
+      Logger.info(`🔧 路径标准化: /tmp/ → ${cwd}`, 'ShellExec');
+    }
 
     try {
       const lowerCommand = command.toLowerCase().trim();
@@ -88,7 +144,12 @@ export function createShellExecExecutor(deps: ShellExecDeps = {}) {
         const result = await deps.shellRunner(command, { timeout, cwd });
         const output = result.stdout || result.stderr || '(无输出)';
         if (result.exitCode === 0) {
-          return ok(output.substring(0, 10000), Date.now() - startTime, { exitCode: 0, command });
+          let finalOutput = output.substring(0, 10000);
+          if (interpret && deps.llm) {
+            const interp = await interpretOutput(deps.llm, command, output);
+            if (interp) finalOutput += `\n\n📖 解读:\n${interp}`;
+          }
+          return ok(finalOutput, Date.now() - startTime, { exitCode: 0, command });
         }
         return fail(`命令退出码: ${result.exitCode}`, Date.now() - startTime, output.substring(0, 5000));
       }
@@ -103,8 +164,14 @@ export function createShellExecExecutor(deps: ShellExecDeps = {}) {
 
       Logger.info(`⚡ shell_exec 成功: "${command.substring(0, 50)}"`, 'ShellExec');
 
+      let finalOutput = (result || '(无输出)').substring(0, 10000);
+      if (interpret && deps.llm) {
+        const interp = await interpretOutput(deps.llm, command, result);
+        if (interp) finalOutput += `\n\n📖 解读:\n${interp}`;
+      }
+
       return ok(
-        (result || '(无输出)').substring(0, 10000),
+        finalOutput,
         Date.now() - startTime,
         { exitCode: 0, command }
       );

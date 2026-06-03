@@ -1,6 +1,6 @@
 /**
- * initEvolution V2 — 只保留 EvolutionEngineV2 真正自我进化
- * V1 (EvolutionEngine/StrategyOptimizer/FeedbackCollector/tone微调) 已全部移除
+ * initEvolution V2 — EvolutionEngineV2 自进化 + V1 进化权重同步
+ * 闭合 Loop B: 工具可靠性数据 → 进化权重 → ToolReliabilityTracker
  */
 
 import { EvolutionOrchestrator } from '../../evolution/EvolutionOrchestrator';
@@ -48,6 +48,25 @@ export async function initEvolution(
   });
   orchestrator.start();
 
+  // 闭合 Loop B: 定期同步进化权重到 ToolReliabilityTracker
+  const syncEvolutionWeights = (): void => {
+    const harness = core?.getHarness();
+    if (!harness) return;
+    const toolRegistry = harness.getToolRegistry();
+    if (!toolRegistry) return;
+    const v1Engine = core?.evolutionEngine;
+    if (!v1Engine) return;
+
+    const weights = v1Engine.getToolWeights();
+    if (Object.keys(weights).length > 0) {
+      toolRegistry.getReliabilityTracker().applyEvolutionWeights(weights);
+      Logger.debug(
+        `🧬 进化权重已同步: ${Object.keys(weights).length} 个工具`,
+        'initEvolution'
+      );
+    }
+  };
+
   // 定时进化检查：每5分钟扫描一次，低质量时触发V2自进化
   const OPTIMIZATION_INTERVAL_MS = 5 * 60 * 1000;
   let consecutiveEmptyChecks = 0;
@@ -69,6 +88,9 @@ export async function initEvolution(
       return;
     }
     consecutiveEmptyChecks = 0;
+
+    // 闭合 Loop B: 每次检查时同步进化权重
+    syncEvolutionWeights();
 
     // 质量低于0.7时触发V2自进化
     if (avgScore < 0.7 && evolutionEngineV2) {

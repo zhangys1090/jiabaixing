@@ -27,6 +27,7 @@ import { Permission } from '../types';
 import { SkillRegistry } from '../../skills/SkillRegistry';
 import type { SkillContext } from '../../skills/SkillInterface';
 import type { TrajectoryDatabase } from '../persistence/TrajectoryDatabase';
+import { ToolCallGuard } from '../tools/registry/ToolCallGuard';
 
 /** 工具调用拦截器 — 非侵入式钩子接口 */
 export interface ToolCallHooks {
@@ -77,17 +78,11 @@ export interface ExecutorDeps {
   schemaValidator: SchemaValidator;
   /** 权限守卫（@deprecated 通过 hooks 替代） */
   permissionGuard: PermissionGuard;
-  /** 验证服务（@deprecated 通过 hooks 替代） */
-  verificationService?: {
-    validateToolResult(...args: unknown[]): unknown;
-    checkOutputSafety(output: string): {
-      safe: boolean;
-      riskLevel: string;
-      violations: string[];
-      sanitizedOutput?: string;
-    };
-  };
-  /** 约束服务（@deprecated 通过 hooks 替代） */
+  /** 轨迹数据库（@deprecated 通过 hooks 替代） */
+  trajectoryDatabase?: TrajectoryDatabase;
+  /** 非侵入式工具调用钩子（推荐） */
+  hooks?: ToolCallHooks;
+  /** 约束服务 — 用于触发生命周期钩子 BEFORE_TOOL_CALL, AFTER_TOOL_CALL, ON_ERROR */
   constraintsService?: {
     executeHooks(
       event: LifecycleEvent,
@@ -107,25 +102,24 @@ export interface ExecutorDeps {
       reason?: string;
     }>;
   };
-  /** 轨迹数据库（@deprecated 通过 hooks 替代） */
-  trajectoryDatabase?: TrajectoryDatabase;
-  /** 非侵入式工具调用钩子（推荐） */
-  hooks?: ToolCallHooks;
 }
 
-/** 默认安全权限集 — 允许只读、记忆写入和低风险操作 */
+/** 默认安全权限集 — 允许只读、记忆写入、文件读写、代码执行和网络访问 */
 const DEFAULT_SAFE_PERMISSIONS: Permission[] = [
   Permission.MEMORY_READ,
   Permission.MEMORY_WRITE,
   Permission.FILE_READ,
+  Permission.FILE_WRITE,
+  Permission.CODE_EXECUTE,
+  Permission.NETWORK_ACCESS,
 ];
 
-/** 默认限制 */
-const HARD_TOOL_LIMIT = 8;
-const SOFT_TOOL_LIMIT = 4;
+/** 默认限制 — 放宽以释放 LLM 创造性 */
+const HARD_TOOL_LIMIT = 12;
+const SOFT_TOOL_LIMIT = 6;
 const TOOL_TIMEOUT_MS = 30000;
-const TOKEN_WARNING = 4500;
-const MAX_TOOL_OUTPUT = 4000;
+const TOKEN_WARNING = 6000;
+const MAX_TOOL_OUTPUT = 6000;
 
 export class Executor {
   private deps: ExecutorDeps;
@@ -149,18 +143,76 @@ export class Executor {
     // syncToLegacySkillRegistry 同步，不重复传入以免 LLM 看到重复工具
     const allTools = harnessTools;
 
+    // 工具调用守卫：去重 + 缓存 + 速率限制
+    const toolCallGuard = new ToolCallGuard();
+
     const recommendedSet = new Set(plan.recommendedTools);
-    const effectiveTools =
-      recommendedSet.size > 0
-        ? allTools.filter((t) => {
-            const name =
-              (t as { function?: { name?: string } }).function?.name || '';
-            return recommendedSet.has(name);
-          })
-        : allTools;
+    let effectiveTools = allTools;
+
+    // 推荐工具仅作为提示，不强制过滤 — 释放 LLM 创造性
+    // 当工具数 > 16 时才做意图过滤，避免 LLM 选择空间过大
+    if (recommendedSet.size > 0 && allTools.length > 16) {
+      // 保留推荐工具 + 通用工具，而非只保留推荐工具
+      const generalTools = new Set([
+        'web_search', 'memory_store', 'memory_search',
+        'system_status', 'file_list', 'file_search', 'file_read',
+      ]);
+      effectiveTools = allTools.filter((t) => {
+        const name =
+          (t as { function?: { name?: string } }).function?.name || '';
+        return recommendedSet.has(name) || generalTools.has(name);
+      });
+    }
+
+    // Pattern 5.3: Progressive tool disclosure — 工具数 > 16 时按意图过滤
+    if (recommendedSet.size === 0 && allTools.length > 16) {
+      const intentTools = this.filterToolsByIntent(
+        (context.metadata.input as string) || '',
+        allTools
+      );
+      if (intentTools.length > 0 && intentTools.length < allTools.length) {
+        effectiveTools = intentTools;
+        Logger.info(
+          `🔧 意图过滤: ${allTools.length} → ${effectiveTools.length} 个工具`,
+          'Executor'
+        );
+      }
+    }
 
     const toolChoice: 'required' | 'auto' | 'none' =
       plan.toolCallMode === 'none' ? 'none' : 'auto';
+
+    // 纯对话模式：不传工具，直接LLM回复
+    if (plan.toolCallMode === 'none') {
+      Logger.info('💬 纯对话模式: 跳过工具调用', 'Executor');
+      try {
+        const directResponse = await this.deps.llm.chatWithTools(
+          [...context.messages],
+          [],  // 不传任何工具
+          2048,
+          'none'
+        );
+        const messages = [...context.messages];
+        if (directResponse.content) {
+          messages.push({ role: 'assistant', content: directResponse.content });
+        }
+        return {
+          messages,
+          toolCallsCount: 0,
+          toolDuration: 0,
+          completedNaturally: true,
+          estimatedTokens: this.estimateMessagesTokens(messages),
+        };
+      } catch (error) {
+        Logger.error('❌ 纯对话模式LLM调用失败', error as Error, 'Executor');
+        return {
+          messages: [...context.messages],
+          toolCallsCount: 0,
+          toolDuration: 0,
+          completedNaturally: false,
+        };
+      }
+    }
 
     let messages = [...context.messages];
     let loopCount = 0;
@@ -175,34 +227,42 @@ export class Executor {
         .join('、');
       messages.push({
         role: 'system',
-        content: `以下工具可用: [${toolNames}]
+        content: `可用工具: [${toolNames}]
 
-用户请求是一个操作类任务。请按以下步骤处理：
-1. 分析用户想要做什么
-2. 选择合适的工具并调用
-3. 如果需要先获取信息再操作，请分步调用多个工具
-
-工具组合策略：
-- 信息获取链: file_search → file_read → code_analyze
-- 桌面操作链: desktop_automate → screenshot → desktop_automate
-- 网络研究链: web_fetch → memory_write → file_write
-- 浏览器自动化: mcp_browser_* 系列工具
-- 定时任务: mcp_cron_* 系列工具
-- 创造性组合: 你可以自由组合工具实现用户未明确要求但合理的增强操作
-
-注意：工具调用是完成任务的唯一方式。直接告诉我你要调用的工具和参数。`,
+请分析用户请求，选择合适的工具完成任务。你可以自由组合工具实现最佳效果。
+注意：web_search 最多2次，不要重复调用同一工具。`,
       });
     }
 
-    // 进化闭环：注入工具可靠性提示
+    // 进化闭环：注入工具可靠性提示（仅在成功率极低时提示，避免过度约束）
     const unreliableTools = this.deps.toolRegistry
       .getReliabilityTracker()
-      .getUnreliableTools(0.7);
+      .getUnreliableTools(0.5);
     if (unreliableTools.length > 0) {
       messages.push({
         role: 'system',
-        content: `【工具可靠性提示】以下工具近期成功率偏低，优先考虑替代方案：${unreliableTools.join('、')}`,
+        content: `以下工具成功率偏低，可考虑替代方案：${unreliableTools.join('、')}`,
       });
+    }
+
+    // 注入文件搜索参数提示（仅当 Planner 检测到语言关键词时）
+    if (plan.steps && plan.steps.length > 0) {
+      const firstStep = plan.steps[0];
+      if (
+        firstStep.toolName === 'file_search' &&
+        firstStep.toolParams &&
+        firstStep.toolParams.filePattern
+      ) {
+        const filePattern = firstStep.toolParams.filePattern as string;
+        messages.push({
+          role: 'system',
+          content: `搜索时请使用 filePattern="${filePattern}"`,
+        });
+        Logger.info(
+          `📋 Executor: 注入 filePattern 提示: ${filePattern}`,
+          'Executor'
+        );
+      }
     }
 
     // 首次 LLM 调用
@@ -274,9 +334,10 @@ export class Executor {
     // 无进展打断检测
     let lastToolNames = '';
     let stallCount = 0;
+    let toolCallCounter = 0;
     const MAX_STALL = 3; // 连续3轮相同工具 → 打断
-    const MAX_CONSECUTIVE_SAME = 3;
-    const CONSECUTIVE_SAME_WINDOW = 5; // 最近5轮中相同工具超限 → 打断
+    const toolCallCounts = new Map<string, number>(); // 每个工具调用次数
+    const MAX_SAME_TOOL = 3; // 同一工具最多调用3次，允许LLM创造性组合
 
     while (
       fcResponse.toolCalls &&
@@ -302,6 +363,44 @@ export class Executor {
         timestamp: new Date().toISOString(),
       });
 
+      // 工具调用次数限制：同一工具超过上限时强制跳过
+      for (const tc of fcResponse.toolCalls) {
+        const name = tc.function.name;
+        const count = (toolCallCounts.get(name) || 0) + 1;
+        toolCallCounts.set(name, count);
+        if (count > MAX_SAME_TOOL) {
+          Logger.warn(
+            `⚠️ 工具 ${name} 已调用 ${count} 次，超过上限 ${MAX_SAME_TOOL}，强制注入总结指令`,
+            'Executor'
+          );
+          messages.push({
+            role: 'system',
+            content: `工具 ${name} 已经调用足够次数。请立即基于已有结果直接回复用户，不要再调用任何工具。`,
+          });
+          // 强制最后一次 LLM 调用不调工具
+          try {
+            const finalResp = await this.deps.llm.chatWithTools(
+              messages,
+              effectiveTools,
+              4096,
+              'none'
+            );
+            if (finalResp.content) {
+              messages.push({ role: 'assistant', content: finalResp.content });
+            }
+          } catch {
+            /* 忽略 */
+          }
+          return {
+            messages,
+            toolCallsCount: totalToolCalls,
+            toolDuration: totalToolDuration,
+            completedNaturally: true,
+            estimatedTokens: this.estimateMessagesTokens(messages),
+          };
+        }
+      }
+
       // 无进展检测：相同工具名集合
       const toolNameSet = fcResponse.toolCalls
         .map((t) => t.function.name)
@@ -314,8 +413,29 @@ export class Executor {
             `⚠️ 检测到无进展循环（连续${MAX_STALL}轮相同的工具集合 [${toolNames}]），强制结束 FC 循环`,
             'Executor'
           );
-          if (fcResponse.content) {
-            messages.push({ role: 'assistant', content: fcResponse.content });
+          // 注入建议让 LLM 做最终总结
+          messages.push({
+            role: 'system',
+            content: `你已经连续调用了${MAX_STALL}次相同工具但没有进展。请立即基于已有的搜索结果直接回复用户，不要再调用任何工具。即使结果不完美，也要给出你最好的总结。`,
+          });
+          // 最后一次 LLM 调用，强制不调工具
+          try {
+            const finalResponse = await this.deps.llm.chatWithTools(
+              messages,
+              effectiveTools,
+              4096,
+              'none'
+            );
+            if (finalResponse.content) {
+              messages.push({
+                role: 'assistant',
+                content: finalResponse.content,
+              });
+            }
+          } catch {
+            if (fcResponse.content) {
+              messages.push({ role: 'assistant', content: fcResponse.content });
+            }
           }
           break;
         }
@@ -334,11 +454,11 @@ export class Executor {
         messages = this.compressMessages(messages, estimatedTokens);
       }
 
-      // 软预算警告
+      // 软预算警告（精简，不挤占推理空间）
       if (loopCount >= SOFT_TOOL_LIMIT) {
         messages.push({
           role: 'system',
-          content: `注意：你已经进行了 ${loopCount} 轮工具调用。请尽量在 ${HARD_TOOL_LIMIT - loopCount} 轮内完成当前任务。如果已经收集到足够信息，直接回复用户。`,
+          content: `已进行 ${loopCount} 轮调用，剩余 ${HARD_TOOL_LIMIT - loopCount} 轮。信息足够时可直接回复。`,
         });
       }
 
@@ -356,11 +476,17 @@ export class Executor {
       const toolPromises = fcResponse.toolCalls.map(async (toolCall) => {
         const toolStart = Date.now();
         const toolName = toolCall.function.name;
+        const currentStepIndex = toolCallCounter++;
+        this.traceToolCall(
+          toolCall,
+          'started',
+          context.trace.traceId,
+          undefined,
+          undefined,
+          undefined,
+          currentStepIndex
+        );
 
-        // 链路追踪
-        this.traceToolCall(toolCall, 'started', context.trace.traceId);
-
-        // 解析参数
         let args: Record<string, unknown> = {};
         try {
           args = JSON.parse(toolCall.function.arguments);
@@ -368,153 +494,80 @@ export class Executor {
           args = {};
         }
 
-        // BEFORE_TOOL_CALL 钩子（直接调用 constraintsService）
-        let modifiedArgs = args;
-        if (this.deps.constraintsService) {
-          try {
-            const hookResult = await this.deps.constraintsService.executeHooks(
-              LifecycleEvent.BEFORE_TOOL_CALL,
-              {
-                event: LifecycleEvent.BEFORE_TOOL_CALL,
-                toolName,
-                params: args,
-                loopState: LoopState.EXECUTING,
-                metadata: {
-                  traceId: context.trace.traceId,
-                  loopCount,
-                },
-              }
-            );
-            if (!hookResult.proceed) {
-              Logger.info(
-                `🛑 BEFORE_TOOL_CALL 钩子拦截: ${toolName} - ${hookResult.reason}`,
-                'Executor'
-              );
-              const hookResultOutput = hookResult.replacementResult?.output
-                ? typeof hookResult.replacementResult.output === 'string'
-                  ? hookResult.replacementResult.output
-                  : JSON.stringify(hookResult.replacementResult.output)
-                : `工具调用被拦截: ${hookResult.reason}`;
-              return {
-                toolCall,
-                result: hookResultOutput,
-                success: false,
-                error: hookResult.reason || '钩子拦截',
-                duration: Date.now() - toolStart,
-              };
-            }
-            if (hookResult.modifiedParams) {
-              modifiedArgs = hookResult.modifiedParams;
-              Logger.debug(
-                `📝 BEFORE_TOOL_CALL 修改参数: ${toolName}`,
-                'Executor'
-              );
-            }
-          } catch (hookErr) {
-            Logger.warn(
-              `⚠️ BEFORE_TOOL_CALL 钩子执行失败: ${(hookErr as Error).message}`,
-              'Executor'
-            );
-          }
+        // 工具调用守卫：去重 + 缓存 + 速率限制
+        const guardCheck = toolCallGuard.check(toolName, args);
+        if (guardCheck.blocked && guardCheck.result) {
+          Logger.info(
+            `🛡️ 工具守卫拦截: ${toolName} — ${guardCheck.reason}`,
+            'Executor'
+          );
+          this.traceToolCall(
+            toolCall,
+            'completed',
+            context.trace.traceId,
+            0,
+            true,
+            undefined,
+            currentStepIndex
+          );
+          return {
+            toolCall,
+            result:
+              typeof guardCheck.result.output === 'string'
+                ? guardCheck.result.output
+                : JSON.stringify(guardCheck.result.output),
+            success: true,
+            duration: 0,
+          };
         }
-        // 通过 hooks 接口的兼容处理
-        if (this.deps.hooks?.beforeToolCall) {
-          try {
-            const hookResult = await this.deps.hooks.beforeToolCall(
-              toolName,
-              modifiedArgs,
-              {
-                traceId: context.trace.traceId,
-                loopCount,
-              }
-            );
-            if (!hookResult.proceed) {
-              Logger.info(
-                `🛑 hooks.beforeToolCall 拦截: ${toolName} - ${hookResult.reason}`,
-                'Executor'
-              );
-              const hookResultOutput = hookResult.replacementResult?.output
-                ? typeof hookResult.replacementResult.output === 'string'
-                  ? hookResult.replacementResult.output
-                  : JSON.stringify(hookResult.replacementResult.output)
-                : `工具调用被拦截: ${hookResult.reason}`;
-              return {
-                toolCall,
-                result: hookResultOutput,
-                success: false,
-                error: hookResult.reason || '钩子拦截',
-                duration: Date.now() - toolStart,
-              };
-            }
-            if (hookResult.modifiedParams) {
-              modifiedArgs = hookResult.modifiedParams;
-            }
-          } catch (hookErr) {
-            Logger.warn(
-              `⚠️ hooks.beforeToolCall 执行失败: ${(hookErr as Error).message}`,
-              'Executor'
-            );
-          }
+
+        const preCheck = await this.runPreChecks(
+          toolName,
+          args,
+          context,
+          loopCount
+        );
+        if (!preCheck.proceed) {
+          this.traceToolCall(
+            toolCall,
+            'failed',
+            context.trace.traceId,
+            Date.now() - toolStart,
+            false,
+            preCheck.reason,
+            currentStepIndex
+          );
+          const output = preCheck.replacementResult?.output
+            ? typeof preCheck.replacementResult.output === 'string'
+              ? preCheck.replacementResult.output
+              : JSON.stringify(preCheck.replacementResult.output)
+            : `工具调用被拦截: ${preCheck.reason}`;
+          return {
+            toolCall,
+            result: output,
+            success: false,
+            error: preCheck.reason || '前置检查拦截',
+            duration: Date.now() - toolStart,
+          };
         }
 
         try {
-          // Schema 验证 + 权限检查合并到 hooks.beforeToolCall
-          const registeredTool = this.deps.toolRegistry.get(toolName);
-          if (registeredTool) {
-            // Schema 验证（保留旧实现兼容）
-            const validation = this.deps.schemaValidator.validate(
-              modifiedArgs,
-              registeredTool.definition.parameters,
-              registeredTool.definition.requiredParams
-            );
-            if (!validation.valid) {
-              Logger.warn(
-                `⚠️ 参数验证失败: ${toolName} - ${validation.errors.join('; ')}`,
-                'Executor'
-              );
-              modifiedArgs = validation.sanitizedParams;
-            }
-          }
-
-          // 权限检查
           const toolContext: ToolContext = {
             userId: context.metadata.userId as string | undefined,
             traceId: context.trace.traceId,
             permissions: this.resolvePermissions(context),
             metadata: {},
           };
-
+          let execResult: {
+            success: boolean;
+            output?: unknown;
+            error?: string;
+          };
+          const registeredTool = this.deps.toolRegistry.get(toolName);
           if (registeredTool) {
-            const permCheck = this.deps.permissionGuard.check(
+            execResult = await this.executeWithRetry(
               toolName,
-              registeredTool.definition.requiredPermissions,
-              registeredTool.definition.riskLevel,
-              toolContext
-            );
-            if (!permCheck.allowed) {
-              this.traceToolCall(
-                toolCall,
-                'failed',
-                context.trace.traceId,
-                Date.now() - toolStart,
-                false,
-                permCheck.reason
-              );
-              return {
-                toolCall,
-                result: `权限不足: ${permCheck.reason}`,
-                success: false,
-                duration: Date.now() - toolStart,
-              };
-            }
-          }
-
-          // 执行工具（带超时和重试），优先 Harness ToolRegistry，fallback 到 SkillRegistry
-          let result: { success: boolean; output?: unknown; error?: string };
-          if (registeredTool) {
-            result = await this.executeWithRetry(
-              toolName,
-              modifiedArgs,
+              preCheck.modifiedArgs,
               toolContext
             );
           } else {
@@ -527,7 +580,7 @@ export class Executor {
               traceId: context.trace.traceId,
               sessionData: context.metadata as Record<string, unknown>,
             };
-            result = await Promise.race([
+            execResult = await Promise.race([
               SkillRegistry.getInstance().executeToolCall(
                 toolCall,
                 skillContext
@@ -540,184 +593,109 @@ export class Executor {
           totalToolDuration += toolDuration;
           totalToolCalls++;
 
-          // P2 修复: 使用 VerificationService 验证工具结果
-          let output: string;
-          if (result.success) {
-            const rawOutput =
-              typeof result.output === 'string'
-                ? result.output
-                : JSON.stringify(result.output);
-
-            // 输出安全检查（通过 hooks 或旧实现）
-            if (this.deps.hooks?.afterToolCall) {
-              const toolResult: ToolResult = {
-                success: result.success,
-                output: rawOutput,
-                error: result.error,
-                duration: toolDuration,
-                validated: false,
-              };
-              const hookResult = await this.deps.hooks.afterToolCall(
-                toolName,
-                toolResult,
-                {
-                  traceId: context.trace.traceId,
-                  loopCount,
-                }
-              );
-              output =
-                typeof hookResult.output === 'string'
-                  ? hookResult.output
-                  : JSON.stringify(hookResult.output);
-            } else if (this.deps.verificationService) {
-              const safetyCheck =
-                this.deps.verificationService.checkOutputSafety(rawOutput);
-              if (!safetyCheck.safe) {
-                Logger.warn(
-                  `⚠️ 工具输出安全警告 [${toolName}]: ${safetyCheck.violations.join('; ')}`,
-                  'Executor'
-                );
-              }
-              output = safetyCheck.sanitizedOutput || rawOutput;
-            } else {
-              output = this.validateToolOutput(result);
-            }
-          } else {
-            output = `错误: ${result.error || '工具执行失败'}`;
-          }
+          const toolResult: ToolResult = {
+            success: execResult.success,
+            output: execResult.success
+              ? typeof execResult.output === 'string'
+                ? execResult.output
+                : JSON.stringify(execResult.output)
+              : `错误: ${execResult.error || '工具执行失败'}`,
+            error: execResult.error,
+            duration: toolDuration,
+            validated: false,
+          };
+          const postChecked = await this.runPostChecks(
+            toolName,
+            toolResult,
+            context,
+            loopCount
+          );
+          const output = postChecked.success
+            ? typeof postChecked.output === 'string'
+              ? postChecked.output
+              : JSON.stringify(postChecked.output)
+            : `错误: ${postChecked.error || '工具执行失败'}`;
 
           this.traceToolCall(
             toolCall,
             'completed',
             context.trace.traceId,
             toolDuration,
-            result.success
+            execResult.success,
+            undefined,
+            currentStepIndex
           );
 
-          // AFTER_TOOL_CALL 钩子（直接调用 constraintsService）
-          if (this.deps.constraintsService) {
-            try {
-              const toolResult: ToolResult = {
-                success: result.success,
-                output,
-                error: result.error,
-                duration: toolDuration,
-                validated: false,
-              };
-              const hookResult =
-                await this.deps.constraintsService.executeHooks(
-                  LifecycleEvent.AFTER_TOOL_CALL,
-                  {
-                    event: LifecycleEvent.AFTER_TOOL_CALL,
-                    toolName,
-                    result: toolResult,
-                    loopState: LoopState.EXECUTING,
-                    metadata: {
-                      traceId: context.trace.traceId,
-                      loopCount,
-                    },
-                  }
-                );
-              if (hookResult?.replacementResult?.output) {
-                output =
-                  typeof hookResult.replacementResult.output === 'string'
-                    ? hookResult.replacementResult.output
-                    : JSON.stringify(hookResult.replacementResult.output);
-              }
-            } catch (hookErr) {
-              Logger.warn(
-                `⚠️ AFTER_TOOL_CALL 钩子执行失败: ${(hookErr as Error).message}`,
-                'Executor'
-              );
-            }
-          }
-          // Fix: skip hooks if constraintsService already ran (avoid double-sanitization)
-          if (this.deps.hooks?.afterToolCall && !this.deps.constraintsService) {
-            try {
-              const toolResult: ToolResult = {
-                success: result.success,
-                output,
-                error: result.error,
-                duration: toolDuration,
-                validated: false,
-              };
-              const hookResult = await this.deps.hooks.afterToolCall(
-                toolName,
-                toolResult,
-                {
-                  traceId: context.trace.traceId,
-                  loopCount,
-                }
-              );
-              if (hookResult?.output && typeof hookResult.output === 'string') {
-                output = hookResult.output;
-              }
-            } catch (hookErr) {
-              Logger.warn(
-                `⚠️ hooks.afterToolCall 执行失败: ${(hookErr as Error).message}`,
-                'Executor'
-              );
-            }
-          }
-
-          // Track detailed trajectory step for tool call
-          const trajectoryStepCall: TrajectoryStep = {
+          context.trace.trajectory.push({
             type: 'tool_call',
             timestamp: toolStart,
             duration: toolDuration,
             toolName,
-            toolParams: modifiedArgs,
+            toolParams: preCheck.modifiedArgs,
             metadata: { toolCallId: toolCall.id },
-          };
-          context.trace.trajectory.push(trajectoryStepCall);
-
-          const trajectoryStepResult: TrajectoryStep = {
+          });
+          context.trace.trajectory.push({
             type: 'tool_result',
             timestamp: Date.now(),
             duration: 0,
             toolName,
             toolResult: {
-              success: result.success,
-              output: output,
-              error: result.error,
+              success: execResult.success,
+              output,
+              error: execResult.error,
               duration: toolDuration,
               validated: true,
               metadata: {},
             },
             metadata: { toolCallId: toolCall.id },
-          };
-          context.trace.trajectory.push(trajectoryStepResult);
-
-          const stepResult: StepResult = {
+          });
+          context.stepResults.set(toolCall.id, {
             stepId: toolCall.id,
-            toolName: toolName,
-            success: result.success,
-            output: output,
+            toolName,
+            success: execResult.success,
+            output,
             duration: toolDuration,
-            error: result.success ? undefined : result.error,
-          };
-          context.stepResults.set(toolCall.id, stepResult);
+            error: execResult.success ? undefined : execResult.error,
+          });
+
+          // 记录到 guard 缓存
+          toolCallGuard.record(toolName, args, {
+            success: execResult.success,
+            output: execResult.output,
+            duration: toolDuration,
+            validated: true,
+          });
 
           return {
             toolCall,
             result: output,
-            success: result.success,
+            success: execResult.success,
             duration: toolDuration,
           };
         } catch (err) {
           const toolDuration = Date.now() - toolStart;
-          // C4 fix: counters already incremented in try block, skip double-count
-
           this.traceToolCall(
             toolCall,
             'failed',
             context.trace.traceId,
             toolDuration,
             false,
-            (err as Error).message
+            (err as Error).message,
+            currentStepIndex
           );
 
-          // ON_ERROR 钩子（直接调用 constraintsService）
+          if (this.deps.hooks?.onToolError) {
+            try {
+              await this.deps.hooks.onToolError(
+                toolName,
+                (err as Error).message,
+                { traceId: context.trace.traceId, loopCount }
+              );
+            } catch {
+              /* best-effort */
+            }
+          }
+
           if (this.deps.constraintsService) {
             try {
               await this.deps.constraintsService.executeHooks(
@@ -725,8 +703,14 @@ export class Executor {
                 {
                   event: LifecycleEvent.ON_ERROR,
                   toolName,
-                  params: modifiedArgs,
-                  loopState: LoopState.EXECUTING,
+                  params: preCheck.modifiedArgs,
+                  result: {
+                    success: false,
+                    output: `错误: ${(err as Error).message}`,
+                    error: (err as Error).message,
+                    duration: toolDuration,
+                    validated: false,
+                  },
                   metadata: {
                     traceId: context.trace.traceId,
                     loopCount,
@@ -734,44 +718,20 @@ export class Executor {
                   },
                 }
               );
-            } catch (hookErr) {
-              Logger.warn(
-                `⚠️ ON_ERROR 钩子执行失败: ${(hookErr as Error).message}`,
-                'Executor'
-              );
-            }
-          }
-          // 通过 hooks 接口的兼容处理
-          if (this.deps.hooks?.onToolError) {
-            try {
-              await this.deps.hooks.onToolError(
-                toolName,
-                (err as Error).message,
-                {
-                  traceId: context.trace.traceId,
-                  loopCount,
-                }
-              );
-            } catch (hookErr) {
-              Logger.warn(
-                `⚠️ hooks.onToolError 执行失败: ${(hookErr as Error).message}`,
-                'Executor'
-              );
+            } catch {
+              /* best-effort */
             }
           }
 
-          // Track detailed trajectory step for failed tool call
-          const trajectoryStepCall: TrajectoryStep = {
+          context.trace.trajectory.push({
             type: 'tool_call',
             timestamp: toolStart,
             duration: toolDuration,
             toolName,
-            toolParams: modifiedArgs,
+            toolParams: preCheck.modifiedArgs,
             metadata: { toolCallId: toolCall.id },
-          };
-          context.trace.trajectory.push(trajectoryStepCall);
-
-          const trajectoryStepError: TrajectoryStep = {
+          });
+          context.trace.trajectory.push({
             type: 'tool_result',
             timestamp: Date.now(),
             duration: 0,
@@ -785,18 +745,15 @@ export class Executor {
               metadata: {},
             },
             metadata: { toolCallId: toolCall.id },
-          };
-          context.trace.trajectory.push(trajectoryStepError);
-
-          const errorResult: StepResult = {
+          });
+          context.stepResults.set(toolCall.id, {
             stepId: toolCall.id,
-            toolName: toolName,
+            toolName,
             success: false,
             output: `错误: ${(err as Error).message}`,
             duration: toolDuration,
             error: (err as Error).message,
-          };
-          context.stepResults.set(toolCall.id, errorResult);
+          });
 
           return {
             toolCall,
@@ -880,6 +837,178 @@ export class Executor {
       completedNaturally: loopCount < HARD_TOOL_LIMIT,
       estimatedTokens,
     };
+  }
+
+  /**
+   * 统一前置检查管线：hooks → Schema 验证 → 权限检查
+   * @param toolName - 工具名称
+   * @param args - 原始参数
+   * @param context - 循环上下文
+   * @param loopCount - 当前循环计数
+   * @returns 检查结果，包含是否继续、修改后参数及可能的替换结果
+   */
+  private async runPreChecks(
+    toolName: string,
+    args: Record<string, unknown>,
+    context: LoopContext,
+    loopCount: number
+  ): Promise<{
+    proceed: boolean;
+    modifiedArgs: Record<string, unknown>;
+    replacementResult?: ToolResult;
+    reason?: string;
+  }> {
+    let modifiedArgs = args;
+
+    if (this.deps.hooks?.beforeToolCall) {
+      const hookResult = await this.deps.hooks.beforeToolCall(
+        toolName,
+        modifiedArgs,
+        { traceId: context.trace.traceId, loopCount }
+      );
+      if (!hookResult.proceed) {
+        return {
+          proceed: false,
+          modifiedArgs,
+          replacementResult: hookResult.replacementResult,
+          reason: hookResult.reason,
+        };
+      }
+      if (hookResult.modifiedParams) {
+        modifiedArgs = hookResult.modifiedParams;
+      }
+    }
+
+    if (this.deps.constraintsService) {
+      const hookResult = await this.deps.constraintsService.executeHooks(
+        LifecycleEvent.BEFORE_TOOL_CALL,
+        {
+          event: LifecycleEvent.BEFORE_TOOL_CALL,
+          toolName,
+          params: modifiedArgs,
+          metadata: {
+            traceId: context.trace.traceId,
+            loopCount,
+            loopState: context.trace.state,
+          },
+        }
+      );
+      if (!hookResult.proceed) {
+        return {
+          proceed: false,
+          modifiedArgs,
+          replacementResult: hookResult.replacementResult,
+          reason: hookResult.reason,
+        };
+      }
+      if (hookResult.modifiedParams) {
+        modifiedArgs = hookResult.modifiedParams;
+      }
+    }
+
+    const registeredTool = this.deps.toolRegistry.get(toolName);
+    if (registeredTool) {
+      const validation = this.deps.schemaValidator.validate(
+        modifiedArgs,
+        registeredTool.definition.parameters,
+        registeredTool.definition.requiredParams
+      );
+      if (!validation.valid && validation.sanitizedParams) {
+        modifiedArgs = validation.sanitizedParams;
+      }
+    }
+
+    if (registeredTool) {
+      const toolContext: ToolContext = {
+        userId: context.metadata.userId as string | undefined,
+        traceId: context.trace.traceId,
+        permissions: this.resolvePermissions(context),
+        metadata: {},
+      };
+      const permCheck = this.deps.permissionGuard.check(
+        toolName,
+        registeredTool.definition.requiredPermissions,
+        registeredTool.definition.riskLevel,
+        toolContext
+      );
+      if (!permCheck.allowed) {
+        return {
+          proceed: false,
+          modifiedArgs,
+          replacementResult: {
+            success: false,
+            output: `权限不足: ${permCheck.reason}`,
+            error: permCheck.reason,
+            duration: 0,
+            validated: false,
+          },
+          reason: permCheck.reason,
+        };
+      }
+    }
+
+    return { proceed: true, modifiedArgs };
+  }
+
+  /**
+   * 统一后置检查管线：hooks.afterToolCall 输出安全检查 + constraintsService AFTER_TOOL_CALL
+   * @param toolName - 工具名称
+   * @param result - 工具执行结果
+   * @param context - 循环上下文
+   * @param loopCount - 当前循环计数
+   * @returns 经过后置检查的结果
+   */
+  private async runPostChecks(
+    toolName: string,
+    result: ToolResult,
+    context: LoopContext,
+    loopCount: number
+  ): Promise<ToolResult> {
+    let output =
+      typeof result.output === 'string'
+        ? result.output
+        : JSON.stringify(result.output);
+
+    if (this.deps.hooks?.afterToolCall) {
+      const hookResult = await this.deps.hooks.afterToolCall(
+        toolName,
+        { ...result, output },
+        { traceId: context.trace.traceId, loopCount }
+      );
+      output =
+        typeof hookResult.output === 'string'
+          ? hookResult.output
+          : JSON.stringify(hookResult.output);
+    }
+
+    if (this.deps.constraintsService) {
+      try {
+        const hookResult = await this.deps.constraintsService.executeHooks(
+          LifecycleEvent.AFTER_TOOL_CALL,
+          {
+            event: LifecycleEvent.AFTER_TOOL_CALL,
+            toolName,
+            result: { ...result, output },
+            metadata: {
+              traceId: context.trace.traceId,
+              loopCount,
+              success: result.success,
+            },
+          }
+        );
+        if (!hookResult.proceed) {
+          output = hookResult.replacementResult
+            ? typeof hookResult.replacementResult.output === 'string'
+              ? hookResult.replacementResult.output
+              : JSON.stringify(hookResult.replacementResult.output)
+            : output;
+        }
+      } catch {
+        /* best-effort */
+      }
+    }
+
+    return { ...result, output, validated: true };
   }
 
   /**
@@ -1198,8 +1327,33 @@ export class Executor {
 
     if (nonSystemMessages.length <= 4) return messages;
 
-    const keptMessages = nonSystemMessages.slice(-4);
-    const removedMessages = nonSystemMessages.slice(0, -4);
+    // 修复: 确保保留的消息不会断裂 assistant+tool_calls/tool 配对
+    let cutIndex = nonSystemMessages.length - 4;
+    // 如果切点处是 tool 消息，向前扩展到包含对应的 assistant+tool_calls
+    while (cutIndex > 0 && nonSystemMessages[cutIndex]?.role === 'tool') {
+      cutIndex--;
+    }
+    // 如果切点处是 assistant+tool_calls，向后扩展到包含所有对应的 tool 消息
+    if (
+      cutIndex > 0 &&
+      nonSystemMessages[cutIndex]?.role === 'assistant' &&
+      (nonSystemMessages[cutIndex] as { tool_calls?: unknown[] }).tool_calls
+    ) {
+      let j = cutIndex + 1;
+      while (
+        j < nonSystemMessages.length &&
+        nonSystemMessages[j]?.role === 'tool'
+      ) {
+        j++;
+      }
+      // 如果 tool 消息数量少于预期（被截断了），回退到原切点
+      if (j <= nonSystemMessages.length - 4) {
+        cutIndex = j;
+      }
+    }
+
+    const keptMessages = nonSystemMessages.slice(cutIndex);
+    const removedMessages = nonSystemMessages.slice(0, cutIndex);
 
     const summaryParts: string[] = [];
     for (const msg of removedMessages) {
@@ -1244,7 +1398,8 @@ export class Executor {
     traceId: string,
     duration?: number,
     success?: boolean,
-    errorMessage?: string
+    errorMessage?: string,
+    stepIndex?: number
   ): void {
     const eventBusData = {
       timestamp: new Date().toISOString(),
@@ -1281,11 +1436,11 @@ export class Executor {
         Logger.warn(`⚠️ 轨迹记录失败: ${(err as Error).message}`, 'Executor');
       }
     } else if (this.deps.trajectoryDatabase && traceId) {
-      const stepIndex = 0;
+      const effectiveStepIndex = stepIndex ?? 0;
       try {
         this.deps.trajectoryDatabase.recordToolInvocation({
           execution_id: traceId,
-          step_index: stepIndex,
+          step_index: effectiveStepIndex,
           tool_name: toolCall.function.name,
           args_json: toolCall.function.arguments,
           result_success: success === true ? 1 : 0,
@@ -1447,5 +1602,58 @@ export class Executor {
     }
 
     return results;
+  }
+
+  /**
+   * Pattern 5.3: 根据用户意图过滤工具子集
+   * 减少 LLM 的选择空间，提高工具选择准确率
+   */
+  private filterToolsByIntent(
+    input: string,
+    allTools: Array<Record<string, unknown>>
+  ): Array<Record<string, unknown>> {
+    const text = input.toLowerCase();
+
+    // 意图 → 工具名前缀映射（基于 jiabaixing 的 36 工具命名规范）
+    const intentMap: Array<{ pattern: RegExp; prefixes: string[] }> = [
+      {
+        pattern: /审查|review|代码质量|代码检查|安全检查|code\s*review/,
+        prefixes: ['code_review'],
+      },
+      {
+        pattern: /搜索|查|找|搜|了解|研究|什么是|怎么样|新闻|天气/,
+        prefixes: ['web_', 'memory_search', 'memory_recall'],
+      },
+      {
+        pattern: /文件|目录|读|写|创建|删除|编辑|代码/,
+        prefixes: ['file_', 'code_', 'incremental_edit', 'multi_file_edit'],
+      },
+      { pattern: /桌面|截图|点击|窗口|应用|屏幕/, prefixes: ['desktop_'] },
+      {
+        pattern: /提醒|日程|任务|计划|日历|笔记/,
+        prefixes: ['task_', 'calendar', 'reminder_', 'note_', 'batch_task'],
+      },
+      { pattern: /记忆|记得|之前|上次|历史/, prefixes: ['memory_'] },
+      {
+        pattern: /运行|执行|命令|shell|脚本/,
+        prefixes: ['shell_exec', 'file_'],
+      },
+      {
+        pattern: /情绪|情感|心情|感觉/,
+        prefixes: ['emotion_', 'analyze_scene', 'self_reflect'],
+      },
+    ];
+
+    for (const { pattern, prefixes } of intentMap) {
+      if (pattern.test(text)) {
+        return allTools.filter((t) => {
+          const name =
+            (t as { function?: { name?: string } }).function?.name || '';
+          return prefixes.some((prefix) => name.startsWith(prefix));
+        });
+      }
+    }
+
+    return []; // 无法识别意图时不过滤，让 LLM 自己选
   }
 }

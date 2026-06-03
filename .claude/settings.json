@@ -1,15 +1,16 @@
 {
   "env": {
-    "ANTHROPIC_BASE_URL": "https://api.deepseek.com/anthropic",
-    "ANTHROPIC_AUTH_TOKEN": "sk-3139a782551b4b74b69ffc7f53d887bb",
+    "ANTHROPIC_BASE_URL": "https://api.xiaomimimo.com/anthropic",
+    "ANTHROPIC_AUTH_TOKEN": "sk-cexpurb6euyip3rq5tzozmgjxico1vzu1jlz8byso2r5hmnp",
     "API_TIMEOUT_MS": "3000000",
-    "ANTHROPIC_MODEL": "deepseek-v4-pro",
-    "ANTHROPIC_SMALL_FAST_MODEL": "deepseek-v4-flash",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL": "deepseek-v4-pro",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": "deepseek-v4-pro",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "deepseek-v4-flash",
-    "CLAUDE_CODE_SUBAGENT_MODEL": "deepseek-v4-pro",
-    "CLAUDE_CODE_EFFORT_LEVEL": "max"
+    "ANTHROPIC_MODEL": "mimo-v2.5-pro",
+    "ANTHROPIC_SMALL_FAST_MODEL": "mimo-v2-flash",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "mimo-v2.5-pro",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "mimo-v2.5-pro",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "mimo-v2-flash",
+    "CLAUDE_CODE_SUBAGENT_MODEL": "mimo-v2.5-pro",
+    "CLAUDE_CODE_EFFORT_LEVEL": "max",
+    "CLAUDE_CODE_ATTRIBUTION_HEADER": "0"
   },
-  "model": "deepseek-v4-pro"
+  "model": "mimo-v2.5-flash"
 }

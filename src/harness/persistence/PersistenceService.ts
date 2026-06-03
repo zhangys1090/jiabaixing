@@ -145,6 +145,8 @@ export class PersistenceService {
   private evolutionMetricsPath: string;
   private evolutionMetricsSinceLastFlush = 0;
   private flushTimer: ReturnType<typeof setInterval> | null = null;
+  /** 已晋升记忆 ID 集合 — 防止重复晋升 */
+  private promotedMemoryIds: Set<string> = new Set();
 
   constructor(deps: PersistenceServiceDeps, dataDir?: string) {
     this.deps = deps;
@@ -282,18 +284,47 @@ export class PersistenceService {
     }
 
     try {
-      const shortTermMemories =
-        await this.deps.memoryEngine.preciseHybridRetrieval({
-          query: '',
-          topK: 100,
-        });
+      // 修复: 使用有意义的查询替代空字符串，并用多个查询覆盖不同类型的记忆
+      const queries = ['重要', '记住', '关键', '用户偏好', '学习'];
+      const allMemories: Array<{
+        id?: string;
+        type?: string;
+        content: unknown;
+        scene?: string;
+        emotion?: string;
+        importance?: number;
+        accessCount?: number;
+      }> = [];
 
-      const candidates = shortTermMemories.filter(
-        (m) =>
-          m.type === 'short_term' &&
-          ((m.importance != null && m.importance >= 7) ||
-            (m.accessCount != null && m.accessCount >= 3))
-      );
+      for (const query of queries) {
+        const results = await this.deps.memoryEngine.preciseHybridRetrieval({
+          query,
+          topK: 20,
+        });
+        allMemories.push(...results);
+      }
+
+      // 去重（按 id）
+      const seen = new Set<string>();
+      const uniqueMemories = allMemories.filter((m) => {
+        const id = (m as { id?: string }).id || JSON.stringify(m.content);
+        if (seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      });
+
+      const candidates = uniqueMemories.filter((m) => {
+        const id = (m as { id?: string }).id || '';
+        // 排除已晋升的记忆
+        if (this.promotedMemoryIds.has(id)) return false;
+        // 排除已通过 feedback signal 标记的
+        if (id && this.promotedMemoryIds.has(`promoted:${id}`)) return false;
+        return (
+          ((m as { type?: string }).type === 'short_term' || !(m as { type?: string }).type) &&
+          (((m as { importance?: number }).importance != null && (m as { importance?: number }).importance! >= 7) ||
+            ((m as { accessCount?: number }).accessCount != null && (m as { accessCount?: number }).accessCount! >= 3))
+        );
+      });
 
       if (candidates.length === 0) {
         return 0;
@@ -301,32 +332,27 @@ export class PersistenceService {
 
       let promoted = 0;
       for (const memory of candidates) {
+        const memId = (memory as { id?: string }).id || '';
+        const memContent = typeof memory.content === 'string' ? memory.content : JSON.stringify(memory.content);
         try {
           await this.deps.memoryEngine.storeLongTermMemory(
-            memory.content,
+            memContent,
             memory.scene,
             memory.emotion
           );
-          // C8 fix: mark as promoted via feedback signal to prevent re-promotion loop
-          // (IMemoryEngine has no direct delete; short-term cleanup via natural expiration)
-          try {
-            await this.deps.memoryEngine.storeFeedbackSignal({
-              feedbackType: 'success',
-              message: `memory_promoted:${memory.id}`,
-              rating: 1,
-              traceId: memory.id,
-            });
-          } catch {
-            // non-critical: feedback signal failure doesn't invalidate promotion
+          // 标记为已晋升，防止重复晋升
+          if (memId) {
+            this.promotedMemoryIds.add(memId);
+            this.promotedMemoryIds.add(`promoted:${memId}`);
           }
           promoted++;
           Logger.info(
-            `💾 记忆晋升: id=${memory.id} importance=${memory.importance ?? '-'} accessCount=${memory.accessCount ?? '-'}`,
+            `💾 记忆晋升: id=${memId} importance=${(memory as { importance?: number }).importance ?? '-'} accessCount=${(memory as { accessCount?: number }).accessCount ?? '-'}`,
             'PersistenceService'
           );
         } catch (err) {
           Logger.error(
-            `记忆晋升失败: id=${memory.id}`,
+            `记忆晋升失败: id=${memId}`,
             err as Error,
             'PersistenceService'
           );

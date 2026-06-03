@@ -26,6 +26,8 @@ export class LLMProvider {
   private zhipuModel: OpenAICompatibleModel | null = null;
 
   private localUnavailable: boolean = false;
+  private localUnavailableSince: number = 0;
+  private static readonly RECOVERY_INTERVAL_MS = 5 * 60 * 1000; // 5分钟后自动恢复
 
   private static readonly CONNECTION_ERRORS = [
     'econnrefused',
@@ -41,11 +43,32 @@ export class LLMProvider {
   ];
 
   constructor(modelName?: string, model?: Model) {
+    // v5.1: 优先使用 ProviderManager 配置
+    const pmPrimary = (() => {
+      try {
+        const { getProviderManager } = require('./ProviderManager');
+        const pm = getProviderManager();
+        const pk = pm.getPrimary();
+        return pk ? { key: pk.apiKey, base: pk.baseUrl, model: pk.model, name: pk.name, extra: pk.extra } : null;
+      } catch { return null; }
+    })();
+
     if (model) {
       this.model = model;
       this.modelName = modelName || 'external';
       Logger.info('🔌 使用外部注入的模型实例', 'LLMProvider');
     } else {
+      // 优先使用 ProviderManager 主模型
+      if (pmPrimary) {
+        this.modelName = pmPrimary.model;
+        Logger.info(`🔌 使用 ProviderManager 主模型: ${pmPrimary.name} (${pmPrimary.model})`, 'LLMProvider');
+        this.model = new OpenAICompatibleModel({
+          baseUrl: pmPrimary.base, apiKey: pmPrimary.key, modelName: pmPrimary.model,
+          timeout: 90000, maxTokens: 8192, temperature: 0.7, topP: 0.9,
+          thinkingMode: ((pmPrimary.extra?.thinkingMode as string) || 'disabled') as 'enabled' | 'disabled',
+          reasoningEffort: (pmPrimary.extra?.reasoningEffort as 'high' | 'max') || undefined,
+        });
+      } else {
       this.modelName = modelName || process.env.LLM_MODEL || 'deepseek-chat';
       Logger.info('🔌 使用 OpenAI 兼容模式', 'LLMProvider');
       this.model = new OpenAICompatibleModel({
@@ -85,9 +108,49 @@ export class LLMProvider {
         );
       }
     }
+    }
 
     this.responseCache = new LLMResponseCache();
     this.requestQueue = new RequestQueue(2);
+  }
+
+  /**
+   * 根据输入复杂度选择合适的模型
+   * 简单任务（问候/短查询）→ 主模型
+   * 复杂任务（代码/分析）→ 主模型（能力最强）
+   * 如果主模型不可用，降级到备用模型
+   */
+  selectModel(input: string): Model {
+    if (this.localUnavailable || !this.serviceAvailable) {
+      // 自动恢复：如果已过恢复间隔，重置标志并重试主模型
+      if (this.localUnavailable && this.localUnavailableSince > 0 &&
+          Date.now() - this.localUnavailableSince > LLMProvider.RECOVERY_INTERVAL_MS) {
+        Logger.info('🔄 主模型恢复间隔已过，重新尝试使用主模型', 'LLMProvider');
+        this.localUnavailable = false;
+        this.localUnavailableSince = 0;
+        return this.model;
+      }
+
+      if (this.zhipuModel) {
+        Logger.info('🚀 主模型不可用，使用降级模型', 'LLMProvider');
+        return this.zhipuModel;
+      }
+      // 没有降级模型时，仍然返回主模型让调用方处理（而非直接抛异常阻塞所有请求）
+      Logger.warn('⚠️ 主模型不可用且无降级模型，仍尝试使用主模型', 'LLMProvider');
+      return this.model;
+    }
+
+    // 检查主模型熔断状态
+    if (this.model && typeof (this.model as unknown as { isCircuitOpen?: () => boolean }).isCircuitOpen === 'function') {
+      const modelWithCircuit = this.model as unknown as { isCircuitOpen: () => boolean };
+      if (modelWithCircuit.isCircuitOpen()) {
+        Logger.warn('⚠️ 主模型熔断中，切换到降级模型', 'LLMProvider');
+        if (this.zhipuModel) return this.zhipuModel;
+      }
+    }
+
+    // 当前主模型可用，直接用
+    return this.model;
   }
 
   async initialize(): Promise<void> {
@@ -155,10 +218,12 @@ export class LLMProvider {
 
       this.serviceAvailable = false;
       this.localUnavailable = true;
+      this.localUnavailableSince = Date.now();
       return { available: false, message: 'LLM 服务响应异常' };
     } catch (error) {
       this.serviceAvailable = false;
       this.localUnavailable = true;
+      this.localUnavailableSince = Date.now();
       Logger.warn(
         `🚫 本地 LLM 不可用，已标记: ${(error as Error).message}`,
         'LLMProvider'
@@ -188,9 +253,11 @@ export class LLMProvider {
           errorMsg.includes(e)
         );
 
-        if (isConnectionError) {
+        const isAuthError = errorMsg.includes('401') || errorMsg.includes('invalid') || errorMsg.includes('authentication');
+
+        if (isConnectionError || isAuthError) {
           Logger.warn(
-            `🚫 ${operationName} 连接错误，跳过重试: ${lastError.message}`,
+            `🚫 ${operationName} ${isAuthError ? '认证失败' : '连接错误'}，跳过重试: ${lastError.message}`,
             'LLMProvider'
           );
           break;
@@ -501,8 +568,11 @@ ${content}
       throw new Error('所有模型均不可用');
     }
 
+    // v5.1: 根据输入选择模型
+    const chatModel = this.selectModel(message);
+
     const operation = async () => {
-      const response = await this.model.generate({
+      const response = await chatModel.generate({
         prompt: optimizedPrompt,
         systemPrompt: systemPrompt,
         temperature: 0.8,
@@ -537,6 +607,7 @@ ${content}
       );
 
       this.localUnavailable = true;
+      this.localUnavailableSince = Date.now();
       Logger.info(
         '🚫 本地模型已标记为不可用，后续请求将直接使用智谱降级',
         'LLMProvider'
@@ -594,7 +665,9 @@ ${content}
     }>;
   }> {
     // C2 fix: add retry + fallback to chatWithTools (matching chat() resilience)
-    const primaryModel = this.model;
+    // v5.1: 从消息中提取用户输入，选择路由模型
+    const routeInput = messages.find(m => m.role === 'user')?.content || '';
+    const primaryModel = this.selectModel(routeInput);
 
     if (!primaryModel) {
       throw new Error('没有可用的 LLM 模型');
@@ -635,14 +708,23 @@ ${content}
       LLMProvider.CONNECTION_ERRORS.some((pattern) =>
         err.message.toLowerCase().includes(pattern.toLowerCase())
       );
+    const isRetryableHttpError = (err: Error): boolean => {
+      const msg = err.message.toLowerCase();
+      return msg.includes('429') || msg.includes('500') || msg.includes('502') || msg.includes('503');
+    };
 
     for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
       try {
         return await tryGenerate(primaryModel, 'primary');
       } catch (error) {
         lastError = error as Error;
-        if (!isConnectionError(lastError)) {
+        const isAuthError = lastError.message.includes('401') || lastError.message.toLowerCase().includes('invalid') || lastError.message.toLowerCase().includes('authentication');
+        if (!isConnectionError(lastError) && !isRetryableHttpError(lastError) && !isAuthError) {
           break; // non-retryable error, don't retry
+        }
+        if (isAuthError) {
+          Logger.warn(`🔒 主模型认证失败(401)，跳过重试直接降级`, 'LLMProvider');
+          break; // 认证错误不重试，直接走降级
         }
         if (attempt < this.maxRetries) {
           const delay = this.baseRetryInterval * Math.pow(2, attempt);
@@ -655,10 +737,11 @@ ${content}
       }
     }
 
-    // Zhipu fallback
-    if (lastError && isConnectionError(lastError) && this.zhipuModel) {
+    // Zhipu/DeepSeek fallback (包括认证失败)
+    if (lastError && this.zhipuModel) {
       Logger.info('🚀 chatWithTools 降级到智谱模型', 'LLMProvider');
       this.localUnavailable = true;
+      this.localUnavailableSince = Date.now();
       try {
         return await tryGenerate(this.zhipuModel, 'zhipu');
       } catch (zhipuError) {
@@ -848,6 +931,7 @@ ${content}
   /** 永久标记本地模型不可用（供外部调用，如启动时健康检查失败） */
   markLocalUnavailable(reason?: string): void {
     this.localUnavailable = true;
+    this.localUnavailableSince = Date.now();
     this.serviceAvailable = false;
     Logger.warn(
       `🚫 本地模型已标记不可用${reason ? `: ${reason}` : ''}`,

@@ -24,6 +24,7 @@ module.exports = {
     '/tests/unit/memory/MemoryAssociationNetwork',
     '/tests/unit/desktop/OCRService',
     '/tests/unit/desktop/DesktopVisionEngine',
+    '/tests/unit/desktop/DesktopAgentLoop',
     '/tests/unit/core/MultiObjectiveTaskCoordinator',
     '/tests/unit/core/JiabaixingCore',
     '/tests/unit/multimodal/',

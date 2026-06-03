@@ -4,7 +4,7 @@
  * SQLite 轨迹持久化，完整记录 FC 循环执行轨迹
  */
 
-import Database from 'better-sqlite3';
+import { createDatabase } from '../../shared/DatabaseShim';
 import fs from 'fs';
 import path from 'path';
 import { Logger } from '../../utils/Logger';
@@ -51,6 +51,7 @@ export interface ContextSnapshotRecord {
   execution_id: string;
   phase:
     | 'planning'
+    | 'debating'
     | 'executing'
     | 'evaluating'
     | 'reporting'
@@ -64,6 +65,32 @@ export interface ContextSnapshotRecord {
   created_at: number;
 }
 
+export interface LLMOutputRecord {
+  id?: number;
+  execution_id: string;
+  step_index: number;
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  model_name?: string;
+  raw_output?: string;
+  duration_ms?: number;
+  created_at: number;
+}
+
+export interface EvaluationResultRecord {
+  id?: number;
+  execution_id: string;
+  step_index: number;
+  phase: string;
+  task_completion?: number;
+  data_groundedness?: number;
+  safety_risk_level?: string;
+  suggested_action?: string;
+  goal_progress?: number;
+  summary?: string;
+  created_at: number;
+}
+
 export interface ExecutionStats {
   total: number;
   successRate: number;
@@ -72,7 +99,7 @@ export interface ExecutionStats {
 }
 
 export class TrajectoryDatabase {
-  private db: Database.Database;
+  private db: any;
   private dbPath: string;
 
   constructor(dbPath: string) {
@@ -81,13 +108,20 @@ export class TrajectoryDatabase {
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
-    this.db = new Database(dbPath);
-    this.db.pragma('journal_mode = WAL');
-    this.initializeTables();
-    Logger.info(
-      `💾 TrajectoryDatabase 初始化: ${dbPath}`,
-      'TrajectoryDatabase'
-    );
+    this.db = createDatabase(dbPath);
+    if (this.db) {
+      try { this.db.pragma('journal_mode = WAL'); } catch {}
+      this.initializeTables();
+      Logger.info(
+        `💾 TrajectoryDatabase 初始化: ${dbPath}`,
+        'TrajectoryDatabase'
+      );
+    } else {
+      Logger.warn(
+        'TrajectoryDatabase: 降级为内存模式，轨迹数据不会被持久化',
+        'TrajectoryDatabase'
+      );
+    }
   }
 
   private initializeTables(): void {
@@ -143,6 +177,34 @@ export class TrajectoryDatabase {
         FOREIGN KEY (execution_id) REFERENCES executions(id) ON DELETE CASCADE
       );
 
+      CREATE TABLE IF NOT EXISTS llm_outputs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        execution_id TEXT NOT NULL,
+        step_index INTEGER NOT NULL,
+        prompt_tokens INTEGER,
+        completion_tokens INTEGER,
+        model_name TEXT,
+        raw_output TEXT,
+        duration_ms INTEGER,
+        created_at INTEGER NOT NULL,
+        FOREIGN KEY (execution_id) REFERENCES executions(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS evaluation_results (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        execution_id TEXT NOT NULL,
+        step_index INTEGER NOT NULL,
+        phase TEXT NOT NULL,
+        task_completion REAL,
+        data_groundedness REAL,
+        safety_risk_level TEXT,
+        suggested_action TEXT,
+        goal_progress REAL,
+        summary TEXT,
+        created_at INTEGER NOT NULL,
+        FOREIGN KEY (execution_id) REFERENCES executions(id) ON DELETE CASCADE
+      );
+
       CREATE INDEX IF NOT EXISTS idx_tool_invocations_execution_id ON tool_invocations(execution_id);
       CREATE INDEX IF NOT EXISTS idx_tool_invocations_tool_name ON tool_invocations(tool_name);
       CREATE INDEX IF NOT EXISTS idx_state_transitions_execution_id ON state_transitions(execution_id);
@@ -150,6 +212,9 @@ export class TrajectoryDatabase {
       CREATE INDEX IF NOT EXISTS idx_context_snapshots_phase ON context_snapshots(phase);
       CREATE INDEX IF NOT EXISTS idx_executions_status ON executions(status);
       CREATE INDEX IF NOT EXISTS idx_executions_created_at ON executions(created_at);
+      CREATE INDEX IF NOT EXISTS idx_llm_outputs_execution_id ON llm_outputs(execution_id);
+      CREATE INDEX IF NOT EXISTS idx_evaluation_results_execution_id ON evaluation_results(execution_id);
+      CREATE INDEX IF NOT EXISTS idx_evaluation_results_safety ON evaluation_results(safety_risk_level);
     `);
   }
 
@@ -252,6 +317,52 @@ export class TrajectoryDatabase {
     });
   }
 
+  recordLLMOutput(output: LLMOutputRecord): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO llm_outputs (
+        execution_id, step_index, prompt_tokens, completion_tokens,
+        model_name, raw_output, duration_ms, created_at
+      ) VALUES (
+        @execution_id, @step_index, @prompt_tokens, @completion_tokens,
+        @model_name, @raw_output, @duration_ms, @created_at
+      )
+    `);
+    stmt.run({
+      execution_id: output.execution_id,
+      step_index: output.step_index,
+      prompt_tokens: output.prompt_tokens || null,
+      completion_tokens: output.completion_tokens || null,
+      model_name: output.model_name || null,
+      raw_output: output.raw_output || null,
+      duration_ms: output.duration_ms || null,
+      created_at: output.created_at,
+    });
+  }
+
+  recordEvaluationResult(result: EvaluationResultRecord): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO evaluation_results (
+        execution_id, step_index, phase, task_completion, data_groundedness,
+        safety_risk_level, suggested_action, goal_progress, summary, created_at
+      ) VALUES (
+        @execution_id, @step_index, @phase, @task_completion, @data_groundedness,
+        @safety_risk_level, @suggested_action, @goal_progress, @summary, @created_at
+      )
+    `);
+    stmt.run({
+      execution_id: result.execution_id,
+      step_index: result.step_index,
+      phase: result.phase,
+      task_completion: result.task_completion || null,
+      data_groundedness: result.data_groundedness || null,
+      safety_risk_level: result.safety_risk_level || null,
+      suggested_action: result.suggested_action || null,
+      goal_progress: result.goal_progress || null,
+      summary: result.summary || null,
+      created_at: result.created_at,
+    });
+  }
+
   getContextSnapshots(
     executionId: string,
     phase?: string
@@ -266,6 +377,80 @@ export class TrajectoryDatabase {
       'SELECT * FROM context_snapshots WHERE execution_id = ? ORDER BY step_index, id'
     );
     return stmt.all(executionId) as ContextSnapshotRecord[];
+  }
+
+  getLLMOutputs(executionId: string): LLMOutputRecord[] {
+    const stmt = this.db.prepare(
+      'SELECT * FROM llm_outputs WHERE execution_id = ? ORDER BY step_index, id'
+    );
+    return stmt.all(executionId) as LLMOutputRecord[];
+  }
+
+  getEvaluationResults(
+    executionId: string,
+    safetyRiskLevel?: string
+  ): EvaluationResultRecord[] {
+    if (safetyRiskLevel) {
+      const stmt = this.db.prepare(
+        'SELECT * FROM evaluation_results WHERE execution_id = ? AND safety_risk_level = ? ORDER BY step_index, id'
+      );
+      return stmt.all(executionId, safetyRiskLevel) as EvaluationResultRecord[];
+    }
+    const stmt = this.db.prepare(
+      'SELECT * FROM evaluation_results WHERE execution_id = ? ORDER BY step_index, id'
+    );
+    return stmt.all(executionId) as EvaluationResultRecord[];
+  }
+
+  getFullTrace(executionId: string): {
+    execution: ExecutionRecord | null;
+    llmOutputs: LLMOutputRecord[];
+    toolInvocations: ToolInvocationRecord[];
+    evaluations: EvaluationResultRecord[];
+    stateTransitions: StateTransitionRecord[];
+    contextSnapshots: ContextSnapshotRecord[];
+  } {
+    return {
+      execution: this.getExecution(executionId),
+      llmOutputs: this.getLLMOutputs(executionId),
+      toolInvocations: this.getToolInvocations(executionId),
+      evaluations: this.getEvaluationResults(executionId),
+      stateTransitions: this.getStateTransitions(executionId),
+      contextSnapshots: this.getContextSnapshots(executionId),
+    };
+  }
+
+  getTracesByDateRange(startTime: number, endTime: number): ExecutionRecord[] {
+    const stmt = this.db.prepare(
+      'SELECT * FROM executions WHERE created_at >= ? AND created_at <= ? ORDER BY created_at DESC'
+    );
+    return stmt.all(startTime, endTime) as ExecutionRecord[];
+  }
+
+  getTracesBySafetyRisk(riskLevel: string): ExecutionRecord[] {
+    const stmt = this.db.prepare(`
+      SELECT DISTINCT e.* FROM executions e
+      INNER JOIN evaluation_results er ON e.id = er.execution_id
+      WHERE er.safety_risk_level = ?
+      ORDER BY e.created_at DESC
+    `);
+    return stmt.all(riskLevel) as ExecutionRecord[];
+  }
+
+  exportAuditLog(executionId: string): {
+    execution: ExecutionRecord | null;
+    llmOutputs: LLMOutputRecord[];
+    toolInvocations: ToolInvocationRecord[];
+    evaluations: EvaluationResultRecord[];
+    stateTransitions: StateTransitionRecord[];
+    contextSnapshots: ContextSnapshotRecord[];
+    exportedAt: number;
+  } {
+    const trace = this.getFullTrace(executionId);
+    return {
+      ...trace,
+      exportedAt: Date.now(),
+    };
   }
 
   getExecution(id: string): ExecutionRecord | null {

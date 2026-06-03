@@ -48,6 +48,11 @@ export interface SkillParameter {
 }
 
 /**
+ * 技能来源类型
+ */
+export type SkillSource = 'builtin' | 'user' | 'evolution' | 'hub';
+
+/**
  * 技能定义元数据
  */
 export interface SkillDefinition {
@@ -65,6 +70,16 @@ export interface SkillDefinition {
   author?: string;
   /** 标签 */
   tags?: string[];
+  /** 技能来源 */
+  source?: SkillSource;
+  /** 在技能市场的唯一ID */
+  hubId?: string;
+  /** 技能市场URL */
+  hubUrl?: string;
+  /** 许可证（默认 MIT） */
+  license?: string;
+  /** 兼容版本（如 ">=5.0"） */
+  compatibility?: string;
 }
 
 /**

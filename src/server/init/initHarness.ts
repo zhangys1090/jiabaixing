@@ -10,6 +10,7 @@ import type { JiabaixingCore } from '../../core/JiabaixingCore';
 import { Logger } from '../../utils/Logger';
 import { MCPToolBridge } from '../../harness/tools/registry/MCPToolBridge';
 import { AutonomousTrigger } from '../../harness/loop/AutonomousTrigger';
+import { SpeechSynthesizer } from '../../interaction/SpeechSynthesizer';
 import fs from 'fs';
 import path from 'path';
 
@@ -23,11 +24,21 @@ export async function initHarness(
   sceneRecognizer: SceneRecognizer
 ): Promise<HarnessInitResult> {
   let harness: import('../../harness/AgentHarness').AgentHarness | null = null;
+  let speechSynthesizer: SpeechSynthesizer | null = null;
+
   try {
     const llm = core.getLLM();
 
     const userProfile = new UserProfile();
     await userProfile.load();
+
+    speechSynthesizer = new SpeechSynthesizer();
+    try {
+      await speechSynthesizer.initialize();
+      Logger.info('🔊 SpeechSynthesizer 初始化成功', 'Bootstrap');
+    } catch (err) {
+      Logger.warn(`⚠️ SpeechSynthesizer 初始化失败: ${(err as Error).message}，TTS 工具将使用模拟模式`, 'Bootstrap');
+    }
 
     const constitutionPromptBuilder = core.getConstitutionPromptBuilder();
     const conversationHistoryManager = core.getConversationHistoryManager();
@@ -279,6 +290,18 @@ export async function initHarness(
             );
           }
         },
+        generateSkill: (params) => {
+          if (evolutionEngine?.generateSkill) {
+            return evolutionEngine.generateSkill(params);
+          }
+          return null;
+        },
+        nudgeKnowledgePersistence: (input, toolsUsed) => {
+          if (evolutionEngine?.nudgeKnowledgePersistence) {
+            return evolutionEngine.nudgeKnowledgePersistence(input, toolsUsed);
+          }
+          return null;
+        },
       },
       personaCore: core.getPersonaCore(),
       skillRegistry: SkillRegistry.getInstance(),
@@ -332,6 +355,10 @@ export async function initHarness(
         },
       },
       toolDeps: {
+        core: {
+          refreshProjectContext: () => core.refreshProjectContext(),
+          getLoadedContextFiles: () => core.getLoadedContextFiles(),
+        },
         retrieveRelevant: async (query) => {
           const results = await memoryEngine.preciseHybridRetrieval(
             query.query,
@@ -1044,6 +1071,7 @@ export async function initHarness(
             });
           },
         },
+        speechSynthesizer: speechSynthesizer || undefined,
       } satisfies HarnessToolDeps,
     };
 
@@ -1079,7 +1107,8 @@ export async function initHarness(
 
     Logger.info('Harness 框架初始化完成', 'Bootstrap');
   } catch (err) {
-    Logger.warn(`Harness 初始化失败: ${(err as Error).message}`, 'Bootstrap');
+    Logger.error(`Harness 初始化失败: ${(err as Error).message}`, err as Error, 'Bootstrap');
+    Logger.error(`Harness 初始化失败堆栈: ${(err as Error).stack}`, err as Error, 'Bootstrap');
   }
 
   return { harness };

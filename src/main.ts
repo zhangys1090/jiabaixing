@@ -48,6 +48,7 @@ import {
 
 import { registerCoreRoutes } from './server/routes/coreRoutes';
 import { registerDebugRoutes } from './server/routes/debugRoutes';
+import { registerDocsRoutes } from './server/routes/docsRoutes';
 import { registerEvolutionRoutes } from './server/routes/evolutionRoutes';
 import { registerMemoryRoutes } from './server/routes/memoryRoutes';
 import { registerPerformanceRoutes } from './server/routes/performanceRoutes';
@@ -55,6 +56,7 @@ import { registerSecurityRoutes } from './server/routes/securityRoutes';
 import { registerSkillRoutes } from './server/routes/skillRoutes';
 import { registerTraeRoutes } from './server/routes/traeRoutes';
 import { registerMCPRoutes } from './server/routes/mcpRoutes';
+import { registerContextManageRoutes } from './server/routes/contextManageRoutes';
 
 import { bootstrap } from './server/bootstrap';
 import { setupEventBus } from './server/eventBusSetup';
@@ -83,6 +85,9 @@ function setupRoutes(broadcast: (data: Record<string, unknown>) => void): void {
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ extended: true }));
 
+  // 文档路由（优先，提供llms.txt等）
+  registerDocsRoutes(app, process.cwd());
+
   app.use('/api/integration', integrationRoutes);
   app.use('/api/automation', automationRoutes);
   app.use('/api/tasks', taskRoutes);
@@ -98,6 +103,7 @@ function setupRoutes(broadcast: (data: Record<string, unknown>) => void): void {
   registerSkillRoutes(app, core);
   registerTraeRoutes(app, core);
   registerMCPRoutes(app);
+  registerContextManageRoutes(app, core);
   registerDebugRoutes(app, core, broadcast);
 }
 
@@ -157,12 +163,15 @@ function listenServer(): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     server!
       .listen(PORT, () => {
+        const ipcPath = process.env.IPC_PATH
+          || (process.platform === 'win32' ? '\\\\.\\pipe\\jiabaixing' : '/tmp/jiabaixing.sock');
         console.log(
           '  ==========================================================='
         );
         console.log('  [READY] jiabaixing\n');
         console.log(`  API:       http://localhost:${PORT}`);
         console.log(`  WebSocket: ws://localhost:${PORT}`);
+        console.log(`  IPC:       ${ipcPath}`);
         console.log(`  Model:     ${process.env.LLM_MODEL || 'deepseek-chat'}`);
         console.log(
           `  Auto Opt:  ${process.env.ENABLE_AUTO_OPTIMIZE !== 'false' ? 'ON' : 'OFF'}`

@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+import { createDatabase, nativeAvailable } from './DatabaseShim';
 import { EventEmitter } from 'events';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -7,6 +7,31 @@ import { type EventMap } from './eventTypes';
 
 export type EventName = keyof EventMap;
 export type EventPayload<T extends EventName> = EventMap[T];
+
+/** Agent 描述信息 */
+export interface AgentProfile {
+  id: string;
+  name: string;
+  description: string;
+  capabilities: string[];
+  status: 'idle' | 'busy' | 'offline';
+  lastHeartbeat: number;
+  metadata?: Record<string, unknown>;
+}
+
+/** Agent 间通信消息 */
+export interface AgentMessage {
+  id: string;
+  from: string;
+  to?: string;
+  topic: string;
+  type: 'request' | 'response' | 'notification' | 'broadcast';
+  priority: 'low' | 'medium' | 'high' | 'urgent';
+  payload: unknown;
+  replyTo?: string;
+  ttl?: number;
+  timestamp: number;
+}
 
 interface PersistedEvent {
   id: number;
@@ -38,7 +63,8 @@ const DEFAULT_DB_PATH = path.join(process.cwd(), 'data', 'event_bus.db');
 class JiabaixingEventBus extends EventEmitter {
   private static instance: JiabaixingEventBus | null = null;
 
-  private db: Database.Database | null = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private db: any | null = null;
   private persistentEvents: Set<string>;
   private maxEventAge: number;
   private sessionId: string | null = null;
@@ -55,6 +81,49 @@ class JiabaixingEventBus extends EventEmitter {
     timestamp: number;
   }> = [];
   private readonly MAX_TRACE_HISTORY = 1000;
+
+  // ==================== Harness Engineering: 全链路可观测性 ====================
+
+  /** Token 消耗追踪 */
+  private tokenUsage: Array<{
+    traceId: string;
+    model: string;
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+    timestamp: number;
+  }> = [];
+  private readonly MAX_TOKEN_RECORDS = 5000;
+
+  /** 工具调用追踪 */
+  private toolCallRecords: Array<{
+    traceId: string;
+    toolName: string;
+    success: boolean;
+    duration: number;
+    tokenCost?: number;
+    timestamp: number;
+  }> = [];
+  private readonly MAX_TOOL_CALL_RECORDS = 5000;
+
+  /** 全链路追踪：从用户输入到最终响应 */
+  private fullTraces: Map<string, {
+    traceId: string;
+    startTime: number;
+    endTime?: number;
+    phases: Array<{
+      phase: string;
+      startTime: number;
+      endTime?: number;
+      duration?: number;
+      success?: boolean;
+      metadata?: Record<string, unknown>;
+    }>;
+    totalTokens: number;
+    totalToolCalls: number;
+    status: 'running' | 'completed' | 'failed';
+  }> = new Map();
+  private readonly MAX_FULL_TRACES = 100;
 
   private constructor(options?: EventBusOptions) {
     super();
@@ -89,11 +158,12 @@ class JiabaixingEventBus extends EventEmitter {
         fs.mkdirSync(dbDir, { recursive: true });
       }
 
-      this.db = new Database(dbPath);
-      this.db.pragma('journal_mode = WAL');
-      this.db.pragma('synchronous = NORMAL');
+      this.db = createDatabase(dbPath) as any;
+      if (this.db) {
+        try { this.db.pragma('journal_mode = WAL'); } catch {}
+        try { this.db.pragma('synchronous = NORMAL'); } catch {}
 
-      this.db.exec(`
+        this.db.exec(`
         CREATE TABLE IF NOT EXISTS events (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           event_name TEXT NOT NULL,
@@ -107,6 +177,7 @@ class JiabaixingEventBus extends EventEmitter {
         CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
         CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id);
       `);
+      }
     } catch (error) {
       Logger.error('EventBus数据库初始化失败:', error as Error, 'EventBus');
       this.db = null;
@@ -515,6 +586,483 @@ class JiabaixingEventBus extends EventEmitter {
   clearTraceHistory(): void {
     this.traceHistory = [];
     this.activeTraces.clear();
+  }
+
+  // ==================== Harness Engineering: 全链路可观测性方法 ====================
+
+  /**
+   * 记录 Token 消耗
+   * @param traceId - 追踪ID
+   * @param model - 模型名称
+   * @param promptTokens - 输入 Token 数
+   * @param completionTokens - 输出 Token 数
+   */
+  recordTokenUsage(
+    traceId: string,
+    model: string,
+    promptTokens: number,
+    completionTokens: number
+  ): void {
+    this.tokenUsage.push({
+      traceId,
+      model,
+      promptTokens,
+      completionTokens,
+      totalTokens: promptTokens + completionTokens,
+      timestamp: Date.now(),
+    });
+
+    if (this.tokenUsage.length > this.MAX_TOKEN_RECORDS) {
+      this.tokenUsage = this.tokenUsage.slice(-this.MAX_TOKEN_RECORDS);
+    }
+
+    // 更新全链路追踪的 Token 统计
+    const fullTrace = this.fullTraces.get(traceId);
+    if (fullTrace) {
+      fullTrace.totalTokens += promptTokens + completionTokens;
+    }
+  }
+
+  /**
+   * 记录工具调用
+   * @param traceId - 追踪ID
+   * @param toolName - 工具名称
+   * @param success - 是否成功
+   * @param duration - 执行时长(ms)
+   */
+  recordToolCall(
+    traceId: string,
+    toolName: string,
+    success: boolean,
+    duration: number
+  ): void {
+    this.toolCallRecords.push({
+      traceId,
+      toolName,
+      success,
+      duration,
+      timestamp: Date.now(),
+    });
+
+    if (this.toolCallRecords.length > this.MAX_TOOL_CALL_RECORDS) {
+      this.toolCallRecords = this.toolCallRecords.slice(-this.MAX_TOOL_CALL_RECORDS);
+    }
+
+    // 更新全链路追踪的工具调用统计
+    const fullTrace = this.fullTraces.get(traceId);
+    if (fullTrace) {
+      fullTrace.totalToolCalls++;
+    }
+  }
+
+  /**
+   * 开始全链路追踪
+   * @param traceId - 追踪ID
+   */
+  startFullTrace(traceId: string): void {
+    if (this.fullTraces.size >= this.MAX_FULL_TRACES) {
+      // 移除最早的已完成追踪
+      const oldestKey = this.fullTraces.keys().next().value;
+      if (oldestKey) this.fullTraces.delete(oldestKey);
+    }
+
+    this.fullTraces.set(traceId, {
+      traceId,
+      startTime: Date.now(),
+      phases: [],
+      totalTokens: 0,
+      totalToolCalls: 0,
+      status: 'running',
+    });
+  }
+
+  /**
+   * 添加全链路追踪阶段
+   * @param traceId - 追踪ID
+   * @param phase - 阶段名称（如 planning, executing, evaluating, reporting）
+   * @param metadata - 阶段元数据
+   */
+  addTracePhase(
+    traceId: string,
+    phase: string,
+    metadata?: Record<string, unknown>
+  ): void {
+    const fullTrace = this.fullTraces.get(traceId);
+    if (!fullTrace) return;
+
+    fullTrace.phases.push({
+      phase,
+      startTime: Date.now(),
+      metadata,
+    });
+  }
+
+  /**
+   * 完成全链路追踪阶段
+   * @param traceId - 追踪ID
+   * @param phase - 阶段名称
+   * @param success - 是否成功
+   */
+  completeTracePhase(
+    traceId: string,
+    phase: string,
+    success: boolean
+  ): void {
+    const fullTrace = this.fullTraces.get(traceId);
+    if (!fullTrace) return;
+
+    const phaseRecord = fullTrace.phases.find(
+      (p) => p.phase === phase && !p.endTime
+    );
+    if (phaseRecord) {
+      phaseRecord.endTime = Date.now();
+      phaseRecord.duration = phaseRecord.endTime - phaseRecord.startTime;
+      phaseRecord.success = success;
+    }
+  }
+
+  /**
+   * 完成全链路追踪
+   * @param traceId - 追踪ID
+   * @param status - 最终状态
+   */
+  completeFullTrace(
+    traceId: string,
+    status: 'completed' | 'failed'
+  ): void {
+    const fullTrace = this.fullTraces.get(traceId);
+    if (!fullTrace) return;
+
+    fullTrace.endTime = Date.now();
+    fullTrace.status = status;
+  }
+
+  /**
+   * 获取 Token 消耗统计
+   * @param hours - 统计最近几小时的数据
+   */
+  getTokenUsageStats(hours: number = 24): {
+    totalTokens: number;
+    totalPromptTokens: number;
+    totalCompletionTokens: number;
+    byModel: Record<string, { tokens: number; calls: number; avgTokens: number }>;
+    byHour: Array<{ hour: string; tokens: number }>;
+  } {
+    const cutoff = Date.now() - hours * 3600 * 1000;
+    const recent = this.tokenUsage.filter((r) => r.timestamp >= cutoff);
+
+    const totalTokens = recent.reduce((sum, r) => sum + r.totalTokens, 0);
+    const totalPromptTokens = recent.reduce((sum, r) => sum + r.promptTokens, 0);
+    const totalCompletionTokens = recent.reduce((sum, r) => sum + r.completionTokens, 0);
+
+    // 按模型分组
+    const byModel: Record<string, { tokens: number; calls: number; avgTokens: number }> = {};
+    for (const record of recent) {
+      if (!byModel[record.model]) {
+        byModel[record.model] = { tokens: 0, calls: 0, avgTokens: 0 };
+      }
+      byModel[record.model].tokens += record.totalTokens;
+      byModel[record.model].calls++;
+    }
+    for (const model of Object.keys(byModel)) {
+      byModel[model].avgTokens = byModel[model].tokens / byModel[model].calls;
+    }
+
+    // 按小时分组
+    const byHourMap = new Map<string, number>();
+    for (const record of recent) {
+      const hour = new Date(record.timestamp).toISOString().substring(0, 13);
+      byHourMap.set(hour, (byHourMap.get(hour) || 0) + record.totalTokens);
+    }
+    const byHour = Array.from(byHourMap.entries())
+      .map(([hour, tokens]) => ({ hour, tokens }))
+      .sort((a, b) => a.hour.localeCompare(b.hour));
+
+    return { totalTokens, totalPromptTokens, totalCompletionTokens, byModel, byHour };
+  }
+
+  /**
+   * 获取工具调用统计
+   * @param hours - 统计最近几小时的数据
+   */
+  getToolCallStats(hours: number = 24): {
+    totalCalls: number;
+    successRate: number;
+    avgDuration: number;
+    byTool: Record<string, { calls: number; successRate: number; avgDuration: number }>;
+    slowestTools: Array<{ toolName: string; avgDuration: number }>;
+    unreliableTools: Array<{ toolName: string; successRate: number }>;
+  } {
+    const cutoff = Date.now() - hours * 3600 * 1000;
+    const recent = this.toolCallRecords.filter((r) => r.timestamp >= cutoff);
+
+    const totalCalls = recent.length;
+    const successCount = recent.filter((r) => r.success).length;
+    const totalDuration = recent.reduce((sum, r) => sum + r.duration, 0);
+
+    // 按工具分组
+    const byToolMap = new Map<string, { calls: number; successes: number; totalDuration: number }>();
+    for (const record of recent) {
+      const existing = byToolMap.get(record.toolName) || { calls: 0, successes: 0, totalDuration: 0 };
+      existing.calls++;
+      if (record.success) existing.successes++;
+      existing.totalDuration += record.duration;
+      byToolMap.set(record.toolName, existing);
+    }
+
+    const byTool: Record<string, { calls: number; successRate: number; avgDuration: number }> = {};
+    for (const [toolName, stats] of byToolMap) {
+      byTool[toolName] = {
+        calls: stats.calls,
+        successRate: stats.calls > 0 ? stats.successes / stats.calls : 0,
+        avgDuration: stats.calls > 0 ? stats.totalDuration / stats.calls : 0,
+      };
+    }
+
+    // 最慢的工具
+    const slowestTools = Object.entries(byTool)
+      .sort((a, b) => b[1].avgDuration - a[1].avgDuration)
+      .slice(0, 5)
+      .map(([toolName, stats]) => ({ toolName, avgDuration: stats.avgDuration }));
+
+    // 最不可靠的工具
+    const unreliableTools = Object.entries(byTool)
+      .filter(([, stats]) => stats.calls >= 3 && stats.successRate < 0.9)
+      .sort((a, b) => a[1].successRate - b[1].successRate)
+      .map(([toolName, stats]) => ({ toolName, successRate: stats.successRate }));
+
+    return {
+      totalCalls,
+      successRate: totalCalls > 0 ? successCount / totalCalls : 0,
+      avgDuration: totalCalls > 0 ? totalDuration / totalCalls : 0,
+      byTool,
+      slowestTools,
+      unreliableTools,
+    };
+  }
+
+  /**
+   * 获取全链路追踪详情
+   * @param traceId - 追踪ID
+   */
+  getFullTrace(traceId: string): unknown {
+    return this.fullTraces.get(traceId) || null;
+  }
+
+  /**
+   * 获取所有全链路追踪列表
+   */
+  getFullTraces(): unknown[] {
+    return Array.from(this.fullTraces.values());
+  }
+
+  // ==================== Harness Engineering: Agent 间通信 ====================
+
+  /**
+   * Agent 通信层 — 基于发布-订阅模式
+   * 借鉴 EigenFlux：Agent 向网络广播信息，其他 Agent 按画像订阅
+   *
+   * 设计原则：
+   * - 每个 Agent 有一个 profile（能力描述）
+   * - Agent 可以广播消息（不需要知道接收者）
+   * - Agent 可以按 topic 订阅感兴趣的消息
+   * - 消息带有元数据（发送者、类型、优先级、过期时间）
+   */
+
+  /** Agent 注册信息 */
+  private agentRegistry: Map<string, AgentProfile> = new Map();
+
+  /** Agent 订阅关系：topic → Set<agentId> */
+  private agentSubscriptions: Map<string, Set<string>> = new Map();
+
+  /** Agent 消息队列：agentId → AgentMessage[] */
+  private agentMailboxes: Map<string, AgentMessage[]> = new Map();
+
+  /** 最大邮箱大小 */
+  private readonly MAX_MAILBOX_SIZE = 100;
+
+  /** 消息过期时间（默认5分钟） */
+  private readonly MESSAGE_TTL = 5 * 60 * 1000;
+
+  /**
+   * 注册 Agent
+   * @param profile - Agent 描述信息
+   */
+  registerAgent(profile: AgentProfile): void {
+    this.agentRegistry.set(profile.id, profile);
+
+    // 根据 capabilities 自动订阅相关 topic
+    for (const capability of profile.capabilities) {
+      const topic = this.capabilityToTopic(capability);
+      if (!this.agentSubscriptions.has(topic)) {
+        this.agentSubscriptions.set(topic, new Set());
+      }
+      this.agentSubscriptions.get(topic)!.add(profile.id);
+    }
+
+    // 初始化邮箱
+    if (!this.agentMailboxes.has(profile.id)) {
+      this.agentMailboxes.set(profile.id, []);
+    }
+  }
+
+  /**
+   * 注销 Agent
+   * @param agentId - Agent ID
+   */
+  unregisterAgent(agentId: string): void {
+    this.agentRegistry.delete(agentId);
+    this.agentMailboxes.delete(agentId);
+
+    // 从所有订阅中移除
+    for (const subscribers of this.agentSubscriptions.values()) {
+      subscribers.delete(agentId);
+    }
+  }
+
+  /**
+   * Agent 广播消息
+   * @param message - 消息内容
+   */
+  broadcastAgentMessage(message: Omit<AgentMessage, 'id' | 'timestamp'>): string {
+    const fullMessage: AgentMessage = {
+      id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
+      timestamp: Date.now(),
+      ...message,
+    };
+
+    // 投递到订阅了相关 topic 的 Agent 邮箱
+    const topic = message.topic;
+    const subscribers = this.agentSubscriptions.get(topic);
+
+    if (subscribers) {
+      for (const agentId of subscribers) {
+        if (agentId === message.from) continue; // 不投递给自己
+
+        const mailbox = this.agentMailboxes.get(agentId);
+        if (mailbox) {
+          mailbox.push(fullMessage);
+
+          // 邮箱大小限制
+          if (mailbox.length > this.MAX_MAILBOX_SIZE) {
+            mailbox.shift();
+          }
+        }
+      }
+    }
+
+    // 同时通过 EventEmitter 原生事件系统广播（绕过 EventMap 类型限制）
+    super.emit.call(this, `agent:message:${topic}`, {
+      messageId: fullMessage.id,
+      from: message.from,
+      topic,
+      type: message.type,
+      priority: message.priority,
+    });
+
+    return fullMessage.id;
+  }
+
+  /**
+   * Agent 获取未读消息
+   * @param agentId - Agent ID
+   * @param topic - 可选，只获取特定 topic 的消息
+   */
+  getAgentMessages(agentId: string, topic?: string): AgentMessage[] {
+    const mailbox = this.agentMailboxes.get(agentId) || [];
+
+    // 过滤过期消息
+    const now = Date.now();
+    const validMessages = mailbox.filter(
+      (msg) => now - msg.timestamp < (msg.ttl || this.MESSAGE_TTL)
+    );
+
+    // 更新邮箱（移除过期消息）
+    this.agentMailboxes.set(agentId, validMessages);
+
+    if (topic) {
+      return validMessages.filter((msg) => msg.topic === topic);
+    }
+    return validMessages;
+  }
+
+  /**
+   * Agent 消费消息（获取后从邮箱移除）
+   * @param agentId - Agent ID
+   * @param messageId - 消息 ID
+   */
+  consumeAgentMessage(agentId: string, messageId: string): AgentMessage | null {
+    const mailbox = this.agentMailboxes.get(agentId);
+    if (!mailbox) return null;
+
+    const index = mailbox.findIndex((msg) => msg.id === messageId);
+    if (index === -1) return null;
+
+    const [message] = mailbox.splice(index, 1);
+    return message;
+  }
+
+  /**
+   * Agent 订阅特定 topic
+   * @param agentId - Agent ID
+   * @param topic - 订阅的 topic
+   */
+  subscribeAgentToTopic(agentId: string, topic: string): void {
+    if (!this.agentSubscriptions.has(topic)) {
+      this.agentSubscriptions.set(topic, new Set());
+    }
+    this.agentSubscriptions.get(topic)!.add(agentId);
+  }
+
+  /**
+   * Agent 取消订阅
+   * @param agentId - Agent ID
+   * @param topic - 取消订阅的 topic
+   */
+  unsubscribeAgentFromTopic(agentId: string, topic: string): void {
+    const subscribers = this.agentSubscriptions.get(topic);
+    if (subscribers) {
+      subscribers.delete(agentId);
+    }
+  }
+
+  /**
+   * 获取已注册的 Agent 列表
+   */
+  getRegisteredAgents(): AgentProfile[] {
+    return Array.from(this.agentRegistry.values());
+  }
+
+  /**
+   * 根据 capability 查找可用的 Agent
+   * @param capability - 需要的能力
+   */
+  findAgentsByCapability(capability: string): AgentProfile[] {
+    return Array.from(this.agentRegistry.values()).filter(
+      (profile) => profile.capabilities.includes(capability)
+    );
+  }
+
+  /**
+   * 将 capability 映射为 topic
+   */
+  private capabilityToTopic(capability: string): string {
+    const topicMap: Record<string, string> = {
+      'code_generation': 'code',
+      'code_review': 'code',
+      'code_analysis': 'code',
+      'file_operations': 'file',
+      'web_search': 'network',
+      'web_fetch': 'network',
+      'memory_operations': 'memory',
+      'shell_execution': 'system',
+      'desktop_automation': 'desktop',
+      'voice_interaction': 'voice',
+      'task_planning': 'planning',
+      'quality_evaluation': 'evaluation',
+    };
+
+    return topicMap[capability] || capability;
   }
 
   destroy(): void {

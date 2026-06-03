@@ -29,7 +29,7 @@ Gateway → JiabaixingCore → AgentHarness → LoopController
 |------|-----|------|
 | TypeScript 编译 | 0 errors | `npx tsc --noEmit` |
 | 测试套件 | 52/52 通过 (100%) | `npx jest` |
-| 测试用例 | 855/857 通过 (99.8%) | `npx jest` |
+| 测试用例 | 872/874 通过 (99.8%) | `npx jest` |
 | 注册工具 | 33 个 (8 类) | ToolRegistry |
 | Eval 通过率 | 83.3% (25/30) | 最近评估: 2026-05-26 |
 | 轨迹数据库 | 110 条执行记录 | trajectory.db |
@@ -40,25 +40,25 @@ Gateway → JiabaixingCore → AgentHarness → LoopController
 
 ## 二、快速开始
 
-### 环境
+### 一键安装
 
-- Node.js >= 20.x, npm >= 9.x
-- LLM 服务 (OpenAI 兼容接口, 推荐 DeepSeek)
+```bash
+bash install.sh     # 自动完成：检查环境 → 安装依赖 → 配置 LLM → 验证
+```
 
 ### 启动
 
 ```bash
-cp .env.example .env    # 编辑 DEEPSEEK_API_KEY
-npm install
-npm start               # 后端 :3111 + 前端 :3000
+./run.sh            # 一键启动（后端 + 前端）
+# 或:  npm run start
 ```
 
 ### 验证
 
 ```bash
 curl http://localhost:3111/api/health
-npm run eval            # 运行 30 条评估用例
-npm test                # 855 个测试
+npm run setup:test  # 测试所有 LLM 连接
+npm test            # 872 个测试
 ```
 
 ---
@@ -188,7 +188,9 @@ React 18 + TypeScript + Zustand + WebSocket。14 个面板: ChatInterface, Deskt
 
 ### 4.12 安全模块
 
-8 个模块: NetworkGuard, DataSovereigntyPipeline, AuthenticationManager (JWT), SecurityManager, SecurityPolicyEngine, SecurityGuard, EncryptionManager, AuditLogger。
+4 个核心模块 + 8 个原子模块: **SecurityFacade** (SecurityManager + AuthenticationManager + EncryptionManager), **SecurityCore** (SecurityPolicyEngine + SecurityGuard + NetworkGuard), **AuditService** (AuditLogger + DataSovereigntyPipeline), **types.ts**。原有 8 个原子模块仍可独立导入（向后兼容 re-export）。
+
+**动态策略** (2026-06-01): `AutonomyPermissionGuard.dynamicPolicyAdjust` 基于任务意图、风险容忍度和历史成功率动态调整工具白名单，解决静态白名单对 LLM 自主性的障碍。
 
 **脱敏修复** (2026-05-30): `VerificationService.checkOutputSafety` 之前使用 `$& [已脱敏]` (原文仍在), 现在用 `$1[已脱敏]` (真正替换)。
 
@@ -297,7 +299,7 @@ jiabaixing/
 │   │   └── orchestration/ 多 Agent 编排
 │   ├── evolution/         进化引擎 V2
 │   ├── memory/            三层记忆 (SQLite/ChromaDB)
-│   ├── security/          8 安全模块
+│   ├── security/          4 核心模块 + 8 原子模块 (SecurityFacade/SecurityCore/AuditService/types)
 │   ├── models/            LLMProvider (DeepSeek + 智谱降级)
 │   ├── persona/           人格系统
 │   ├── mcp/               MCP 服务管理
@@ -308,7 +310,7 @@ jiabaixing/
 │   ├── eval/              Eval 用例 + 报告
 │   ├── trajectory/        trajectory.db
 │   └── evolution/         metrics.db
-├── tests/                  855 tests, 52 suites
+├── tests/                  881 tests, 53 suites
 ├── scripts/runEval.ts      Eval CLI
 ├── package.json
 ├── tsconfig.json
@@ -329,7 +331,7 @@ jiabaixing/
 | Web | Express 4.x + ws 8.x |
 | 前端 | React 18 + TypeScript + Zustand |
 | 数据库 | better-sqlite3 + ChromaDB |
-| LLM | OpenAI 兼容 (DeepSeek V4 主, 智谱降级) |
+| LLM | OpenAI 兼容 (ProviderManager 管理, 支持多模型+路由+降级) |
 | 桌面 | @nut-tree/nut-js |
 | 安全 | bcrypt + jsonwebtoken + helmet |
 | 日志 | winston + 自定义 Logger |
@@ -338,17 +340,23 @@ jiabaixing/
 
 ---
 
-## 十、配置
+## 配置
 
-### 环境变量
+### Provider 管理（v5.1）
+
+使用 `npm run setup` 向导管理 LLM 模型：
 
 ```bash
-DEEPSEEK_API_KEY=sk-xxx           # DeepSeek API 密钥 (主模型)
-LLM_MODEL=deepseek-chat           # 模型名称
-LLM_SERVER_BASE_URL=http://127.0.0.1:8001/v1  # 本地降级模型
-API_PORT=3111                      # 后端端口
-ENABLE_AUTO_OPTIMIZE=true          # V2 自进化开关
+npm run setup            # 交互式配置向导
+npm run setup:list       # 查看当前配置
+npm run setup:test       # 测试所有 Provider 连接
 ```
+
+支持多 Provider 并行，自动降级和熔断感知。配置存储在 `data/providers.json`。
+
+### 环境变量（兼容）
+
+`.env` 文件仍然生效，启动时会自动导入到 ProviderManager：
 
 ### Harness 开关
 
@@ -376,15 +384,15 @@ const harness = new AgentHarness({
 3. 在 `registerHarnessTools.ts` 注册
 4. `npm test` 验证
 
-### 添加新平台
+### 测试
 
-1. 继承 `BaseIntegrationAdapter`
-2. 实现 connect/disconnect/sendMessage/handleWebhook
-3. `IntegrationManager` 注册
-
-### Commit
-
-`feat:` / `fix:` / `refactor:` / `test:` / `docs:` / `chore:`
+```bash
+npm test                    # 全量: 874 tests, 52 suites
+npm run test:coverage       # 覆盖率
+npm run eval                # Eval 评估: 30 条用例
+npm run build:fast          # 快速编译
+npm run setup               # Provider 配置向导
+```
 
 ---
 
@@ -392,18 +400,16 @@ const harness = new AgentHarness({
 
 ### 功能局限
 
-| 局限 | 影响 | 状态 |
-|------|------|------|
-| Evaluator 与执行耦合 | 非独立评估 Agent | 🟡 部分修复 (IndependentEvaluationService 已集成) |
-| 回溯重试最多 1 次 | 复杂任务可能放弃过早 | 🟡 LoopController 支持 2 次 |
-| Context 无缩减机制 | 长对话 token 累积 | 🔴 未实现 |
-| Golden Eval 覆盖不足 | 30 用例, 多步推理仅 3 条 | 🟡 可扩展 |
-| 前端面板 mock 化 | DesktopPanel/EvolutionPanel/SecurityPanel 部分假数据 | 🟡 |
+| 局限 | 状态 |
+|------|------|
+| Golden Eval 覆盖不足 (30 用例) | 🟡 可扩展 |
+| 前端面板部分 mock 数据 | 🟡 |
+| ModelRouter 还未接入 Harness 层 | 🟡 |
+| CLI 启动慢 (ts-node 5-10s) | 🟡 |
+| 桌面自动化依赖 Windows powershell | 🟡 |
 
 ### 性能局限
 
-| 局限 | 数据 |
-|------|------|
-| 单条消息 LLM 调用 | 2+N (Planner + Evaluator + N 轮 Executor) |
-| 质量评分 | friendly 对短回复偏严 (< 50 字 = 0.3) |
-| read_file 成功率 | 0% (3 calls) — 需排查 |
+| 局限 | 数据 | 状态 |
+|------|------|------|
+| 单条消息 LLM 调用 | 2+N (Planner + Evaluator + N 轮 Executor) | 🟡 简单任务已有快速路径 |

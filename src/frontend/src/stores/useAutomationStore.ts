@@ -13,6 +13,7 @@ interface AutomationState {
   setTriggers: (triggers: AutomationTrigger[]) => void;
   setPatterns: (patterns: AutomationPattern) => void;
   toggleTask: (taskId: string) => void;
+  createTask: (task: unknown) => Promise<void>;
   fetchTasks: () => Promise<void>;
   fetchTriggers: () => Promise<void>;
   fetchPatterns: () => Promise<void>;
@@ -41,6 +42,22 @@ export const useAutomationStore = create<AutomationState>((set, get) => ({
     set((state) => ({
       tasks: state.tasks.map((t) => (t.id === taskId ? { ...t, enabled: !t.enabled } : t)),
     })),
+
+  createTask: async (task: unknown) => {
+    set({ loading: true });
+    try {
+      const result = await apiService.createAutomationTask(task);
+      if (result.success) {
+        console.log('[AutomationStore] 任务创建成功');
+        await get().fetchTasks();
+      } else {
+        set({ error: result.error || '创建任务失败', loading: false });
+      }
+    } catch (error) {
+      console.error('[AutomationStore] createTask 失败:', error);
+      set({ error: (error as Error).message, loading: false });
+    }
+  },
 
   fetchTasks: async () => {
     set({ loading: true });

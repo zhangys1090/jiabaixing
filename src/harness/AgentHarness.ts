@@ -6,7 +6,7 @@
 
 import { Logger } from '../utils/Logger';
 import path from 'path';
-import { LoopController } from './loop/LoopController';
+import { LoopController, DefaultDebater } from './loop/LoopController';
 import { Planner } from './loop/Planner';
 import { Executor } from './loop/Executor';
 import { Evaluator } from './loop/Evaluator';
@@ -32,11 +32,13 @@ import {
   ChatMessage,
   LifecycleEvent,
   HookContext,
-  LoopState,
 } from './types';
 import type { HarnessConfig } from './types';
 import { type HarnessDeps } from './deps';
 import { EventBus } from '../shared/EventBus';
+import { OrchestratorAgent } from './orchestration/OrchestratorAgent';
+import { AgentRegistry } from './orchestration/AgentRegistry';
+import { skillUsageTracker } from '../evolution/SkillUsageTracker';
 
 export { type HarnessDeps } from './deps';
 
@@ -109,6 +111,9 @@ export class AgentHarness {
     null;
   // 沙箱执行器（安全隔离）
   private sandboxExecutor: SandboxExecutor | null = null;
+  // 多Agent编排组件
+  private agentRegistry: AgentRegistry | null = null;
+  private orchestratorAgent: OrchestratorAgent | null = null;
 
   constructor(config?: Partial<HarnessConfig>) {
     const envConfig = getEnvConfig();
@@ -134,46 +139,150 @@ export class AgentHarness {
       Logger.warn('⚠️ 未注入依赖，部分功能不可用', 'AgentHarness');
     }
 
-    // Phase 1: 工具层初始化
-    if (this.config.useHarnessTools) {
-      const result = registerHarnessTools(
-        this.deps?.toolDeps ?? ({} as HarnessToolDeps)
-      );
-      this.toolRegistry = result.toolRegistry;
-      this.schemaValidator = result.schemaValidator;
-      this.permissionGuard = result.permissionGuard;
-
-      if (this.deps?.skillRegistry) {
-        syncToLegacySkillRegistry(
-          this.toolRegistry,
-          this.deps.skillRegistry as never
-        );
+    // 分步诊断
+    const stepLog = (step: string, ok: boolean, detail?: string) => {
+      if (ok) {
         Logger.info(
-          '  🔄 双写兼容: 已同步到旧版 SkillRegistry',
+          `  ✅ ${step}${detail ? ': ' + detail : ''}`,
+          'AgentHarness'
+        );
+      } else {
+        Logger.warn(
+          `  ❌ ${step}${detail ? ': ' + detail : ''}`,
           'AgentHarness'
         );
       }
+    };
 
-      Logger.info(
-        `  🔧 工具层: 启用 (${result.registeredCount} 个工具)`,
+    // Phase 1: 工具层初始化
+    try {
+      if (this.config.useHarnessTools) {
+        const result = registerHarnessTools(
+          this.deps?.toolDeps ?? ({} as HarnessToolDeps)
+        );
+        this.toolRegistry = result.toolRegistry;
+        this.schemaValidator = result.schemaValidator;
+        this.permissionGuard = result.permissionGuard;
+
+        if (this.deps?.skillRegistry) {
+          syncToLegacySkillRegistry(
+            this.toolRegistry,
+            this.deps.skillRegistry as never
+          );
+          Logger.info(
+            '  🔄 双写兼容: 已同步到旧版 SkillRegistry',
+            'AgentHarness'
+          );
+        }
+
+        Logger.info(
+          `  🔧 工具层: 启用 (${result.registeredCount} 个工具)`,
+          'AgentHarness'
+        );
+      }
+    } catch (err) {
+      Logger.error(
+        `  ❌ 工具层初始化失败: ${(err as Error).message}`,
+        err as Error,
         'AgentHarness'
       );
+      throw err;
     }
 
     // Phase 2: 约束层初始化
-    if (this.config.useHarnessConstraints) {
-      this.constraintsService = new ConstraintsService({
-        permissionGuard: this.permissionGuard || new PermissionGuard(),
-      });
-      Logger.info('  🛡️ 约束层: 启用', 'AgentHarness');
+    try {
+      if (this.config.useHarnessConstraints) {
+        this.constraintsService = new ConstraintsService({
+          permissionGuard: this.permissionGuard || new PermissionGuard(),
+        });
+        Logger.info('  🛡️ 约束层: 启用', 'AgentHarness');
+      }
+    } catch (err) {
+      Logger.error(
+        `  ❌ 约束层初始化失败: ${(err as Error).message}`,
+        err as Error,
+        'AgentHarness'
+      );
+      throw err;
     }
 
     // Phase 2.5: 沙箱执行器初始化
-    this.sandboxExecutor = new SandboxExecutor({
-      securityLevel: 'high',
-      timeoutMs: 30000,
-    });
-    Logger.info('  🔒 沙箱执行器: 启用 (安全级别: high)', 'AgentHarness');
+    try {
+      this.sandboxExecutor = new SandboxExecutor({
+        securityLevel: 'high',
+        timeoutMs: 30000,
+      });
+      Logger.info('  🔒 沙箱执行器: 启用 (安全级别: high)', 'AgentHarness');
+    } catch (err) {
+      Logger.error(
+        `  ❌ 沙箱执行器初始化失败: ${(err as Error).message}`,
+        err as Error,
+        'AgentHarness'
+      );
+      throw err;
+    }
+
+    // Phase 2.6: 多Agent编排初始化
+    if (this.deps?.orchestratorAgent) {
+      this.orchestratorAgent = this.deps.orchestratorAgent;
+      Logger.info(
+        '  🤖 多Agent编排: 使用外部提供的 OrchestratorAgent',
+        'AgentHarness'
+      );
+    } else if (this.deps) {
+      this.agentRegistry = new AgentRegistry();
+      // 注册默认Agent
+      this.agentRegistry.register({
+        id: 'default-agent',
+        name: '默认执行Agent',
+        capabilities: [
+          {
+            name: '通用任务执行',
+            description: '处理各类通用任务',
+            tools: ['*'],
+          },
+        ],
+        status: 'idle',
+        createdAt: new Date(),
+        lastActiveAt: new Date(),
+      });
+
+      // 创建OrchestratorAgent
+      this.orchestratorAgent = new OrchestratorAgent({
+        registry: this.agentRegistry,
+        llm: {
+          decomposeGoal: async (goal: string, context?: string) => {
+            try {
+              const prompt = `请将以下目标分解为可执行的步骤，每个步骤应该是一个独立的任务。请返回JSON格式，格式为 {"tasks": [{"id": "步骤id", "goal": "步骤描述", "dependencies": ["依赖的步骤id"], "priority": 5}]}\n\n目标: ${goal}\n${context ? `上下文: ${context}` : ''}`;
+              const response = await this.deps!.llm.chat(prompt);
+              const jsonMatch = response.match(/\{[\s\S]*\}/);
+              if (jsonMatch) {
+                const parsed = JSON.parse(jsonMatch[0]);
+                return parsed.tasks || [];
+              }
+            } catch (e) {
+              Logger.warn('LLM目标分解失败，使用默认分解', 'AgentHarness');
+            }
+            return [
+              {
+                id: 'step-1',
+                goal,
+                context,
+                dependencies: [],
+                priority: 5,
+                status: 'pending' as const,
+              },
+            ];
+          },
+        },
+        config: {
+          enableMultiAgent: true,
+          complexityThreshold: 'complex',
+          maxSubAgents: 3,
+        },
+      });
+      Logger.info('  🤖 多Agent编排: 启用 (内部初始化)', 'AgentHarness');
+    }
 
     // Phase 3: 验证层初始化
     if (this.config.useHarnessVerification) {
@@ -238,19 +347,18 @@ export class AgentHarness {
       const planner = new Planner({
         llm: this.deps.llm,
         evolutionExamples: this.deps.evolutionExamples,
+        memoryInjector: this.deps.memoryInjector,
       });
       const executor = new Executor({
         llm: this.deps.llm,
         toolRegistry: this.toolRegistry || new ToolRegistry(),
         schemaValidator: this.schemaValidator || new SchemaValidator(),
         permissionGuard: this.permissionGuard || new PermissionGuard(),
-        verificationService: this.verificationService || undefined,
-        constraintsService: this.constraintsService || undefined,
         trajectoryDatabase: this.trajectoryDatabase || undefined,
+        constraintsService: this.constraintsService || undefined,
         // 非侵入式 hooks 适配器 —— 桥接约束/验证/轨迹到 Executor
         hooks: {
-          beforeToolCall: async (toolName, params, ctx) => {
-            // 0. 沙箱权限检查
+          beforeToolCall: async (toolName, params, _ctx) => {
             if (this.sandboxExecutor) {
               const sandboxCheck = this.sandboxExecutor.checkToolPermission(
                 toolName,
@@ -270,78 +378,17 @@ export class AgentHarness {
                 };
               }
             }
-
-            // 1. 执行生命周期钩子（约束层）
-            if (this.constraintsService) {
-              const hookResult = await this.constraintsService.executeHooks(
-                LifecycleEvent.BEFORE_TOOL_CALL,
-                {
-                  event: LifecycleEvent.BEFORE_TOOL_CALL,
-                  toolName,
-                  params,
-                  loopState:
-                    LifecycleEvent.BEFORE_TOOL_CALL as unknown as LoopState,
-                  metadata: { traceId: ctx.traceId, loopCount: ctx.loopCount },
-                }
-              );
-              if (!hookResult.proceed) {
-                return {
-                  proceed: false,
-                  reason: hookResult.reason,
-                  replacementResult: hookResult.replacementResult,
-                };
-              }
-              if (hookResult.modifiedParams) {
-                return {
-                  proceed: true,
-                  modifiedParams: hookResult.modifiedParams,
-                };
-              }
-            }
-            // 2. Schema 验证（工具层）
-            const registeredTool = this.toolRegistry?.get(toolName);
-            if (registeredTool && this.schemaValidator) {
-              const validation = this.schemaValidator.validate(
-                params,
-                registeredTool.definition.parameters,
-                registeredTool.definition.requiredParams
-              );
-              if (!validation.valid && validation.sanitizedParams) {
-                return {
-                  proceed: true,
-                  modifiedParams: validation.sanitizedParams,
-                };
-              }
-            }
             return { proceed: true };
           },
-          afterToolCall: async (toolName, result) => {
-            // 安全检查（验证层）
-            let safeOutput =
+          afterToolCall: async (_toolName, result) => {
+            const output =
               typeof result.output === 'string'
                 ? result.output
                 : JSON.stringify(result.output);
-            if (this.verificationService) {
-              const safetyCheck =
-                this.verificationService.checkOutputSafety(safeOutput);
-              if (safetyCheck.sanitizedOutput) {
-                safeOutput = safetyCheck.sanitizedOutput;
-              }
-            }
-            return { ...result, output: safeOutput, validated: true };
+            return { ...result, output, validated: true };
           },
-          onToolError: async (toolName, error, ctx) => {
+          onToolError: async (toolName, error, _ctx) => {
             Logger.warn(`🛑 工具错误: ${toolName} - ${error}`, 'AgentHarness');
-            if (this.constraintsService) {
-              await this.constraintsService.executeHooks(
-                LifecycleEvent.ON_ERROR,
-                {
-                  event: LifecycleEvent.ON_ERROR,
-                  toolName,
-                  metadata: { traceId: ctx.traceId, error },
-                }
-              );
-            }
           },
           // Fix: delegate to Executor's proper fallback instead of broken hook
           // The Executor has correct step_index and args_json; this hook was
@@ -361,10 +408,13 @@ export class AgentHarness {
         executor,
         evaluator,
         reporter,
+        debater: new DefaultDebater(this.deps?.llm),
         constraintsService: this.constraintsService || undefined,
         verificationService: this.verificationService || undefined,
         persistenceService: this.persistenceService || undefined,
         trajectoryDatabase: this.trajectoryDatabase || undefined,
+        orchestratorAgent: this.orchestratorAgent || undefined,
+        evolutionEngine: this.deps?.evolutionEngine || undefined,
       });
       Logger.info('  🔄 循环层: 启用', 'AgentHarness');
     }
@@ -384,15 +434,38 @@ export class AgentHarness {
             | { overall: number }
             | undefined;
           const traceId = String(hookCtx.metadata.traceId || '');
-          const toolsUsed = hookCtx.metadata.toolsUsed as string[] | undefined;
+          const toolsUsedRaw = hookCtx.metadata.toolsUsed;
+          const toolsUsed = Array.isArray(toolsUsedRaw)
+            ? (toolsUsedRaw as string[])
+            : [];
 
           evo.collectFeedback(input, response, {
             success: true,
-            toolsUsed: toolsUsed || [],
+            toolsUsed,
           });
 
           if (quality) {
             evo.assessQuality(traceId, true, quality.overall, 0);
+          }
+
+          // 高质量任务 → 自动生成 SKILL.md
+          if (quality && quality.overall >= 0.7) {
+            const metadata = hookCtx.metadata;
+            evo.generateSkill({
+              input,
+              response,
+              toolsUsed,
+              totalDuration: (typeof metadata.duration === 'number'
+                ? metadata.duration
+                : 0) as number,
+              qualityScore: quality.overall,
+              traceId,
+            });
+          }
+
+          // 跟踪本次使用的工具中是否有已注册的 skill
+          for (const toolName of toolsUsed) {
+            skillUsageTracker.trackUse(toolName);
           }
 
           if (this.persistenceService) {
@@ -413,6 +486,69 @@ export class AgentHarness {
       );
       Logger.info('  🧬 进化闭环: 启用', 'AgentHarness');
     }
+
+    // Phase 7.5: 注册调度任务完成事件监听（反馈闭环）
+    if (this.deps?.evolutionEngine) {
+      EventBus.on('scheduled_task_completed', (payload: unknown) => {
+        const data = payload as {
+          taskId: string;
+          taskName: string;
+          success: boolean;
+          executionTime: number;
+          timestamp: string;
+          error?: string;
+        };
+        Logger.info(
+          `📊 调度任务完成事件: ${data.taskName} (${data.success ? '成功' : '失败'})`,
+          'AgentHarness'
+        );
+
+        // 调用 EvolutionEngine 收集反馈
+        this.deps!.evolutionEngine!.collectFeedback(
+          `调度任务: ${data.taskName}`,
+          data.success
+            ? '任务执行成功'
+            : `任务执行失败: ${data.error || '未知错误'}`,
+          {
+            success: data.success,
+            intent: data.taskId,
+            error: data.error,
+          },
+          'scheduler'
+        );
+      });
+      Logger.info('  📊 调度任务反馈监听: 启用', 'AgentHarness');
+    }
+
+    // Phase 7.6: 注册文件变更事件监听（记录文件变更历史）
+    EventBus.on('file_changed', (payload: unknown) => {
+      const data = payload as {
+        filePath: string;
+        changeType: 'created' | 'modified' | 'deleted' | 'renamed';
+        timestamp: string;
+        matchedRules: Array<{ id: string; name: string; action: string }>;
+      };
+      Logger.debug(
+        `📁 文件变更: ${path.basename(data.filePath)} (${data.changeType})`,
+        'AgentHarness'
+      );
+
+      // 记录文件变更到持久化服务
+      if (this.persistenceService) {
+        this.persistenceService.recordEvolutionMetric({
+          metricType: 'file_change',
+          value: 1,
+          timestamp: Date.now(),
+          metadata: {
+            filePath: data.filePath,
+            changeType: data.changeType,
+            timestamp: data.timestamp,
+            matchedRulesCount: data.matchedRules.length,
+          },
+        });
+      }
+    });
+    Logger.info('  📁 文件变更监听: 启用', 'AgentHarness');
 
     this.initialized = true;
     Logger.info('✅ Agent Harness 初始化完成', 'AgentHarness');
@@ -645,13 +781,23 @@ export class AgentHarness {
 
     // Fix: close resources to prevent leaks
     if (this.trajectoryDatabase) {
-      try { this.trajectoryDatabase.close(); } catch { /* best-effort */ }
+      try {
+        this.trajectoryDatabase.close();
+      } catch {
+        /* best-effort */
+      }
       this.trajectoryDatabase = null;
     }
     if (this.persistenceService) {
       try {
-        (this.persistenceService as unknown as { shutdown?: () => Promise<void> }).shutdown?.();
-      } catch { /* best-effort */ }
+        (
+          this.persistenceService as unknown as {
+            shutdown?: () => Promise<void>;
+          }
+        ).shutdown?.();
+      } catch {
+        /* best-effort */
+      }
       this.persistenceService = null;
     }
     if (this.sandboxExecutor) {

@@ -591,6 +591,163 @@ export class JiabaixingApiService extends ApiService {
     const endpoint = API_ENDPOINTS.INTEGRATION_WEBHOOK.replace(':platform', platform);
     return this.get(endpoint);
   }
+
+  async getWeChatQRCode(): Promise<ApiResponse<unknown>> {
+    return this.get(API_ENDPOINTS.INTEGRATION_WECHAT_QRCODE);
+  }
+
+  // Desktop API
+  async takeDesktopScreenshot(): Promise<ApiResponse<{ screenshot: string }>> {
+    return this.post<{ screenshot: string }>(API_ENDPOINTS.DESKTOP_SCREENSHOT);
+  }
+
+  async desktopAutomate(task: string): Promise<ApiResponse<{ output: unknown }>> {
+    return this.post<{ output: unknown }>(API_ENDPOINTS.DESKTOP_AUTOMATE, { task });
+  }
+
+  // MCP API
+  async getMCPServers(): Promise<ApiResponse<unknown>> {
+    return this.get(API_ENDPOINTS.MCP_SERVERS);
+  }
+
+  async getMCPServerDetail(name: string): Promise<ApiResponse<unknown>> {
+    const endpoint = API_ENDPOINTS.MCP_SERVER_DETAIL.replace(':name', name);
+    return this.get(endpoint);
+  }
+
+  async startMCPServer(name: string): Promise<ApiResponse<unknown>> {
+    const endpoint = API_ENDPOINTS.MCP_SERVER_START.replace(':name', name);
+    return this.post(endpoint);
+  }
+
+  async stopMCPServer(name: string): Promise<ApiResponse<unknown>> {
+    const endpoint = API_ENDPOINTS.MCP_SERVER_STOP.replace(':name', name);
+    return this.post(endpoint);
+  }
+
+  async startAllMCPServers(): Promise<ApiResponse<unknown>> {
+    return this.post(API_ENDPOINTS.MCP_SERVERS_START_ALL);
+  }
+
+  async getMCPServerTools(name: string): Promise<ApiResponse<unknown>> {
+    const endpoint = API_ENDPOINTS.MCP_SERVER_TOOLS.replace(':name', name);
+    return this.get(endpoint);
+  }
+
+  async callMCPTool(name: string, tool: string, args?: Record<string, unknown>): Promise<ApiResponse<unknown>> {
+    const endpoint = API_ENDPOINTS.MCP_SERVER_CALL.replace(':name', name);
+    return this.post(endpoint, { tool, args });
+  }
+
+  async sendMCPMessage(name: string, message: Record<string, unknown>): Promise<ApiResponse<unknown>> {
+    const endpoint = API_ENDPOINTS.MCP_SERVER_MESSAGE.replace(':name', name);
+    return this.post(endpoint, message);
+  }
+
+  async registerMCPServer(config: { name: string; command: string; args?: string[] }): Promise<ApiResponse<unknown>> {
+    return this.post(API_ENDPOINTS.MCP_REGISTER, config);
+  }
+
+  // TRAE API
+  async getTRAEHealth(): Promise<ApiResponse<unknown>> {
+    return this.get(API_ENDPOINTS.TRAE_HEALTH);
+  }
+
+  async getTRAEPerformance(): Promise<ApiResponse<unknown>> {
+    return this.get(API_ENDPOINTS.TRAE_PERFORMANCE);
+  }
+
+  async getTRAEMCPStatus(): Promise<ApiResponse<unknown>> {
+    return this.get(API_ENDPOINTS.TRAE_MCP_STATUS);
+  }
+
+  async getTRAESkillsStatus(): Promise<ApiResponse<unknown>> {
+    return this.get(API_ENDPOINTS.TRAE_SKILLS_STATUS);
+  }
+
+  async executeTRAESkill(skillName: string, params?: Record<string, unknown>): Promise<ApiResponse<unknown>> {
+    return this.post(API_ENDPOINTS.TRAE_SKILLS_EXECUTE, { skillName, params });
+  }
+
+  async traeSecurityAudit(target?: string, auditType?: string): Promise<ApiResponse<unknown>> {
+    return this.post(API_ENDPOINTS.TRAE_SECURITY_AUDIT, { target, auditType });
+  }
+
+  async traeTestingGenerate(targetFile: string, testType?: string, framework?: string): Promise<ApiResponse<unknown>> {
+    return this.post(API_ENDPOINTS.TRAE_TESTING_GENERATE, { targetFile, testType, framework });
+  }
+
+  // Debug API
+  async getDebugWeights(): Promise<ApiResponse<unknown>> {
+    return this.get(API_ENDPOINTS.DEBUG_WEIGHTS);
+  }
+
+  async getDebugRecentHistory(): Promise<ApiResponse<unknown>> {
+    return this.get(API_ENDPOINTS.DEBUG_RECENT_HISTORY);
+  }
+
+  async getDebugToolUsage(): Promise<ApiResponse<unknown>> {
+    return this.get(API_ENDPOINTS.DEBUG_TOOL_USAGE);
+  }
+
+  // Docs API
+  async getDocsIndex(): Promise<ApiResponse<unknown>> {
+    return this.get(API_ENDPOINTS.DOCS_INDEX);
+  }
+
+  async generateDocs(): Promise<ApiResponse<unknown>> {
+    return this.post(API_ENDPOINTS.DOCS_GENERATE);
+  }
+
+  // Chat API
+  async sendChatMessage(
+    message: string,
+    conversationId?: string
+  ): Promise<ApiResponse<{ response: string; conversation_id: string; trace_id: string }>> {
+    return this.post(API_ENDPOINTS.CHAT, { message, conversation_id: conversationId });
+  }
+
+  // Orchestrate & Evaluate API
+  async orchestrate(goal: string, context?: string): Promise<ApiResponse<unknown>> {
+    return this.post(API_ENDPOINTS.ORCHESTRATE, { goal, context });
+  }
+
+  async evaluate(evalContext: {
+    input?: string;
+    response?: string;
+    steps?: Array<Record<string, unknown>>;
+    duration?: number;
+    retries?: number;
+    errors?: number;
+  }): Promise<ApiResponse<unknown>> {
+    return this.post(API_ENDPOINTS.EVALUATE, { context: evalContext });
+  }
+
+  // Automation extended API
+  async toggleAutomationTask(taskId: string, enabled: boolean): Promise<ApiResponse<unknown>> {
+    const endpoint = API_ENDPOINTS.AUTOMATION_TASK_TOGGLE.replace(':taskId', taskId);
+    return this.post(endpoint, { enabled });
+  }
+
+  async executeAutomationTask(taskId: string): Promise<ApiResponse<unknown>> {
+    const endpoint = API_ENDPOINTS.AUTOMATION_TASK_EXECUTE.replace(':taskId', taskId);
+    return this.post(endpoint);
+  }
+
+  // General logs API
+  async getLogsGeneral(params?: {
+    file?: string;
+    lines?: number;
+    level?: string;
+    component?: string;
+  }): Promise<ApiResponse<unknown>> {
+    return this.get(API_ENDPOINTS.LOGS_GENERAL, params);
+  }
+
+  // Harness status
+  async getHarnessStatus(): Promise<ApiResponse<unknown>> {
+    return this.get(API_ENDPOINTS.HARNESS_STATUS);
+  }
 }
 
 const apiBaseUrl =

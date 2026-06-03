@@ -66,8 +66,8 @@ describe('ToolReliabilityTracker', () => {
   });
 
   describe('getSuccessRate', () => {
-    it('应该在没有调用时返回0', () => {
-      expect(tracker.getSuccessRate('unknown_tool')).toBe(0);
+    it('应该在没有调用时返回1.0（新工具默认满分）', () => {
+      expect(tracker.getSuccessRate('unknown_tool')).toBe(1);
     });
 
     it('应该在全成功时返回1.0', () => {

@@ -217,6 +217,14 @@ export class OpenAICompatibleModel implements Model {
           errorMsg.includes('fetch failed') ||
           errorMsg.includes('abort');
 
+        // 401 认证错误：立即失败，不重试（让上层 LLMProvider 降级）
+        const isAuthError = errorMsg.includes('401') || errorMsg.includes('invalid api') || errorMsg.includes('invalid_key');
+        if (isAuthError) {
+          Logger.warn(`🔒 认证失败(401)，跳过重试让上层降级: ${lastError.message}`, 'OpenAICompatibleModel');
+          skipRetry = true;
+          // 不要 break，让循环自然结束到 throw
+        }
+
         if (isConnectionError) {
           this.consecutiveConnectionFailures++;
           Logger.warn(
@@ -461,9 +469,9 @@ export class OpenAICompatibleModel implements Model {
   }
 
   /**
-   * 检查熔断器是否开启
+   * 检查熔断器是否开启（公开，供 LLMProvider 路由决策用）
    */
-  private isCircuitOpen(): boolean {
+  public isCircuitOpen(): boolean {
     if (this.permanentlyDisabled) return true;
     if (!this.circuitOpen) return false;
 

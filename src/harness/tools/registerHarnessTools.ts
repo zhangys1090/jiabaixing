@@ -33,13 +33,19 @@ import { ROLLBACK_CHANGES_DEF } from './system/rollback_changes';
 
 // === 文件工具 ===
 import { FILE_LIST_DEF } from './file/file_list';
+import { FILE_READ_DEF } from './file/file_read';
 import { FILE_SEARCH_DEF } from './file/file_search';
+import { FILE_GREP_DEF } from './file/file_grep';
+import { FILE_DEDUP_DEF } from './file/file_dedup';
 import { GET_ACTIVE_FILE_DEF } from './file/get_active_file';
 import { INCREMENTAL_EDIT_DEF } from './file/incremental_edit';
 import { MULTI_FILE_EDIT_DEF } from './file/multi_file_edit';
 
 // === 代码工具 ===
 import { CODE_ANALYZE_DEF } from './code/code_analyze';
+import { CSV_ANALYZE_DEF, createCsvAnalyzeExecutor } from './code/csv_analyze';
+import { CODE_REVIEW_DEF, createCodeReviewExecutor, type CodeReviewDeps } from './code/code_review';
+import { CODE_REVIEW_PROJECT_DEF, createCodeReviewProjectExecutor } from './code/code_review_project';
 import { CODE_FIX_DEF } from './code/code_fix';
 import { CODE_GENERATE_DEF } from './code/code_generate';
 
@@ -52,6 +58,10 @@ import { TASK_PRIORITY_DEF } from './daily/task_priority';
 import { TASK_DEPENDENCY_DEF } from './daily/task_dependency';
 import { BATCH_TASK_DEF } from './daily/batch_task';
 import { TASK_ANALYTICS_DEF } from './daily/task_analytics';
+import { MORNING_BRIEF_DEF, createMorningBriefExecutor, type MorningBriefDeps } from './daily/morning_brief';
+import { NATURAL_SCHEDULE_DEF, createNaturalScheduleExecutor } from './daily/natural_schedule';
+import { SKILL_SHARE_DEF, createSkillShareExecutor } from './skill/skill_share';
+import { KNOWLEDGE_QUERY_DEF, createKnowledgeQueryExecutor, type KnowledgeQueryDeps } from './memory/knowledge_query';
 import { CALENDAR_DEF } from './daily/calendar';
 
 // === 网络工具 ===
@@ -59,9 +69,16 @@ import { WEB_SEARCH_DEF } from './network/web_search';
 import { SKILL_CREATE_DEF } from './network/skill_create';
 import { WEB_FETCH_DEF } from './network/web_fetch';
 import { IMAGE_GENERATE_DEF } from './network/image_generate';
+import { TTS_SPEAK_DEF } from './network/tts_speak';
+import { CHART_GENERATE_DEF } from './network/chart_generate';
+import { MESSAGE_PUSH_DEF } from './network/message_push';
 
 // === 系统工具(扩展) ===
 import { SHELL_EXEC_DEF } from './system/shell_exec';
+import { SHELL_GENERATE_DEF, createShellGenerateExecutor } from './system/shell_generate';
+import { DELEGATE_TASK_DEF, createDelegateTaskExecutor } from './system/delegate_task';
+import { CONTEXT_MANAGE_DEF } from './system/context_manage';
+import { VOICE_INTERACT_DEF, createVoiceInteractExecutor, type VoiceInteractDeps } from './system/voice_interact';
 
 // === 工具执行器工厂 ===
 import {
@@ -92,9 +109,18 @@ import {
 } from './desktop/desktop_screenshot';
 import { createFileListExecutor, type FileListDeps } from './file/file_list';
 import {
+  createFileReadExecutor,
+  type FileReadDeps,
+} from './file/file_read';
+import {
   createFileSearchExecutor,
   type FileSearchDeps,
 } from './file/file_search';
+import {
+  createFileGrepExecutor,
+  type FileGrepDeps,
+} from './file/file_grep';
+import { createFileDedupExecutor } from './file/file_dedup';
 import {
   createGetActiveFileExecutor,
   type GetActiveFileDeps,
@@ -176,9 +202,25 @@ import {
   type ImageGenerateDeps,
 } from './network/image_generate';
 import {
+  createTTSSpeakExecutor,
+  type TTSSpeakDeps,
+} from './network/tts_speak';
+import {
+  createChartGenerateExecutor,
+  type ChartGenerateDeps,
+} from './network/chart_generate';
+import {
+  createMessagePushExecutor,
+  type MessagePushDeps,
+} from './network/message_push';
+import {
   createShellExecExecutor,
   type ShellExecDeps,
 } from './system/shell_exec';
+import {
+  createContextManageExecutor,
+  type ContextManageDeps,
+} from './system/context_manage';
 
 /** 所有工具依赖的聚合接口 */
 export interface HarnessToolDeps
@@ -193,8 +235,10 @@ export interface HarnessToolDeps
     RollbackChangesDeps,
     IncrementalEditDeps,
     MultiFileEditDeps,
+    FileReadDeps,
     FileSearchDeps,
     FileListDeps,
+    FileGrepDeps,
     GetActiveFileDeps,
     CodeGenerateDeps,
     CodeAnalyzeDeps,
@@ -212,7 +256,12 @@ export interface HarnessToolDeps
     SkillCreateDeps,
     WebFetchDeps,
     ImageGenerateDeps,
-    ShellExecDeps {}
+    TTSSpeakDeps,
+    ShellExecDeps,
+    ContextManageDeps,
+    VoiceInteractDeps,
+    ChartGenerateDeps,
+    MessagePushDeps {}
 
 /** 工具注册结果 */
 export interface ToolRegistrationResult {
@@ -249,7 +298,8 @@ export function registerHarnessTools(
     createDesktopScreenshotExecutor(deps)
   );
 
-  // 文件工具 (5)
+  // 文件工具 (6→7)
+  toolRegistry.register(FILE_READ_DEF, createFileReadExecutor(deps));
   toolRegistry.register(GET_ACTIVE_FILE_DEF, createGetActiveFileExecutor(deps));
   toolRegistry.register(
     INCREMENTAL_EDIT_DEF,
@@ -258,10 +308,18 @@ export function registerHarnessTools(
   toolRegistry.register(MULTI_FILE_EDIT_DEF, createMultiFileEditExecutor(deps));
   toolRegistry.register(FILE_SEARCH_DEF, createFileSearchExecutor(deps));
   toolRegistry.register(FILE_LIST_DEF, createFileListExecutor(deps));
+  toolRegistry.register(FILE_GREP_DEF, createFileGrepExecutor(deps));
+  toolRegistry.register(FILE_DEDUP_DEF, createFileDedupExecutor());
 
   // 代码工具 (3)
   toolRegistry.register(CODE_GENERATE_DEF, createCodeGenerateExecutor(deps));
   toolRegistry.register(CODE_ANALYZE_DEF, createCodeAnalyzeExecutor(deps));
+  toolRegistry.register(CSV_ANALYZE_DEF, createCsvAnalyzeExecutor());
+
+  // 代码审查工具
+  const codeReviewDeps: CodeReviewDeps = { llm: deps.llm };
+  toolRegistry.register(CODE_REVIEW_DEF, createCodeReviewExecutor(codeReviewDeps));
+  toolRegistry.register(CODE_REVIEW_PROJECT_DEF, createCodeReviewProjectExecutor(codeReviewDeps));
   toolRegistry.register(CODE_FIX_DEF, createCodeFixExecutor(deps));
 
   // 日常管理工具 (9)
@@ -273,16 +331,48 @@ export function registerHarnessTools(
   );
   toolRegistry.register(BATCH_TASK_DEF, createBatchTaskExecutor(deps));
   toolRegistry.register(TASK_ANALYTICS_DEF, createTaskAnalyticsExecutor(deps));
+
+  // 晨报工具
+  const morningBriefDeps: MorningBriefDeps = {
+    llm: deps.llm,
+    searchExecutor: (params, ctx) => toolRegistry.execute('web_search', params, ctx || { permissions: new Set(), metadata: {} }),
+  };
+  toolRegistry.register(MORNING_BRIEF_DEF, createMorningBriefExecutor(morningBriefDeps));
+
+  // 自然语言调度工具
+  toolRegistry.register(NATURAL_SCHEDULE_DEF, createNaturalScheduleExecutor());
+
+  // Skill 分享工具
+  toolRegistry.register(SKILL_SHARE_DEF, createSkillShareExecutor());
+
+  // 知识查询工具
+  const knowledgeDeps: KnowledgeQueryDeps = {
+    memoryRecall: deps.retrieveRelevant
+      ? async (query, limit) => {
+          const results = await deps.retrieveRelevant!({ query, limit });
+          return results.map((r: any) => ({
+            content: r.content,
+            type: r.type,
+            timestamp: r.timestamp,
+            relevanceScore: r.relevanceScore,
+          }));
+        }
+      : undefined,
+  };
+  toolRegistry.register(KNOWLEDGE_QUERY_DEF, createKnowledgeQueryExecutor(knowledgeDeps));
   toolRegistry.register(CALENDAR_DEF, createCalendarExecutor(deps));
   toolRegistry.register(REMINDER_SET_DEF, createReminderSetExecutor(deps));
   toolRegistry.register(NOTE_TAKE_DEF, createNoteTakeExecutor(deps));
   toolRegistry.register(SYSTEM_STATUS_DEF, createSystemStatusExecutor(deps));
 
-  // 网络工具 (2→4)
+  // 网络工具 (2→7)
   toolRegistry.register(WEB_SEARCH_DEF, createWebSearchExecutor(deps));
   toolRegistry.register(SKILL_CREATE_DEF, createSkillCreateExecutor(deps));
   toolRegistry.register(WEB_FETCH_DEF, createWebFetchExecutor(deps));
   toolRegistry.register(IMAGE_GENERATE_DEF, createImageGenerateExecutor(deps));
+  toolRegistry.register(TTS_SPEAK_DEF, createTTSSpeakExecutor(deps));
+  toolRegistry.register(CHART_GENERATE_DEF, createChartGenerateExecutor(deps));
+  toolRegistry.register(MESSAGE_PUSH_DEF, createMessagePushExecutor(deps));
 
   // 系统工具(扩展) (3→4)
   toolRegistry.register(
@@ -298,6 +388,10 @@ export function registerHarnessTools(
     createRollbackChangesExecutor(deps)
   );
   toolRegistry.register(SHELL_EXEC_DEF, createShellExecExecutor(deps));
+  toolRegistry.register(SHELL_GENERATE_DEF, createShellGenerateExecutor({ llm: deps.llm }));
+  toolRegistry.register(DELEGATE_TASK_DEF, createDelegateTaskExecutor({ llm: deps.llm, toolRegistry }));
+  toolRegistry.register(CONTEXT_MANAGE_DEF, createContextManageExecutor(deps));
+  toolRegistry.register(VOICE_INTERACT_DEF, createVoiceInteractExecutor(deps));
 
   Logger.info(
     `🔧 Harness 工具注册完成: ${toolRegistry.size} 个工具`,
@@ -344,6 +438,9 @@ export function syncToLegacySkillRegistry(
                 Permission.MEMORY_READ,
                 Permission.MEMORY_WRITE,
                 Permission.FILE_READ,
+                Permission.FILE_WRITE,
+                Permission.CODE_EXECUTE,
+                Permission.NETWORK_ACCESS,
               ]);
         const toolContext: import('../types').ToolContext = {
           userId: context?.userId,

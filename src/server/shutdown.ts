@@ -8,6 +8,7 @@ import * as WebSocket from 'ws';
 import { JiabaixingCore } from '../core/JiabaixingCore';
 import { Logger } from '../utils/Logger';
 import { MCPServerManager } from '../mcp/MCPServerManager';
+import { stopIpcServer } from './bootstrap';
 
 type WSServer = WebSocket.Server;
 
@@ -33,6 +34,13 @@ export async function gracefulShutdown(
     Logger.info('✅ MCP服务器已停止', 'Main');
   } catch {
     // MCP 清理失败不影响关闭流程
+  }
+
+  // 关闭 IPC 服务器
+  try {
+    await stopIpcServer();
+  } catch {
+    // IPC 关闭失败不影响主流程
   }
 
   if (wss) {

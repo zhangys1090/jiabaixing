@@ -132,7 +132,7 @@ const MessageInput: React.FC<MessageInputProps> = ({ inputText, setInputText, is
         <button
           className="attach-button"
           onClick={() => fileInputRef.current?.click()}
-          disabled={isLoading}
+          disabled={false}
           aria-label="添加图片"
           title="添加图片（支持多模态分析）"
         >
@@ -145,7 +145,7 @@ const MessageInput: React.FC<MessageInputProps> = ({ inputText, setInputText, is
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
           className="chat-input chat-textarea"
-          disabled={isLoading}
+          disabled={false}
           rows={1}
         />
         <button

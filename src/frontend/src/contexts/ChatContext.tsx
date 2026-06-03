@@ -7,6 +7,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useReducer, useRef } from 'react';
 import { Message } from '../types/chat';
 import { apiService } from '../api/apiService';
+import { connectionManager } from '../hooks/websocket';
 import type { BrainStageUpdate, PerceptionUpdate, SkillExecutionUpdate, EvolutionEvent } from '../hooks/useWebSocket';
 
 // ═══════════════════════════════════════════════════════════════
@@ -65,7 +66,9 @@ type ChatAction =
   | { type: 'CLEAR_EXECUTION_UPDATES' }
   | { type: 'MARK_SENDING_AS_SENT' }
   | { type: 'CLEAR_PROGRESS_MESSAGES' }
-  | { type: 'SET_CURRENT_TRACE_ID'; payload: string | null };
+  | { type: 'SET_CURRENT_TRACE_ID'; payload: string | null }
+  | { type: 'APPEND_STREAM_CHUNK'; id: string; chunk: string }
+  | { type: 'FINISH_STREAM'; id: string };
 
 interface ChatContextValue {
   state: ChatState;
@@ -196,6 +199,21 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
       return {
         ...state,
         currentTraceId: action.payload,
+      };
+    case 'APPEND_STREAM_CHUNK':
+      return {
+        ...state,
+        messages: state.messages.map((m) =>
+          m.id === action.id ? { ...m, content: m.content + action.chunk } : m
+        ),
+      };
+    case 'FINISH_STREAM':
+      return {
+        ...state,
+        messages: state.messages.map((m) =>
+          m.id === action.id ? { ...m, status: 'sent' as const } : m
+        ),
+        isTyping: false,
       };
     default:
       return state;
@@ -343,6 +361,105 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     loadHistoryFromBackend();
+  }, []);
+
+  // 订阅 WebSocket 事件
+  useEffect(() => {
+    const streamMessageIdRef = useRef<string | null>(null);
+
+    const handleResponseReady = (response: unknown, traceId?: string) => {
+      const data = response as Record<string, unknown> | undefined;
+      const responseText = typeof data?.response === 'string'
+        ? data.response
+        : typeof data?.text === 'string'
+          ? data.text
+          : typeof data?.message === 'string'
+            ? data.message
+            : '';
+
+      if (responseText) {
+        dispatch({
+          type: 'ADD_MESSAGE',
+          payload: {
+            id: `msg_response_${Date.now().toString(36)}`,
+            content: responseText,
+            sender: 'assistant' as const,
+            timestamp: new Date(),
+            status: 'sent' as const,
+          },
+        });
+        dispatch({ type: 'SET_IS_TYPING', payload: false });
+        dispatch({ type: 'SET_IS_RUNNING', payload: false });
+      }
+
+      if (traceId) {
+        dispatch({ type: 'SET_CURRENT_TRACE_ID', payload: null });
+      }
+    };
+
+    const handleStreamStart = (data: { traceId?: string; totalLength?: number; timestamp?: number }) => {
+      const msgId = `msg_stream_${Date.now().toString(36)}`;
+      streamMessageIdRef.current = msgId;
+      dispatch({
+        type: 'ADD_MESSAGE',
+        payload: {
+          id: msgId,
+          content: '',
+          sender: 'assistant' as const,
+          timestamp: new Date(),
+          status: 'typing' as const,
+        },
+      });
+      dispatch({ type: 'SET_IS_TYPING', payload: true });
+      if (data.traceId) {
+        dispatch({ type: 'SET_CURRENT_TRACE_ID', payload: data.traceId });
+      }
+    };
+
+    const handleStreamChunk = (data: { traceId?: string; chunk?: string; offset?: number; timestamp?: number }) => {
+      const msgId = streamMessageIdRef.current;
+      if (msgId && data.chunk) {
+        dispatch({ type: 'APPEND_STREAM_CHUNK', id: msgId, chunk: data.chunk });
+      }
+    };
+
+    const handleStreamDone = (data: { traceId?: string; fullText?: string; timestamp?: number }) => {
+      const msgId = streamMessageIdRef.current;
+      if (msgId) {
+        dispatch({ type: 'FINISH_STREAM', id: msgId });
+        streamMessageIdRef.current = null;
+      }
+      dispatch({ type: 'SET_IS_TYPING', payload: false });
+      dispatch({ type: 'SET_IS_RUNNING', payload: false });
+      if (data.traceId) {
+        dispatch({ type: 'SET_CURRENT_TRACE_ID', payload: null });
+      }
+    };
+
+    const handleProcessingStatus = (data: { status: string; message: string; traceId?: string }) => {
+      if (data.status === 'started' || data.status === 'processing') {
+        dispatch({ type: 'SET_IS_RUNNING', payload: true });
+      } else if (data.status === 'completed' || data.status === 'done') {
+        dispatch({ type: 'SET_IS_RUNNING', payload: false });
+      }
+      if (data.traceId) {
+        dispatch({ type: 'SET_CURRENT_TRACE_ID', payload: data.traceId });
+      }
+    };
+
+    connectionManager.onResponseReady(handleResponseReady);
+    connectionManager.onStreamStart(handleStreamStart);
+    connectionManager.onStreamChunk(handleStreamChunk);
+    connectionManager.onStreamDone(handleStreamDone);
+    connectionManager.onProcessingStatus(handleProcessingStatus);
+
+    return () => {
+      connectionManager.offResponseReady(handleResponseReady);
+      connectionManager.offStreamStart(handleStreamStart);
+      connectionManager.offStreamChunk(handleStreamChunk);
+      connectionManager.offStreamDone(handleStreamDone);
+      connectionManager.offProcessingStatus(handleProcessingStatus);
+    };
   }, []);
 
   // 持久化消息

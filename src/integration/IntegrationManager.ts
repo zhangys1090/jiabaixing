@@ -7,6 +7,7 @@ import {
   SendMessageResponse,
   IncomingMessageEvent,
 } from '../shared/contracts';
+import * as crypto from 'crypto';
 import { Logger } from '../utils/Logger';
 import { BaseIntegrationAdapter } from './adapters/BaseIntegrationAdapter';
 import { WeChatAdapter } from './adapters/WeChatAdapter';
@@ -14,8 +15,36 @@ import { WeChatQRAdapter } from './adapters/WeChatQRAdapter';
 import { FeishuAdapter } from './adapters/FeishuAdapter';
 import { DingTalkAdapter } from './adapters/DingTalkAdapter';
 import { QQAdapter } from './adapters/QQAdapter';
+import { TelegramAdapter } from './adapters/TelegramAdapter';
+import { DiscordAdapter } from './adapters/DiscordAdapter';
+import { SlackAdapter } from './adapters/SlackAdapter';
 import { EventBus } from '../shared/EventBus';
 import type { JiabaixingCore } from '../core/JiabaixingCore';
+
+/**
+ * Webhook 端点配置
+ */
+export interface WebhookEndpoint {
+  id: string;
+  name: string;
+  url: string;
+  secret?: string;
+  events: string[];
+  enabled: boolean;
+  headers?: Record<string, string>;
+  retryCount?: number;
+  timeout?: number;
+}
+
+/**
+ * Webhook 投递请求体
+ */
+interface WebhookPayload {
+  event: string;
+  data: unknown;
+  timestamp: number;
+  source: string;
+}
 
 const PLATFORM_INFO: Record<
   IntegrationPlatform,
@@ -49,11 +78,40 @@ const PLATFORM_INFO: Record<
     description: '通过 Mirai 连接 QQ 机器人',
     enabled: true,
   },
+  telegram: {
+    id: 'telegram',
+    name: 'Telegram',
+    icon: '✈️',
+    description: '通过 Bot API 连接 Telegram 机器人',
+    enabled: true,
+  },
+  discord: {
+    id: 'discord',
+    name: 'Discord',
+    icon: '🎮',
+    description: '通过 Webhook 连接 Discord 频道',
+    enabled: true,
+  },
+  slack: {
+    id: 'slack',
+    name: 'Slack',
+    icon: '📱',
+    description: '通过 Webhook 连接 Slack 工作区',
+    enabled: true,
+  },
+  signal: {
+    id: 'signal',
+    name: 'Signal',
+    icon: '🔒',
+    description: '连接到 Signal 平台（预留）',
+    enabled: false,
+  },
 };
 
 export class IntegrationManager {
   private adapters: Map<IntegrationPlatform, BaseIntegrationAdapter> =
     new Map();
+  private webhookEndpoints: Map<string, WebhookEndpoint> = new Map();
   private static instance: IntegrationManager;
   private core: JiabaixingCore | null = null;
 
@@ -82,6 +140,9 @@ export class IntegrationManager {
     this.adapters.set('feishu', new FeishuAdapter());
     this.adapters.set('dingtalk', new DingTalkAdapter());
     this.adapters.set('qq', new QQAdapter());
+    this.adapters.set('telegram', new TelegramAdapter());
+    this.adapters.set('discord', new DiscordAdapter());
+    this.adapters.set('slack', new SlackAdapter());
 
     // 为每个适配器注册消息处理
     for (const adapter of this.adapters.values()) {
@@ -94,6 +155,8 @@ export class IntegrationManager {
 
     // 如果环境变量配置了 QQ，自动连接
     void this.autoConnectQQ();
+    // 如果环境变量配置了 Telegram，自动连接
+    void this.autoConnectTelegram();
   }
 
   /**
@@ -120,6 +183,38 @@ export class IntegrationManager {
     } else {
       Logger.warn(
         'QQ 机器人自动连接失败，将在后台自动重试',
+        'IntegrationManager'
+      );
+    }
+  }
+
+  /**
+   * 从环境变量自动连接 Telegram
+   */
+  private async autoConnectTelegram(): Promise<void> {
+    const telegramConfig = TelegramAdapter.loadConfigFromEnv();
+    if (!telegramConfig) {
+      Logger.info(
+        'Telegram 自动连接未启用 (TELEGRAM_ENABLED=false)',
+        'IntegrationManager'
+      );
+      return;
+    }
+
+    Logger.info(
+      '检测到 Telegram 环境变量配置，正在自动连接...',
+      'IntegrationManager'
+    );
+
+    // 等待 2 秒让系统完全就绪
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
+    const success = await this.connectPlatform('telegram', telegramConfig);
+    if (success) {
+      Logger.info('Telegram 机器人自动连接成功', 'IntegrationManager');
+    } else {
+      Logger.warn(
+        'Telegram 机器人自动连接失败',
         'IntegrationManager'
       );
     }
@@ -316,5 +411,176 @@ export class IntegrationManager {
         );
       }
     }
+  }
+
+  // ====================== Webhook 推送功能 ======================
+
+  /**
+   * 注册 Webhook 端点
+   * @param endpoint - Webhook 端点配置
+   */
+  registerWebhook(endpoint: WebhookEndpoint): void {
+    if (this.webhookEndpoints.has(endpoint.id)) {
+      Logger.warn(
+        `Webhook 端点已存在，将覆盖: ${endpoint.id}`,
+        'IntegrationManager'
+      );
+    }
+    this.webhookEndpoints.set(endpoint.id, endpoint);
+    Logger.info(
+      `Webhook 端点已注册: ${endpoint.id} (${endpoint.name}), 订阅事件: [${endpoint.events.join(', ')}]`,
+      'IntegrationManager'
+    );
+  }
+
+  /**
+   * 注销 Webhook 端点
+   * @param id - Webhook 端点 ID
+   */
+  unregisterWebhook(id: string): void {
+    const removed = this.webhookEndpoints.delete(id);
+    if (removed) {
+      Logger.info(`Webhook 端点已注销: ${id}`, 'IntegrationManager');
+    } else {
+      Logger.warn(`Webhook 端点不存在: ${id}`, 'IntegrationManager');
+    }
+  }
+
+  /**
+   * 列出所有 Webhook 端点
+   * @returns Webhook 端点列表
+   */
+  listWebhooks(): WebhookEndpoint[] {
+    return Array.from(this.webhookEndpoints.values());
+  }
+
+  /**
+   * 获取指定 Webhook 端点
+   * @param id - Webhook 端点 ID
+   * @returns Webhook 端点配置，不存在则返回 undefined
+   */
+  getWebhook(id: string): WebhookEndpoint | undefined {
+    return this.webhookEndpoints.get(id);
+  }
+
+  /**
+   * 向所有订阅了指定事件的 Webhook 端点推送通知
+   * @param eventType - 事件类型
+   * @param payload - 事件数据
+   */
+  async pushToWebhooks(eventType: string, payload: unknown): Promise<void> {
+    const matchedEndpoints = Array.from(this.webhookEndpoints.values()).filter(
+      (ep) => ep.enabled && ep.events.includes(eventType)
+    );
+
+    if (matchedEndpoints.length === 0) {
+      return;
+    }
+
+    Logger.info(
+      `推送事件 ${eventType} 到 ${matchedEndpoints.length} 个 Webhook`,
+      'IntegrationManager'
+    );
+
+    const results = await Promise.allSettled(
+      matchedEndpoints.map((endpoint) =>
+        this.deliverWebhook(endpoint, eventType, payload)
+      )
+    );
+
+    const failedCount = results.filter((r) => r.status === 'rejected').length;
+    if (failedCount > 0) {
+      Logger.warn(
+        `事件 ${eventType} 推送完成: ${matchedEndpoints.length - failedCount}/${matchedEndpoints.length} 成功`,
+        'IntegrationManager'
+      );
+    }
+  }
+
+  /**
+   * 单个 Webhook 投递（带重试和 HMAC 签名）
+   * @param endpoint - Webhook 端点配置
+   * @param eventType - 事件类型
+   * @param payload - 事件数据
+   * @returns 投递是否成功
+   */
+  async deliverWebhook(
+    endpoint: WebhookEndpoint,
+    eventType: string,
+    payload: unknown
+  ): Promise<boolean> {
+    const body: WebhookPayload = {
+      event: eventType,
+      data: payload,
+      timestamp: Date.now(),
+      source: 'jiabaixing',
+    };
+
+    const bodyStr = JSON.stringify(body);
+    const maxRetries = endpoint.retryCount ?? 3;
+    const timeout = endpoint.timeout ?? 5000;
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...endpoint.headers,
+    };
+
+    // HMAC-SHA256 签名
+    if (endpoint.secret) {
+      const signature = crypto
+        .createHmac('sha256', endpoint.secret)
+        .update(bodyStr)
+        .digest('hex');
+      headers['X-Jiabaixing-Signature'] = `sha256=${signature}`;
+    }
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeout);
+
+        const response = await fetch(endpoint.url, {
+          method: 'POST',
+          headers,
+          body: bodyStr,
+          signal: controller.signal,
+        });
+
+        clearTimeout(timer);
+
+        if (response.ok) {
+          Logger.info(
+            `Webhook 投递成功: ${endpoint.id} (${eventType}), 状态码=${response.status}`,
+            'IntegrationManager'
+          );
+          return true;
+        }
+
+        Logger.warn(
+          `Webhook 投递失败: ${endpoint.id} (${eventType}), 状态码=${response.status}`,
+          'IntegrationManager'
+        );
+      } catch (error) {
+        const errorMsg =
+          error instanceof Error ? error.message : String(error);
+        Logger.warn(
+          `Webhook 投递异常: ${endpoint.id} (${eventType}), 尝试 ${attempt + 1}/${maxRetries + 1}, 错误: ${errorMsg}`,
+          'IntegrationManager'
+        );
+      }
+
+      // 重试间隔: 1s, 2s, 4s
+      if (attempt < maxRetries) {
+        const delay = Math.pow(2, attempt) * 1000;
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+
+    Logger.error(
+      `Webhook 投递最终失败: ${endpoint.id} (${eventType}), 已重试 ${maxRetries} 次`,
+      new Error('所有重试均失败'),
+      'IntegrationManager'
+    );
+    return false;
   }
 }

@@ -1,11 +1,17 @@
 /**
- * 安全审计模块
- * 负责记录系统操作日志、安全事件监控与审计报告生成
+ * 安全审计模块（兼容层）
+ *
+ * 本模块已重构，核心功能已合并到 src/security/AuditService.ts
+ * 此类保留用于向后兼容，新的代码应直接使用 AuditService
+ *
+ * @deprecated 请使用 src/security/AuditService 代替
  */
 
-import * as fs from 'fs';
-import * as path from 'path';
 import { Logger } from '../utils/Logger';
+import { AuditService } from '../security/AuditService';
+import type { SecurityEvent as UnifiedSecurityEvent, SecurityEventType } from '../security/types';
+
+// ── 向后兼容的类型定义 ──
 
 export interface AuditLogEntry {
   id: string;
@@ -44,31 +50,74 @@ export interface SecurityEvent {
   acknowledged: boolean;
 }
 
+// ── 事件类型映射 ──
+
+const LEGACY_EVENT_TYPE_MAP: Record<SecurityEvent['eventType'], SecurityEventType> = {
+  login_failed: 'authentication.failure',
+  access_denied: 'permission.denied',
+  suspicious_activity: 'security.alarm',
+  data_breach_attempt: 'security.alarm',
+  rate_limit_exceeded: 'security.alarm',
+  malicious_input: 'security.alarm',
+};
+
+/**
+ * 安全审计器（兼容层）
+ *
+ * @deprecated 请使用 AuditService 代替
+ */
 export class SecurityAuditor {
-  private logs: AuditLogEntry[] = [];
-  private events: SecurityEvent[] = [];
-  private maxLogs = 50000;
-  private maxEvents = 10000;
-  private logFilePath?: string;
-  private eventListeners: Map<string, Array<(event: SecurityEvent) => void>> =
-    new Map();
+  private static instance: SecurityAuditor | null = null;
+  private auditService: AuditService;
+  private legacyListeners: Array<(event: SecurityEvent) => void> = [];
 
   constructor(options?: {
     logFilePath?: string;
     maxLogs?: number;
     maxEvents?: number;
   }) {
-    this.logFilePath = options?.logFilePath;
-    this.maxLogs = options?.maxLogs ?? 50000;
-    this.maxEvents = options?.maxEvents ?? 10000;
+    this.auditService = AuditService.getInstance();
 
-    if (this.logFilePath) {
-      this.ensureLogFile();
+    // 初始化审计服务
+    this.initialize();
+
+    // 注册事件监听器，将事件转换为旧格式
+    this.auditService.onEvent((event: UnifiedSecurityEvent) => {
+      const legacyEvent = this.convertToLegacyEvent(event);
+      this.legacyListeners.forEach((callback) => {
+        try {
+          callback(legacyEvent);
+        } catch (error) {
+          Logger.error('安全事件监听器回调失败', error as Error, 'SecurityAuditor');
+        }
+      });
+    });
+
+    Logger.info('⚠️ SecurityAuditor 是向后兼容层，建议迁移到 AuditService', 'SecurityAuditor');
+  }
+
+  static getInstance(options?: {
+    logFilePath?: string;
+    maxLogs?: number;
+    maxEvents?: number;
+  }): SecurityAuditor {
+    if (!SecurityAuditor.instance) {
+      SecurityAuditor.instance = new SecurityAuditor(options);
+    }
+    return SecurityAuditor.instance;
+  }
+
+  private async initialize(): Promise<void> {
+    try {
+      await this.auditService.initialize();
+    } catch (error) {
+      Logger.error('SecurityAuditor 初始化失败', error as Error, 'SecurityAuditor');
     }
   }
 
   /**
-   * 记录审计日志
+   * 记录审计日志（向后兼容方法）
+   * @deprecated 使用 auditService.getAuditLogger().log() 代替
    */
   logAuditEntry(
     entry: Omit<AuditLogEntry, 'id' | 'timestamp' | 'resolved'>
@@ -80,62 +129,44 @@ export class SecurityAuditor {
       resolved: false,
     };
 
-    this.logs.push(fullEntry);
-
-    if (this.logs.length > this.maxLogs) {
-      this.logs = this.logs.slice(-this.maxLogs);
-    }
-
-    if (this.logFilePath) {
-      this.writeToFile(fullEntry);
-    }
+    // 记录到 AuditService
+    this.auditService.getAuditLogger().log({
+      action: entry.action,
+      actor: entry.userId,
+      result: entry.level === 'error' ? 'failure' : entry.level === 'warning' ? 'warning' : 'success',
+      category: entry.category,
+      details: entry.details,
+      userId: entry.userId,
+      ipAddress: entry.ipAddress,
+      userAgent: entry.userAgent,
+    });
 
     return fullEntry;
   }
 
   /**
-   * 记录安全事件
+   * 记录安全事件（向后兼容方法）
+   * @deprecated 使用 auditService.recordSecurityEvent() 代替
    */
   recordSecurityEvent(
     event: Omit<SecurityEvent, 'id' | 'timestamp' | 'acknowledged'>
   ): SecurityEvent {
-    const fullEvent: SecurityEvent = {
-      ...event,
-      id: this.generateId(),
-      timestamp: new Date(),
-      acknowledged: false,
-    };
+    const unifiedEventType = LEGACY_EVENT_TYPE_MAP[event.eventType] || 'security.alarm';
 
-    this.events.push(fullEvent);
+    const unifiedEvent = this.auditService.recordSecurityEvent({
+      type: unifiedEventType,
+      userId: event.userId,
+      description: event.description,
+      severity: event.severity,
+      metadata: event.metadata,
+    });
 
-    if (this.events.length > this.maxEvents) {
-      this.events = this.events.slice(-this.maxEvents);
-    }
-
-    // 通知监听器
-    this.notifyEventListeners(fullEvent);
-
-    // 高严重性事件同时记录审计日志
-    if (fullEvent.severity === 'high' || fullEvent.severity === 'critical') {
-      this.logAuditEntry({
-        level: fullEvent.severity === 'critical' ? 'critical' : 'error',
-        category: 'security_event',
-        userId: event.userId ?? 'system',
-        action: `security_event:${event.eventType}`,
-        details: {
-          eventType: event.eventType,
-          description: event.description,
-          metadata: event.metadata,
-        },
-        severity: event.severity,
-      });
-    }
-
-    return fullEvent;
+    return this.convertToLegacyEvent(unifiedEvent);
   }
 
   /**
-   * 查询审计日志
+   * 查询审计日志（向后兼容方法）
+   * @deprecated 使用 auditService.getAuditLogger().queryLogs() 代替
    */
   queryLogs(options?: {
     level?: AuditLogEntry['level'];
@@ -146,32 +177,48 @@ export class SecurityAuditor {
     resolved?: boolean;
     limit?: number;
   }): AuditLogEntry[] {
-    let filtered = [...this.logs];
+    const category = options?.category;
+    const logs = this.auditService.getAuditLogger().queryLogs(
+      {
+        startDate: options?.startTime,
+        endDate: options?.endTime,
+      },
+      options?.limit ?? 100,
+      0
+    );
 
-    if (options?.level) {
-      filtered = filtered.filter((log) => log.level === options.level);
-    }
-    if (options?.category) {
-      filtered = filtered.filter((log) => log.category === options.category);
-    }
-    if (options?.userId) {
-      filtered = filtered.filter((log) => log.userId === options.userId);
-    }
-    if (options?.startTime) {
-      filtered = filtered.filter((log) => log.timestamp >= options.startTime!);
-    }
-    if (options?.endTime) {
-      filtered = filtered.filter((log) => log.timestamp <= options.endTime!);
-    }
-    if (options?.resolved !== undefined) {
-      filtered = filtered.filter((log) => log.resolved === options.resolved);
-    }
-
-    return filtered.slice(-(options?.limit ?? 100));
+    return logs
+      .filter((log) => {
+        if (options?.level) {
+          const levelMap: Record<string, AuditLogEntry['level']> = {
+            success: 'info',
+            failure: 'error',
+            warning: 'warning',
+          };
+          if (levelMap[log.result] !== options.level) return false;
+        }
+        if (options?.userId && log.userId !== options.userId) return false;
+        if (category && log.category !== category) return false;
+        return true;
+      })
+      .map((log) => ({
+        id: log.id,
+        timestamp: log.timestamp,
+        level: log.result === 'failure' ? 'error' : log.result === 'warning' ? 'warning' : 'info',
+        category: (log.category as AuditLogEntry['category']) || 'system',
+        userId: log.userId,
+        action: log.action,
+        details: log.details || {},
+        ipAddress: log.ipAddress,
+        userAgent: log.userAgent,
+        severity: (log.details?.severity as AuditLogEntry['severity']) || 'low',
+        resolved: false,
+      }));
   }
 
   /**
-   * 查询安全事件
+   * 查询安全事件（向后兼容方法）
+   * @deprecated 使用 auditService.queryEvents() 代替
    */
   queryEvents(options?: {
     eventType?: SecurityEvent['eventType'];
@@ -179,60 +226,48 @@ export class SecurityAuditor {
     acknowledged?: boolean;
     limit?: number;
   }): SecurityEvent[] {
-    let filtered = [...this.events];
+    const events = this.auditService.queryEvents({
+      limit: options?.limit ?? 50,
+    });
 
-    if (options?.eventType) {
-      filtered = filtered.filter(
-        (event) => event.eventType === options.eventType
-      );
-    }
-    if (options?.severity) {
-      filtered = filtered.filter(
-        (event) => event.severity === options.severity
-      );
-    }
-    if (options?.acknowledged !== undefined) {
-      filtered = filtered.filter(
-        (event) => event.acknowledged === options.acknowledged
-      );
-    }
-
-    return filtered.slice(-(options?.limit ?? 50));
+    return events
+      .filter((event) => {
+        if (options?.severity && event.severity !== options.severity) return false;
+        if (options?.acknowledged !== undefined && event.acknowledged !== options.acknowledged) return false;
+        return true;
+      })
+      .map((event) => this.convertToLegacyEvent(event));
   }
 
   /**
-   * 标记事件为已确认
+   * 标记事件为已确认（向后兼容方法）
+   * @deprecated 使用 auditService.acknowledgeEvent() 代替
    */
   acknowledgeEvent(eventId: string): boolean {
-    const event = this.events.find((e) => e.id === eventId);
-    if (event) {
-      event.acknowledged = true;
-      return true;
-    }
-    return false;
+    return this.auditService.acknowledgeEvent(eventId);
   }
 
   /**
-   * 标记日志为已解决
+   * 标记日志为已解决（向后兼容方法）
+   * @deprecated 此方法已弃用
    */
   resolveLog(logId: string): boolean {
-    const log = this.logs.find((l) => l.id === logId);
-    if (log) {
-      log.resolved = true;
-      return true;
-    }
+    // 日志解决功能在 AuditService 中未实现，此处返回 false
+    Logger.debug(`日志解决功能已弃用: ${logId}`, 'SecurityAuditor');
     return false;
   }
 
   /**
    * 获取未确认的安全事件数量
+   * @deprecated 使用 auditService.getUnacknowledgedEventCount() 代替
    */
   getUnacknowledgedEventCount(): number {
-    return this.events.filter((e) => !e.acknowledged).length;
+    return this.auditService.getUnacknowledgedEventCount();
   }
 
   /**
-   * 生成审计报告
+   * 生成审计报告（向后兼容方法）
+   * @deprecated 使用 auditService.generateReport() 代替
    */
   generateReport(timeWindowHours: number = 24): {
     totalLogs: number;
@@ -244,104 +279,49 @@ export class SecurityAuditor {
     topUsers: Array<{ userId: string; logCount: number }>;
     summary: string;
   } {
-    const cutoff = new Date(Date.now() - timeWindowHours * 3600000);
-
-    const recentLogs = this.logs.filter((l) => l.timestamp >= cutoff);
-    const recentEvents = this.events.filter((e) => e.timestamp >= cutoff);
-
-    // 按类型统计事件
-    const eventsByType: Record<string, number> = {};
-    recentEvents.forEach((e) => {
-      eventsByType[e.eventType] = (eventsByType[e.eventType] || 0) + 1;
-    });
-
-    // 按严重性统计
-    const eventsBySeverity: Record<string, number> = {};
-    recentEvents.forEach((e) => {
-      eventsBySeverity[e.severity] = (eventsBySeverity[e.severity] || 0) + 1;
-    });
-
-    // 统计活跃用户
-    const userCounts: Record<string, number> = {};
-    recentLogs.forEach((l) => {
-      userCounts[l.userId] = (userCounts[l.userId] || 0) + 1;
-    });
-
-    const topUsers = Object.entries(userCounts)
-      .map(([userId, logCount]) => ({ userId, logCount }))
-      .sort((a, b) => b.logCount - a.logCount)
-      .slice(0, 10);
-
-    const unacknowledgedEvents = this.getUnacknowledgedEventCount();
-    const unresolvedLogs = this.logs.filter((l) => !l.resolved).length;
-
-    return {
-      totalLogs: recentLogs.length,
-      totalEvents: recentEvents.length,
-      eventsByType,
-      eventsBySeverity,
-      unresolvedLogs,
-      unacknowledgedEvents: unacknowledgedEvents,
-      topUsers,
-      summary: `过去 ${timeWindowHours} 小时内，系统记录了 ${recentLogs.length} 条审计日志和 ${recentEvents.length} 个安全事件。未确认事件: ${unacknowledgedEvents}，未解决日志: ${unresolvedLogs}`,
-    };
+    return this.auditService.generateReport(timeWindowHours);
   }
 
   /**
-   * 添加事件监听器
+   * 添加事件监听器（向后兼容方法）
+   * @deprecated 使用 auditService.onEvent() 代替
    */
   onEvent(callback: (event: SecurityEvent) => void): void {
-    if (!this.eventListeners.has('all')) {
-      this.eventListeners.set('all', []);
-    }
-    this.eventListeners.get('all')!.push(callback);
+    this.legacyListeners.push(callback);
   }
 
   /**
-   * 清理旧数据
+   * 清理旧数据（向后兼容方法）
+   * @deprecated 使用 auditService.cleanupEvents() 代替
    */
   cleanup(maxAgeHours: number = 168): void {
-    const cutoff = new Date(Date.now() - maxAgeHours * 3600000);
-    this.logs = this.logs.filter((l) => l.timestamp >= cutoff);
-    this.events = this.events.filter((e) => e.timestamp >= cutoff);
+    this.auditService.cleanupEvents(maxAgeHours);
   }
 
   private generateId(): string {
     return `audit_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
   }
 
-  private ensureLogFile(): void {
-    if (!this.logFilePath) return;
-    const dir = path.dirname(this.logFilePath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-    if (!fs.existsSync(this.logFilePath)) {
-      fs.writeFileSync(this.logFilePath, '');
-    }
-  }
+  private convertToLegacyEvent(event: UnifiedSecurityEvent): SecurityEvent {
+    // 将统一格式的事件转换为旧格式
+    let legacyEventType: SecurityEvent['eventType'] = 'suspicious_activity';
 
-  private writeToFile(entry: AuditLogEntry): void {
-    if (!this.logFilePath) return;
-    try {
-      const line = JSON.stringify(entry) + '\n';
-      fs.appendFileSync(this.logFilePath, line);
-    } catch (error) {
-      Logger.error('写入日志文件失败', error as Error, 'SecurityAuditor');
+    if (event.type === 'authentication.failure') {
+      legacyEventType = 'login_failed';
+    } else if (event.type === 'permission.denied') {
+      legacyEventType = 'access_denied';
     }
-  }
 
-  private notifyEventListeners(event: SecurityEvent): void {
-    const listeners = this.eventListeners.get('all');
-    if (listeners) {
-      listeners.forEach((callback) => {
-        try {
-          callback(event);
-        } catch (error) {
-          Logger.error('监听器回调失败', error as Error, 'SecurityAuditor');
-        }
-      });
-    }
+    return {
+      id: event.id,
+      timestamp: event.timestamp,
+      eventType: legacyEventType,
+      userId: event.userId,
+      description: event.description,
+      severity: event.severity,
+      metadata: event.metadata,
+      acknowledged: event.acknowledged,
+    };
   }
 }
 

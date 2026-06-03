@@ -42,9 +42,13 @@ const DEFAULT_ALLOWED_HOSTS: AllowedHost[] = [
   { host: 'open.bigmodel.cn', description: '智谱云端API' },
   { host: 'api.openai.com', description: 'OpenAI API' },
   { host: 'api.tavily.com', description: 'Tavily搜索API' },
-  { host: 'html.duckduckgo.com', description: 'DuckDuckGo搜索' },
+  { host: 'html.duckduckgo.com', description: 'DuckDuckGo搜索HTML' },
+  { host: 'lite.duckduckgo.com', description: 'DuckDuckGo搜索Lite' },
+  { host: 'www.bing.com', description: 'Bing搜索' },
+  { host: 'www.baidu.com', description: '百度搜索' },
   { host: 'market.jiabaixing.ai', description: 'jiabaixing插件市场' },
   { host: 'api.deepseek.com', description: 'DeepSeek API' },
+  { host: 'token-plan-cn.xiaomimimo.com', description: '小米 MiMo API' },
 ];
 
 const DEFAULT_ALLOWED_PORTS = [3111, 8000, 8001, 3000, 3100, 11434, 8080];

@@ -5,7 +5,7 @@
  * 用户可随时查看"谁在什么时候访问了我的什么数据"
  */
 
-import Database from 'better-sqlite3';
+import { createDatabase } from '../shared/DatabaseShim';
 import * as fs from 'fs';
 import * as path from 'path';
 import { Logger } from '../utils/Logger';
@@ -33,7 +33,7 @@ export interface DataSovereigntyReport {
 }
 
 export class DataSovereigntyPipeline {
-  private auditDb: Database.Database | null = null;
+  private auditDb: any = null;
   private dbPath: string;
   private static readonly MAX_AUDIT_RECORDS = 50000;
 
@@ -48,8 +48,12 @@ export class DataSovereigntyPipeline {
         fs.mkdirSync(dir, { recursive: true });
       }
 
-      this.auditDb = new Database(this.dbPath);
-      this.auditDb.pragma('journal_mode = WAL');
+      this.auditDb = createDatabase(this.dbPath);
+      if (!this.auditDb) {
+        Logger.warn('⚠️ 数据主权审计管道：数据库降级为内存模式', 'DataSovereigntyPipeline');
+        return true;
+      }
+      try { this.auditDb.pragma('journal_mode = WAL'); } catch {}
 
       this.auditDb.exec(`
         CREATE TABLE IF NOT EXISTS data_access_audit (

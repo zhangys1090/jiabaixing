@@ -61,13 +61,29 @@ export class PersonaRules {
   /**
    * 生成 LLM system prompt（供 DialogueGenerator 使用）
    * v3.3: 人格定义在 system prompt 中，LLM 自行判断安全边界
+   * v5.1: 注入启用的动态规则
    */
   public buildSystemPrompt(scene: string = 'daily'): string {
     const personaSummary = this.personaCore.buildPersonaSummary();
     const sceneInstruction = this.personaCore.buildSceneToneInstruction(scene);
+
+    // 注入启用的动态规则（按优先级排序）
+    const enabledRules = this.dynamicRules
+      .filter((r) => r.enabled)
+      .sort((a, b) => b.priority - a.priority);
+
+    let rulesSection = '';
+    if (enabledRules.length > 0) {
+      const ruleLines = enabledRules.map((r) => {
+        const prefix = r.type === 'mandatory' ? '【必须】' : r.type === 'emotion' ? '【情感】' : '【风格】';
+        return `${prefix} ${r.content}`;
+      });
+      rulesSection = `\n\n【行为规则】\n${ruleLines.join('\n')}`;
+    }
+
     return `${personaSummary}
 
-${sceneInstruction}`;
+${sceneInstruction}${rulesSection}`;
   }
 
   /**

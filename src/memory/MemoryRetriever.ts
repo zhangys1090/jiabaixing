@@ -15,11 +15,7 @@ import { ChineseTokenizer } from './ChineseTokenizer';
 import { MemoryItem, MemoryTier } from './MemoryEngine';
 import { ShortTermMemory } from './ShortTermMemory';
 import { LongTermMemory } from './LongTermMemory';
-
-/** SemanticSimilarityEngine 存根（原模块已删除） */
-class SemanticSimilarityEngine {
-  async initialize(): Promise<void> {}
-}
+import { MemoryDatabase } from './Database';
 
 /** 记忆存储接口（支持获取所有记忆项） */
 interface MemoryStoreWithGetAll {
@@ -75,7 +71,6 @@ export class LLMEmbeddingModel implements SemanticEmbeddingModel {
 }
 
 export class MemoryRetriever {
-  private semanticSimilarityEngine: SemanticSimilarityEngine;
   private embeddingModel: SemanticEmbeddingModel;
   private memoryVectors: Map<string, number[]>;
   private hotMemoryCache: Map<string, MemoryItem>;
@@ -87,6 +82,7 @@ export class MemoryRetriever {
   private memoryLastAccess: Map<string, number>;
   private memoryTierMap: Map<string, MemoryTier>;
   private vectorDatabase: VectorDatabase | null;
+  private memoryDatabase: MemoryDatabase | null = null;
 
   /** 获取即时记忆的回调（避免数组引用失效） */
   private getInstantMemory: () => MemoryItem[];
@@ -110,7 +106,6 @@ export class MemoryRetriever {
   private readonly EMBEDDING_BATCH_DELAY = 100;
 
   constructor(deps: {
-    semanticSimilarityEngine: SemanticSimilarityEngine;
     embeddingModel: SemanticEmbeddingModel;
     memoryVectors: Map<string, number[]>;
     hotMemoryCache: Map<string, MemoryItem>;
@@ -120,8 +115,8 @@ export class MemoryRetriever {
     vectorDatabase: VectorDatabase | null;
     instantMemoryRef: MemoryItem[] | (() => MemoryItem[]);
     queryVectorCache: Map<string, { vector: number[]; timestamp: number }>;
+    memoryDatabase?: MemoryDatabase;
   }) {
-    this.semanticSimilarityEngine = deps.semanticSimilarityEngine;
     this.embeddingModel = deps.embeddingModel;
     this.memoryVectors = deps.memoryVectors;
     this.hotMemoryCache = deps.hotMemoryCache;
@@ -129,11 +124,17 @@ export class MemoryRetriever {
     this.memoryLastAccess = deps.memoryLastAccess;
     this.memoryTierMap = deps.memoryTierMap;
     this.vectorDatabase = deps.vectorDatabase;
+    this.memoryDatabase = deps.memoryDatabase || null;
     this.getInstantMemory =
       typeof deps.instantMemoryRef === 'function'
         ? deps.instantMemoryRef
         : () => deps.instantMemoryRef as MemoryItem[];
     this.queryVectorCache = deps.queryVectorCache;
+  }
+
+  /** 设置MemoryDatabase引用（P1增强） */
+  setMemoryDatabase(mdb: MemoryDatabase | null): void {
+    this.memoryDatabase = mdb;
   }
 
   /** 更新向量数据库引用（initialize后调用） */
@@ -144,10 +145,10 @@ export class MemoryRetriever {
   // ==================== 精确混合检索 v2 ====================
 
   /**
-   * 精确混合检索v2
+   * 精确混合检索v3 - P1增强版
    * 步骤：
    * 1. 查询向量缓存
-   * 2. 多路召回
+   * 2. 多路召回（含FTS5）
    * 3. RRF融合排序
    */
   async preciseHybridRetrieval(
@@ -163,34 +164,38 @@ export class MemoryRetriever {
     // 1. 查询向量缓存
     const queryEmbedding = await this.getCachedQueryVector(query);
 
-    // 2. 多路召回并行执行
+    // 2. 多路召回并行执行（含FTS5）
     const hotResults = this.retrieveFromHotCache(
       query,
       scene,
       emotion,
       Math.ceil(topK * 0.3)
     );
-    const [keywordResults, vectorResults] = await Promise.all([
+    
+    // 并行执行：关键词、向量、FTS5
+    const [keywordResults, vectorResults, fts5Results] = await Promise.all([
       this.keywordRetrieval(
         query,
         scene,
         emotion,
-        Math.ceil(topK * 0.7),
+        Math.ceil(topK * 0.6),
         shortTermMemory,
         longTermMemory
       ),
       this.vectorSimilarityRetrieval(
         queryEmbedding,
-        Math.ceil(topK * 0.7),
+        Math.ceil(topK * 0.6),
         shortTermMemory,
         longTermMemory
       ),
+      this.fts5Retrieval(query, scene, Math.ceil(topK * 0.8)),
     ]);
 
-    // 3. 应用RRF融合算法
-    const mergedResults = this.applyRRFAlgorithm(
+    // 3. 应用RRF融合算法（三路融合）
+    const mergedResults = this.applyTripleRRFAlgorithm(
       [...hotResults, ...keywordResults],
       vectorResults,
+      fts5Results,
       scene,
       emotion
     );
@@ -365,14 +370,27 @@ export class MemoryRetriever {
   private expandQueryTokens(tokens: string[]): string[] {
     const expanded = new Set(tokens);
     const synonyms: Record<string, string[]> = {
-      error: ['exception', 'fail', 'bug'],
-      bug: ['issue', 'problem', 'defect'],
-      feature: ['function', 'capability', 'enhancement'],
-      query: ['search', 'find', 'lookup'],
-      task: ['todo', 'job', 'item'],
-      code: ['source', 'program', 'script'],
-      test: ['unit-test', 'integration-test', 'e2e'],
-      data: ['information', 'content', 'record'],
+      error: ['exception', 'fail', 'bug', '错误', '异常', '失败'],
+      bug: ['issue', 'problem', 'defect', '问题', '缺陷', '漏洞'],
+      feature: ['function', 'capability', 'enhancement', '功能', '特性', '能力'],
+      query: ['search', 'find', 'lookup', '查询', '搜索', '查找'],
+      task: ['todo', 'job', 'item', '任务', '待办', '工作'],
+      code: ['source', 'program', 'script', '代码', '源码', '脚本'],
+      test: ['unit-test', 'integration-test', 'e2e', '测试', '单元测试'],
+      data: ['information', 'content', 'record', '数据', '信息', '内容'],
+      optimize: ['improve', 'enhance', 'refactor', '优化', '改进', '重构'],
+      deploy: ['release', 'publish', 'ship', '部署', '发布', '上线'],
+      config: ['configuration', 'setting', 'preference', '配置', '设置', '偏好'],
+      fix: ['repair', 'patch', 'resolve', '修复', '修补', '解决'],
+      create: ['add', 'new', 'generate', '创建', '新建', '添加'],
+      delete: ['remove', 'drop', 'destroy', '删除', '移除', '清除'],
+      update: ['modify', 'change', 'edit', '更新', '修改', '编辑'],
+      run: ['execute', 'start', 'launch', '运行', '执行', '启动'],
+      stop: ['halt', 'terminate', 'kill', '停止', '终止', '关闭'],
+      file: ['document', 'resource', '文件', '文档'],
+      project: ['repository', 'repo', '项目', '仓库'],
+      schedule: ['plan', 'calendar', '日程', '计划', '安排'],
+      memory: ['recall', 'remember', '记忆', '回忆', '记住'],
     };
 
     tokens.forEach((token) => {
@@ -587,6 +605,129 @@ export class MemoryRetriever {
         keywordRanks.get(memoryId) || keywordResults.length + 1;
       const vectorRank = vectorRanks.get(memoryId) || vectorResults.length + 1;
       let rrfScore = 1 / (k + keywordRank) + 1 / (k + vectorRank);
+
+      rrfScore *= this.calculateTimeWeight(memory.timestamp);
+      if (scene && memory.scene)
+        rrfScore *= this.calculateSceneWeight(memory.scene, scene);
+      if (emotion && memory.emotion)
+        rrfScore *= this.calculateEmotionWeight(memory.emotion, emotion);
+
+      memory.relevanceScore = rrfScore;
+      scoredMemories.push(memory);
+    });
+
+    return scoredMemories.sort(
+      (a, b) => (b.relevanceScore || 0) - (a.relevanceScore || 0)
+    );
+  }
+
+  // ==================== P1增强：FTS5检索 ====================
+
+  /**
+   * FTS5全文检索（P1增强）
+   */
+  private fts5Retrieval(
+    query: string,
+    scene?: string,
+    limit: number = 30
+  ): MemoryItem[] {
+    if (!this.memoryDatabase) {
+      return [];
+    }
+
+    try {
+      // 转换查询为FTS5语法
+      const ftsQuery = this.buildFTS5Query(query);
+      const results = this.memoryDatabase.searchByFTS5(ftsQuery, limit);
+
+      return results.map((record) => ({
+        id: `fts5_${record.id}`,
+        type: record.type as any,
+        content: record.content,
+        timestamp: new Date(record.timestamp),
+        relevanceScore: 1 - (record.rank || 0) / 1000, // FTS5 rank是越小越好
+        keywordScore: 1 - (record.rank || 0) / 1000,
+      }));
+    } catch (error) {
+      Logger.debug('FTS5检索失败，回退到关键词', 'MemoryRetriever');
+      return [];
+    }
+  }
+
+  /**
+   * 构建FTS5查询语法
+   * 支持：OR、AND、前缀匹配、短语搜索
+   */
+  private buildFTS5Query(query: string): string {
+    const tokens = query.split(/\s+/).filter((t) => t);
+    
+    if (tokens.length === 0) return '*';
+    
+    // 对于中文，添加前缀匹配
+    return tokens
+      .map((token) => {
+        // 保留FTS5语法字符
+        if (token.includes('OR') || token.includes('AND') || token.includes('"')) {
+          return token;
+        }
+        // 添加前缀匹配
+        return `${token}*`;
+      })
+      .join(' ');
+  }
+
+  /**
+   * 三路RRF融合算法（P1增强）
+   * 融合：关键词 + 向量 + FTS5
+   */
+  private applyTripleRRFAlgorithm(
+    keywordResults: MemoryItem[],
+    vectorResults: MemoryItem[],
+    fts5Results: MemoryItem[],
+    scene?: string,
+    emotion?: string
+  ): MemoryItem[] {
+    const keywordRanks = new Map<string, number>();
+    keywordResults.forEach((memory, index) =>
+      keywordRanks.set(memory.id, index + 1)
+    );
+
+    const vectorRanks = new Map<string, number>();
+    vectorResults.forEach((memory, index) =>
+      vectorRanks.set(memory.id, index + 1)
+    );
+
+    const fts5Ranks = new Map<string, number>();
+    fts5Results.forEach((memory, index) =>
+      fts5Ranks.set(memory.id, index + 1)
+    );
+
+    const allMemoryIds = new Set([
+      ...keywordResults.map((m) => m.id),
+      ...vectorResults.map((m) => m.id),
+      ...fts5Results.map((m) => m.id),
+    ]);
+
+    const scoredMemories: MemoryItem[] = [];
+    const k = 60; // RRF常数
+
+    allMemoryIds.forEach((memoryId) => {
+      const memory =
+        keywordResults.find((m) => m.id === memoryId) ||
+        vectorResults.find((m) => m.id === memoryId) ||
+        fts5Results.find((m) => m.id === memoryId);
+      if (!memory) return;
+
+      const keywordRank =
+        keywordRanks.get(memoryId) || keywordResults.length + 1;
+      const vectorRank = vectorRanks.get(memoryId) || vectorResults.length + 1;
+      const fts5Rank = fts5Ranks.get(memoryId) || fts5Results.length + 1;
+
+      // 三路RRF：关键词权重0.3，向量权重0.4，FTS5权重0.3
+      let rrfScore =
+        (1 / (k + keywordRank)) * 0.3 +
+        (1 / (k + vectorRank)) * 0.4 +
+        (1 / (k + fts5Rank)) * 0.3;
 
       rrfScore *= this.calculateTimeWeight(memory.timestamp);
       if (scene && memory.scene)

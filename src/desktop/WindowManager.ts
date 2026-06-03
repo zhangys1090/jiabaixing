@@ -132,7 +132,10 @@ $windows | ConvertTo-Json -Compress
       );
       fs.unlinkSync(tmpFile);
 
-      const windows = JSON.parse(result.trim());
+      const output = (result ?? '').toString().trim();
+      if (!output) return [];
+
+      const windows = JSON.parse(output);
       const windowList = Array.isArray(windows) ? windows : [windows];
 
       Logger.info(`🪟 发现 ${windowList.length} 个窗口`, 'WindowManager');

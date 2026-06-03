@@ -4,7 +4,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import Database from 'better-sqlite3';
+import { createDatabase, nativeAvailable } from '../shared/DatabaseShim';
 import { createLogger, format, transports, Logger } from 'winston';
 import { Logger as AppLogger } from '../utils/Logger';
 import { AuditConfig, AuditLogEntry } from './types';
@@ -38,7 +38,7 @@ export interface ExportOptions {
 export class AuditLogger {
   private config: AuditConfig;
   private logger!: Logger;
-  private db!: Database.Database;
+  private db: any = null;
   private initialized: boolean = false;
   private cleanupTimer?: NodeJS.Timeout;
   private dbPath: string;
@@ -81,8 +81,12 @@ export class AuditLogger {
   }
 
   private initializeDatabase(): void {
-    this.db = new Database(this.dbPath);
-    this.db.pragma('journal_mode = WAL');
+    this.db = createDatabase(this.dbPath);
+    if (!this.db) {
+      AppLogger.warn('⚠️ 审计日志器：数据库降级为内存模式，日志不会被持久化');
+      return;
+    }
+    try { this.db.pragma('journal_mode = WAL'); } catch {}
 
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS audit_logs (

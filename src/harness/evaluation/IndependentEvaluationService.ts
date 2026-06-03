@@ -8,6 +8,7 @@
  */
 
 import { Logger } from '../../utils/Logger';
+import { checkSensitiveInfo } from '../security/SensitiveDetector';
 
 // 核心评估结果类型
 export interface IndependentEvaluationResult {
@@ -211,24 +212,35 @@ export class IndependentEvaluationService {
   private evaluateTaskCompletion(
     input: EvaluationInput
   ): IndependentEvaluationResult['taskCompletion'] {
-    const { conversationHistory, currentOutput } = input;
+    const { conversationHistory, currentOutput, executionTrace } = input;
 
-    // 检查是否有最终输出
+    const lastOutput =
+      currentOutput ||
+      this.getLastAssistantContent(conversationHistory) ||
+      '';
+
+    const hasToolResults = executionTrace?.toolResults &&
+      executionTrace.toolResults.length > 0 &&
+      executionTrace.toolResults.some(r => r.success);
+
+    const hasToolCalls = executionTrace?.totalToolCalls &&
+      executionTrace.totalToolCalls > 0;
+
+    const isAcknowledgmentOnly = this.isAcknowledgmentResponse(lastOutput);
+
     const hasFinalOutput = !!(
-      this.hasFinalAssistantMessage(conversationHistory) ||
-      (currentOutput && currentOutput.length > 0)
+      (this.hasFinalAssistantMessage(conversationHistory) && !isAcknowledgmentOnly) ||
+      (currentOutput && currentOutput.length > 0 && !isAcknowledgmentOnly) ||
+      hasToolResults
     );
 
-    // 检查输出是否合理
     let confidence = 0.5;
     let reason = '未检测到明确的任务完成信号，使用默认评估';
 
-    if (hasFinalOutput) {
-      const lastOutput =
-        currentOutput ||
-        this.getLastAssistantContent(conversationHistory) ||
-        '';
-
+    if (hasToolResults) {
+      confidence = 0.8;
+      reason = '工具执行成功，任务可能已完成';
+    } else if (hasFinalOutput) {
       const hasErrorMarkers = [
         '抱歉',
         '无法',
@@ -248,6 +260,9 @@ export class IndependentEvaluationService {
         confidence = 0.5;
         reason = '有输出但较短';
       }
+    } else if (isAcknowledgmentOnly) {
+      confidence = 0.2;
+      reason = '仅检测到确认响应，未见实际执行';
     }
 
     return {
@@ -255,6 +270,24 @@ export class IndependentEvaluationService {
       confidence,
       reason,
     };
+  }
+
+  /**
+   * 判断是否为仅确认类响应（未实际执行）
+   */
+  private isAcknowledgmentResponse(output: string): boolean {
+    if (!output || output.length === 0) return false;
+
+    const ackPatterns = [
+      /^好的?/,
+      /好的[，,]?\s*(我|我们|这)/,
+      /^收到/,
+      /^明白/,
+      /^了解/,
+      /开始.+(执行|处理|操作)/,
+    ];
+
+    return ackPatterns.some(pattern => pattern.test(output));
   }
 
   /**
@@ -283,6 +316,8 @@ export class IndependentEvaluationService {
 
   /**
    * 安全评估
+   *
+   * 委托给统一敏感信息检测器 SensitiveDetector
    */
   private evaluateSafety(
     input: EvaluationInput
@@ -292,80 +327,18 @@ export class IndependentEvaluationService {
     const outputToCheck =
       currentOutput || this.getLastAssistantContent(conversationHistory) || '';
 
-    // 敏感信息检测
-    const violations: string[] = [];
-    let sanitizedOutput: string | undefined;
+    // 委托给统一检测器
+    const result = checkSensitiveInfo(outputToCheck, 'output');
 
-    const sensitivePatterns = [
-      // 金融类敏感信息
-      { pattern: /\b\d{16,19}\b/g, name: '银行卡号', risk: 'high' as const },
-      {
-        pattern: /\b\d{6}\d{4}\d{2}\d{2}\d{4}\b/g,
-        name: '身份证号',
-        risk: 'high' as const,
-      },
-
-      // 认证凭据
-      {
-        pattern:
-          /(?:password|密码|pwd|passwd)\s*[:=是]\s*\S+|(?:password|密码|pwd|passwd)\s+(?:is|是|为)\s+\S+/gi,
-        name: '密码泄露',
-        risk: 'critical' as const,
-      },
-      {
-        pattern: /(?:secret|密钥|api[_-]?key|token)\s*[:=]\s*\S+/gi,
-        name: '密钥/Token泄露',
-        risk: 'critical' as const,
-      },
-
-      // 通信联系方式
-      {
-        pattern: /\b1[3-9]\d{9}\b/g,
-        name: '手机号码',
-        risk: 'medium' as const,
-      },
-      {
-        pattern: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g,
-        name: '邮箱地址',
-        risk: 'medium' as const,
-      },
-    ];
-
-    for (const { pattern, name, risk } of sensitivePatterns) {
-      if (pattern.test(outputToCheck)) {
-        violations.push(`${name} (风险: ${risk})`);
-      }
-    }
-
-    if (violations.length > 0) {
-      sanitizedOutput = outputToCheck
-        .replace(/\b\d{16,19}\b/g, '[银行卡-已脱敏]')
-        .replace(/\b1[3-9]\d{9}\b/g, '[手机号-已脱敏]')
-        .replace(
-          /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g,
-          '[邮箱-已脱敏]'
-        )
-        .replace(
-          /(?:password|密码|pwd|passwd|secret|密钥|api[_-]?key|token)\s*[:=]\s*\S+/gi,
-          '$& [已脱敏]'
-        )
-        .replace(/\b\d{6}\d{4}\d{2}\d{2}\d{4}\b/g, '[身份证-已脱敏]');
-    }
-
-    const hasCritical = violations.some((v) => v.includes('critical'));
-    const hasHigh = violations.some((v) => v.includes('high'));
+    const violations = result.violations.map(
+      (v) => `${v.name} (风险: ${v.risk})`
+    );
 
     return {
-      safe: violations.length === 0,
-      riskLevel: hasCritical
-        ? 'critical'
-        : hasHigh
-          ? 'high'
-          : violations.length > 0
-            ? 'medium'
-            : 'none',
+      safe: result.safe,
+      riskLevel: result.riskLevel,
       violations,
-      sanitizedOutput,
+      sanitizedOutput: result.sanitizedOutput,
     };
   }
 
@@ -445,22 +418,22 @@ export class IndependentEvaluationService {
         goalProgress = 0.4;
         summary = `部分工具调用失败: ${stepEvaluation.failedCount}/${stepEvaluation.totalCount} (${stepEvaluation.failedTools.join(', ')})`;
       }
-    } else if (taskCompletion.completed && quality.overall >= 0.7) {
-      goalProgress = 0.85;
-      summary = '任务基本完成，质量良好';
     } else if (!taskCompletion.completed) {
-      goalProgress = taskCompletion.confidence;
+      goalProgress = taskCompletion.confidence * 0.6;
       if (taskCompletion.confidence < 0.3) {
         suggestedAction = 'replan';
         summary = '任务进展不明确，建议重新规划';
       } else {
         summary = '任务进行中，继续执行';
       }
+    } else if (taskCompletion.completed && quality.overall >= 0.7) {
+      goalProgress = 0.7 + (taskCompletion.confidence * 0.3);
+      summary = '任务基本完成，质量良好';
     }
 
     return {
       suggestedAction,
-      goalProgress,
+      goalProgress: Math.max(0, Math.min(1, goalProgress)),
       summary,
     };
   }

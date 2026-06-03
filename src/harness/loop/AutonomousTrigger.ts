@@ -149,7 +149,7 @@ export class AutonomousTrigger {
       Logger.info('🤖 开始定时巡检...', 'AutonomousTrigger');
 
       const input: UserInput = {
-        text: '执行系统健康检查：检查内存状态、工具可用性、MCP服务器状态。如果发现异常，尝试自动修复。只报告关键发现。',
+        text: '执行系统健康检查：检查内存状态、工具可用性、MCP服务器状态。同时扫描 data/evolution/skills/ 目录下的 evolve skill 文件，检查是否有长时间未使用的 skill（30天以上），如果有则标记为待优化。如果发现异常，尝试自动修复。只报告关键发现。',
         traceId: taskId,
       };
 

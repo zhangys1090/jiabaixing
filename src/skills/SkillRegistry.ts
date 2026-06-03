@@ -6,10 +6,34 @@
 import {
   Skill,
   SkillDefinition,
+  SkillSource,
   SkillContext,
   SkillResult,
 } from './SkillInterface';
 import { Logger } from '../utils/Logger';
+
+/**
+ * 技能导出数据格式（agentskills.io 兼容）
+ */
+export interface SkillExportData {
+  /** 导出格式版本 */
+  formatVersion: string;
+  /** agentskills.io 标准标识 */
+  agentskillsIo: {
+    version: string;
+    schema: string;
+  };
+  /** 技能定义 */
+  definition: SkillDefinition;
+  /** 技能模板（用户自定义技能的 prompt 模板） */
+  template?: string;
+  /** 技能变量定义 */
+  variables?: Record<string, { description: string; default: string }>;
+  /** 导出时间 */
+  exportedAt: string;
+  /** 导出来源 */
+  exportedFrom: string;
+}
 
 /**
  * 技能元数据（用于查询和匹配）
@@ -479,5 +503,538 @@ export class SkillRegistry {
       'SkillRegistry'
     );
     return await skill.execute(args, context);
+  }
+
+  /**
+   * 将技能导出为 JSON 字符串（agentskills.io 兼容格式）
+   * @param name - 技能名称
+   * @returns 导出的 JSON 字符串，技能不存在时返回 null
+   */
+  exportSkill(name: string): string | null {
+    const skill = this.skills.get(name);
+    if (!skill) {
+      Logger.warn(`导出技能失败：技能不存在: ${name}`, 'SkillRegistry');
+      return null;
+    }
+
+    const exportData: SkillExportData = {
+      formatVersion: '1.0.0',
+      agentskillsIo: {
+        version: '1.0.0',
+        schema: 'https://agentskills.io/schemas/skill-export-v1.json',
+      },
+      definition: {
+        ...skill.definition,
+        source: skill.definition.source || 'builtin',
+        license: skill.definition.license || 'MIT',
+        compatibility: skill.definition.compatibility || '>=5.0',
+      },
+      exportedAt: new Date().toISOString(),
+      exportedFrom: 'jiabaixing',
+    };
+
+    try {
+      const jsonStr = JSON.stringify(exportData, null, 2);
+      Logger.info(`📤 技能已导出: ${name}`, 'SkillRegistry');
+      return jsonStr;
+    } catch (error) {
+      Logger.error(
+        `导出技能序列化失败: ${name}`,
+        error as Error,
+        'SkillRegistry'
+      );
+      return null;
+    }
+  }
+
+  /**
+   * 从 JSON 字符串导入技能
+   * @param jsonString - 符合 SkillExportData 格式的 JSON 字符串
+   * @returns 导入是否成功
+   */
+  importSkill(jsonString: string): boolean {
+    let data: SkillExportData;
+    try {
+      data = JSON.parse(jsonString) as SkillExportData;
+    } catch (error) {
+      Logger.error(
+        '导入技能失败：JSON 解析错误',
+        error as Error,
+        'SkillRegistry'
+      );
+      return false;
+    }
+
+    if (!data.definition || !data.definition.name) {
+      Logger.warn(
+        '导入技能失败：缺少 definition 或 name 字段',
+        'SkillRegistry'
+      );
+      return false;
+    }
+
+    const name = data.definition.name;
+    if (this.skills.has(name)) {
+      Logger.warn(`导入技能失败：技能已存在: ${name}`, 'SkillRegistry');
+      return false;
+    }
+
+    // 标记来源为 hub
+    const enrichedDefinition: SkillDefinition = {
+      ...data.definition,
+      source: 'hub' as SkillSource,
+      hubId: data.definition.hubId || data.agentskillsIo?.schema,
+      hubUrl: data.definition.hubUrl,
+    };
+
+    // 创建导入技能的 Skill 实现
+    const importedSkill: Skill = {
+      definition: enrichedDefinition,
+      async execute(
+        params: Record<string, unknown>,
+        context?: SkillContext
+      ): Promise<SkillResult> {
+        // 如果有模板和 LLM 可用，则渲染模板
+        if (data.template) {
+          let rendered = data.template;
+          if (data.variables) {
+            for (const [key, varDef] of Object.entries(data.variables)) {
+              const value =
+                params[key] != null ? String(params[key]) : varDef.default;
+              rendered = rendered.replaceAll(`{{${key}}}`, value);
+            }
+          }
+          return { success: true, output: rendered };
+        }
+        return {
+          success: true,
+          output: `导入技能 ${enrichedDefinition.name} 执行成功`,
+          metadata: { params, context },
+        };
+      },
+      async validate(
+        params: Record<string, unknown>
+      ): Promise<{ valid: boolean; errors: string[] }> {
+        const errors: string[] = [];
+        for (const param of enrichedDefinition.parameters) {
+          if (
+            param.required &&
+            (params[param.name] === undefined || params[param.name] === null)
+          ) {
+            errors.push(`缺少必填参数: ${param.name}`);
+          }
+        }
+        return { valid: errors.length === 0, errors };
+      },
+    };
+
+    this.register(importedSkill);
+    Logger.info(
+      `📥 技能已导入: ${name} (来源: ${enrichedDefinition.source}, 许可证: ${enrichedDefinition.license || 'MIT'})`,
+      'SkillRegistry'
+    );
+    return true;
+  }
+
+  /**
+   * 导出所有用户/进化生成的技能
+   * @returns 包含所有可导出技能的 JSON 字符串
+   */
+  exportAllSkills(): string {
+    const exportableSkills = Array.from(this.skills.values()).filter(
+      (skill) => {
+        const source = skill.definition.source;
+        return source === 'user' || source === 'evolution' || source === 'hub';
+      }
+    );
+
+    const exportList: SkillExportData[] = exportableSkills.map((skill) => ({
+      formatVersion: '1.0.0',
+      agentskillsIo: {
+        version: '1.0.0',
+        schema: 'https://agentskills.io/schemas/skill-export-v1.json',
+      },
+      definition: {
+        ...skill.definition,
+        source: skill.definition.source || 'user',
+        license: skill.definition.license || 'MIT',
+        compatibility: skill.definition.compatibility || '>=5.0',
+      },
+      exportedAt: new Date().toISOString(),
+      exportedFrom: 'jiabaixing',
+    }));
+
+    try {
+      const jsonStr = JSON.stringify(exportList, null, 2);
+      Logger.info(`📤 批量导出技能: ${exportList.length} 个`, 'SkillRegistry');
+      return jsonStr;
+    } catch (error) {
+      Logger.error('批量导出技能序列化失败', error as Error, 'SkillRegistry');
+      return '[]';
+    }
+  }
+
+  /**
+   * 搜索远程技能市场（目前使用本地模拟数据，预留远程 API 扩展）
+   * @param keyword - 搜索关键词
+   * @returns 匹配的技能定义列表
+   */
+  async searchHub(keyword: string): Promise<SkillDefinition[]> {
+    Logger.info(`🔍 搜索技能市场: "${keyword}"`, 'SkillRegistry');
+
+    // 本地模拟数据 — 后续替换为远程 API 调用
+    const mockHubSkills: SkillDefinition[] = [
+      {
+        name: 'code_review',
+        description: '自动代码审查，检测潜在问题和改进建议',
+        category: 'development',
+        parameters: [
+          {
+            name: 'code',
+            type: 'string',
+            required: true,
+            description: '待审查的代码',
+          },
+          {
+            name: 'language',
+            type: 'string',
+            required: false,
+            description: '编程语言',
+          },
+        ],
+        version: '1.2.0',
+        author: 'hub-contributor',
+        tags: ['code', 'review', 'quality'],
+        source: 'hub',
+        hubId: 'code-review-v1',
+        hubUrl: 'https://agentskills.io/skills/code-review-v1',
+        license: 'MIT',
+        compatibility: '>=5.0',
+      },
+      {
+        name: 'api_doc_generator',
+        description: '根据 API 路由自动生成 OpenAPI 文档',
+        category: 'development',
+        parameters: [
+          {
+            name: 'routes',
+            type: 'string',
+            required: true,
+            description: 'API 路由文件路径',
+          },
+          {
+            name: 'format',
+            type: 'string',
+            required: false,
+            description: '输出格式 (yaml/json)',
+          },
+        ],
+        version: '2.0.1',
+        author: 'hub-contributor',
+        tags: ['api', 'documentation', 'openapi'],
+        source: 'hub',
+        hubId: 'api-doc-gen-v2',
+        hubUrl: 'https://agentskills.io/skills/api-doc-gen-v2',
+        license: 'Apache-2.0',
+        compatibility: '>=5.0',
+      },
+      {
+        name: 'data_analyzer',
+        description: '数据分析技能，支持 CSV/JSON 数据的统计分析与可视化建议',
+        category: 'data',
+        parameters: [
+          {
+            name: 'data',
+            type: 'string',
+            required: true,
+            description: '数据内容或文件路径',
+          },
+          {
+            name: 'analysis_type',
+            type: 'string',
+            required: false,
+            description: '分析类型 (summary/trend/comparison)',
+          },
+        ],
+        version: '1.0.0',
+        author: 'hub-contributor',
+        tags: ['data', 'analysis', 'visualization'],
+        source: 'hub',
+        hubId: 'data-analyzer-v1',
+        hubUrl: 'https://agentskills.io/skills/data-analyzer-v1',
+        license: 'MIT',
+        compatibility: '>=5.0',
+      },
+      {
+        name: 'security_scanner',
+        description: '安全扫描技能，检测代码中的常见安全漏洞',
+        category: 'security',
+        parameters: [
+          {
+            name: 'target',
+            type: 'string',
+            required: true,
+            description: '扫描目标路径',
+          },
+          {
+            name: 'severity',
+            type: 'string',
+            required: false,
+            description: '最低严重级别 (low/medium/high/critical)',
+          },
+        ],
+        version: '1.1.0',
+        author: 'hub-contributor',
+        tags: ['security', 'scan', 'vulnerability'],
+        source: 'hub',
+        hubId: 'security-scanner-v1',
+        hubUrl: 'https://agentskills.io/skills/security-scanner-v1',
+        license: 'MIT',
+        compatibility: '>=5.0',
+      },
+      {
+        name: 'i18n_helper',
+        description: '国际化辅助技能，自动提取和翻译多语言文本',
+        category: 'development',
+        parameters: [
+          {
+            name: 'source_path',
+            type: 'string',
+            required: true,
+            description: '源文件路径',
+          },
+          {
+            name: 'target_lang',
+            type: 'string',
+            required: true,
+            description: '目标语言',
+          },
+        ],
+        version: '1.0.0',
+        author: 'hub-contributor',
+        tags: ['i18n', 'translation', 'localization'],
+        source: 'hub',
+        hubId: 'i18n-helper-v1',
+        hubUrl: 'https://agentskills.io/skills/i18n-helper-v1',
+        license: 'MIT',
+        compatibility: '>=5.0',
+      },
+    ];
+
+    const lowerKeyword = keyword.toLowerCase();
+    const results = mockHubSkills.filter((skill) => {
+      const nameMatch = skill.name.toLowerCase().includes(lowerKeyword);
+      const descMatch = skill.description.toLowerCase().includes(lowerKeyword);
+      const tagMatch = (skill.tags || []).some((tag) =>
+        tag.toLowerCase().includes(lowerKeyword)
+      );
+      const categoryMatch = skill.category.toLowerCase().includes(lowerKeyword);
+      return nameMatch || descMatch || tagMatch || categoryMatch;
+    });
+
+    Logger.info(
+      `🔍 技能市场搜索结果: "${keyword}" → ${results.length} 个匹配`,
+      'SkillRegistry'
+    );
+    return results;
+  }
+
+  /**
+   * 从技能市场安装技能（目前使用本地模拟，预留远程 API 扩展）
+   * @param hubId - 技能在市场的唯一ID
+   * @returns 安装是否成功
+   */
+  async installFromHub(hubId: string): Promise<boolean> {
+    Logger.info(`📥 从技能市场安装: ${hubId}`, 'SkillRegistry');
+
+    // 本地模拟 — 后续替换为远程 API 调用
+    const mockHubSkills: SkillDefinition[] = [
+      {
+        name: 'code_review',
+        description: '自动代码审查，检测潜在问题和改进建议',
+        category: 'development',
+        parameters: [
+          {
+            name: 'code',
+            type: 'string',
+            required: true,
+            description: '待审查的代码',
+          },
+          {
+            name: 'language',
+            type: 'string',
+            required: false,
+            description: '编程语言',
+          },
+        ],
+        version: '1.2.0',
+        author: 'hub-contributor',
+        tags: ['code', 'review', 'quality'],
+        source: 'hub',
+        hubId: 'code-review-v1',
+        hubUrl: 'https://agentskills.io/skills/code-review-v1',
+        license: 'MIT',
+        compatibility: '>=5.0',
+      },
+      {
+        name: 'api_doc_generator',
+        description: '根据 API 路由自动生成 OpenAPI 文档',
+        category: 'development',
+        parameters: [
+          {
+            name: 'routes',
+            type: 'string',
+            required: true,
+            description: 'API 路由文件路径',
+          },
+          {
+            name: 'format',
+            type: 'string',
+            required: false,
+            description: '输出格式 (yaml/json)',
+          },
+        ],
+        version: '2.0.1',
+        author: 'hub-contributor',
+        tags: ['api', 'documentation', 'openapi'],
+        source: 'hub',
+        hubId: 'api-doc-gen-v2',
+        hubUrl: 'https://agentskills.io/skills/api-doc-gen-v2',
+        license: 'Apache-2.0',
+        compatibility: '>=5.0',
+      },
+      {
+        name: 'data_analyzer',
+        description: '数据分析技能，支持 CSV/JSON 数据的统计分析与可视化建议',
+        category: 'data',
+        parameters: [
+          {
+            name: 'data',
+            type: 'string',
+            required: true,
+            description: '数据内容或文件路径',
+          },
+          {
+            name: 'analysis_type',
+            type: 'string',
+            required: false,
+            description: '分析类型 (summary/trend/comparison)',
+          },
+        ],
+        version: '1.0.0',
+        author: 'hub-contributor',
+        tags: ['data', 'analysis', 'visualization'],
+        source: 'hub',
+        hubId: 'data-analyzer-v1',
+        hubUrl: 'https://agentskills.io/skills/data-analyzer-v1',
+        license: 'MIT',
+        compatibility: '>=5.0',
+      },
+      {
+        name: 'security_scanner',
+        description: '安全扫描技能，检测代码中的常见安全漏洞',
+        category: 'security',
+        parameters: [
+          {
+            name: 'target',
+            type: 'string',
+            required: true,
+            description: '扫描目标路径',
+          },
+          {
+            name: 'severity',
+            type: 'string',
+            required: false,
+            description: '最低严重级别 (low/medium/high/critical)',
+          },
+        ],
+        version: '1.1.0',
+        author: 'hub-contributor',
+        tags: ['security', 'scan', 'vulnerability'],
+        source: 'hub',
+        hubId: 'security-scanner-v1',
+        hubUrl: 'https://agentskills.io/skills/security-scanner-v1',
+        license: 'MIT',
+        compatibility: '>=5.0',
+      },
+      {
+        name: 'i18n_helper',
+        description: '国际化辅助技能，自动提取和翻译多语言文本',
+        category: 'development',
+        parameters: [
+          {
+            name: 'source_path',
+            type: 'string',
+            required: true,
+            description: '源文件路径',
+          },
+          {
+            name: 'target_lang',
+            type: 'string',
+            required: true,
+            description: '目标语言',
+          },
+        ],
+        version: '1.0.0',
+        author: 'hub-contributor',
+        tags: ['i18n', 'translation', 'localization'],
+        source: 'hub',
+        hubId: 'i18n-helper-v1',
+        hubUrl: 'https://agentskills.io/skills/i18n-helper-v1',
+        license: 'MIT',
+        compatibility: '>=5.0',
+      },
+    ];
+
+    const hubSkill = mockHubSkills.find((s) => s.hubId === hubId);
+    if (!hubSkill) {
+      Logger.warn(`技能市场安装失败：未找到技能: ${hubId}`, 'SkillRegistry');
+      return false;
+    }
+
+    // 检查是否已安装
+    if (this.skills.has(hubSkill.name)) {
+      Logger.warn(
+        `技能市场安装失败：技能已存在: ${hubSkill.name}`,
+        'SkillRegistry'
+      );
+      return false;
+    }
+
+    // 创建 hub 技能的 Skill 实现
+    const installedSkill: Skill = {
+      definition: { ...hubSkill, source: 'hub' },
+      async execute(
+        params: Record<string, unknown>,
+        context?: SkillContext
+      ): Promise<SkillResult> {
+        return {
+          success: true,
+          output: `技能市场技能 ${hubSkill.name} 执行成功`,
+          metadata: { params, context, hubId: hubSkill.hubId },
+        };
+      },
+      async validate(
+        params: Record<string, unknown>
+      ): Promise<{ valid: boolean; errors: string[] }> {
+        const errors: string[] = [];
+        for (const param of hubSkill.parameters) {
+          if (
+            param.required &&
+            (params[param.name] === undefined || params[param.name] === null)
+          ) {
+            errors.push(`缺少必填参数: ${param.name}`);
+          }
+        }
+        return { valid: errors.length === 0, errors };
+      },
+    };
+
+    this.register(installedSkill);
+    Logger.info(
+      `✅ 技能市场安装成功: ${hubSkill.name} (hubId: ${hubId}, 版本: ${hubSkill.version})`,
+      'SkillRegistry'
+    );
+    return true;
   }
 }

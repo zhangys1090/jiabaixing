@@ -687,3 +687,8 @@ export class SecurityManager {
     return { success: true, result: { success: true, data: '操作执行成功' } };
   }
 }
+
+export { SecurityCore } from './SecurityCore';
+export type { SecurityCoreConfig } from './SecurityCore';
+export { AuditService } from './AuditService';
+export type { AuditServiceConfig } from './AuditService';

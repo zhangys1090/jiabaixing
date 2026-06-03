@@ -82,6 +82,29 @@ export type EnvironmentUpdate = WsEnvironmentUpdateData;
 export type ProjectChange = WsProjectChangeData;
 export type GitStatus = WsGitStatusData;
 
+export type StreamStartData = {
+  traceId?: string;
+  totalLength?: number;
+  timestamp?: number;
+};
+
+export type StreamChunkData = {
+  traceId?: string;
+  chunk?: string;
+  offset?: number;
+  timestamp?: number;
+};
+
+export type StreamDoneData = {
+  traceId?: string;
+  fullText?: string;
+  timestamp?: number;
+};
+
+export type StreamStartListener = (data: StreamStartData) => void;
+export type StreamChunkListener = (data: StreamChunkData) => void;
+export type StreamDoneListener = (data: StreamDoneData) => void;
+
 export interface WebSocketMessage {
   type: WsServerEventType;
   data?: Record<string, unknown>;
@@ -146,6 +169,9 @@ export interface UseWebSocketOptions {
   onEnvironmentUpdate?: (data: EnvironmentUpdate) => void;
   onProjectChange?: (data: ProjectChange) => void;
   onGitStatus?: (data: GitStatus) => void;
+  onStreamStart?: (data: StreamStartData) => void;
+  onStreamChunk?: (data: StreamChunkData) => void;
+  onStreamDone?: (data: StreamDoneData) => void;
 }
 
 export interface WebSocketState {

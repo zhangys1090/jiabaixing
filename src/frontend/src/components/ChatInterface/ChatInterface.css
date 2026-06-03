@@ -234,7 +234,7 @@
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: var(--s-5);
+  gap: var(--s-6);
   position: relative;
   background:
     radial-gradient(ellipse at 20% 0%, rgba(201, 149, 107, 0.03) 0%, transparent 50%),
@@ -395,6 +395,18 @@
   justify-content: center;
 }
 
+/* 同发送者连续消息：缩小间距，视觉分组 */
+.message-row.user-row + .message-row.user-row,
+.message-row.assistant-row + .message-row.assistant-row {
+  margin-top: calc(var(--s-1) * -1);
+}
+
+/* 不同发送者之间增加间距 */
+.message-row.user-row + .message-row.assistant-row,
+.message-row.assistant-row + .message-row.user-row {
+  margin-top: var(--s-3);
+}
+
 @keyframes messageSlideIn {
   from {
     opacity: 0;
@@ -410,8 +422,8 @@
 .message-bubble {
   display: flex;
   gap: var(--s-3);
-  max-width: 72%;
-  padding: var(--s-3) var(--s-4);
+  max-width: 78%;
+  padding: var(--s-4) var(--s-5);
   border-radius: var(--r-lg);
   font-size: var(--text-base);
   line-height: var(--leading);
@@ -427,6 +439,7 @@
   color: var(--text);
   flex-direction: row-reverse;
   border: 1px solid rgba(201, 149, 107, 0.25);
+  border-right: 3px solid rgba(201, 149, 107, 0.4);
   box-shadow:
     0 4px 16px rgba(0, 0, 0, 0.2),
     inset 0 1px 0 rgba(255, 255, 255, 0.04);
@@ -458,6 +471,7 @@
   -webkit-backdrop-filter: blur(16px);
   color: var(--text);
   border: 1px solid rgba(255, 255, 255, 0.06);
+  border-left: 3px solid rgba(201, 149, 107, 0.25);
   box-shadow:
     0 4px 16px rgba(0, 0, 0, 0.15),
     inset 0 1px 0 rgba(255, 255, 255, 0.03);
@@ -537,7 +551,7 @@
 }
 
 .message-body {
-  line-height: var(--leading);
+  line-height: 1.7;
   word-wrap: break-word;
   overflow-wrap: break-word;
 }
@@ -547,9 +561,79 @@
   white-space: pre-wrap;
 }
 
+/* 长文本段落间距：连续换行视为分段 */
+.message-text::after {
+  content: '';
+  display: block;
+  height: 0.3em;
+}
+
+/* 列表项间距 */
+.message-body ul,
+.message-body ol {
+  padding-left: var(--s-5);
+  margin: var(--s-2) 0;
+}
+
+.message-body li {
+  margin-bottom: var(--s-1);
+  line-height: 1.6;
+}
+
+.message-body li:last-child {
+  margin-bottom: 0;
+}
+
+/* 代码块/行内代码样式 */
+.message-body code {
+  background: rgba(201, 149, 107, 0.08);
+  border: 1px solid rgba(201, 149, 107, 0.12);
+  border-radius: var(--r-sm);
+  padding: 2px 6px;
+  font-size: calc(var(--text-base) - 1px);
+  font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
+}
+
+.message-body pre {
+  background: rgba(15, 15, 15, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--r-md);
+  padding: var(--s-3) var(--s-4);
+  margin: var(--s-2) 0;
+  overflow-x: auto;
+  line-height: 1.5;
+}
+
+.message-body pre code {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-size: var(--text-sm);
+}
+
 .message-text.pending-text {
   opacity: 0.45;
   font-style: italic;
+}
+
+.streaming-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1.2em;
+  background-color: currentColor;
+  margin-left: 2px;
+  animation: stream-cursor-blink 1s step-end infinite;
+  vertical-align: text-bottom;
+}
+
+@keyframes stream-cursor-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
 }
 
 /* === 消息元数据 === */
@@ -567,6 +651,43 @@
   color: var(--accent);
   font-weight: 500;
   opacity: 0.7;
+}
+
+.copy-button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity 0.2s, background 0.2s;
+  line-height: 1;
+}
+
+.message-bubble:hover .copy-button {
+  opacity: 0.6;
+}
+
+.copy-button:hover {
+  opacity: 1 !important;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.reconnect-button {
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-left: 6px;
+  transition: background 0.2s;
+  line-height: 1;
+}
+
+.reconnect-button:hover {
+  background: rgba(255, 255, 255, 0.1);
 }
 
 /* === 状态指示器 · 琥珀脉冲 === */
@@ -1098,8 +1219,8 @@
   }
 
   .message-bubble {
-    max-width: 88%;
-    padding: var(--s-3);
+    max-width: 92%;
+    padding: var(--s-3) var(--s-4);
   }
 
   .chat-input-area {

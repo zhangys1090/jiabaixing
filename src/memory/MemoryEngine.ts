@@ -64,6 +64,16 @@ export interface MemoryItem {
   vectorScore?: number;
   accessCount?: number;
   lastAccessTime?: number;
+  /** 衰减分数 (0-1)，由时间衰减和访问强化计算得出，越低越应被清理 */
+  decayScore?: number;
+  /** 重要性评分 (1-10)，>=7 可晋升长期记忆 */
+  importance?: number;
+  /** 记忆分类：preference/fact/task/event/conversation/other */
+  category?: string;
+  /** 是否已被压缩合并 */
+  isCompressed?: boolean;
+  /** 合并来源ID列表（被合并掉的原始记忆ID） */
+  mergedFrom?: string[];
 }
 
 export interface TrackedResult {
@@ -126,10 +136,6 @@ export class MemoryEngine {
   private memoryTierMap: Map<string, MemoryTier> = new Map();
   private memoryAccessCount: Map<string, number> = new Map();
   private memoryLastAccess: Map<string, number> = new Map();
-  /** 语义相似度引擎存根（原 SemanticSimilarityEngine 已删除） */
-  private semanticSimilarityEngine: {
-    initialize(): Promise<void>;
-  } = { async initialize() {} };
   private memoryDatabase: MemoryDatabase;
 
   // 共享的缓存Map（与MemoryRetriever共享引用）
@@ -146,12 +152,54 @@ export class MemoryEngine {
   private memoryEncryption: MemoryEncryption;
   private memoryTracker: MemoryTracker;
 
+  // ==================== 衰减与"做梦"机制 ====================
+
+  /** 衰减配置 */
+  private static readonly DECAY_CONFIG = {
+    /** 短期记忆半衰期（小时） */
+    SHORT_TERM_HALF_LIFE: 24,
+    /** 长期记忆半衰期（小时） */
+    LONG_TERM_HALF_LIFE: 720,
+    /** 访问强化因子：每次访问增加的权重 */
+    ACCESS_BOOST: 0.15,
+    /** 最大访问强化上限 */
+    MAX_ACCESS_BOOST: 2.0,
+    /** 衰减清理阈值：低于此值的记忆可被清理 */
+    DECAY_CLEANUP_THRESHOLD: 0.1,
+    /** 做梦间隔（毫秒）：30分钟 */
+    DREAM_INTERVAL: 30 * 60 * 1000,
+    /** 做梦时最大处理记忆数 */
+    DREAM_BATCH_SIZE: 100,
+    /** 去重相似度阈值 */
+    DEDUP_SIMILARITY_THRESHOLD: 0.8,
+  };
+
+  /** "做梦"定时器 */
+  private dreamTimer: ReturnType<typeof setInterval> | null = null;
+  /** 上次用户活跃时间 */
+  private lastActiveTime: number = Date.now();
+  /** 是否正在"做梦" */
+  private isDreaming: boolean = false;
+  /** 做梦统计 */
+  private dreamStats: {
+    totalDreams: number;
+    memoriesConsolidated: number;
+    memoriesDeduplicated: number;
+    memoriesDecayed: number;
+    lastDreamTime: number | null;
+  } = {
+    totalDreams: 0,
+    memoriesConsolidated: 0,
+    memoriesDeduplicated: 0,
+    memoriesDecayed: 0,
+    lastDreamTime: null,
+  };
+
   constructor() {
     this.userProfile = new UserProfile();
     this.shortTermMemory = new ShortTermMemory();
     this.longTermMemory = new LongTermMemory();
     this.embeddingModel = new LLMEmbeddingModel();
-    this.semanticSimilarityEngine = { async initialize() {} };
     this.vectorDatabase = null;
     this.memoryDatabase = MemoryDatabase.getInstance();
 
@@ -159,7 +207,6 @@ export class MemoryEngine {
     this.memoryEncryption = new MemoryEncryption();
 
     this.memoryRetriever = new MemoryRetriever({
-      semanticSimilarityEngine: this.semanticSimilarityEngine,
       embeddingModel: this.embeddingModel,
       memoryVectors: this.memoryVectors,
       hotMemoryCache: this.hotMemoryCache,
@@ -169,6 +216,7 @@ export class MemoryEngine {
       vectorDatabase: this.vectorDatabase,
       instantMemoryRef: () => this.instantMemory,
       queryVectorCache: this.queryVectorCache,
+      memoryDatabase: this.memoryDatabase,
     });
 
     this.knowledgeGraphBuilder = new KnowledgeGraphBuilder();
@@ -185,7 +233,6 @@ export class MemoryEngine {
       await this.shortTermMemory.initialize();
       await this.longTermMemory.initialize();
       await this.userProfile.load();
-      await this.semanticSimilarityEngine.initialize();
       this.memoryDatabase = MemoryDatabase.getInstance();
       this.vectorDatabase = await VectorDatabaseFactory.createVectorDatabase();
 
@@ -373,7 +420,7 @@ export class MemoryEngine {
     return perf.measure(
       'memory.recall',
       async () => {
-        return this.memoryRetriever.preciseHybridRetrieval(
+        const results = await this.memoryRetriever.preciseHybridRetrieval(
           query,
           scene,
           emotion,
@@ -381,6 +428,16 @@ export class MemoryEngine {
           this.shortTermMemory,
           this.longTermMemory
         );
+
+        // 应用衰减分数加权：衰减分数影响最终排序
+        return results.map((memory) => {
+          const decayScore = memory.decayScore ?? this.calculateDecayScore(memory);
+          return {
+            ...memory,
+            decayScore,
+            relevanceScore: (memory.relevanceScore || 0) * decayScore,
+          };
+        });
       },
       'memory'
     );
@@ -555,6 +612,359 @@ export class MemoryEngine {
       },
       5 * 60 * 1000
     );
+
+    // 启动"做梦"机制：在用户不活跃时自动整理记忆
+    this.dreamTimer = setInterval(
+      () => {
+        this.performDream().catch((err: unknown) => {
+          Logger.error(
+            '记忆整理（做梦）失败',
+            err instanceof Error ? err : new Error(String(err)),
+            'MemoryEngine'
+          );
+        });
+      },
+      MemoryEngine.DECAY_CONFIG.DREAM_INTERVAL
+    );
+  }
+
+  // ==================== 衰减计算 ====================
+
+  /**
+   * 计算记忆的衰减分数
+   * 衰减分数 = 时间衰减 × 访问强化
+   * - 时间衰减：指数衰减，半衰期取决于记忆类型
+   * - 访问强化：每次访问增加权重，有上限
+   *
+   * @param memory - 记忆项
+   * @returns 衰减分数 (0-1)，1=最新最强，0=完全衰减
+   */
+  public calculateDecayScore(memory: MemoryItem): number {
+    const now = Date.now();
+    const timestamp =
+      memory.timestamp instanceof Date
+        ? memory.timestamp.getTime()
+        : new Date(memory.timestamp).getTime();
+
+    const ageHours = (now - timestamp) / (1000 * 60 * 60);
+
+    // 根据记忆类型选择半衰期
+    const halfLife =
+      memory.type === MemoryType.LONG_TERM
+        ? MemoryEngine.DECAY_CONFIG.LONG_TERM_HALF_LIFE
+        : MemoryEngine.DECAY_CONFIG.SHORT_TERM_HALF_LIFE;
+
+    // 时间衰减：指数衰减
+    const timeDecay = Math.exp(-0.693 * ageHours / halfLife);
+
+    // 访问强化：log(1 + accessCount) * boost
+    const accessCount = memory.accessCount || 0;
+    const accessBoost = Math.min(
+      1 + Math.log1p(accessCount) * MemoryEngine.DECAY_CONFIG.ACCESS_BOOST,
+      MemoryEngine.DECAY_CONFIG.MAX_ACCESS_BOOST
+    );
+
+    // 重要性加权：importance >= 7 的记忆衰减更慢
+    const importanceBoost = memory.importance
+      ? 1 + (memory.importance / 10) * 0.5
+      : 1;
+
+    return Math.min(1, timeDecay * accessBoost * importanceBoost);
+  }
+
+  /**
+   * 批量更新记忆衰减分数
+   * @param memories - 需要更新的记忆列表
+   * @returns 更新后的记忆列表
+   */
+  public updateDecayScores(memories: MemoryItem[]): MemoryItem[] {
+    return memories.map((memory) => ({
+      ...memory,
+      decayScore: this.calculateDecayScore(memory),
+    }));
+  }
+
+  // ==================== "做梦"机制 ====================
+
+  /**
+   * 记录用户活跃时间（由外部调用）
+   * 在每次用户交互时调用，用于判断用户是否不活跃
+   */
+  public markUserActive(): void {
+    this.lastActiveTime = Date.now();
+  }
+
+  /**
+   * 执行"做梦"：在用户不活跃时自动整理记忆
+   * 类比人类睡眠时的记忆固化过程：
+   * 1. 衰减计算 - 更新所有记忆的衰减分数
+   * 2. 去重合并 - 合并相似记忆
+   * 3. 晋升/降级 - 高价值短期记忆晋升长期，低价值长期记忆降级
+   * 4. 清理 - 移除完全衰减的记忆
+   */
+  private async performDream(): Promise<void> {
+    // 如果正在做梦或用户活跃（5分钟内有交互），跳过
+    const idleThreshold = 5 * 60 * 1000;
+    if (this.isDreaming) return;
+    if (Date.now() - this.lastActiveTime < idleThreshold) return;
+
+    this.isDreaming = true;
+    const startTime = Date.now();
+
+    try {
+      Logger.info('💤 开始记忆整理（做梦）...', 'MemoryEngine');
+
+      // 步骤1：衰减计算
+      const decayedCount = await this.dreamDecayCalculation();
+
+      // 步骤2：去重合并
+      const dedupedCount = await this.dreamDeduplication();
+
+      // 步骤3：晋升/降级
+      const consolidatedCount = await this.dreamConsolidation();
+
+      // 步骤4：清理
+      const cleanedCount = await this.dreamCleanup();
+
+      this.dreamStats.totalDreams++;
+      this.dreamStats.memoriesConsolidated += consolidatedCount;
+      this.dreamStats.memoriesDeduplicated += dedupedCount;
+      this.dreamStats.memoriesDecayed += decayedCount;
+      this.dreamStats.lastDreamTime = Date.now();
+
+      const duration = Date.now() - startTime;
+      Logger.info(
+        `💤 记忆整理完成: 衰减=${decayedCount} 去重=${dedupedCount} ` +
+        `晋升=${consolidatedCount} 清理=${cleanedCount} 耗时=${duration}ms`,
+        'MemoryEngine'
+      );
+    } catch (error) {
+      Logger.error('记忆整理失败', error as Error, 'MemoryEngine');
+    } finally {
+      this.isDreaming = false;
+    }
+  }
+
+  /**
+   * 做梦步骤1：衰减计算
+   * 更新短期和长期记忆的衰减分数
+   */
+  private async dreamDecayCalculation(): Promise<number> {
+    let updatedCount = 0;
+
+    // 更新短期记忆衰减分数
+    const stmMemories = this.shortTermMemory.getAll();
+    for (const memory of stmMemories.slice(0, MemoryEngine.DECAY_CONFIG.DREAM_BATCH_SIZE)) {
+      const decayScore = this.calculateDecayScore(memory);
+      if (memory.decayScore !== decayScore) {
+        memory.decayScore = decayScore;
+        updatedCount++;
+      }
+    }
+
+    // 更新长期记忆衰减分数
+    const ltmMemories = this.longTermMemory.getAll();
+    for (const memory of ltmMemories.slice(0, MemoryEngine.DECAY_CONFIG.DREAM_BATCH_SIZE)) {
+      const decayScore = this.calculateDecayScore(memory);
+      if (memory.decayScore !== decayScore) {
+        memory.decayScore = decayScore;
+        updatedCount++;
+      }
+    }
+
+    return updatedCount;
+  }
+
+  /**
+   * 做梦步骤2：去重合并
+   * 找出相似度 >80% 的记忆，合并为一条精炼记忆
+   */
+  private async dreamDeduplication(): Promise<number> {
+    let dedupedCount = 0;
+
+    const stmMemories = this.shortTermMemory.getAll();
+    const merged: Set<string> = new Set();
+
+    for (let i = 0; i < stmMemories.length && dedupedCount < 20; i++) {
+      const memA = stmMemories[i];
+      if (merged.has(memA.id) || memA.isCompressed) continue;
+
+      const textA = this.memoryToText(memA);
+      if (!textA) continue;
+
+      for (let j = i + 1; j < stmMemories.length; j++) {
+        const memB = stmMemories[j];
+        if (merged.has(memB.id) || memB.isCompressed) continue;
+
+        const textB = this.memoryToText(memB);
+        if (!textB) continue;
+
+        const similarity = this.computeTextSimilarity(textA, textB);
+        if (similarity > MemoryEngine.DECAY_CONFIG.DEDUP_SIMILARITY_THRESHOLD) {
+          // 合并：保留较新的记忆，标记较旧的为已压缩
+          const newer = memA.timestamp > memB.timestamp ? memA : memB;
+          const older = memA.timestamp > memB.timestamp ? memB : memA;
+
+          // 将旧记忆的关键信息合并到新记忆
+          const mergedContent = this.mergeMemoryContent(newer, older);
+          newer.content = mergedContent;
+          newer.mergedFrom = [...(newer.mergedFrom || []), older.id, ...(older.mergedFrom || [])];
+          newer.importance = Math.max(newer.importance || 5, older.importance || 5);
+
+          merged.add(older.id);
+          dedupedCount++;
+        }
+      }
+    }
+
+    return dedupedCount;
+  }
+
+  /**
+   * 做梦步骤3：晋升/降级
+   * - 高衰减分数的短期记忆 → 晋升长期记忆
+   * - 低衰减分数的长期记忆 → 标记待清理
+   */
+  private async dreamConsolidation(): Promise<number> {
+    let consolidatedCount = 0;
+
+    // 短期→长期晋升：衰减分数 > 0.5 且 importance >= 7 的短期记忆
+    const stmMemories = this.shortTermMemory.getAll();
+    for (const memory of stmMemories.slice(0, MemoryEngine.DECAY_CONFIG.DREAM_BATCH_SIZE)) {
+      const decayScore = memory.decayScore ?? this.calculateDecayScore(memory);
+      const importance = memory.importance ?? 5;
+
+      if (decayScore > 0.5 && importance >= 7 && !memory.isCompressed) {
+        try {
+          await this.storeLongTermMemory(
+            memory.content,
+            memory.scene,
+            memory.emotion
+          );
+          consolidatedCount++;
+        } catch {
+          // 晋升失败不阻塞
+        }
+      }
+    }
+
+    return consolidatedCount;
+  }
+
+  /**
+   * 做梦步骤4：清理完全衰减的记忆
+   * 移除衰减分数低于阈值的即时记忆
+   */
+  private async dreamCleanup(): Promise<number> {
+    let cleanedCount = 0;
+
+    // 清理即时记忆中衰减严重的
+    const before = this.instantMemory.length;
+    this.instantMemory = this.instantMemory.filter((memory) => {
+      const decayScore = memory.decayScore ?? this.calculateDecayScore(memory);
+      return decayScore >= MemoryEngine.DECAY_CONFIG.DECAY_CLEANUP_THRESHOLD;
+    });
+    cleanedCount += before - this.instantMemory.length;
+
+    return cleanedCount;
+  }
+
+  // ==================== 去重与合并辅助方法 ====================
+
+  /**
+   * 计算两个文本的相似度（0-1）
+   * 基于 Jaccard 相似度 + 中文分词
+   */
+  private computeTextSimilarity(a: string, b: string): number {
+    if (a === b) return 1;
+    if (a.length === 0 || b.length === 0) return 0;
+
+    const tokensA = new Set(this.tokenizeForSimilarity(a));
+    const tokensB = new Set(this.tokenizeForSimilarity(b));
+
+    const intersection = new Set([...tokensA].filter((t) => tokensB.has(t)));
+    const union = new Set([...tokensA, ...tokensB]);
+
+    return union.size > 0 ? intersection.size / union.size : 0;
+  }
+
+  /**
+   * 为相似度计算进行分词
+   * 简单的字符级 N-gram + 关键词提取
+   */
+  private tokenizeForSimilarity(text: string): string[] {
+    const tokens: string[] = [];
+
+    // 提取中文关键词（2-4字）
+    const chineseWords = text.match(/[\u4e00-\u9fa5]{2,4}/g);
+    if (chineseWords) {
+      tokens.push(...chineseWords);
+    }
+
+    // 提取英文单词
+    const englishWords = text.match(/[a-zA-Z]{2,}/g);
+    if (englishWords) {
+      tokens.push(...englishWords.map((w) => w.toLowerCase()));
+    }
+
+    // 2-gram 补充
+    const cleanText = text.replace(/\s+/g, '');
+    for (let i = 0; i < cleanText.length - 1; i++) {
+      tokens.push(cleanText.substring(i, i + 2));
+    }
+
+    return tokens;
+  }
+
+  /**
+   * 合并两条记忆的内容
+   * 保留较新的内容，补充旧内容中的独特信息
+   */
+  private mergeMemoryContent(
+    newer: MemoryItem,
+    older: MemoryItem
+  ): MemoryContent {
+    const textA = typeof newer.content === 'string'
+      ? newer.content
+      : JSON.stringify(newer.content);
+    const textB = typeof older.content === 'string'
+      ? older.content
+      : JSON.stringify(older.content);
+
+    // 如果两条记忆内容非常相似，直接保留较新的
+    if (this.computeTextSimilarity(textA, textB) > 0.9) {
+      return newer.content;
+    }
+
+    // 否则合并为结构化摘要
+    return {
+      type: 'merged_memory',
+      primary: newer.content,
+      supplementary: older.content,
+      mergedAt: new Date().toISOString(),
+      reason: '自动去重合并',
+    };
+  }
+
+  /**
+   * 将记忆转为文本（用于相似度计算）
+   */
+  private memoryToText(memory: MemoryItem): string {
+    if (typeof memory.content === 'string') return memory.content;
+    if (memory.content && typeof memory.content === 'object' && !Array.isArray(memory.content)) {
+      const obj = memory.content as Record<string, unknown>;
+      if (obj.input && typeof obj.input === 'string') return obj.input;
+      if (obj.summary && typeof obj.summary === 'string') return obj.summary;
+      if (obj.primary && typeof obj.primary === 'string') return obj.primary;
+    }
+    return JSON.stringify(memory.content);
+  }
+
+  /**
+   * 获取做梦统计信息
+   */
+  public getDreamStats(): typeof this.dreamStats {
+    return { ...this.dreamStats };
   }
 
   private async performMemoryManagement(): Promise<void> {
@@ -892,6 +1302,10 @@ export class MemoryEngine {
     if (this.memoryManagementTimer) {
       clearInterval(this.memoryManagementTimer);
       this.memoryManagementTimer = null;
+    }
+    if (this.dreamTimer) {
+      clearInterval(this.dreamTimer);
+      this.dreamTimer = null;
     }
     try {
       await this.shortTermMemory.shutdown?.();

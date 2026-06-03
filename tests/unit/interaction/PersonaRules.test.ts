@@ -112,12 +112,12 @@ describe('PersonaRules', () => {
       expect(rules.canProactivelyInteract('greeting')).toBe(true);
     });
 
-    it('development 场景不允许主动交互', () => {
-      expect(rules.canProactivelyInteract('development')).toBe(false);
+    it('development 场景允许主动交互', () => {
+      expect(rules.canProactivelyInteract('development')).toBe(true);
     });
 
-    it('work 场景不允许主动交互', () => {
-      expect(rules.canProactivelyInteract('work')).toBe(false);
+    it('work 场景允许主动交互', () => {
+      expect(rules.canProactivelyInteract('work')).toBe(true);
     });
 
     it('idle 场景不允许主动交互', () => {

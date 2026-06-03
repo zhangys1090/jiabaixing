@@ -33,7 +33,8 @@ const RESPONSE_TIMEOUT_MS = 0;
 const ChatHeader: React.FC<{
   isConnected: boolean;
   onCancelTask: () => void;
-}> = ({ isConnected, onCancelTask }) => {
+  onReconnect?: () => void;
+}> = ({ isConnected, onCancelTask, onReconnect }) => {
   const { state, dispatch } = useChat();
 
   const connectionStatus = isConnected ? 'connected' : 'disconnected';
@@ -49,6 +50,11 @@ const ChatHeader: React.FC<{
         <div className={`connection-indicator ${connectionStatus}`}>
           <span className="status-dot" />
           <span>{statusLabel}</span>
+          {!isConnected && onReconnect && (
+            <button className="reconnect-button" onClick={onReconnect} title="重新连接">
+              🔄
+            </button>
+          )}
         </div>
         {state.isRunning && (
           <button className="control-button stop-btn" onClick={onCancelTask} title="取消执行">
@@ -245,7 +251,7 @@ const ChatInterface: React.FC = () => {
     [dispatch, generateMessageId, setCurrentTraceId]
   );
 
-  const { send, isConnected, dialogState } = useWebSocket({
+  const { send, isConnected, dialogState, reconnect } = useWebSocket({
     url: WS_URL,
     onResponseReady: handleResponseReady,
     onServerLog: handleServerLog,
@@ -283,6 +289,45 @@ const ChatInterface: React.FC = () => {
       });
       currentTraceIdRef.current = null;
       setCurrentTraceId(null);
+    },
+    onStreamStart: (data) => {
+      const traceId = data.traceId || '';
+      logFrontend('info', 'Chat', `流式开始: traceId=${traceId}, totalLength=${data.totalLength}`);
+      clearResponseTimeout();
+      hasRespondedOnceRef.current = true;
+      dispatch({ type: 'MARK_SENDING_AS_SENT' });
+      const streamMsgId = generateMessageId();
+      typingMessageIdRef.current = streamMsgId;
+      dispatch({
+        type: 'ADD_MESSAGE',
+        payload: {
+          id: streamMsgId,
+          content: '',
+          sender: 'assistant',
+          timestamp: new Date(),
+          status: 'streaming',
+          emoji: '🤔',
+        },
+      });
+      dispatch({ type: 'SET_IS_LOADING', payload: false });
+      dispatch({ type: 'SET_IS_TYPING', payload: true });
+    },
+    onStreamChunk: (data) => {
+      const chunk = data.chunk || '';
+      if (chunk && typingMessageIdRef.current) {
+        dispatch({ type: 'APPEND_STREAM_CHUNK', id: typingMessageIdRef.current, chunk });
+      }
+    },
+    onStreamDone: (data) => {
+      const fullText = data.fullText || '';
+      logFrontend('info', 'Chat', `流式完成: traceId=${data.traceId}, 长度=${fullText.length}`);
+      if (typingMessageIdRef.current) {
+        dispatch({ type: 'FINISH_STREAM', id: typingMessageIdRef.current });
+        typingMessageIdRef.current = null;
+      }
+      dispatch({ type: 'SET_IS_RUNNING', payload: false });
+      dispatch({ type: 'SET_IS_TYPING', payload: false });
+      setTimeout(() => speakResponse(fullText), 300);
     },
   });
 
@@ -365,6 +410,11 @@ const ChatInterface: React.FC = () => {
   );
 
   function handleResponseReady(response: string | unknown, _traceId?: string) {
+    if (hasRespondedOnceRef.current && typingMessageIdRef.current) {
+      logFrontend('info', 'Chat', `handleResponseReady: 已有流式响应在处理中，跳过`);
+      return;
+    }
+
     let responseText: string;
     if (typeof response === 'string') {
       responseText = response;
@@ -676,6 +726,7 @@ const ChatInterface: React.FC = () => {
     <div className="chat-interface">
       <ChatHeader
         isConnected={isConnected}
+        onReconnect={reconnect}
         onCancelTask={() => {
           if (currentTraceIdRef.current && send) {
             send({ type: 'cancel_task', traceId: currentTraceIdRef.current });

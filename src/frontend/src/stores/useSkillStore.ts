@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { WsSkillExecutionUpdateData, WsWeightUpdateData } from '@shared/contracts';
+import { apiService } from '../api/apiService';
 
 interface SkillState {
   skills: Array<Record<string, unknown>>;
@@ -15,6 +16,8 @@ interface SkillState {
   setWeights: (weights: Record<string, number>) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
+  fetchSkills: () => Promise<void>;
+  executeSkill: (skillName: string, params?: Record<string, unknown>, userId?: string) => Promise<void>;
   reset: () => void;
 }
 
@@ -52,5 +55,38 @@ export const useSkillStore = create<SkillState>((set) => ({
 
   setLoading: (loading) => set({ loading }),
   setError: (error) => set({ error, loading: false }),
+
+  fetchSkills: async () => {
+    set({ loading: true });
+    try {
+      const result = await apiService.listSkills();
+      if (result.success && result.data) {
+        const skillsList = (result.data as { skills: Array<Record<string, unknown>> }).skills || [];
+        set({ skills: skillsList, loading: false });
+      } else {
+        set({ error: result.error || '获取技能列表失败', loading: false });
+      }
+    } catch (error) {
+      console.error('[SkillStore] fetchSkills 失败:', error);
+      set({ error: (error as Error).message, loading: false });
+    }
+  },
+
+  executeSkill: async (skillName: string, params?: Record<string, unknown>, userId?: string) => {
+    set({ loading: true });
+    try {
+      const result = await apiService.executeSkill(skillName, params, userId);
+      if (result.success) {
+        console.log('[SkillStore] 技能执行成功:', skillName);
+        set({ loading: false });
+      } else {
+        set({ error: result.error || '技能执行失败', loading: false });
+      }
+    } catch (error) {
+      console.error('[SkillStore] executeSkill 异常:', error);
+      set({ error: (error as Error).message, loading: false });
+    }
+  },
+
   reset: () => set(initialState),
 }));

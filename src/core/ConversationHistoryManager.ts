@@ -90,6 +90,18 @@ export class ConversationHistoryManager {
     return [...this.history];
   }
 
+  /**
+   * 获取上一条助手消息内容（用于反馈分析）
+   */
+  public getPreviousAssistantMessage(): string | null {
+    for (let i = this.history.length - 1; i >= 0; i--) {
+      if (this.history[i].role === 'assistant') {
+        return this.history[i].content;
+      }
+    }
+    return null;
+  }
+
   public async clear(): Promise<void> {
     this.history = [];
     await this.flushSave();

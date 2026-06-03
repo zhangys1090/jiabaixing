@@ -45,9 +45,9 @@ describe('ScenarioAwareScheduler', () => {
       expect(scheduler.isActive()).toBe(false);
     });
 
-    it('应该初始化默认任务 env_awareness 和 git_awareness', () => {
+    it('应该初始化默认任务 env_awareness、git_awareness 和 skill_discovery', () => {
       const tasks = scheduler.getTasks();
-      expect(tasks.length).toBe(2);
+      expect(tasks.length).toBe(3);
 
       const envTask = scheduler.getTask('env_awareness');
       expect(envTask).toBeDefined();
@@ -137,7 +137,7 @@ describe('ScenarioAwareScheduler', () => {
       scheduler.addTask(task);
 
       const tasks = scheduler.getTasks();
-      expect(tasks).toHaveLength(3);
+      expect(tasks).toHaveLength(4);
       expect(tasks.map((t) => t.id)).toContain('env_awareness');
       expect(tasks.map((t) => t.id)).toContain('extra_task');
     });
@@ -222,9 +222,29 @@ describe('ScenarioAwareScheduler', () => {
   });
 
   describe('getProactiveTriggers', () => {
-    it('应该返回空数组', () => {
+    it('应该返回触发器数组', () => {
       const triggers = scheduler.getProactiveTriggers();
-      expect(triggers).toEqual([]);
+      // 冷却期内可能返回空数组，但不应该是永远空的
+      expect(Array.isArray(triggers)).toBe(true);
+    });
+
+    it('应该在深夜时段返回late_night触发器', () => {
+      // 模拟深夜时间
+      const originalDate = Date;
+      const mockDate = new Date('2024-01-01T23:30:00');
+      jest.spyOn(global, 'Date').mockImplementation(() => mockDate as unknown as Date);
+      Date.now = jest.fn(() => mockDate.getTime());
+
+      // 重置冷却期
+      (scheduler as unknown as { lastProactiveTrigger: number }).lastProactiveTrigger = 0;
+
+      const triggers = scheduler.getProactiveTriggers();
+      const hasLateNight = triggers.some((t) => t.reason === 'late_night');
+      expect(hasLateNight).toBe(true);
+
+      // 恢复
+      global.Date = originalDate;
+      jest.restoreAllMocks();
     });
   });
 });

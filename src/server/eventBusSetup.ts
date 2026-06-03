@@ -1,6 +1,6 @@
 /**
  * EventBus 事件监听注册
- * 将 EventBus 事件桥接到 WebSocket 广播
+ * 将 EventBus 事件桥接到 WebSocket 广播和 Webhook 推送
  */
 
 import * as WebSocket from 'ws';
@@ -8,6 +8,7 @@ import * as WebSocket from 'ws';
 import { JiabaixingCore } from '../core/JiabaixingCore';
 import { EventBus } from '../shared/EventBus';
 import type { EventName } from '../shared/EventBus';
+import { IntegrationManager } from '../integration/IntegrationManager';
 import { Logger } from '../utils/Logger';
 
 type WSServer = WebSocket.Server;
@@ -27,6 +28,23 @@ export function setupEventBus(
     });
   };
 
+  const integrationManager = IntegrationManager.getInstance();
+
+  /**
+   * 广播事件到 WebSocket 并推送到 Webhook
+   * @param eventType - 事件类型
+   * @param wsData - 推送到 WebSocket 的数据
+   * @param webhookData - 推送到 Webhook 的数据（默认与 wsData 相同）
+   */
+  const broadcastAndPush = (
+    eventType: string,
+    wsData: Record<string, unknown>,
+    webhookData?: unknown
+  ): void => {
+    broadcast(wsData);
+    void integrationManager.pushToWebhooks(eventType, webhookData ?? wsData);
+  };
+
   const registeredEvents = new Set<string>();
 
   const registerOnce = (
@@ -40,7 +58,7 @@ export function setupEventBus(
 
   registerOnce('weight_update', (data: unknown) => {
     const payload = data as { weights?: Record<string, number> };
-    broadcast({
+    broadcastAndPush('weight_update', {
       type: 'weight_update',
       data: { weights: payload.weights || {} },
     });
@@ -61,7 +79,7 @@ export function setupEventBus(
       duration?: number;
       attempt?: number;
     };
-    broadcast({
+    broadcastAndPush('agent_execution_update', {
       type: 'agent_execution_update',
       data: {
         traceId: payload.traceId || 'unknown',
@@ -107,7 +125,7 @@ export function setupEventBus(
       });
 
       if (message) {
-        broadcast({
+        broadcastAndPush('proactive_message', {
           type: 'proactive_message',
           data: {
             message,
@@ -134,7 +152,7 @@ export function setupEventBus(
       reason?: string;
       timestamp?: number;
     };
-    broadcast({
+    broadcastAndPush('weight_changed', {
       type: 'weight_update',
       data: {
         toolId: payload.toolId || '',
@@ -148,7 +166,7 @@ export function setupEventBus(
   });
 
   registerOnce('user_correction', (data: unknown) => {
-    broadcast({ type: 'user_correction', data });
+    broadcastAndPush('user_correction', { type: 'user_correction', data });
   });
 
   registerOnce('perception_update', (data: unknown) => {
@@ -162,7 +180,7 @@ export function setupEventBus(
       error?: string;
       timestamp?: string;
     };
-    broadcast({
+    broadcastAndPush('perception_update', {
       type: 'perception_update',
       data: {
         traceId: payload.traceId || 'unknown',
@@ -186,7 +204,7 @@ export function setupEventBus(
       result?: unknown;
       timestamp?: string;
     };
-    broadcast({
+    broadcastAndPush('brain_stage_update', {
       type: 'brain_stage_update',
       data: {
         traceId: payload.traceId || 'unknown',
@@ -210,7 +228,7 @@ export function setupEventBus(
       error?: string;
       timestamp?: string;
     };
-    broadcast({
+    broadcastAndPush('skill_execution_update', {
       type: 'skill_execution_update',
       data: {
         traceId: payload.traceId || 'unknown',
@@ -234,7 +252,7 @@ export function setupEventBus(
       metrics?: Record<string, number>;
       timestamp?: string;
     };
-    broadcast({
+    broadcastAndPush('evolution_event', {
       type: 'evolution_event',
       data: {
         type: payload.type || 'quality_assessed',
@@ -255,7 +273,7 @@ export function setupEventBus(
       context?: string;
       timestamp?: string;
     };
-    broadcast({
+    broadcastAndPush('clarification_request', {
       type: 'clarification_request',
       data: {
         traceId: payload.traceId || 'unknown',
@@ -275,7 +293,7 @@ export function setupEventBus(
       estimatedTime?: number;
       timestamp?: string;
     };
-    broadcast({
+    broadcastAndPush('execution_preview', {
       type: 'execution_preview',
       data: {
         traceId: payload.traceId || 'unknown',
@@ -295,7 +313,7 @@ export function setupEventBus(
       edits?: unknown[];
       timestamp?: string;
     };
-    broadcast({
+    broadcastAndPush('file_modified', {
       type: 'file_modified',
       data: {
         traceId: payload.traceId || 'unknown',
@@ -314,7 +332,7 @@ export function setupEventBus(
       success?: boolean;
       timestamp?: string;
     };
-    broadcast({
+    broadcastAndPush('file_rollback', {
       type: 'file_rollback',
       data: {
         traceId: payload.traceId || 'unknown',
@@ -331,7 +349,7 @@ export function setupEventBus(
       files?: Array<{ path: string; changeType: string }>;
       timestamp?: string;
     };
-    broadcast({
+    broadcastAndPush('multi_file_modified', {
       type: 'multi_file_modified',
       data: {
         traceId: payload.traceId || 'unknown',
@@ -352,7 +370,7 @@ export function setupEventBus(
       success?: boolean | null;
       errorMessage?: string | null;
     };
-    broadcast({
+    broadcastAndPush('tool_trace', {
       type: 'tool_trace',
       data: {
         timestamp: payload.timestamp || new Date().toISOString(),
@@ -377,7 +395,7 @@ export function setupEventBus(
       `📡 EventBus广播 response_ready: traceId=${payload.traceId}, success=${payload.success}, 响应长度=${payload.response?.length || 0}`,
       'EventBus'
     );
-    broadcast({
+    broadcastAndPush('response_ready', {
       type: 'response_ready',
       data: {
         response: payload.response || '',
@@ -387,9 +405,59 @@ export function setupEventBus(
     });
   });
 
+  registerOnce('stream_start', (data: unknown) => {
+    const payload = data as {
+      traceId?: string;
+      totalLength?: number;
+      timestamp?: number;
+    };
+    broadcastAndPush('stream_start', {
+      type: 'stream_start',
+      data: {
+        traceId: payload.traceId || '',
+        totalLength: payload.totalLength || 0,
+        timestamp: payload.timestamp || Date.now(),
+      },
+    });
+  });
+
+  registerOnce('stream_chunk', (data: unknown) => {
+    const payload = data as {
+      traceId?: string;
+      chunk?: string;
+      offset?: number;
+      timestamp?: number;
+    };
+    broadcastAndPush('stream_chunk', {
+      type: 'stream_chunk',
+      data: {
+        traceId: payload.traceId || '',
+        chunk: payload.chunk || '',
+        offset: payload.offset || 0,
+        timestamp: payload.timestamp || Date.now(),
+      },
+    });
+  });
+
+  registerOnce('stream_done', (data: unknown) => {
+    const payload = data as {
+      traceId?: string;
+      fullText?: string;
+      timestamp?: number;
+    };
+    broadcastAndPush('stream_done', {
+      type: 'stream_done',
+      data: {
+        traceId: payload.traceId || '',
+        fullText: payload.fullText || '',
+        timestamp: payload.timestamp || Date.now(),
+      },
+    });
+  });
+
   registerOnce('proactive_message', (data: unknown) => {
     const payload = data as { message?: string; reason?: string };
-    broadcast({
+    broadcastAndPush('proactive_message', {
       type: 'proactive_message',
       data: {
         message: payload.message || payload.reason || '',
@@ -404,7 +472,7 @@ export function setupEventBus(
       activeEnv?: string;
       foregroundWindow?: { title: string; process: string };
     };
-    broadcast({
+    broadcastAndPush('environment_update', {
       type: 'environment_update',
       data: {
         timestamp: payload.timestamp || new Date().toISOString(),
@@ -421,7 +489,7 @@ export function setupEventBus(
       detail: string;
       timestamp: string;
     };
-    broadcast({
+    broadcastAndPush('project_change', {
       type: 'project_change',
       data: {
         type: payload.type,
@@ -437,7 +505,7 @@ export function setupEventBus(
       timestamp: string;
       repos: Array<Record<string, unknown>>;
     };
-    broadcast({
+    broadcastAndPush('git_status', {
       type: 'git_status',
       data: {
         timestamp: payload.timestamp || new Date().toISOString(),

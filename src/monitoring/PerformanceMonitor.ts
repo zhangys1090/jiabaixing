@@ -88,6 +88,20 @@ export class PerformanceMonitor extends EventEmitter {
   private activeSpans: Map<string, PerformanceMetric> = new Map();
   private readonly maxMetricsPerCategory: number = 1000;
 
+  private tokenUsage: {
+    totalInputTokens: number;
+    totalOutputTokens: number;
+    totalTokens: number;
+    sessionCount: number;
+    lastReset: number;
+  } = {
+    totalInputTokens: 0,
+    totalOutputTokens: 0,
+    totalTokens: 0,
+    sessionCount: 0,
+    lastReset: Date.now(),
+  };
+
   private constructor(config?: Partial<PerformanceConfig>) {
     super();
     this.config = {
@@ -617,6 +631,51 @@ export class PerformanceMonitor extends EventEmitter {
       .flat()
       .filter((m) => m.name === name);
     return this.calculateSpanStats(metrics);
+  }
+
+  public recordTokenUsage(inputTokens: number, outputTokens: number): void {
+    this.tokenUsage.totalInputTokens += inputTokens;
+    this.tokenUsage.totalOutputTokens += outputTokens;
+    this.tokenUsage.totalTokens += inputTokens + outputTokens;
+    this.tokenUsage.sessionCount++;
+  }
+
+  public getTokenUsage(): {
+    totalInputTokens: number;
+    totalOutputTokens: number;
+    totalTokens: number;
+    sessionCount: number;
+    avgTokensPerSession: number;
+    estimatedCostUSD: number;
+    uptime: number;
+  } {
+    const uptime = (Date.now() - this.tokenUsage.lastReset) / 1000;
+    const avgPerSession =
+      this.tokenUsage.sessionCount > 0
+        ? this.tokenUsage.totalTokens / this.tokenUsage.sessionCount
+        : 0;
+    const estimatedCost =
+      (this.tokenUsage.totalInputTokens * 0.00000014) +
+      (this.tokenUsage.totalOutputTokens * 0.00000028);
+    return {
+      totalInputTokens: this.tokenUsage.totalInputTokens,
+      totalOutputTokens: this.tokenUsage.totalOutputTokens,
+      totalTokens: this.tokenUsage.totalTokens,
+      sessionCount: this.tokenUsage.sessionCount,
+      avgTokensPerSession: Math.round(avgPerSession),
+      estimatedCostUSD: Math.round(estimatedCost * 10000) / 10000,
+      uptime,
+    };
+  }
+
+  public resetTokenUsage(): void {
+    this.tokenUsage = {
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
+      totalTokens: 0,
+      sessionCount: 0,
+      lastReset: Date.now(),
+    };
   }
 }
 

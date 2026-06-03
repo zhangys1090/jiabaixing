@@ -474,7 +474,7 @@ export class ContextManager {
             input.text
           );
           if (memories?.length) {
-            const memoryContext = memories.slice(0, 3).join('\n');
+            const memoryContext = memories.slice(0, 5).join('\n');
             if (memoryContext) {
               messages.push({
                 role: 'system',
@@ -505,6 +505,32 @@ export class ContextManager {
 
     // User input
     messages.push({ role: 'user', content: input.text });
+
+    // 自动缩减：当消息超过阈值时触发压缩
+    const totalTokens = this.estimateMessageTokens(messages);
+    const budget = this.allocator.allocate();
+    const totalBudget = budget.systemPrompt + budget.dynamicContext + budget.memory + budget.history + budget.reserve;
+
+    if (totalTokens > totalBudget * this.compressionConfig.tokenUsageThreshold) {
+      Logger.info(
+        `🗜️ buildPhaseContext Token 超阈值 (${totalTokens} > ${Math.round(totalBudget * this.compressionConfig.tokenUsageThreshold)})，触发自动缩减`,
+        'ContextManager'
+      );
+      const compressionResult = this.compressHistory(messages, totalBudget);
+      if (compressionResult.compressed.length < messages.length ||
+          compressionResult.compressedTokenCount < totalTokens) {
+        messages.length = 0;
+        messages.push(...compressionResult.compressed);
+
+        // 确保用户输入仍在
+        const hasUserInput = messages.some(
+          (m) => m.role === 'user' && m.content === input.text
+        );
+        if (!hasUserInput) {
+          messages.push({ role: 'user', content: input.text });
+        }
+      }
+    }
 
     return messages;
   }

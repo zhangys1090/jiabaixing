@@ -1,6 +1,8 @@
 import path from 'path';
+import fs from 'fs';
 import { EvolutionOrchestrator } from '../evolution/EvolutionOrchestrator';
 import { EvolutionEngine } from '../evolution/EvolutionEngine';
+import { FeedbackCollector } from '../evolution/FeedbackCollector';
 import { LLMProvider } from '../models/LLMProvider';
 import { PerformanceMonitor } from '../monitoring/PerformanceMonitor';
 import { SecurityAuditor } from '../monitoring/SecurityAuditor';
@@ -30,6 +32,11 @@ import { ScenarioAwareScheduler } from './ScenarioAwareScheduler';
  */
 export interface IMemoryEngine {
   storeShortTermMemory?(
+    content: string | Record<string, unknown> | unknown[],
+    scene?: string,
+    emotion?: string
+  ): Promise<unknown>;
+  storeLongTermMemory?(
     content: string | Record<string, unknown> | unknown[],
     scene?: string,
     emotion?: string
@@ -73,6 +80,8 @@ export interface IMemoryEngine {
   }>;
   getUserProfile?(): unknown;
   detectBehaviorPatterns?(): unknown[];
+  /** 标记用户活跃（用于记忆"做梦"机制判断空闲状态） */
+  markUserActive?(): void;
 }
 
 /**
@@ -105,6 +114,25 @@ export interface TrackedProcessResult {
  * - 保留必要的集成组件（记忆、调度、进化）
  * - 移除旧的 FC 循环、DirectExecutor 等残留
  */
+
+/** 上下文文件扫描列表（按优先级排序） */
+const CONTEXT_FILE_LIST = [
+  'JIABAIXING.md',
+  'CONTEXT.md',
+  '.jiabaixing/context.md',
+  'CLAUDE.md',
+] as const;
+
+/** 上下文文件缓存有效期（5分钟） */
+const CONTEXT_CACHE_TTL_MS = 5 * 60 * 1000;
+
+/** 已加载的上下文文件条目 */
+interface ContextFileEntry {
+  fileName: string;
+  content: string;
+  loadedAt: number;
+}
+
 export class JiabaixingCore {
   private initialized = false;
   private personaCore: PersonaCore;
@@ -116,6 +144,8 @@ export class JiabaixingCore {
   private traeOptimizationIntegrator: ITRAEOptimizationIntegrator | null = null;
   // V1 stub for evolution routes backward compat (V2 EvolutionEngineV2 is active)
   public evolutionEngine: EvolutionEngine = new EvolutionEngine();
+  // 反馈收集器 — 闭合 Loop B
+  public feedbackCollector: FeedbackCollector = new FeedbackCollector();
   private optimizationSchedulerManager!: OptimizationScheduler;
   private scenarioScheduler: ScenarioAwareScheduler | null = null;
 
@@ -126,6 +156,10 @@ export class JiabaixingCore {
   private constitutionPromptBuilder: ConstitutionPromptBuilder;
   private memoryAssistant!: MemoryAssistant;
   private conversationHistoryManager: ConversationHistoryManager;
+
+  // 项目上下文文件缓存
+  private _contextFileCache: ContextFileEntry[] = [];
+  private _contextCacheTimestamp: number = 0;
 
   constructor() {
     this.personaCore = new PersonaCore();
@@ -324,6 +358,93 @@ export class JiabaixingCore {
     return this.memoryEngine;
   }
 
+  /**
+   * 加载项目上下文文件并注入到 ConstitutionPromptBuilder
+   * 使用缓存机制，5分钟内不重复读磁盘
+   */
+  private async loadAndInjectProjectContext(): Promise<void> {
+    try {
+      const now = Date.now();
+      const cacheExpired =
+        now - this._contextCacheTimestamp >= CONTEXT_CACHE_TTL_MS;
+
+      if (cacheExpired) {
+        this._contextFileCache = await this.scanContextFiles();
+        this._contextCacheTimestamp = now;
+        Logger.info(
+          `📄 项目上下文文件已加载: ${this._contextFileCache.length} 个`,
+          'JiabaixingCore'
+        );
+      }
+
+      const contextText = this._contextFileCache
+        .map((entry) => `[${entry.fileName}]\n${entry.content}`)
+        .join('\n\n');
+
+      this.constitutionPromptBuilder.setProjectContext(contextText);
+    } catch (error) {
+      Logger.warn(
+        `项目上下文文件加载失败: ${(error as Error).message}`,
+        'JiabaixingCore'
+      );
+      // 加载失败不影响主流程
+    }
+  }
+
+  /**
+   * 扫描项目根目录下的上下文文件
+   * @returns 成功读取的上下文文件条目列表
+   */
+  private async scanContextFiles(): Promise<ContextFileEntry[]> {
+    const projectRoot = process.cwd();
+    const entries: ContextFileEntry[] = [];
+
+    for (const fileName of CONTEXT_FILE_LIST) {
+      const filePath = path.join(projectRoot, fileName);
+      try {
+        if (fs.existsSync(filePath)) {
+          const content = fs.readFileSync(filePath, 'utf-8').trim();
+          if (content.length > 0) {
+            entries.push({
+              fileName,
+              content,
+              loadedAt: Date.now(),
+            });
+            Logger.debug(
+              `📄 加载上下文文件: ${fileName} (${content.length} 字符)`,
+              'JiabaixingCore'
+            );
+          }
+        }
+      } catch (error) {
+        Logger.debug(
+          `跳过上下文文件 ${fileName}: ${(error as Error).message}`,
+          'JiabaixingCore'
+        );
+      }
+    }
+
+    return entries;
+  }
+
+  /**
+   * 手动刷新项目上下文文件缓存
+   * @returns 刷新后加载的上下文文件数量
+   */
+  public async refreshProjectContext(): Promise<number> {
+    this._contextCacheTimestamp = 0;
+    await this.loadAndInjectProjectContext();
+    return this._contextFileCache.length;
+  }
+
+  /**
+   * 获取当前已加载的上下文文件列表
+   * @returns 上下文文件条目的只读副本
+   */
+  public getLoadedContextFiles(): ReadonlyArray<ContextFileEntry> {
+    return [...this._contextFileCache];
+  }
+
   async getLLMHealth(): Promise<{ available: boolean; message: string }> {
     return this.llm.healthCheck();
   }
@@ -350,6 +471,9 @@ export class JiabaixingCore {
       'JiabaixingCore'
     );
 
+    // 加载项目上下文文件并注入到 ConstitutionPromptBuilder
+    await this.loadAndInjectProjectContext();
+
     // 立即发送处理开始的信号，让前端知道后端已开始处理
     void EventBus.emit('agent_execution_update', {
       traceId: finalTraceId,
@@ -359,10 +483,16 @@ export class JiabaixingCore {
     });
 
     const startTime = Date.now();
+    let requestSuccess = false;
 
     // 更新用户活跃状态
     if (this.scenarioScheduler) {
       this.scenarioScheduler.updateUserActivity();
+    }
+
+    // 标记记忆引擎用户活跃（用于"做梦"机制判断空闲状态）
+    if (this.memoryEngine?.markUserActive) {
+      this.memoryEngine.markUserActive();
     }
 
     this.securityAuditor.logAuditEntry({
@@ -395,10 +525,43 @@ export class JiabaixingCore {
           `🏗️ Harness 处理完成 (质量:${qualityScore.toFixed(2)}, 轮次:${harnessResult.metadata.loopRounds}, 工具:${harnessResult.trace.totalToolCalls})`,
           'JiabaixingCore'
         );
+        requestSuccess = qualityScore >= 0.5;
 
         // 更新对话历史
         this.conversationHistoryManager.addUserMessage(input);
         this.conversationHistoryManager.addAssistantMessage(safeResponse);
+
+        // 反馈收集: 分析用户输入是否为纠正/重试
+        const lastResponse = this.conversationHistoryManager.getPreviousAssistantMessage?.() || '';
+        const feedbackRecord = this.feedbackCollector.analyzeUserInput(
+          input,
+          lastResponse,
+          userId,
+          this.inferSceneFromInput(input)
+        );
+        if (feedbackRecord) {
+          // 将反馈信号传递给进化引擎
+          this.evolutionEngine.collectFeedback(input, safeResponse, {
+            success: false,
+            toolsUsed: [],
+            error: `用户反馈: ${feedbackRecord.type}`,
+          });
+
+          // Phase 1-2: 偏好提取 — 从纠正中自动学习用户偏好
+          try {
+            const { PreferenceManager } = await import('../memory/PreferenceManager');
+            const pm = PreferenceManager.getInstance();
+            const entry = pm.applyCorrection(input, 'general');
+            if (entry) {
+              Logger.info(
+                `⚡ 从用户纠正中提取偏好: ${entry.key}=${entry.value}`,
+                'JiabaixingCore'
+              );
+            }
+          } catch {
+            // 偏好提取失败不影响主流程
+          }
+        }
 
         // 自动知识提取
         setImmediate(() => {
@@ -437,6 +600,29 @@ export class JiabaixingCore {
               scene: this.inferSceneFromInput(input),
               userId: userId || 'default',
             });
+
+            // 闭合 Loop B: 低质量交互触发反馈收集
+            if (qualityScore < 0.5) {
+              this.feedbackCollector.recordLowQuality(
+                input,
+                safeResponse,
+                qualityScore,
+                userId,
+                this.inferSceneFromInput(input)
+              );
+            }
+
+            // 闭合 Loop B: 工具失败触发反馈收集
+            for (const tc of toolCalls) {
+              if (!tc.success) {
+                this.feedbackCollector.recordToolFailure(
+                  tc.toolName,
+                  '工具执行失败',
+                  input,
+                  userId
+                );
+              }
+            }
           } catch (error) {
             Logger.debug(
               `进化编排器记录失败（非关键）: ${(error as Error).message}`,
@@ -445,13 +631,10 @@ export class JiabaixingCore {
           }
         });
 
-        void EventBus.emit('response_ready', {
-          response: safeResponse,
-          traceId: finalTraceId,
-          success: true,
-        });
+        this.streamResponse(safeResponse, finalTraceId);
+
         Logger.info(
-          `✅ response_ready已发射: traceId=${finalTraceId}, 响应长度=${safeResponse.length}, 质量=${qualityScore.toFixed(2)}`,
+          `✅ 流式推送已启动: traceId=${finalTraceId}, 响应长度=${safeResponse.length}, 质量=${qualityScore.toFixed(2)}`,
           'JiabaixingCore'
         );
         Logger.debug(
@@ -478,13 +661,9 @@ export class JiabaixingCore {
       this.conversationHistoryManager.addUserMessage(input);
       this.conversationHistoryManager.addAssistantMessage(fallbackResponse);
 
-      void EventBus.emit('response_ready', {
-        response: fallbackResponse,
-        traceId: finalTraceId,
-        success: false,
-      });
+      this.streamResponse(fallbackResponse, finalTraceId);
       Logger.warn(
-        `⚠️ response_ready已发射(降级): traceId=${finalTraceId}`,
+        `⚠️ 流式推送已启动(降级): traceId=${finalTraceId}`,
         'JiabaixingCore'
       );
       Logger.debug(
@@ -504,13 +683,9 @@ export class JiabaixingCore {
       this.conversationHistoryManager.addUserMessage(input);
       this.conversationHistoryManager.addAssistantMessage(fallbackResponse);
 
-      void EventBus.emit('response_ready', {
-        response: fallbackResponse,
-        traceId: finalTraceId,
-        success: false,
-      });
+      this.streamResponse(fallbackResponse, finalTraceId);
       Logger.error(
-        `❌ response_ready已发射(错误): traceId=${finalTraceId}, error=${(error as Error).message}`,
+        `❌ 流式推送已启动(错误): traceId=${finalTraceId}, error=${(error as Error).message}`,
         error as Error,
         'JiabaixingCore'
       );
@@ -526,9 +701,7 @@ export class JiabaixingCore {
       };
     } finally {
       const duration = Date.now() - startTime;
-      // C1 fix: report actual success instead of always true
-      const success = this.harness ? true : false;
-      this.performanceMonitor.recordRequest(duration, success);
+      this.performanceMonitor.recordRequest(duration, requestSuccess);
       Logger.clearTraceId();
     }
   }
@@ -603,7 +776,7 @@ export class JiabaixingCore {
   private readonly MAX_CONVERSATION_HISTORY = 20;
 
   /**
-   * 生成主动消息（已简化，不再依赖 ProactiveMessageGenerator）
+   * 生成主动消息 — 使用 LLM 生成人格化的主动消息
    */
   public async generateProactiveMessage(context: {
     reason: string;
@@ -611,7 +784,59 @@ export class JiabaixingCore {
     scene: string;
     isEmotionBased: boolean;
   }): Promise<string> {
-    return `提醒：${context.reason}`;
+    // 主动消息原因 → 引导文案映射
+    const reasonGuidance: Record<string, string> = {
+      long_silence: '用户已经很久没有互动了，用温暖的方式打个招呼，不要有压力感',
+      negative_emotion_trend: '用户之前的情绪不太好，用关心但不刻意的语气问候',
+      morning_greeting: '早上好，用轻松的方式开启新的一天',
+      evening_checkin: '晚上好，关心一下今天过得怎么样',
+      late_night: '用户还在熬夜，用关心的语气提醒休息',
+      scheduled: '有日程提醒需要告知用户',
+      behavior_pattern: '根据用户的行为习惯，提供适时的建议',
+      git_changes: '用户的代码仓库有变化，可以主动提供建议',
+      idle_reminder: '用户似乎空闲了，可以提供一些有用的建议',
+    };
+
+    const guidance = reasonGuidance[context.reason] || '用自然的方式与用户互动';
+
+    try {
+      const systemPrompt = `${this.personaCore.buildPersonaSummary()}
+
+你正在发起一次主动对话。规则：
+- 不要说"我是AI"或"作为助手"
+- 不要过度热情或刻意
+- 保持自然、温暖、简洁
+- 不超过50字
+- 不要用"主人"称呼
+- ${guidance}`;
+
+      const userPrompt = context.context
+        ? `背景信息: ${context.context}\n场景: ${context.scene}`
+        : `场景: ${context.scene}`;
+
+      const response = await this.llm.chat(userPrompt, [], systemPrompt);
+      return response || this.getFallbackProactiveMessage(context.reason);
+    } catch {
+      return this.getFallbackProactiveMessage(context.reason);
+    }
+  }
+
+  /**
+   * 主动消息降级方案
+   */
+  private getFallbackProactiveMessage(reason: string): string {
+    const fallbacks: Record<string, string> = {
+      long_silence: '在忙什么呢？需要帮忙的话随时说~',
+      negative_emotion_trend: '今天还好吗？有什么我能帮上的？',
+      morning_greeting: '早~ 新的一天开始了，有什么计划吗？',
+      evening_checkin: '晚上好，今天辛苦了~',
+      late_night: '这么晚了还在忙？注意休息哦',
+      scheduled: '有个提醒想跟你说一下~',
+      behavior_pattern: '想到一个可能对你有帮助的建议~',
+      git_changes: '看到你的代码有更新，需要帮忙review吗？',
+      idle_reminder: '闲着的话，要不要看看待办事项？',
+    };
+    return fallbacks[reason] || '在呢，需要什么帮忙吗？';
   }
 
   public getLastToolResults(): Array<{
@@ -643,5 +868,46 @@ export class JiabaixingCore {
     if (/你好|嗨|谢谢|再见|早安|晚安/.test(input))
       return 'greeting';
     return 'general';
+  }
+
+  /**
+   * 流式推送响应 — 将完整文本分块推送，避免前端 TypewriterText 闪烁
+   */
+  private streamResponse(fullText: string, traceId: string): void {
+    const CHUNK_SIZE = 6;
+    const CHUNK_DELAY_MS = 25;
+
+    void EventBus.emit('stream_start', {
+      traceId,
+      totalLength: fullText.length,
+      timestamp: Date.now(),
+    });
+
+    let offset = 0;
+
+    const sendNext = (): void => {
+      if (offset >= fullText.length) {
+        void EventBus.emit('stream_done', {
+          traceId,
+          fullText,
+          timestamp: Date.now(),
+        });
+        return;
+      }
+
+      const chunk = fullText.slice(offset, offset + CHUNK_SIZE);
+      offset += CHUNK_SIZE;
+
+      void EventBus.emit('stream_chunk', {
+        traceId,
+        chunk,
+        offset,
+        timestamp: Date.now(),
+      });
+
+      setTimeout(sendNext, CHUNK_DELAY_MS);
+    };
+
+    setTimeout(sendNext, CHUNK_DELAY_MS);
   }
 }

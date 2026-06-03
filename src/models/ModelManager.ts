@@ -84,9 +84,20 @@ export class ModelManager implements ModelManagerInterface {
   }
 
   private async registerDefaultModels(): Promise<void> {
-    const llmModel = process.env.LLM_MODEL || 'deepseek-chat';
-    const baseUrl = process.env.OPENAI_API_BASE || 'http://127.0.0.1:8001/v1';
-    const apiKey = process.env.OPENAI_API_KEY || 'not-needed';
+    // 小米 MiMo 优先：如果配置了 XIAOMI_API_KEY，自动作为默认模型
+    const xiaomiApiKey = process.env.XIAOMI_API_KEY;
+    const xiaomiBaseUrl = process.env.XIAOMI_BASE_URL || 'https://token-plan-cn.xiaomimimo.com/v1';
+    const xiaomiModel = process.env.XIAOMI_MODEL || 'mimo-v2.5-pro';
+
+    const llmModel = xiaomiApiKey
+      ? xiaomiModel
+      : (process.env.LLM_MODEL || 'deepseek-chat');
+    const baseUrl = xiaomiApiKey
+      ? xiaomiBaseUrl
+      : (process.env.OPENAI_API_BASE || 'http://127.0.0.1:8001/v1');
+    const apiKey = xiaomiApiKey
+      ? xiaomiApiKey
+      : (process.env.OPENAI_API_KEY || 'not-needed');
 
     const defaultConfig: ModelConfig = {
       name: 'default',

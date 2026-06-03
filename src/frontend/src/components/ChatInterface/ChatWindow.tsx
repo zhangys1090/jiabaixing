@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePerformanceMonitor } from '../../hooks/usePerformanceMonitor';
 import { useVirtualScroll } from '../../hooks/useVirtualScroll';
 import { Message, MessageStatus } from '../../types/chat';
@@ -35,6 +35,8 @@ const getStatusLabel = (status: MessageStatus): string => {
       return '思考中';
     case 'typing':
       return '输入中';
+    case 'streaming':
+      return '回复中';
     case 'error':
       return '发送失败';
     case 'retrying':
@@ -148,6 +150,26 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     [onSkipTyping]
   );
 
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const handleCopy = useCallback(async (messageId: string, text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedId(messageId);
+      setTimeout(() => setCopiedId(null), 2000);
+    } catch {
+      // fallback
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      setCopiedId(messageId);
+      setTimeout(() => setCopiedId(null), 2000);
+    }
+  }, []);
+
   const renderMessageContent = (message: Message) => {
     const { status, sender, content, images } = message;
 
@@ -189,7 +211,12 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
           </div>
         )}
 
-        {sender === 'assistant' && status === 'typing' ? (
+        {sender === 'assistant' && status === 'streaming' ? (
+          <p className="message-text">
+            {content}
+            <span className="streaming-cursor">|</span>
+          </p>
+        ) : sender === 'assistant' && status === 'typing' ? (
           <TypewriterText
             text={content}
             speed={40}
@@ -299,6 +326,15 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                             {formatRelativeTime(message.timestamp)}
                           </span>
                           {isUser && message.status === 'sent' && <span className="read-status">已读</span>}
+                          {isAssistant && message.content && message.status !== 'typing' && message.status !== 'streaming' && (
+                            <button
+                              className="copy-button"
+                              onClick={() => handleCopy(message.id, message.content)}
+                              title="复制消息"
+                            >
+                              {copiedId === message.id ? '✅' : '📋'}
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>

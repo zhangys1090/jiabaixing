@@ -44,11 +44,55 @@ export interface CoreEvents {
       ws?: unknown;
     },
   ];
+  stream_start: [
+    payload: {
+      traceId: string;
+      totalLength: number;
+      timestamp: number;
+    },
+  ];
+  stream_chunk: [
+    payload: {
+      traceId: string;
+      chunk: string;
+      offset: number;
+      timestamp: number;
+    },
+  ];
+  stream_done: [
+    payload: {
+      traceId: string;
+      fullText: string;
+      timestamp: number;
+    },
+  ];
   system_status: [status: string, detail?: string];
   command_executed: [command: string, result: unknown];
   context_switch: [fromScene: string, toScene: string];
   active_interaction: [
     data: { input?: string; userId?: string; text?: string },
+  ];
+}
+
+export interface FileWatchEvents {
+  file_changed: [
+    payload: {
+      filePath: string;
+      changeType: 'created' | 'modified' | 'deleted' | 'renamed';
+      timestamp: string;
+      matchedRules: Array<{ id: string; name: string; action: string }>;
+    },
+  ];
+  file_watch_started: [payload: { directories: string[]; timestamp: string }];
+  file_watch_stopped: [payload: { timestamp: string }];
+  file_change_rule_triggered: [
+    payload: {
+      ruleId: string;
+      ruleName: string;
+      action: string;
+      filePath: string;
+      timestamp: string;
+    },
   ];
 }
 
@@ -88,6 +132,33 @@ export interface SchedulerEvents {
     },
   ];
   schedule_check: [scheduleId: string, time: Date];
+  skill_discovery: [
+    payload: {
+      timestamp: string;
+      skillsDir: string;
+      skillCount: number;
+      skills: Array<{ name: string; path: string }>;
+    },
+  ];
+  task_created_from_natural_language: [
+    payload: {
+      taskId: string;
+      cronExpression: string;
+      taskDescription: string;
+      platform?: string;
+      timestamp: string;
+    },
+  ];
+  scheduled_task_completed: [
+    payload: {
+      taskId: string;
+      taskName: string;
+      success: boolean;
+      executionTime: number;
+      timestamp: string;
+      error?: string;
+    },
+  ];
 }
 
 export interface ProactiveEvents {
@@ -175,6 +246,14 @@ export interface EvolutionEvents {
   self_refactor_completed: [payload: RefactoringResult];
   self_enhancement_completed: [
     payload: { total: number; success: number; results: EnhancementResult[] },
+  ];
+  proactive_evolution_completed: [
+    payload: {
+      cause: string;
+      action: string;
+      result: string;
+      timestamp: string;
+    },
   ];
 }
 
@@ -506,4 +585,5 @@ export interface EventMap
     VibeCodingEvents,
     AutomationEvents,
     IntegrationEvents,
-    TraceEvents {}
+    TraceEvents,
+    FileWatchEvents {}

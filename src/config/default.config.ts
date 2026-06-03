@@ -44,8 +44,8 @@ export const defaultConfig = {
     defaultModel: 'deepseek-chat',
     baseUrl: 'http://127.0.0.1:8001/v1',
     apiKey: 'not-needed',
-    timeout: 60000,
-    maxTokens: 4096,
+    timeout: 90000,
+    maxTokens: 8192,
     temperature: 0.7,
     fallbackModels: [
       {
@@ -74,8 +74,8 @@ export const defaultConfig = {
 
   memory: {
     shortTerm: {
-      maxSize: 100,
-      ttl: 3600000,
+      maxSize: 200,
+      ttl: 7200000,
     },
     longTerm: {
       enabled: true,
@@ -87,7 +87,7 @@ export const defaultConfig = {
     },
     autoExtraction: {
       enabled: true,
-      minConfidence: 0.7,
+      minConfidence: 0.6,
     },
   },
 

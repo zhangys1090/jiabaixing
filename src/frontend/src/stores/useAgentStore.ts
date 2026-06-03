@@ -8,6 +8,7 @@ import type {
   WsFileModifiedData,
   WsFileRollbackData,
 } from '@shared/contracts';
+import { apiService } from '../api/apiService';
 
 interface AgentState {
   executionUpdates: WsAgentExecutionUpdateData[];
@@ -25,6 +26,9 @@ interface AgentState {
   fcLoopMax: number;
   tokenBudget: number;
   tokenUsed: number;
+  harnessStatus: Record<string, unknown> | null;
+  loading: boolean;
+  error: string | null;
 
   addExecutionUpdate: (update: WsAgentExecutionUpdateData) => void;
   addBrainStageUpdate: (update: WsBrainStageUpdateData) => void;
@@ -40,6 +44,7 @@ interface AgentState {
     }>
   ) => void;
   updateFcLoop: (count: number, tokenUsed: number) => void;
+  fetchHarnessStatus: () => Promise<void>;
   reset: () => void;
 }
 
@@ -55,6 +60,9 @@ const initialState = {
   fcLoopMax: 8,
   tokenBudget: 6000,
   tokenUsed: 0,
+  harnessStatus: null,
+  loading: false,
+  error: null,
 };
 
 export const useAgentStore = create<AgentState>((set) => ({
@@ -87,6 +95,21 @@ export const useAgentStore = create<AgentState>((set) => ({
   setCrossSessionTasks: (tasks) => set({ crossSessionTasks: tasks }),
 
   updateFcLoop: (count, tokenUsed) => set({ fcLoopCount: count, tokenUsed }),
+
+  fetchHarnessStatus: async () => {
+    set({ loading: true });
+    try {
+      const result = await apiService.getHarnessStatus();
+      if (result.success && result.data) {
+        set({ harnessStatus: result.data as Record<string, unknown>, loading: false });
+      } else {
+        set({ error: result.error || '获取 Harness 状态失败', loading: false });
+      }
+    } catch (error) {
+      console.error('[AgentStore] fetchHarnessStatus 失败:', error);
+      set({ error: (error as Error).message, loading: false });
+    }
+  },
 
   reset: () => set(initialState),
 }));

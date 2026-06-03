@@ -1,8 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import './DesktopPanel.css';
 import { useDesktopStore } from '../../stores/useDesktopStore';
-
-const API_BASE = (window as unknown as Record<string, string>).REACT_APP_API_URL || `http://${window.location.hostname}:3111`;
+import { apiService } from '../../api/apiService';
 
 export const DesktopPanel: React.FC = () => {
   const {
@@ -26,12 +25,11 @@ export const DesktopPanel: React.FC = () => {
     setError(null);
     addAction({ type: 'screenshot', detail: '屏幕截图', timestamp: Date.now() });
     try {
-      const resp = await fetch(`${API_BASE}/api/desktop/screenshot`, { method: 'POST' });
-      const data = await resp.json();
-      if (data.success && data.data?.screenshot) {
-        setScreenshot(data.data.screenshot);
+      const result = await apiService.takeDesktopScreenshot();
+      if (result.success && result.data?.screenshot) {
+        setScreenshot(result.data.screenshot);
       } else {
-        setError(data.error || '截图失败');
+        setError(result.error || '截图失败');
       }
     } catch (e) {
       setError(`截图失败: ${(e as Error).message}`);
@@ -58,14 +56,9 @@ export const DesktopPanel: React.FC = () => {
     setError(null);
     addAction({ type: 'click', detail: 'UI检查', timestamp: Date.now() });
     try {
-      const resp = await fetch(`${API_BASE}/api/desktop/automate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ task: '检查当前桌面UI元素布局' }),
-      });
-      const data = await resp.json();
-      if (data.success) {
-        addAction({ type: 'click', detail: `UI检查: ${String(data.data?.output || '').substring(0, 80)}`, timestamp: Date.now() });
+      const result = await apiService.desktopAutomate('检查当前桌面UI元素布局');
+      if (result.success) {
+        addAction({ type: 'click', detail: `UI检查: ${String(result.data?.output || '').substring(0, 80)}`, timestamp: Date.now() });
       }
     } catch {
       // 静默降级

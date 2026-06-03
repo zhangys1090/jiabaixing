@@ -10,7 +10,7 @@ import { ToolCategory } from '../../types';
 export const ASK_CLARIFICATION_DEF: ToolDefinition = {
   name: 'ask_clarification',
   description:
-    '当用户需求不明确、有多种理解、或缺少关键信息时，主动向用户提问澄清。适用场景：用户说"改一下代码"但没说改什么、"帮我优化"但没说优化哪方面、"修复bug"但没描述具体问题。不适用：需求已经明确、简单问候。',
+    '（最后手段）当用户需求确实无法通过搜索、分析、推理获取关键信息时，才向用户提问澄清。应优先尝试：web_search、file_search、分析上下文等方式。适用场景：尝试所有工具后仍缺少关键信息且风险较高。不适用：需求可以通过搜索/推理获取、需求已经明确、简单问候。',
   category: ToolCategory.SYSTEM,
   parameters: {
     question: {

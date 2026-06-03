@@ -24,7 +24,14 @@ jest.mock('../../../src/utils/Logger', () => ({
 function createPlan(overrides: Partial<ExecutionPlan> = {}): ExecutionPlan {
   return {
     steps: [
-      { id: 'step-1', description: '测试步骤', toolName: 'test_tool', retryCount: 0, maxRetries: 2 },
+      { 
+        id: 'step-1', 
+        description: '测试步骤', 
+        toolName: 'test_tool', 
+        retryCount: 0, 
+        maxRetries: 2,
+        toUnifiedTaskNode: () => ({ id: 'step-1', status: 'pending' } as any),
+      },
     ],
     dependencies: new Map(),
     estimatedBudget: { maxRounds: 4, maxToolCalls: 10, maxTokens: 4000, maxDurationMs: 30000 },

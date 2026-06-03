@@ -94,6 +94,59 @@ export const API_ENDPOINTS = {
   ERROR_MONITORING: '/api/error/monitoring',
   OPTIMIZATION_PROCESS: '/api/optimization/process',
   OPTIMIZATION_HISTORY: '/api/optimization/history',
+
+  // Desktop
+  DESKTOP_SCREENSHOT: '/api/desktop/screenshot',
+  DESKTOP_AUTOMATE: '/api/desktop/automate',
+
+  // MCP
+  MCP_SERVERS: '/api/mcp/servers',
+  MCP_SERVER_DETAIL: '/api/mcp/servers/:name',
+  MCP_SERVER_START: '/api/mcp/servers/:name/start',
+  MCP_SERVER_STOP: '/api/mcp/servers/:name/stop',
+  MCP_SERVERS_START_ALL: '/api/mcp/servers/start-all',
+  MCP_SERVER_TOOLS: '/api/mcp/servers/:name/tools',
+  MCP_SERVER_CALL: '/api/mcp/servers/:name/call',
+  MCP_SERVER_MESSAGE: '/api/mcp/servers/:name/message',
+  MCP_REGISTER: '/api/mcp/register',
+
+  // TRAE
+  TRAE_HEALTH: '/api/trae/health',
+  TRAE_PERFORMANCE: '/api/trae/performance',
+  TRAE_MCP_STATUS: '/api/trae/mcp/status',
+  TRAE_SKILLS_STATUS: '/api/trae/skills/status',
+  TRAE_SKILLS_EXECUTE: '/api/trae/skills/execute',
+  TRAE_SECURITY_AUDIT: '/api/trae/security/audit',
+  TRAE_TESTING_GENERATE: '/api/trae/testing/generate',
+
+  // Debug
+  DEBUG_WEIGHTS: '/api/debug/weights',
+  DEBUG_RECENT_HISTORY: '/api/debug/recentHistory',
+  DEBUG_TOOL_USAGE: '/api/debug/tool-usage',
+
+  // Docs
+  DOCS_INDEX: '/api/docs/index',
+  DOCS_GENERATE: '/api/docs/generate',
+
+  // Chat
+  CHAT: '/api/chat',
+
+  // Orchestrate & Evaluate
+  ORCHESTRATE: '/api/orchestrate',
+  EVALUATE: '/api/evaluate',
+
+  // Automation extended
+  AUTOMATION_TASK_TOGGLE: '/api/automation/tasks/:taskId/toggle',
+  AUTOMATION_TASK_EXECUTE: '/api/automation/tasks/:taskId/execute',
+
+  // Logs
+  LOGS_GENERAL: '/api/logs',
+
+  // Integration WeChat QR
+  INTEGRATION_WECHAT_QRCODE: '/api/integration/wechat/qrcode',
+
+  // Harness status
+  HARNESS_STATUS: '/api/tasks/harness/status',
 } as const;
 
 export type ApiEndpoint = (typeof API_ENDPOINTS)[keyof typeof API_ENDPOINTS];
@@ -487,6 +540,9 @@ export const WS_EVENTS = {
     ENVIRONMENT_UPDATE: 'environment_update',
     PROJECT_CHANGE: 'project_change',
     GIT_STATUS: 'git_status',
+    STREAM_START: 'stream_start',
+    STREAM_CHUNK: 'stream_chunk',
+    STREAM_DONE: 'stream_done',
   },
 } as const;
 
@@ -713,6 +769,25 @@ export interface WsGitStatusData {
   repos: Array<Record<string, unknown>>;
 }
 
+export interface WsStreamStartData {
+  traceId: string;
+  totalLength: number;
+  timestamp: number;
+}
+
+export interface WsStreamChunkData {
+  traceId: string;
+  chunk: string;
+  offset: number;
+  timestamp: number;
+}
+
+export interface WsStreamDoneData {
+  traceId: string;
+  fullText: string;
+  timestamp: number;
+}
+
 // ====================== EventBus → WebSocket 桥接映射 ======================
 
 export const EVENTBUS_TO_WS_MAP: Record<string, WsServerEventType> = {
@@ -735,6 +810,9 @@ export const EVENTBUS_TO_WS_MAP: Record<string, WsServerEventType> = {
   environment_update: 'environment_update',
   project_change: 'project_change',
   git_status: 'git_status',
+  stream_start: 'stream_start',
+  stream_chunk: 'stream_chunk',
+  stream_done: 'stream_done',
 };
 
 // ====================== 连接状态 ======================
@@ -749,14 +827,28 @@ export type DialogStateValue = 'idle' | 'listening' | 'processing' | 'speaking';
 
 // ====================== 集成平台类型 ======================
 
-export type IntegrationPlatform = 'wechat' | 'feishu' | 'dingtalk' | 'qq';
+export type IntegrationPlatform =
+  | 'wechat'
+  | 'feishu'
+  | 'dingtalk'
+  | 'qq'
+  | 'telegram'
+  | 'discord'
+  | 'slack'
+  | 'signal';
 
 export interface PlatformConfig {
   /** 连接模式: qr=扫码登录个人微信, official=公众号/企业微信 */
   mode?: 'qr' | 'official';
   appId?: string;
   appSecret?: string;
+  token?: string;
+  encodingAESKey?: string;
   verificationToken?: string;
+  encryptKey?: string;
+  clientId?: string;
+  clientSecret?: string;
+  signatureSecret?: string;
   webhookUrl?: string;
   webhookSecret?: string;
   /** Mirai HTTP API 地址，如 http://localhost:8080 */

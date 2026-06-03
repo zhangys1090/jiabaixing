@@ -47,6 +47,9 @@ import {
   ProjectChangeListener,
   GitStatus,
   GitStatusListener,
+  StreamStartListener,
+  StreamChunkListener,
+  StreamDoneListener,
 } from './types';
 import { SYSTEM_CONSTANTS } from '@shared/contracts';
 
@@ -87,6 +90,9 @@ class WebSocketConnectionManager {
   private projectChangeListeners = new Set<ProjectChangeListener>();
   private gitStatusListeners = new Set<GitStatusListener>();
   private processingStatusListeners = new Set<(data: { status: string; message: string; traceId?: string }) => void>();
+  private streamStartListeners = new Set<StreamStartListener>();
+  private streamChunkListeners = new Set<StreamChunkListener>();
+  private streamDoneListeners = new Set<StreamDoneListener>();
 
   private currentDialogState: DialogStateValue = 'idle';
   private currentConnected = false;
@@ -511,6 +517,39 @@ class WebSocketConnectionManager {
         });
         break;
       }
+      case 'stream_start': {
+        const streamStartData = message.data as unknown as { traceId?: string; totalLength?: number; timestamp?: number };
+        this.streamStartListeners.forEach((listener) => {
+          try {
+            listener(streamStartData);
+          } catch {
+            // 静默处理
+          }
+        });
+        break;
+      }
+      case 'stream_chunk': {
+        const streamChunkData = message.data as unknown as { traceId?: string; chunk?: string; offset?: number; timestamp?: number };
+        this.streamChunkListeners.forEach((listener) => {
+          try {
+            listener(streamChunkData);
+          } catch {
+            // 静默处理
+          }
+        });
+        break;
+      }
+      case 'stream_done': {
+        const streamDoneData = message.data as unknown as { traceId?: string; fullText?: string; timestamp?: number };
+        this.streamDoneListeners.forEach((listener) => {
+          try {
+            listener(streamDoneData);
+          } catch {
+            // 静默处理
+          }
+        });
+        break;
+      }
       default:
         console.warn(`⚠️ 未知的WebSocket消息类型: ${message.type}`);
         break;
@@ -782,6 +821,30 @@ class WebSocketConnectionManager {
 
   offProcessingStatus(listener: (data: { status: string; message: string; traceId?: string }) => void): void {
     this.processingStatusListeners.delete(listener);
+  }
+
+  onStreamStart(listener: StreamStartListener): void {
+    this.streamStartListeners.add(listener);
+  }
+
+  offStreamStart(listener: StreamStartListener): void {
+    this.streamStartListeners.delete(listener);
+  }
+
+  onStreamChunk(listener: StreamChunkListener): void {
+    this.streamChunkListeners.add(listener);
+  }
+
+  offStreamChunk(listener: StreamChunkListener): void {
+    this.streamChunkListeners.delete(listener);
+  }
+
+  onStreamDone(listener: StreamDoneListener): void {
+    this.streamDoneListeners.add(listener);
+  }
+
+  offStreamDone(listener: StreamDoneListener): void {
+    this.streamDoneListeners.delete(listener);
   }
 
   on(event: string, listener: (data: unknown) => void): () => void {

@@ -203,15 +203,26 @@ export type SecurityEventType =
   | 'data.encrypted'
   | 'data.decrypted'
   | 'audit.log.created'
-  | 'security.alarm';
+  | 'security.alarm'
+  | 'login_failed'
+  | 'access_denied'
+  | 'suspicious_activity'
+  | 'data_breach_attempt'
+  | 'rate_limit_exceeded'
+  | 'malicious_input';
 
 /**
  * 安全事件
  */
 export interface SecurityEvent {
+  id: string;
   type: SecurityEventType;
   timestamp: Date;
-  data: Record<string, unknown>;
+  userId?: string;
+  description: string;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  metadata: Record<string, unknown>;
+  acknowledged: boolean;
 }
 
 export interface User {

@@ -186,7 +186,13 @@ describe('TokenBudgetAllocator', () => {
 describe('LoopController', () => {
   test('应该完成 Plan-Execute-Evaluate 循环', async () => {
     const mockPlan: ExecutionPlan = {
-      steps: [{ id: 'step1', description: '回答问题', retryCount: 0, maxRetries: 0 }],
+      steps: [{ 
+        id: 'step1', 
+        description: '回答问题', 
+        retryCount: 0, 
+        maxRetries: 0,
+        toUnifiedTaskNode: () => ({ id: 'step1', status: 'pending' } as any),
+      }],
       dependencies: new Map(),
       estimatedBudget: { maxRounds: 4, maxToolCalls: 5, maxTokens: 3000, maxDurationMs: 30000 },
       simple: true,

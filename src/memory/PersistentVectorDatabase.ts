@@ -3,7 +3,7 @@
  * 使用 SQLite + better-sqlite3 实现向量持久化存储，支持跨会话记忆
  */
 
-import Database from 'better-sqlite3';
+import { createDatabase } from '../shared/DatabaseShim';
 import * as fs from 'fs';
 import * as path from 'path';
 import { Logger } from '../utils/Logger';
@@ -18,7 +18,7 @@ export class PersistentVectorDatabase
   extends BaseMemoryStore
   implements VectorDatabase
 {
-  private db: Database.Database | null = null;
+  private db: any = null;
   private dbPath: string;
   private vectorCache: Map<
     string,
@@ -41,27 +41,35 @@ export class PersistentVectorDatabase
         fs.mkdirSync(dataDir, { recursive: true });
       }
 
-      this.db = new Database(this.dbPath);
-      this.db.pragma('journal_mode = WAL');
-      this.db.pragma('synchronous = NORMAL');
+      this.db = createDatabase(this.dbPath);
+      if (this.db) {
+        try { this.db.pragma('journal_mode = WAL'); } catch {}
+        try { this.db.pragma('synchronous = NORMAL'); } catch {}
 
-      this.db.exec(`
-        CREATE TABLE IF NOT EXISTS vectors (
-          id TEXT PRIMARY KEY,
-          vector TEXT NOT NULL,
-          metadata TEXT,
-          created_at INTEGER DEFAULT (strftime('%s', 'now')),
-          updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS vectors (
+            id TEXT PRIMARY KEY,
+            vector TEXT NOT NULL,
+            metadata TEXT,
+            created_at INTEGER DEFAULT (strftime('%s', 'now')),
+            updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+          );
+          CREATE INDEX IF NOT EXISTS idx_vectors_created ON vectors(created_at);
+        `);
+
+        this.loadVectorCache();
+        this.initialized = true;
+        Logger.info(
+          `✅ 持久化向量数据库初始化成功 - 已加载 ${this.vectorCache.size} 个向量`,
+          'PersistentVectorDatabase'
         );
-        CREATE INDEX IF NOT EXISTS idx_vectors_created ON vectors(created_at);
-      `);
-
-      this.loadVectorCache();
-      this.initialized = true;
-      Logger.info(
-        `✅ 持久化向量数据库初始化成功 - 已加载 ${this.vectorCache.size} 个向量`,
-        'PersistentVectorDatabase'
-      );
+      } else {
+        Logger.warn(
+          '⚠️ 持久化向量数据库降级为内存模式（仅缓存）',
+          'PersistentVectorDatabase'
+        );
+        this.initialized = true;
+      }
     });
   }
 

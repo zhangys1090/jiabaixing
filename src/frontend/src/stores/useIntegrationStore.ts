@@ -7,6 +7,7 @@ import {
   ApiResponse,
   PlatformConfig,
 } from '@shared/contracts';
+import { apiService } from '../api/apiService';
 
 interface IntegrationState {
   platforms: IntegrationPlatformInfo[];
@@ -49,12 +50,11 @@ export const useIntegrationStore = create<IntegrationState>((set, get) => ({
   fetchPlatforms: async () => {
     set({ isLoading: true, error: null });
     try {
-      const response = await fetch('/api/integration/platforms');
-      const data: ApiResponse<{ platforms: IntegrationPlatformInfo[] }> = await response.json();
-      if (data.success && data.data) {
-        set({ platforms: data.data.platforms });
+      const result = await apiService.getIntegrationPlatforms();
+      if (result.success && result.data) {
+        set({ platforms: result.data.platforms });
       } else {
-        set({ error: data.error || '获取平台列表失败' });
+        set({ error: result.error || '获取平台列表失败' });
       }
     } catch (error) {
       set({ error: (error as Error).message });
@@ -66,16 +66,15 @@ export const useIntegrationStore = create<IntegrationState>((set, get) => ({
   fetchPlatformStatus: async (platform: IntegrationPlatform) => {
     set({ isLoading: true, error: null });
     try {
-      const response = await fetch(`/api/integration/${platform}/status`);
-      const data: ApiResponse<{ status: IntegrationStatus }> = await response.json();
-      if (data.success && data.data) {
+      const result = await apiService.getIntegrationPlatformStatus(platform);
+      if (result.success && result.data) {
         set((state) => {
           const newStatuses = new Map(state.platformStatuses);
-          newStatuses.set(platform, data.data!.status);
+          newStatuses.set(platform, (result.data as { status: IntegrationStatus }).status);
           return { platformStatuses: newStatuses };
         });
       } else {
-        set({ error: data.error || `获取${platform}状态失败` });
+        set({ error: result.error || `获取${platform}状态失败` });
       }
     } catch (error) {
       set({ error: (error as Error).message });
@@ -87,16 +86,11 @@ export const useIntegrationStore = create<IntegrationState>((set, get) => ({
   connectPlatform: async (platform: IntegrationPlatform, config: PlatformConfig) => {
     set({ isLoading: true, error: null });
     try {
-      const response = await fetch(`/api/integration/${platform}/connect`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ config }),
-      });
-      const data: ApiResponse<{ status: string }> = await response.json();
-      if (data.success) {
+      const result = await apiService.connectIntegrationPlatform(platform, config);
+      if (result.success) {
         await get().fetchPlatformStatus(platform);
       } else {
-        set({ error: data.error || `连接${platform}失败` });
+        set({ error: result.error || `连接${platform}失败` });
       }
     } catch (error) {
       set({ error: (error as Error).message });
@@ -108,14 +102,11 @@ export const useIntegrationStore = create<IntegrationState>((set, get) => ({
   disconnectPlatform: async (platform: IntegrationPlatform) => {
     set({ isLoading: true, error: null });
     try {
-      const response = await fetch(`/api/integration/${platform}/disconnect`, {
-        method: 'POST',
-      });
-      const data: ApiResponse<{ success: boolean }> = await response.json();
-      if (data.success) {
+      const result = await apiService.disconnectIntegrationPlatform(platform);
+      if (result.success) {
         await get().fetchPlatformStatus(platform);
       } else {
-        set({ error: data.error || `断开${platform}失败` });
+        set({ error: result.error || `断开${platform}失败` });
       }
     } catch (error) {
       set({ error: (error as Error).message });
@@ -127,13 +118,8 @@ export const useIntegrationStore = create<IntegrationState>((set, get) => ({
   sendMessage: async (platform: IntegrationPlatform, request: SendMessageRequest) => {
     set({ isLoading: true, error: null });
     try {
-      const response = await fetch(`/api/integration/${platform}/send`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(request),
-      });
-      const data: ApiResponse<{ success: boolean; messageId?: string }> = await response.json();
-      if (data.success) {
+      const result = await apiService.sendIntegrationMessage(request);
+      if (result.success) {
         get().addMessage({
           platform,
           type: 'text',
@@ -141,7 +127,7 @@ export const useIntegrationStore = create<IntegrationState>((set, get) => ({
           direction: 'outgoing',
         });
       } else {
-        set({ error: data.error || '发送消息失败' });
+        set({ error: result.error || '发送消息失败' });
       }
     } catch (error) {
       set({ error: (error as Error).message });

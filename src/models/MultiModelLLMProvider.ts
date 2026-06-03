@@ -110,6 +110,49 @@ export class MultiModelLLMProvider {
     );
     */
 
+    // --- 小米 MiMo（主模型，OpenAI 兼容接口）---
+    const xiaomiApiKey = process.env.XIAOMI_API_KEY;
+    const xiaomiBaseUrl =
+      process.env.XIAOMI_BASE_URL ||
+      'https://token-plan-cn.xiaomimimo.com/v1';
+    const xiaomiModelName = process.env.XIAOMI_MODEL || 'mimo-v2.5-pro';
+
+    if (xiaomiApiKey) {
+      await this.registerModel(
+        'xiaomi',
+        xiaomiModelName,
+        {
+          name: xiaomiModelName,
+          baseUrl: xiaomiBaseUrl,
+          apiKey: xiaomiApiKey,
+          timeout: 120000,
+          maxTokens: 8192,
+          temperature: 0.7,
+          topP: 0.9,
+          frequencyPenalty: 0,
+          presencePenalty: 0,
+        },
+        {
+          visionScore: 85,
+          codingScore: 88,
+          reasoningScore: 90,
+          speedScore: 75,
+          contextLength: 131072,
+          features: ['chat', 'code', 'analysis', 'review'],
+        },
+        30
+      );
+      Logger.info(
+        `✅ 已注册小米 MiMo 模型: ${xiaomiModelName} @ ${xiaomiBaseUrl}`,
+        'MultiModelLLMProvider'
+      );
+    } else {
+      Logger.info(
+        'ℹ️ 未配置 XIAOMI_API_KEY，跳过小米 MiMo 模型注册',
+        'MultiModelLLMProvider'
+      );
+    }
+
     const zhipuApiKey = process.env.ZHIPU_API_KEY;
     const zhipuBaseUrl =
       process.env.ZHIPU_BASE_URL || 'https://open.bigmodel.cn/api/paas/v4';

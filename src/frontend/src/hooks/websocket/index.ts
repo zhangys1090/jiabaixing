@@ -26,6 +26,9 @@ import {
   EnvironmentUpdate,
   ProjectChange,
   GitStatus,
+  StreamStartData,
+  StreamChunkData,
+  StreamDoneData,
 } from './types';
 
 const DEFAULT_WS_URL = `ws://localhost:3111`;
@@ -195,6 +198,18 @@ export function useWebSocket(options: UseWebSocketOptions = {}): WebSocketState 
       optionsRef.current.onGitStatus?.(data);
     };
 
+    const handleStreamStart = (data: StreamStartData) => {
+      optionsRef.current.onStreamStart?.(data);
+    };
+
+    const handleStreamChunk = (data: StreamChunkData) => {
+      optionsRef.current.onStreamChunk?.(data);
+    };
+
+    const handleStreamDone = (data: StreamDoneData) => {
+      optionsRef.current.onStreamDone?.(data);
+    };
+
     connectionManager.onStateChange(handleStateChange);
     connectionManager.onConnectionStatus(handleConnectionStatus);
     connectionManager.onDialogState(handleDialogState);
@@ -221,6 +236,9 @@ export function useWebSocket(options: UseWebSocketOptions = {}): WebSocketState 
     connectionManager.onEnvironmentUpdate(handleEnvironmentUpdate);
     connectionManager.onProjectChange(handleProjectChange);
     connectionManager.onGitStatus(handleGitStatus);
+    connectionManager.onStreamStart(handleStreamStart);
+    connectionManager.onStreamChunk(handleStreamChunk);
+    connectionManager.onStreamDone(handleStreamDone);
 
     cleanupRef.current = [
       () => connectionManager.offStateChange(handleStateChange),
@@ -249,6 +267,9 @@ export function useWebSocket(options: UseWebSocketOptions = {}): WebSocketState 
       () => connectionManager.offEnvironmentUpdate(handleEnvironmentUpdate),
       () => connectionManager.offProjectChange(handleProjectChange),
       () => connectionManager.offGitStatus(handleGitStatus),
+      () => connectionManager.offStreamStart(handleStreamStart),
+      () => connectionManager.offStreamChunk(handleStreamChunk),
+      () => connectionManager.offStreamDone(handleStreamDone),
     ];
 
     return () => {

@@ -124,7 +124,7 @@ describe('AgentHarness 初始化', () => {
     const harness = new AgentHarness({ useHarnessTools: true });
     await harness.initialize();
     expect(harness.getToolRegistry()).not.toBeNull();
-    expect(harness.getToolRegistry()!.size).toBe(33);
+    expect(harness.getToolRegistry()!.size).toBe(49);
   });
 
   test('注入 deps + 启用工具层后应创建 ToolRegistry', async () => {
@@ -225,7 +225,7 @@ describe('工具层集成', () => {
 
     const registry = harness.getToolRegistry();
     expect(registry).not.toBeNull();
-    expect(registry!.size).toBe(33);
+    expect(registry!.size).toBe(49);
   });
 
   test('所有工具应能转换为 OpenAI 格式', async () => {
@@ -237,7 +237,7 @@ describe('工具层集成', () => {
 
     const registry = harness.getToolRegistry();
     const openaiTools = registry!.toOpenAITools();
-    expect(openaiTools.length).toBe(33);
+    expect(openaiTools.length).toBe(49);
 
     for (const tool of openaiTools) {
       expect(tool.type).toBe('function');
@@ -692,7 +692,7 @@ describe('双写兼容', () => {
     await harness.initialize();
 
     const registry = harness.getToolRegistry()!;
-    expect(registry.size).toBe(33);
-    expect(registeredTools.length).toBe(33);
+    expect(registry.size).toBe(49);
+    expect(registeredTools.length).toBe(49);
   });
 });

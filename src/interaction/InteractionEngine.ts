@@ -63,6 +63,33 @@ export interface TrackedResponseResult {
 }
 
 /**
+ * 语音会话状态
+ */
+export type VoiceSessionStatus = 'idle' | 'listening' | 'processing' | 'speaking';
+
+/**
+ * 语音会话接口
+ */
+export interface VoiceSession {
+  id: string;
+  status: VoiceSessionStatus;
+  language: string;
+  startedAt: Date;
+  lastActivityAt: Date;
+  turnCount: number;
+}
+
+/**
+ * 语音交互处理结果
+ */
+export interface VoiceProcessResult {
+  text: string;
+  audioData?: Buffer;
+  duration: number;
+  turnCount: number;
+}
+
+/**
  * 交互引擎类 v2
  * 模板已死，LLM + 记忆永生
  */
@@ -88,6 +115,9 @@ export class InteractionEngine {
 
   // v2: 多模态处理器（复用现有架构）
   private speechRecognizer: SpeechRecognizer;
+
+  // v2: 语音会话管理
+  private voiceSession: VoiceSession | null = null;
 
   constructor(
     userProfile?: UserProfile,
@@ -630,6 +660,202 @@ export class InteractionEngine {
     }
   }
 
+  // ═══════════════════════════ v2: 语音会话管理 ═══════════════════════════
+
+  /**
+   * 开始语音会话
+   * @param language - 语音识别语言，默认 zh-CN
+   * @returns 新创建的语音会话
+   */
+  public startVoiceSession(language: string = 'zh-CN'): VoiceSession {
+    if (this.voiceSession) {
+      Logger.warn(
+        `语音会话已存在 (id=${this.voiceSession.id})，将先关闭旧会话`,
+        'InteractionEngine'
+      );
+      this.stopVoiceSession();
+    }
+
+    const session: VoiceSession = {
+      id: `voice_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`,
+      status: 'idle',
+      language,
+      startedAt: new Date(),
+      lastActivityAt: new Date(),
+      turnCount: 0,
+    };
+
+    this.voiceSession = session;
+
+    Logger.info(
+      `🎤 语音会话已启动: id=${session.id}, language=${language}`,
+      'InteractionEngine'
+    );
+
+    return { ...session };
+  }
+
+  /**
+   * 停止语音会话
+   */
+  public stopVoiceSession(): void {
+    if (!this.voiceSession) {
+      Logger.warn('没有活跃的语音会话可以停止', 'InteractionEngine');
+      return;
+    }
+
+    Logger.info(
+      `🎤 语音会话已停止: id=${this.voiceSession.id}, 轮次=${this.voiceSession.turnCount}`,
+      'InteractionEngine'
+    );
+
+    this.voiceSession = null;
+  }
+
+  /**
+   * 处理语音输入（STT → LLM → TTS 完整流程）
+   * @param audioData - 音频数据 Buffer
+   * @returns 语音交互处理结果，包含文本和可选的音频数据
+   */
+  public async processVoiceInput(audioData: Buffer): Promise<VoiceProcessResult> {
+    const startTime = Date.now();
+
+    if (!this.voiceSession) {
+      Logger.error('没有活跃的语音会话，请先调用 startVoiceSession', new Error('NoVoiceSession'), 'InteractionEngine');
+      throw new Error('没有活跃的语音会话，请先调用 startVoiceSession');
+    }
+
+    // 更新会话状态为 listening
+    this.updateVoiceSessionStatus('listening');
+
+    try {
+      // Step 1: STT — 语音识别
+      this.updateVoiceSessionStatus('processing');
+      Logger.info('🎤 语音交互: 开始 STT 识别...', 'InteractionEngine');
+
+      const sttResult = await this.speechRecognizer.recognize(audioData);
+
+      if (!sttResult.text || sttResult.text.trim().length === 0) {
+        Logger.warn('语音识别结果为空', 'InteractionEngine');
+        this.updateVoiceSessionStatus('idle');
+        return {
+          text: '',
+          duration: Date.now() - startTime,
+          turnCount: this.voiceSession.turnCount,
+        };
+      }
+
+      Logger.info(
+        `🎤 语音识别完成: "${sttResult.text}" (置信度: ${sttResult.confidence?.toFixed(2)})`,
+        'InteractionEngine'
+      );
+
+      // Step 2: 构建完整 prompt 并调用 LLM
+      const userText = sttResult.text;
+      const memoryContext = this.buildMemoryContextFromHistory();
+      const userProfileSummary = this.buildUserProfileSummary();
+
+      let llmResponse = '';
+
+      if (this.dialogueGenerator) {
+        try {
+          llmResponse = await this.dialogueGenerator.generate(
+            userText,
+            'daily',
+            memoryContext,
+            userProfileSummary
+          );
+
+          // 应用人设规则
+          const toneResult = this.personaRules.adjustTone(llmResponse, 'daily');
+          llmResponse = toneResult.adjustedContent;
+        } catch (error) {
+          Logger.error(
+            '语音交互 LLM 生成失败',
+            error as Error,
+            'InteractionEngine'
+          );
+          llmResponse = '抱歉，我暂时无法回应。请稍后再试。';
+        }
+      } else {
+        llmResponse = '我在。有什么可以帮你的？';
+      }
+
+      Logger.info(
+        `🧠 LLM 响应: "${llmResponse.substring(0, 50)}${llmResponse.length > 50 ? '...' : ''}"`,
+        'InteractionEngine'
+      );
+
+      // Step 3: TTS — 语音合成
+      this.updateVoiceSessionStatus('speaking');
+      let audioOutput: Buffer | undefined;
+
+      try {
+        const ttsResult = await this.speechSynthesizer.speak(llmResponse);
+        if (ttsResult.success && ttsResult.audioData) {
+          audioOutput = ttsResult.audioData;
+        }
+      } catch (error) {
+        Logger.warn(
+          `语音合成失败: ${(error as Error).message}，仅返回文本`,
+          'InteractionEngine'
+        );
+      }
+
+      // 更新轮次计数
+      this.voiceSession.turnCount++;
+      this.voiceSession.lastActivityAt = new Date();
+
+      // 保存到交互历史
+      this.interactionHistory.push({
+        type: 'voice_input',
+        content: userText,
+        timestamp: new Date(),
+      });
+      this.interactionHistory.push({
+        type: 'voice_response',
+        content: llmResponse,
+        timestamp: new Date(),
+      });
+
+      // 恢复会话状态
+      this.updateVoiceSessionStatus('idle');
+
+      return {
+        text: llmResponse,
+        audioData: audioOutput,
+        duration: Date.now() - startTime,
+        turnCount: this.voiceSession.turnCount,
+      };
+    } catch (error) {
+      Logger.error('语音交互处理失败', error as Error, 'InteractionEngine');
+      this.updateVoiceSessionStatus('idle');
+      throw new Error(`语音交互处理失败: ${(error as Error).message}`);
+    }
+  }
+
+  /**
+   * 获取当前语音会话状态
+   * @returns 当前语音会话，如果没有活跃会话则返回 null
+   */
+  public getVoiceSession(): VoiceSession | null {
+    if (!this.voiceSession) {
+      return null;
+    }
+    return { ...this.voiceSession };
+  }
+
+  /**
+   * 更新语音会话状态
+   * @param status - 新的会话状态
+   */
+  private updateVoiceSessionStatus(status: VoiceSessionStatus): void {
+    if (this.voiceSession) {
+      this.voiceSession.status = status;
+      this.voiceSession.lastActivityAt = new Date();
+    }
+  }
+
   // ═══════════════════════════ 内部方法 ═══════════════════════════
 
   private setupEventBusListeners(): void {
@@ -739,6 +965,7 @@ export class InteractionEngine {
     Logger.info('正在关闭 InteractionEngine...', 'InteractionEngine');
     this.interactionHistory = [];
     this.isSpeaking = false;
+    this.voiceSession = null;
   }
 
   public async generateResponseWithPersona(

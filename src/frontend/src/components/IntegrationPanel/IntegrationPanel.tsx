@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useIntegrationStore } from '../../stores/useIntegrationStore';
 import { IntegrationPlatform, PlatformConfig } from '@shared/contracts';
+import { apiService } from '../../api/apiService';
 import './IntegrationPanel.css';
 
 const PLATFORM_DISPLAY_NAMES: Record<IntegrationPlatform, string> = {
@@ -8,6 +9,10 @@ const PLATFORM_DISPLAY_NAMES: Record<IntegrationPlatform, string> = {
   feishu: '飞书',
   dingtalk: '钉钉',
   qq: 'QQ',
+  telegram: 'Telegram',
+  discord: 'Discord',
+  slack: 'Slack',
+  signal: 'Signal',
 };
 
 const PLATFORM_ICONS: Record<IntegrationPlatform, string> = {
@@ -15,6 +20,10 @@ const PLATFORM_ICONS: Record<IntegrationPlatform, string> = {
   feishu: '✈️',
   dingtalk: '🔔',
   qq: '🐧',
+  telegram: '✈️',
+  discord: '🎮',
+  slack: '📱',
+  signal: '🔒',
 };
 
 interface PlatformConfigFormProps {
@@ -320,15 +329,15 @@ const IntegrationPanel: React.FC = () => {
     if (qrPollRef.current) clearInterval(qrPollRef.current);
     qrPollRef.current = setInterval(async () => {
       try {
-        const resp = await fetch('/api/integration/wechat/qrcode');
-        const data = await resp.json();
-        if (data.success && data.data) {
-          if (data.data.qrCodeBase64) {
-            setQrCodeData(data.data.qrCodeBase64);
+        const result = await apiService.getWeChatQRCode();
+        if (result.success && result.data) {
+          const data = result.data as Record<string, unknown>;
+          if (data.qrCodeBase64) {
+            setQrCodeData(data.qrCodeBase64 as string);
           }
-          setQrStatus(data.data.status);
-          if (data.data.status === 'logged_in') {
-            setQrStatus('已登录: ' + (data.data.botNickname || ''));
+          setQrStatus(data.status as string);
+          if (data.status === 'logged_in') {
+            setQrStatus('已登录: ' + ((data.botNickname as string) || ''));
             if (qrPollRef.current) clearInterval(qrPollRef.current);
           }
         }

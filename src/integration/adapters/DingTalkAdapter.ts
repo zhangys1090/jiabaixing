@@ -18,7 +18,11 @@ export class DingTalkAdapter extends BaseIntegrationAdapter {
       this.config = config;
       this.updateStatus('connecting');
 
-      if (config.appId && config.appSecret) {
+      // 支持两种命名方式：appId/appSecret 或 clientId/clientSecret
+      const appId = config.appId || config.clientId;
+      const appSecret = config.appSecret || config.clientSecret;
+
+      if (appId && appSecret) {
         Logger.info('正在连接到钉钉...', 'DingTalkAdapter');
         await this.fetchAccessToken();
         this.updateStatus('connected');
