@@ -766,23 +766,4 @@ export class JiabaixingCore {
   }> {
     return [];
   }
-
-  /** 从输入推断场景类型 */
-  private inferSceneFromInput(input: string): string {
-    if (/代码|编程|编译|重构|debug|bug|测试|接口|API|函数|类|模块/.test(input))
-      return 'coding';
-    if (/文件|目录|文件夹|打开|搜索|查找|读|写|创建|删除/.test(input))
-      return 'file_operation';
-    if (/桌面|截图|点击|窗口|应用|程序|打开|关闭/.test(input))
-      return 'desktop';
-    if (/记忆|记得|之前|上次|回忆|历史/.test(input))
-      return 'memory';
-    if (/天气|新闻|搜索|查询|什么是|怎么/.test(input))
-      return 'knowledge';
-    if (/提醒|日程|任务|计划|安排/.test(input))
-      return 'planning';
-    if (/你好|嗨|谢谢|再见|早安|晚安/.test(input))
-      return 'greeting';
-    return 'general';
-  }
 }
