@@ -518,11 +518,16 @@ export class JiabaixingCore {
       if (this.harness && this.harness.getConfig().useHarnessLoop) {
         Logger.info('🏗️ V5.0 Harness 统一处理', 'JiabaixingCore');
 
+        // 获取上一个助手消息，供 FeedbackLoops 进行纠正检测
+        const previousResponse =
+          this.conversationHistoryManager.getPreviousAssistantMessage?.() || '';
+
         const harnessResult = await this.harness.processInput({
           text: input,
           userId,
           traceId: finalTraceId,
           images, // Fix: pass images through to harness
+          metadata: { previousResponse },
         });
 
         const safeResponse = harnessResult.response;
@@ -538,106 +543,7 @@ export class JiabaixingCore {
         this.conversationHistoryManager.addUserMessage(input);
         this.conversationHistoryManager.addAssistantMessage(safeResponse);
 
-        // 反馈收集: 分析用户输入是否为纠正/重试
-        const lastResponse = this.conversationHistoryManager.getPreviousAssistantMessage?.() || '';
-        const feedbackRecord = this.feedbackCollector.analyzeUserInput(
-          input,
-          lastResponse,
-          userId,
-          this.inferSceneFromInput(input)
-        );
-        if (feedbackRecord) {
-          // 将反馈信号传递给进化引擎
-          this.evolutionEngine.collectFeedback(input, safeResponse, {
-            success: false,
-            toolsUsed: [],
-            error: `用户反馈: ${feedbackRecord.type}`,
-          });
-
-          // Phase 1-2: 偏好提取 — 从纠正中自动学习用户偏好
-          try {
-            const { PreferenceManager } = await import('../memory/PreferenceManager');
-            const pm = PreferenceManager.getInstance();
-            const entry = pm.applyCorrection(input, 'general');
-            if (entry) {
-              Logger.info(
-                `⚡ 从用户纠正中提取偏好: ${entry.key}=${entry.value}`,
-                'JiabaixingCore'
-              );
-            }
-          } catch {
-            // 偏好提取失败不影响主流程
-          }
-        }
-
-        // 自动知识提取
-        setImmediate(() => {
-          this.memoryAssistant
-            .autoExtractKnowledge(input, safeResponse, userId)
-            .catch(() => {});
-        });
-
-        // 进化记录
-        setImmediate(() => {
-          try {
-            const orchestrator = EvolutionOrchestrator.getInstance();
-            // 从轨迹中提取工具调用详情（含真实success状态）
-            const trajectory = harnessResult.trace.trajectory || [];
-            const toolResults = new Map<string, boolean>();
-            for (const s of trajectory) {
-              if (s.type === 'tool_result' && s.toolName) {
-                toolResults.set(s.toolName, s.toolResult?.success ?? false);
-              }
-            }
-            const toolCalls = trajectory
-              .filter((s: { type: string }) => s.type === 'tool_call')
-              .map((s: { toolName?: string; duration?: number }) => ({
-                toolName: s.toolName || 'unknown',
-                success: toolResults.get(s.toolName || '') ?? false,
-                executionTime: s.duration || 0,
-              }));
-            orchestrator.recordInteraction({
-              traceId: finalTraceId,
-              input,
-              response: safeResponse,
-              success: qualityScore >= 0.5,
-              qualityScore,
-              executionDuration: harnessResult.trace.totalDuration,
-              toolCalls,
-              scene: this.inferSceneFromInput(input),
-              userId: userId || 'default',
-            });
-
-            // 闭合 Loop B: 低质量交互触发反馈收集
-            if (qualityScore < 0.5) {
-              this.feedbackCollector.recordLowQuality(
-                input,
-                safeResponse,
-                qualityScore,
-                userId,
-                this.inferSceneFromInput(input)
-              );
-            }
-
-            // 闭合 Loop B: 工具失败触发反馈收集
-            for (const tc of toolCalls) {
-              if (!tc.success) {
-                this.feedbackCollector.recordToolFailure(
-                  tc.toolName,
-                  '工具执行失败',
-                  input,
-                  userId
-                );
-              }
-            }
-          } catch (error) {
-            Logger.debug(
-              `进化编排器记录失败（非关键）: ${(error as Error).message}`,
-              'JiabaixingCore'
-            );
-          }
-        });
-
+        // 闭环逻辑已迁移到 FeedbackLoops，通过 AFTER_RESPONSE 钩子自动触发
         this.streamResponse(safeResponse, finalTraceId);
 
         Logger.info(
