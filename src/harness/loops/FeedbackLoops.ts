@@ -95,8 +95,12 @@ export class FeedbackLoops {
     // 自动知识提取 — 异步执行
     if (this.deps.memoryAssistant) {
       setImmediate(() => {
-        this.deps.memoryAssistant!
-          .autoExtractKnowledge(meta.input, meta.response, meta.userId)
+        this.deps
+          .memoryAssistant!.autoExtractKnowledge(
+            meta.input,
+            meta.response,
+            meta.userId
+          )
           .catch(() => {});
       });
     }
@@ -208,7 +212,6 @@ export class FeedbackLoops {
 
       // 从纠正中自动学习用户偏好
       try {
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
         const { PreferenceManager } = require('../../memory/PreferenceManager');
         const pm = PreferenceManager.getInstance();
         const entry = pm.applyCorrection(input, 'general');

@@ -37,7 +37,10 @@ export async function initHarness(
       await speechSynthesizer.initialize();
       Logger.info('🔊 SpeechSynthesizer 初始化成功', 'Bootstrap');
     } catch (err) {
-      Logger.warn(`⚠️ SpeechSynthesizer 初始化失败: ${(err as Error).message}，TTS 工具将使用模拟模式`, 'Bootstrap');
+      Logger.warn(
+        `⚠️ SpeechSynthesizer 初始化失败: ${(err as Error).message}，TTS 工具将使用模拟模式`,
+        'Bootstrap'
+      );
     }
 
     const constitutionPromptBuilder = core.getConstitutionPromptBuilder();
@@ -1087,8 +1090,14 @@ export async function initHarness(
     // 注入 FeedbackLoops 依赖
     harnessDeps.feedbackCollector = core.feedbackCollector;
     harnessDeps.memoryAssistant = {
-      autoExtractKnowledge: async (input: string, response: string, userId?: string) => {
-        await core.getMemoryAssistant().autoExtractKnowledge(input, response, userId);
+      autoExtractKnowledge: async (
+        input: string,
+        response: string,
+        userId?: string
+      ) => {
+        await core
+          .getMemoryAssistant()
+          .autoExtractKnowledge(input, response, userId);
       },
     };
 
@@ -1115,8 +1124,16 @@ export async function initHarness(
 
     Logger.info('Harness 框架初始化完成', 'Bootstrap');
   } catch (err) {
-    Logger.error(`Harness 初始化失败: ${(err as Error).message}`, err as Error, 'Bootstrap');
-    Logger.error(`Harness 初始化失败堆栈: ${(err as Error).stack}`, err as Error, 'Bootstrap');
+    Logger.error(
+      `Harness 初始化失败: ${(err as Error).message}`,
+      err as Error,
+      'Bootstrap'
+    );
+    Logger.error(
+      `Harness 初始化失败堆栈: ${(err as Error).stack}`,
+      err as Error,
+      'Bootstrap'
+    );
   }
 
   return { harness };
