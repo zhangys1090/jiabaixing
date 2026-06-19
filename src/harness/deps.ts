@@ -1,12 +1,16 @@
-import type { ChatMessage } from './types';
-import type { HarnessToolDeps } from './tools/registerHarnessTools';
-import type { PersistenceServiceDeps } from './persistence/PersistenceService';
+import type { RoutingResult, RoutingStrategy } from '../models/types';
 import type { OrchestratorAgent } from './orchestration/OrchestratorAgent';
+import type { PersistenceServiceDeps } from './persistence/PersistenceService';
+import type { HarnessToolDeps } from './tools/registerHarnessTools';
+import type { ChatMessage } from './types';
+import type { OutputGuardrailEngine } from './verification/OutputGuardrailEngine';
 
 export interface LLMProviderDeps {
   chatWithTools(
     messages: ChatMessage[],
-    tools: Array<Record<string, unknown>>
+    tools: Array<Record<string, unknown>>,
+    maxTokens?: number,
+    toolChoice?: string
   ): Promise<{
     content: string | null;
     toolCalls?: Array<{
@@ -16,6 +20,21 @@ export interface LLMProviderDeps {
     }>;
   }>;
   chat(prompt: string, systemPrompt?: string): Promise<string>;
+  /** 设置 ModelRouter 路由的首选模型 */
+  setPreferredModel?(modelName: string): void;
+}
+
+export interface ModelRouterDeps {
+  route(
+    input: { prompt?: string; images?: string[] },
+    strategy?: RoutingStrategy
+  ): RoutingResult;
+  getAvailableModels(): Array<{ id: string; name: string; priority: number }>;
+  getModelHealth(modelId: string): {
+    available: boolean;
+    averageLatencyMs: number;
+    successRate: number;
+  } | null;
 }
 
 export interface ConstitutionalBuilderDeps {
@@ -88,7 +107,7 @@ export interface EvolutionEngineDeps {
     response: string;
     toolsUsed: string[];
     totalDuration: number;
-    qualityScore: number;
+    quality_score: number;
     traceId: string;
   }): string | null;
   nudgeKnowledgePersistence(input: string, toolsUsed: string[]): string | null;
@@ -115,12 +134,64 @@ export interface EvolutionExamplesDeps {
   }>;
 }
 
+export interface EvolutionToolWeightsDeps {
+  getToolWeights(): Record<string, number>;
+}
+
 export interface EnvironmentSensorDeps {
   getEnvironmentContext(): string;
 }
 
+export interface ContextReferenceResolverDeps {
+  resolve(input: string): Promise<{
+    hasReferences: boolean;
+    resolvedContent: string;
+    references: Array<{
+      type: string;
+      target: string;
+      content: string;
+      error?: string;
+      charCount: number;
+    }>;
+    cleanedInput: string;
+  }>;
+}
+
+/** FeedbackLoops 依赖 — 反馈收集器接口 */
+export interface FeedbackCollectorDeps {
+  analyzeUserInput(
+    currentInput: string,
+    previousResponse: string,
+    userId?: string,
+    scene?: string
+  ): { type: string; input?: string; response?: string; [key: string]: unknown } | null;
+  recordToolFailure(
+    toolName: string,
+    errorMessage: string,
+    input: string,
+    userId?: string
+  ): void;
+  recordLowQuality(
+    input: string,
+    response: string,
+    qualityScore: number,
+    userId?: string,
+    scene?: string
+  ): void;
+}
+
+/** FeedbackLoops 依赖 — 记忆助手接口 */
+export interface MemoryAssistantDeps {
+  autoExtractKnowledge(
+    input: string,
+    response: string,
+    userId?: string
+  ): Promise<void>;
+}
+
 export interface HarnessDeps {
   llm: LLMProviderDeps;
+  modelRouter?: ModelRouterDeps;
   constitutionalBuilder: ConstitutionalBuilderDeps;
   memoryInjector: MemoryInjectorDeps;
   memoryStore?: MemoryStoreDeps;
@@ -132,6 +203,110 @@ export interface HarnessDeps {
   evolutionEngine?: EvolutionEngineDeps;
   personaCore?: PersonaCoreDeps;
   evolutionExamples?: EvolutionExamplesDeps;
+  evolutionToolWeights?: EvolutionToolWeightsDeps;
+  /** 知识图谱注入器 — 提供关联实体和推理链，增强 Planner 规划能力 */
+  knowledgeInjector?: {
+    getRelatedEntities(
+      input: string
+    ): Promise<Array<{ name: string; type: string; relations: string[] }>>;
+    getInferenceChain(input: string): Promise<string[]>;
+    identifyGaps(): Array<{
+      entity: string;
+      gapType: string;
+      suggestedQuery: string;
+      priority: number;
+    }>;
+  };
+  /** P2.2: 知识图谱提取器 — 从工具结果/对话中提取实体和关系，激活知识图谱 */
+  knowledgeExtractor?: {
+    extractAndStore(text: string, source: string): Promise<void>;
+  };
   environmentSensor?: EnvironmentSensorDeps;
+  contextReferenceResolver?: ContextReferenceResolverDeps;
   orchestratorAgent?: OrchestratorAgent;
+  outputGuardrails?: OutputGuardrailEngine;
+  auxiliaryRouter?: {
+    resolve(task: string): {
+      model: string;
+      baseUrl: string;
+      apiKey: string;
+      providerName: string;
+    };
+  };
+  memoryRefresher?: {
+    refreshFrozenSnapshot(): void;
+  };
+  reflectionEngine?: ReflectionEngineDeps;
+  /** FeedbackLoops 闭环服务依赖 — 反馈收集器 */
+  feedbackCollector?: FeedbackCollectorDeps;
+  /** FeedbackLoops 闭环服务依赖 — 记忆助手（自动知识提取） */
+  memoryAssistant?: MemoryAssistantDeps;
+}
+
+export interface ReflectionEngineDeps {
+  reflect(
+    toolName: string,
+    args: Record<string, unknown>,
+    error: string,
+    context: { traceId: string; loopCount: number }
+  ): Promise<{
+    rootCause: string;
+    correctedArgs: Record<string, unknown> | null;
+    alternativeTool: string | null;
+    shouldRetry: boolean;
+  }>;
+  deepReflect(
+    userInput: string,
+    trajectory: Array<{
+      toolName: string;
+      success: boolean;
+      error?: string;
+      output?: string;
+    }>,
+    evalResult: {
+      goalProgress: number;
+      suggestedAction: string;
+      reason: string;
+    }
+  ): Promise<{
+    diagnosis: string;
+    rootCause: string;
+    fixStrategy: string;
+    correctedPlan?: Array<{
+      stepDescription: string;
+      toolName?: string;
+      args?: Record<string, unknown>;
+    }>;
+  }>;
+  recordExperience(entry: {
+    toolName: string;
+    args: Record<string, unknown>;
+    error: string;
+    rootCause: string;
+    resolution: string;
+    success: boolean;
+  }): void;
+  getRelevantExperiences(
+    toolName: string,
+    error?: string,
+    limit?: number
+  ): Array<{
+    toolName: string;
+    error: string;
+    rootCause: string;
+    resolution: string;
+    success: boolean;
+  }>;
+  /** P4-3: 获取任务级反思经验（供 Planner 注入） */
+  getTaskReflectionExperiences?(): Array<{
+    userInput: string;
+    taskGoal: string;
+    taskDiagnosis: string;
+    rootCause: string;
+    strategyAdjustment: string;
+    lessonsLearned: string;
+    confidence: number;
+    success: boolean;
+    timestamp: number;
+  }>;
 }
