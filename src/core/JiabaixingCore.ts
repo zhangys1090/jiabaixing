@@ -785,45 +785,4 @@ export class JiabaixingCore {
       return 'greeting';
     return 'general';
   }
-
-  /**
-   * 流式推送响应 — 将完整文本分块推送，避免前端 TypewriterText 闪烁
-   */
-  private streamResponse(fullText: string, traceId: string): void {
-    const CHUNK_SIZE = 6;
-    const CHUNK_DELAY_MS = 25;
-
-    void EventBus.emit('stream_start', {
-      traceId,
-      totalLength: fullText.length,
-      timestamp: Date.now(),
-    });
-
-    let offset = 0;
-
-    const sendNext = (): void => {
-      if (offset >= fullText.length) {
-        void EventBus.emit('stream_done', {
-          traceId,
-          fullText,
-          timestamp: Date.now(),
-        });
-        return;
-      }
-
-      const chunk = fullText.slice(offset, offset + CHUNK_SIZE);
-      offset += CHUNK_SIZE;
-
-      void EventBus.emit('stream_chunk', {
-        traceId,
-        chunk,
-        offset,
-        timestamp: Date.now(),
-      });
-
-      setTimeout(sendNext, CHUNK_DELAY_MS);
-    };
-
-    setTimeout(sendNext, CHUNK_DELAY_MS);
-  }
 }
