@@ -1084,6 +1084,14 @@ export async function initHarness(
       useHarnessPersistence: true,
     });
 
+    // 注入 FeedbackLoops 依赖
+    harnessDeps.feedbackCollector = core.feedbackCollector;
+    harnessDeps.memoryAssistant = {
+      autoExtractKnowledge: async (input: string, response: string, userId?: string) => {
+        await core.getMemoryAssistant().autoExtractKnowledge(input, response, userId);
+      },
+    };
+
     harness.setDeps(harnessDeps);
     await harness.initialize();
 

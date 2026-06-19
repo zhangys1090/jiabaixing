@@ -359,6 +359,13 @@ export class JiabaixingCore {
   }
 
   /**
+   * 获取记忆助手实例（供 FeedbackLoops 使用）
+   */
+  public getMemoryAssistant(): MemoryAssistant {
+    return this.memoryAssistant;
+  }
+
+  /**
    * 加载项目上下文文件并注入到 ConstitutionPromptBuilder
    * 使用缓存机制，5分钟内不重复读磁盘
    */

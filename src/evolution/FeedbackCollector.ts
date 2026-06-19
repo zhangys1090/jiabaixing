@@ -13,6 +13,7 @@
 import { Logger } from '../utils/Logger';
 
 export interface FeedbackRecord {
+  [key: string]: unknown;
   id: string;
   type: 'correction' | 'retry' | 'tool_failure' | 'low_quality' | 'explicit';
   input: string;
