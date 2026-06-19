@@ -21,6 +21,7 @@ import {
   ConversationHistoryManager,
 } from './ConversationHistoryManager';
 import { MemoryAssistant } from './MemoryAssistant';
+import { StreamResponseService } from './StreamResponseService';
 import {
   OptimizationDependencies,
   OptimizationScheduler,
@@ -156,6 +157,7 @@ export class JiabaixingCore {
   private constitutionPromptBuilder: ConstitutionPromptBuilder;
   private memoryAssistant!: MemoryAssistant;
   private conversationHistoryManager: ConversationHistoryManager;
+  private streamResponseService: StreamResponseService;
 
   // 项目上下文文件缓存
   private _contextFileCache: ContextFileEntry[] = [];
@@ -166,6 +168,7 @@ export class JiabaixingCore {
     this.personaGuard = new PersonaRules(this.personaCore);
     this.llm = new LLMProvider(process.env.LLM_MODEL || 'deepseek-chat');
     this.performanceMonitor = PerformanceMonitor.getInstance();
+    this.streamResponseService = new StreamResponseService();
     this.securityAuditor = new SecurityAuditor({
       logFilePath: path.join(
         process.cwd(),
@@ -544,7 +547,7 @@ export class JiabaixingCore {
         this.conversationHistoryManager.addAssistantMessage(safeResponse);
 
         // 闭环逻辑已迁移到 FeedbackLoops，通过 AFTER_RESPONSE 钩子自动触发
-        this.streamResponse(safeResponse, finalTraceId);
+        this.streamResponseService.stream(safeResponse, finalTraceId);
 
         Logger.info(
           `✅ 流式推送已启动: traceId=${finalTraceId}, 响应长度=${safeResponse.length}, 质量=${qualityScore.toFixed(2)}`,
@@ -574,7 +577,7 @@ export class JiabaixingCore {
       this.conversationHistoryManager.addUserMessage(input);
       this.conversationHistoryManager.addAssistantMessage(fallbackResponse);
 
-      this.streamResponse(fallbackResponse, finalTraceId);
+      this.streamResponseService.stream(fallbackResponse, finalTraceId);
       Logger.warn(
         `⚠️ 流式推送已启动(降级): traceId=${finalTraceId}`,
         'JiabaixingCore'
@@ -596,7 +599,7 @@ export class JiabaixingCore {
       this.conversationHistoryManager.addUserMessage(input);
       this.conversationHistoryManager.addAssistantMessage(fallbackResponse);
 
-      this.streamResponse(fallbackResponse, finalTraceId);
+      this.streamResponseService.stream(fallbackResponse, finalTraceId);
       Logger.error(
         `❌ 流式推送已启动(错误): traceId=${finalTraceId}, error=${(error as Error).message}`,
         error as Error,
