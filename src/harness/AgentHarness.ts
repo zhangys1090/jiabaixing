@@ -550,6 +550,21 @@ export class AgentHarness {
     });
     Logger.info('  📁 文件变更监听: 启用', 'AgentHarness');
 
+    // Phase 7.8: 注册 FeedbackLoops 闭环钩子
+    if (this.deps?.feedbackCollector && this.constraintsService) {
+      const { FeedbackLoops } = require('./loops/FeedbackLoops');
+      const feedbackLoops = new FeedbackLoops({
+        feedbackCollector: this.deps.feedbackCollector,
+        evolutionEngine: this.deps.evolutionEngine,
+        memoryAssistant: this.deps.memoryAssistant,
+      });
+      this.constraintsService.registerHook(
+        LifecycleEvent.AFTER_RESPONSE,
+        feedbackLoops.createAFTER_RESPONSEHook()
+      );
+      Logger.info('  🔄 FeedbackLoops 闭环钩子: 已注册', 'AgentHarness');
+    }
+
     this.initialized = true;
     Logger.info('✅ Agent Harness 初始化完成', 'AgentHarness');
   }
@@ -630,6 +645,9 @@ export class AgentHarness {
         quality: result.quality,
         traceId: result.trace.traceId,
         toolsUsed: result.metadata.toolCalls,
+        userId: input.userId,
+        trace: result.trace,
+        previousResponse: input.metadata?.previousResponse,
         metadata: result.metadata,
       });
 
