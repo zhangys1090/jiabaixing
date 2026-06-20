@@ -12,6 +12,9 @@ import { LLMResponseCache } from './LLMResponseCache';
 import { RequestQueue } from './RequestQueue';
 import { PromptOptimizer } from './PromptOptimizer';
 import { getPromptTemplate } from '../llm/prompt-templates';
+import { ChatProvider } from './ChatProvider';
+import { CodeProvider } from './CodeProvider';
+import { MultimodalProvider } from './MultimodalProvider';
 
 export class LLMProvider {
   private model: Model;
@@ -22,6 +25,11 @@ export class LLMProvider {
 
   private responseCache: LLMResponseCache;
   private requestQueue: RequestQueue;
+
+  // v5.1 Task 7: 门面模式委托给子 Provider
+  private chatProvider!: ChatProvider;
+  private codeProvider!: CodeProvider;
+  private multimodalProvider!: MultimodalProvider;
 
   private zhipuModel: OpenAICompatibleModel | null = null;
 
@@ -112,6 +120,11 @@ export class LLMProvider {
 
     this.responseCache = new LLMResponseCache();
     this.requestQueue = new RequestQueue(2);
+
+    // v5.1 Task 7: 初始化三个子 Provider（门面模式）
+    this.chatProvider = new ChatProvider(this.model, this.modelName);
+    this.codeProvider = new CodeProvider(this.model, this.modelName);
+    this.multimodalProvider = new MultimodalProvider(this.model, this.modelName);
   }
 
   /**
@@ -286,64 +299,11 @@ export class LLMProvider {
     images?: string[],
     history: Array<{ role: string; content: string }> = []
   ): Promise<string> {
+    // v5.1 Task 7: 委托给 MultimodalProvider（保留 localUnavailable 检查）
     if (this.localUnavailable) {
       throw new Error('本地模型已标记不可用');
     }
-
-    const systemPrompt = injectPreferences(getPromptTemplate('multimodalChat'));
-
-    const compressedHistory = PromptOptimizer.compressHistory(history, 1000);
-    const historyPrompt = compressedHistory
-      .map((h) => `${h.role}: ${h.content}`)
-      .join('\n');
-    const humanPrompt = `${historyPrompt}\n\n用户: ${message}`;
-    const optimizedPrompt = PromptOptimizer.optimizePrompt(humanPrompt, 2000);
-
-    const cacheKey = this.responseCache.generateKey(
-      optimizedPrompt + (images?.length || 0).toString(),
-      systemPrompt
-    );
-    const cached = this.responseCache.get(cacheKey);
-    if (cached) {
-      return cached;
-    }
-
-    const operation = async () => {
-      const input = {
-        prompt: optimizedPrompt,
-        systemPrompt,
-        temperature: 0.8,
-        maxTokens: 1024,
-      } as Record<string, unknown>;
-
-      if (images && images.length > 0) {
-        input.images = images;
-      }
-
-      const response = await this.model.generate(
-        input as unknown as Parameters<typeof this.model.generate>[0]
-      );
-
-      if (response.error) {
-        throw new Error(response.error);
-      }
-
-      if (!response.text) {
-        throw new Error('模型未返回内容');
-      }
-
-      this.responseCache.set(cacheKey, response.text);
-      return response.text;
-    };
-
-    try {
-      return await this.requestQueue.enqueue(() =>
-        this.executeWithRetry(operation, 'LLM多模态聊天')
-      );
-    } catch (error) {
-      Logger.error(`⚠️ LLM多模态聊天失败`, error as Error, 'LLMProvider');
-      throw error;
-    }
+    return this.multimodalProvider.multimodalChat(message, images, history);
   }
 
   async multimodalCodeAnalysis(
@@ -351,40 +311,8 @@ export class LLMProvider {
     images: string[],
     filePath?: string
   ): Promise<string> {
-    const systemPrompt = injectPreferences(
-      getPromptTemplate('multimodalCodeAnalysis')
-    );
-
-    const humanPrompt = filePath
-      ? `用户问题：${userQuery}\n相关文件：${filePath}\n请分析图片并给出建议。`
-      : `用户问题：${userQuery}\n请分析图片并给出建议。`;
-
-    const operation = async () => {
-      const response = await this.model.generate({
-        prompt: humanPrompt,
-        systemPrompt,
-        temperature: 0.7,
-        maxTokens: 2048,
-        images,
-      } as ModelInput);
-
-      if (response.error) {
-        throw new Error(response.error);
-      }
-
-      if (!response.text) {
-        throw new Error('模型未返回内容');
-      }
-
-      return response.text;
-    };
-
-    try {
-      return await this.executeWithRetry(operation, 'LLM多模态代码分析');
-    } catch (error) {
-      Logger.error(`⚠️ LLM多模态代码分析失败`, error as Error, 'LLMProvider');
-      throw error;
-    }
+    // v5.1 Task 7: 委托给 MultimodalProvider
+    return this.multimodalProvider.multimodalCodeAnalysis(userQuery, images, filePath);
   }
 
   async analyzeCode(
@@ -392,41 +320,8 @@ export class LLMProvider {
     content: string,
     userQuery: string
   ): Promise<string> {
-    const systemPrompt = injectPreferences(getPromptTemplate('analyzeCode'));
-
-    const humanPrompt = `用户问题：${userQuery}
-文件路径：${filePath}
-文件内容：
-\`\`\`
-${content}
-\`\`\`
-请分析并给出专业、温柔的回答。`;
-
-    const operation = async () => {
-      const response = await this.model.generate({
-        prompt: humanPrompt,
-        systemPrompt: systemPrompt,
-        temperature: 0.7,
-        maxTokens: 2048,
-      });
-
-      if (response.error) {
-        throw new Error(response.error);
-      }
-
-      if (!response.text) {
-        throw new Error('模型未返回内容');
-      }
-
-      return response.text;
-    };
-
-    try {
-      return await this.executeWithRetry(operation, 'LLM分析代码');
-    } catch (error) {
-      Logger.error(`⚠️ LLM分析失败`, error as Error, 'LLMProvider');
-      throw error;
-    }
+    // v5.1 Task 7: 委托给 CodeProvider
+    return this.codeProvider.analyzeCode(filePath, content, userQuery);
   }
 
   async generateModificationPlan(
@@ -434,43 +329,8 @@ ${content}
     content: string,
     userQuery: string
   ): Promise<string> {
-    const systemPrompt = injectPreferences(
-      getPromptTemplate('generateModificationPlan')
-    );
-
-    const humanPrompt = `用户需求：${userQuery}
-文件路径：${filePath}
-当前文件内容：
-\`\`\`
-${content}
-\`\`\`
-请给出修改方案。`;
-
-    const operation = async () => {
-      const response = await this.model.generate({
-        prompt: humanPrompt,
-        systemPrompt: systemPrompt,
-        temperature: 0.7,
-        maxTokens: 2048,
-      });
-
-      if (response.error) {
-        throw new Error(response.error);
-      }
-
-      if (!response.text) {
-        throw new Error('模型未返回内容');
-      }
-
-      return response.text;
-    };
-
-    try {
-      return await this.executeWithRetry(operation, 'LLM生成修改方案');
-    } catch (error) {
-      Logger.error(`⚠️ LLM生成修改方案失败`, error as Error, 'LLMProvider');
-      throw error;
-    }
+    // v5.1 Task 7: 委托给 CodeProvider
+    return this.codeProvider.generateModificationPlan(filePath, content, userQuery);
   }
 
   async generateModifiedFileContent(
@@ -479,41 +339,8 @@ ${content}
     userRequest: string,
     fileExists: boolean
   ): Promise<string> {
-    const rawPrompt = getPromptTemplate('generateModifiedFileContent');
-    const systemPrompt = injectPreferences(
-      rawPrompt.replace('{{fileState}}', fileExists ? '' : '（文件当前不存在）')
-    );
-
-    const humanPrompt = `用户需求：${userRequest}
-文件路径：${filePath}
-当前文件内容：${fileExists ? currentContent : '（文件不存在）'}
-请给出修改后的完整文件内容。`;
-
-    const operation = async () => {
-      const response = await this.model.generate({
-        prompt: humanPrompt,
-        systemPrompt: systemPrompt,
-        temperature: 0.7,
-        maxTokens: 4096,
-      });
-
-      if (response.error) {
-        throw new Error(response.error);
-      }
-
-      if (!response.text) {
-        throw new Error('模型未返回内容');
-      }
-
-      return response.text;
-    };
-
-    try {
-      return await this.executeWithRetry(operation, 'LLM生成修改文件内容');
-    } catch (error) {
-      Logger.error(`⚠️ 生成修改文件内容失败`, error as Error, 'LLMProvider');
-      throw error;
-    }
+    // v5.1 Task 7: 委托给 CodeProvider
+    return this.codeProvider.generateModifiedFileContent(filePath, currentContent, userRequest, fileExists);
   }
 
   async chat(
@@ -521,8 +348,8 @@ ${content}
     history: Array<{ role: string; content: string }> = [],
     systemPromptOverride?: string
   ): Promise<string> {
+    // v5.1 Task 7: 委托给 ChatProvider，保留门面中的 zhipuModel 降级逻辑
     const defaultPrompt = getPromptTemplate('chat');
-
     const systemPrompt = injectPreferences(
       systemPromptOverride || defaultPrompt
     );
@@ -538,10 +365,6 @@ ${content}
       optimizedPrompt,
       systemPrompt
     );
-    const cached = this.responseCache.get(cacheKey);
-    if (cached) {
-      return cached;
-    }
 
     // 如果本地模型已被标记为不可用，直接走智谱降级
     if (this.localUnavailable || !this.serviceAvailable) {
@@ -568,38 +391,9 @@ ${content}
       throw new Error('所有模型均不可用');
     }
 
-    // v5.1: 根据输入选择模型
-    const chatModel = this.selectModel(message);
-
-    const operation = async () => {
-      const response = await chatModel.generate({
-        prompt: optimizedPrompt,
-        systemPrompt: systemPrompt,
-        temperature: 0.8,
-        maxTokens: 1024,
-      });
-
-      if (response.isFallback) {
-        Logger.warn('⚠️ 使用降级回复', 'LLMProvider');
-        return response.text;
-      }
-
-      if (response.error) {
-        throw new Error(response.error);
-      }
-
-      if (!response.text) {
-        throw new Error('模型未返回内容');
-      }
-
-      this.responseCache.set(cacheKey, response.text);
-      return response.text;
-    };
-
+    // 委托给 ChatProvider 执行主调用
     try {
-      return await this.requestQueue.enqueue(() =>
-        this.executeWithRetry(operation, 'LLM聊天')
-      );
+      return await this.chatProvider.chat(message, history, systemPromptOverride);
     } catch (error) {
       Logger.warn(
         `⚠️ 主模型 LLM聊天失败: ${(error as Error).message}`,
@@ -640,6 +434,7 @@ ${content}
   /**
    * 使用 Function Calling 调用 LLM
    * v3: LLM 原生架构核心方法，支持工具调用循环
+   * v5.1 Task 7: 委托给 ChatProvider，保留门面中的 zhipuModel 降级逻辑
    */
   async chatWithTools(
     messages: Array<{
@@ -664,101 +459,79 @@ ${content}
       function: { name: string; arguments: string };
     }>;
   }> {
-    // C2 fix: add retry + fallback to chatWithTools (matching chat() resilience)
-    // v5.1: 从消息中提取用户输入，选择路由模型
-    const routeInput = messages.find(m => m.role === 'user')?.content || '';
-    const primaryModel = this.selectModel(routeInput);
-
-    if (!primaryModel) {
-      throw new Error('没有可用的 LLM 模型');
-    }
-
-    const sanitizedMessages = this.sanitizeMessagesForAPI(messages);
-
-    const tryGenerate = async (
-      model: Model,
-      modelLabel: string
-    ): Promise<{
-      content: string;
-      toolCalls?: Array<{
-        id: string;
-        type: string;
-        function: { name: string; arguments: string };
-      }>;
-    }> => {
-      const response = await model.generate({
-        messages: sanitizedMessages,
-        tools,
-        maxTokens,
-        temperature: 0.8,
-        toolChoice,
-      } as ModelInput);
-
-      return {
-        content: response.text || '',
-        toolCalls: response.toolCalls
-          ? this.normalizeToolCalls(response.toolCalls)
-          : undefined,
-      };
-    };
-
-    // Retry loop: primary model with retries, then zhipu fallback
-    let lastError: Error | null = null;
-    const isConnectionError = (err: Error): boolean =>
-      LLMProvider.CONNECTION_ERRORS.some((pattern) =>
-        err.message.toLowerCase().includes(pattern.toLowerCase())
-      );
-    const isRetryableHttpError = (err: Error): boolean => {
-      const msg = err.message.toLowerCase();
-      return msg.includes('429') || msg.includes('500') || msg.includes('502') || msg.includes('503');
-    };
-
-    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+    // 如果本地模型不可用，直接走智谱降级
+    if ((this.localUnavailable || !this.serviceAvailable) && this.zhipuModel) {
+      Logger.info('🚀 chatWithTools 主模型不可用，直接降级到智谱模型', 'LLMProvider');
       try {
-        return await tryGenerate(primaryModel, 'primary');
-      } catch (error) {
-        lastError = error as Error;
-        const isAuthError = lastError.message.includes('401') || lastError.message.toLowerCase().includes('invalid') || lastError.message.toLowerCase().includes('authentication');
-        if (!isConnectionError(lastError) && !isRetryableHttpError(lastError) && !isAuthError) {
-          break; // non-retryable error, don't retry
-        }
-        if (isAuthError) {
-          Logger.warn(`🔒 主模型认证失败(401)，跳过重试直接降级`, 'LLMProvider');
-          break; // 认证错误不重试，直接走降级
-        }
-        if (attempt < this.maxRetries) {
-          const delay = this.baseRetryInterval * Math.pow(2, attempt);
-          Logger.warn(
-            `🔄 chatWithTools 重试 ${attempt + 1}/${this.maxRetries}, ${delay}ms 后重试`,
-            'LLMProvider'
-          );
-          await new Promise((resolve) => setTimeout(resolve, delay));
-        }
-      }
-    }
-
-    // Zhipu/DeepSeek fallback (包括认证失败)
-    if (lastError && this.zhipuModel) {
-      Logger.info('🚀 chatWithTools 降级到智谱模型', 'LLMProvider');
-      this.localUnavailable = true;
-      this.localUnavailableSince = Date.now();
-      try {
-        return await tryGenerate(this.zhipuModel, 'zhipu');
+        const sanitizedMessages = this.sanitizeMessagesForAPI(messages);
+        const response = await this.zhipuModel.generate({
+          messages: sanitizedMessages,
+          tools,
+          maxTokens,
+          temperature: 0.8,
+          toolChoice,
+        } as ModelInput);
+        return {
+          content: response.text || '',
+          toolCalls: response.toolCalls
+            ? this.normalizeToolCalls(response.toolCalls)
+            : undefined,
+        };
       } catch (zhipuError) {
         Logger.error(
           `❌ 智谱降级也失败: ${(zhipuError as Error).message}`,
           zhipuError as Error,
           'LLMProvider'
         );
+        throw zhipuError;
       }
     }
 
-    Logger.error(
-      `❌ Function Calling 失败: ${lastError?.message}`,
-      lastError as Error,
-      'LLMProvider'
-    );
-    throw lastError || new Error('LLM 调用失败');
+    // 委托给 ChatProvider 执行主调用
+    try {
+      return await this.chatProvider.chatWithTools(messages, tools, maxTokens, toolChoice);
+    } catch (error) {
+      Logger.warn(
+        `⚠️ chatWithTools 主模型失败: ${(error as Error).message}`,
+        'LLMProvider'
+      );
+      this.localUnavailable = true;
+      this.localUnavailableSince = Date.now();
+
+      // Zhipu/DeepSeek fallback
+      if (this.zhipuModel) {
+        Logger.info('🚀 chatWithTools 降级到智谱模型', 'LLMProvider');
+        try {
+          const sanitizedMessages = this.sanitizeMessagesForAPI(messages);
+          const response = await this.zhipuModel.generate({
+            messages: sanitizedMessages,
+            tools,
+            maxTokens,
+            temperature: 0.8,
+            toolChoice,
+          } as ModelInput);
+          return {
+            content: response.text || '',
+            toolCalls: response.toolCalls
+              ? this.normalizeToolCalls(response.toolCalls)
+              : undefined,
+          };
+        } catch (zhipuError) {
+          Logger.error(
+            `❌ 智谱降级也失败: ${(zhipuError as Error).message}`,
+            zhipuError as Error,
+            'LLMProvider'
+          );
+        }
+      }
+
+      Logger.error(
+        `❌ Function Calling 失败: ${(error as Error).message}`,
+        error as Error,
+        'LLMProvider'
+      );
+      throw error;
+    }
   }
 
   /**
@@ -872,46 +645,14 @@ ${content}
   /**
    * 开发副驾专用：专业代码生成（无人设，无"亲爱的主人"等强制称呼）
    * 使用专业开发者 system prompt，直接生成可执行代码
+   * v5.1 Task 7: 委托给 CodeProvider
    */
   async devGenerateCode(
     userRequest: string,
     filePath?: string,
     existingContent?: string
   ): Promise<string> {
-    const systemPrompt = getPromptTemplate('devGenerateCode');
-
-    const fileContext = filePath ? `\n目标文件路径：${filePath}` : '';
-    const existingCodeContext = existingContent
-      ? `\n\n当前文件内容：\n${existingContent}`
-      : '\n（新文件，当前不存在）';
-
-    const humanPrompt = `用户需求：${userRequest}${fileContext}${existingCodeContext}\n\n请生成代码。`;
-
-    const operation = async () => {
-      const response = await this.model.generate({
-        prompt: humanPrompt,
-        systemPrompt,
-        temperature: 0.3,
-        maxTokens: 4096,
-      });
-
-      if (response.error) {
-        throw new Error(response.error);
-      }
-
-      if (!response.text) {
-        throw new Error('模型未返回内容');
-      }
-
-      return response.text;
-    };
-
-    try {
-      return await this.executeWithRetry(operation, '开发副驾代码生成');
-    } catch (error) {
-      Logger.error('开发副驾代码生成失败', error as Error, 'LLMProvider');
-      throw error;
-    }
+    return this.codeProvider.devGenerateCode(userRequest, filePath, existingContent);
   }
 
   isAvailable(): boolean {
