@@ -5,16 +5,36 @@
  * 通过创建 TestableExecutor 子类暴露这些方法进行测试
  */
 
-import { Executor, type ExecutorDeps } from '../../src/harness/loop/Executor';
-import { ToolRegistry } from '../../src/harness/tools/registry/ToolRegistry';
-import { SchemaValidator } from '../../src/harness/tools/registry/SchemaValidator';
+import {
+  Executor,
+  type ErrorType,
+  type ExecutorDeps,
+} from '../../src/harness/loop/Executor';
 import { PermissionGuard } from '../../src/harness/tools/registry/PermissionGuard';
-import type { ToolContext, ToolDefinition, ToolResult } from '../../src/harness/types';
+import { SchemaValidator } from '../../src/harness/tools/registry/SchemaValidator';
+import { ToolRegistry } from '../../src/harness/tools/registry/ToolRegistry';
+import type {
+  ToolContext,
+  ToolDefinition,
+  ToolResult,
+} from '../../src/harness/types';
 import { Permission, ToolCategory } from '../../src/harness/types';
 
 class TestableExecutor extends Executor {
-  public testClassifyError(error: string): 'retryable' | 'non_retryable' {
-    return (this as unknown as { classifyError: (e: string) => 'retryable' | 'non_retryable' }).classifyError.call(this, error);
+  public testClassifyError(error: string): ErrorType {
+    return (
+      this as unknown as { classifyError: (e: string) => ErrorType }
+    ).classifyError.call(this, error);
+  }
+
+  public testRepairToolCallArguments(
+    raw: string
+  ): Record<string, unknown> | null {
+    return (
+      this as unknown as {
+        repairToolCallArguments: (r: string) => Record<string, unknown> | null;
+      }
+    ).repairToolCallArguments.call(this, raw);
   }
 
   public async testExecuteWithRetry(
@@ -23,7 +43,16 @@ class TestableExecutor extends Executor {
     context: ToolContext,
     maxRetries: number = 2
   ): Promise<ToolResult> {
-    return (this as unknown as { executeWithRetry: (n: string, a: Record<string, unknown>, c: ToolContext, m: number) => Promise<ToolResult> }).executeWithRetry.call(this, toolName, args, context, maxRetries);
+    return (
+      this as unknown as {
+        executeWithRetry: (
+          n: string,
+          a: Record<string, unknown>,
+          c: ToolContext,
+          m: number
+        ) => Promise<ToolResult>;
+      }
+    ).executeWithRetry.call(this, toolName, args, context, maxRetries);
   }
 }
 
@@ -34,7 +63,9 @@ function createMockDeps(overrides?: Partial<ExecutorDeps>): ExecutorDeps {
 
   return {
     llm: {
-      chatWithTools: jest.fn().mockResolvedValue({ content: 'test', toolCalls: [] }),
+      chatWithTools: jest
+        .fn()
+        .mockResolvedValue({ content: 'test', toolCalls: [] }),
     },
     toolRegistry: mockToolRegistry,
     schemaValidator: mockSchemaValidator,
@@ -73,27 +104,39 @@ describe('Executor 错误分类', () => {
 
   describe('classifyError - 可重试错误', () => {
     it('应该将 timeout 错误分类为可重试', () => {
-      expect(executor.testClassifyError('Connection timeout')).toBe('retryable');
+      expect(executor.testClassifyError('Connection timeout')).toBe(
+        'retryable'
+      );
     });
 
     it('应该将 network 错误分类为可重试', () => {
-      expect(executor.testClassifyError('Network error occurred')).toBe('retryable');
+      expect(executor.testClassifyError('Network error occurred')).toBe(
+        'retryable'
+      );
     });
 
     it('应该将 ECONNREFUSED 错误分类为可重试', () => {
-      expect(executor.testClassifyError('connect ECONNREFUSED 127.0.0.1:3000')).toBe('retryable');
+      expect(
+        executor.testClassifyError('connect ECONNREFUSED 127.0.0.1:3000')
+      ).toBe('retryable');
     });
 
     it('应该将 ETIMEDOUT 错误分类为可重试', () => {
-      expect(executor.testClassifyError('connect ETIMEDOUT 10.0.0.1:443')).toBe('retryable');
+      expect(executor.testClassifyError('connect ETIMEDOUT 10.0.0.1:443')).toBe(
+        'retryable'
+      );
     });
 
-    it('应该将 503 错误分类为可重试', () => {
-      expect(executor.testClassifyError('HTTP 503 Service Unavailable')).toBe('retryable');
+    it('应该将 503 错误分类为 overloaded（P0-1 扩展）', () => {
+      expect(executor.testClassifyError('HTTP 503 Service Unavailable')).toBe(
+        'overloaded'
+      );
     });
 
-    it('应该将 429 错误分类为可重试', () => {
-      expect(executor.testClassifyError('HTTP 429 Too Many Requests')).toBe('retryable');
+    it('应该将 429 错误分类为 rate_limited', () => {
+      expect(executor.testClassifyError('HTTP 429 Too Many Requests')).toBe(
+        'rate_limited'
+      );
     });
 
     it('应该对可重试错误不区分大小写', () => {
@@ -104,19 +147,27 @@ describe('Executor 错误分类', () => {
 
   describe('classifyError - 不可重试错误', () => {
     it('应该将 permission 错误分类为不可重试', () => {
-      expect(executor.testClassifyError('Permission denied')).toBe('non_retryable');
+      expect(executor.testClassifyError('Permission denied')).toBe(
+        'non_retryable'
+      );
     });
 
     it('应该将 auth 错误分类为不可重试', () => {
-      expect(executor.testClassifyError('Authentication failed')).toBe('non_retryable');
+      expect(executor.testClassifyError('Authentication failed')).toBe(
+        'non_retryable'
+      );
     });
 
     it('应该将 invalid param 错误分类为不可重试', () => {
-      expect(executor.testClassifyError('Invalid parameter value')).toBe('non_retryable');
+      expect(executor.testClassifyError('Invalid parameter value')).toBe(
+        'non_retryable'
+      );
     });
 
     it('应该将 not found 错误分类为不可重试', () => {
-      expect(executor.testClassifyError('Resource not found')).toBe('non_retryable');
+      expect(executor.testClassifyError('Resource not found')).toBe(
+        'non_retryable'
+      );
     });
 
     it('应该将权限错误(中文)分类为不可重试', () => {
@@ -138,7 +189,9 @@ describe('Executor 错误分类', () => {
 
   describe('classifyError - 未知错误', () => {
     it('应该将未知错误分类为不可重试', () => {
-      expect(executor.testClassifyError('Something went wrong')).toBe('non_retryable');
+      expect(executor.testClassifyError('Something went wrong')).toBe(
+        'non_retryable'
+      );
     });
 
     it('应该将空字符串分类为不可重试', () => {
@@ -148,11 +201,152 @@ describe('Executor 错误分类', () => {
 
   describe('classifyError - 优先级', () => {
     it('当错误同时包含可重试和不可重试关键词时，不可重试优先', () => {
-      expect(executor.testClassifyError('Authentication timeout')).toBe('non_retryable');
+      expect(executor.testClassifyError('Authentication timeout')).toBe(
+        'non_retryable'
+      );
     });
 
     it('当错误同时包含 permission 和 network 时，不可重试优先', () => {
-      expect(executor.testClassifyError('permission denied for network resource')).toBe('non_retryable');
+      expect(
+        executor.testClassifyError('permission denied for network resource')
+      ).toBe('non_retryable');
+    });
+  });
+
+  // P0-1: 新增错误分类测试
+  describe('classifyError - P0-1 扩展分类', () => {
+    it('应该将 context length 错误分类为 context_overflow', () => {
+      expect(
+        executor.testClassifyError('context length exceeded the maximum')
+      ).toBe('context_overflow');
+    });
+
+    it('应该将 max tokens 错误分类为 context_overflow', () => {
+      expect(
+        executor.testClassifyError('Request too large: max tokens 8192')
+      ).toBe('context_overflow');
+    });
+
+    it('应该将上下文超限(中文)分类为 context_overflow', () => {
+      expect(executor.testClassifyError('上下文超出限制')).toBe(
+        'context_overflow'
+      );
+    });
+
+    it('应该将 content policy 错误分类为 content_policy', () => {
+      expect(
+        executor.testClassifyError('content policy violation detected')
+      ).toBe('content_policy');
+    });
+
+    it('应该将内容过滤(中文)分类为 content_policy', () => {
+      expect(executor.testClassifyError('触发内容过滤')).toBe('content_policy');
+    });
+
+    it('应该将 402 billing 错误分类为 billing', () => {
+      expect(executor.testClassifyError('HTTP 402 Payment Required')).toBe(
+        'billing'
+      );
+    });
+
+    it('应该将余额不足(中文)分类为 billing', () => {
+      expect(executor.testClassifyError('账户余额不足')).toBe('billing');
+    });
+
+    it('应该将 404 model not found 错误分类为 model_not_found', () => {
+      expect(executor.testClassifyError('model gpt-5 not found')).toBe(
+        'model_not_found'
+      );
+    });
+
+    it('应该将模型未找到(中文)分类为 model_not_found', () => {
+      expect(executor.testClassifyError('模型 gpt-5 未找到')).toBe(
+        'model_not_found'
+      );
+    });
+
+    it('应该将 overloaded 错误分类为 overloaded', () => {
+      expect(
+        executor.testClassifyError('service overloaded, try again later')
+      ).toBe('overloaded');
+    });
+
+    it('应该将过载(中文)分类为 overloaded', () => {
+      expect(executor.testClassifyError('服务过载')).toBe('overloaded');
+    });
+  });
+
+  // P0-2: JSON 参数修复测试
+  describe('repairToolCallArguments - P0-2 JSON 修复', () => {
+    it('应该修复未闭合的大括号', () => {
+      const result = executor.testRepairToolCallArguments(
+        '{"path": "/tmp/test"'
+      );
+      expect(result).toEqual({ path: '/tmp/test' });
+    });
+
+    it('应该修复尾随逗号', () => {
+      const result = executor.testRepairToolCallArguments('{"path": "/tmp",}');
+      expect(result).toEqual({ path: '/tmp' });
+    });
+
+    it('应该修复单引号', () => {
+      const result = executor.testRepairToolCallArguments(
+        "{'path': '/tmp/test'}"
+      );
+      expect(result).toEqual({ path: '/tmp/test' });
+    });
+
+    it('应该修复未加引号的键名', () => {
+      const result = executor.testRepairToolCallArguments(
+        '{path: "/tmp/test"}'
+      );
+      expect(result).toEqual({ path: '/tmp/test' });
+    });
+
+    it('应该剥离代码块标记', () => {
+      const result = executor.testRepairToolCallArguments(
+        '```json\n{"path": "/tmp/test"}\n```'
+      );
+      expect(result).toEqual({ path: '/tmp/test' });
+    });
+
+    it('应该转义字符串内的换行符', () => {
+      const result = executor.testRepairToolCallArguments(
+        '{"text": "line1\nline2"}'
+      );
+      expect(result).toEqual({ text: 'line1\nline2' });
+    });
+
+    it('应该提取首个 JSON 对象（去除尾随文本）', () => {
+      const result = executor.testRepairToolCallArguments(
+        'Here is the args: {"path": "/tmp"} done'
+      );
+      expect(result).toEqual({ path: '/tmp' });
+    });
+
+    it('应该修复复合错误（单引号+尾随逗号+未闭合）', () => {
+      const result = executor.testRepairToolCallArguments(
+        "{'path': '/tmp', 'limit': 10"
+      );
+      expect(result).toEqual({ path: '/tmp', limit: 10 });
+    });
+
+    it('应该对空字符串返回 null', () => {
+      expect(executor.testRepairToolCallArguments('')).toBeNull();
+    });
+
+    it('应该对非 JSON 字符串返回 null', () => {
+      expect(
+        executor.testRepairToolCallArguments('not a json at all')
+      ).toBeNull();
+    });
+
+    it('应该对有效 JSON 原样解析', () => {
+      const result = executor.testRepairToolCallArguments(
+        '{"path": "/tmp/test", "limit": 10}'
+      );
+      expect(result).toEqual({ path: '/tmp/test', limit: 10 });
     });
   });
 });
@@ -177,7 +371,11 @@ describe('Executor 重试逻辑', () => {
       });
       toolRegistry.register(createTestToolDef('test_tool'), executorFn);
 
-      const result = await executor.testExecuteWithRetry('test_tool', { input: 'test' }, mockContext);
+      const result = await executor.testExecuteWithRetry(
+        'test_tool',
+        { input: 'test' },
+        mockContext
+      );
 
       expect(result.success).toBe(true);
       expect(result.output).toBe('ok');
@@ -193,7 +391,11 @@ describe('Executor 重试逻辑', () => {
       });
       toolRegistry.register(createTestToolDef('test_tool'), executorFn);
 
-      const result = await executor.testExecuteWithRetry('test_tool', { input: 'test' }, mockContext);
+      const result = await executor.testExecuteWithRetry(
+        'test_tool',
+        { input: 'test' },
+        mockContext
+      );
 
       expect(result.metadata?.retryCount).toBeUndefined();
     });
@@ -201,7 +403,8 @@ describe('Executor 重试逻辑', () => {
 
   describe('executeWithRetry - 可重试错误', () => {
     it('应该在遇到可重试错误时重试', async () => {
-      const executorFn = jest.fn()
+      const executorFn = jest
+        .fn()
         .mockRejectedValueOnce(new Error('timeout'))
         .mockResolvedValue({
           success: true,
@@ -211,7 +414,11 @@ describe('Executor 重试逻辑', () => {
         });
       toolRegistry.register(createTestToolDef('test_tool'), executorFn);
 
-      const result = await executor.testExecuteWithRetry('test_tool', { input: 'test' }, mockContext);
+      const result = await executor.testExecuteWithRetry(
+        'test_tool',
+        { input: 'test' },
+        mockContext
+      );
 
       expect(result.success).toBe(true);
       expect(result.output).toBe('recovered');
@@ -219,7 +426,8 @@ describe('Executor 重试逻辑', () => {
     });
 
     it('应该在重试成功后记录 retryCount', async () => {
-      const executorFn = jest.fn()
+      const executorFn = jest
+        .fn()
         .mockRejectedValueOnce(new Error('network error'))
         .mockResolvedValue({
           success: true,
@@ -229,7 +437,11 @@ describe('Executor 重试逻辑', () => {
         });
       toolRegistry.register(createTestToolDef('test_tool'), executorFn);
 
-      const result = await executor.testExecuteWithRetry('test_tool', { input: 'test' }, mockContext);
+      const result = await executor.testExecuteWithRetry(
+        'test_tool',
+        { input: 'test' },
+        mockContext
+      );
 
       expect(result.metadata?.retryCount).toBe(1);
     });
@@ -238,7 +450,12 @@ describe('Executor 重试逻辑', () => {
       const executorFn = jest.fn().mockRejectedValue(new Error('ECONNREFUSED'));
       toolRegistry.register(createTestToolDef('test_tool'), executorFn);
 
-      const result = await executor.testExecuteWithRetry('test_tool', { input: 'test' }, mockContext, 2);
+      const result = await executor.testExecuteWithRetry(
+        'test_tool',
+        { input: 'test' },
+        mockContext,
+        2
+      );
 
       expect(result.success).toBe(false);
       expect(executorFn).toHaveBeenCalledTimes(3);
@@ -248,13 +465,19 @@ describe('Executor 重试逻辑', () => {
       const executorFn = jest.fn().mockRejectedValue(new Error('ETIMEDOUT'));
       toolRegistry.register(createTestToolDef('test_tool'), executorFn);
 
-      const result = await executor.testExecuteWithRetry('test_tool', { input: 'test' }, mockContext, 2);
+      const result = await executor.testExecuteWithRetry(
+        'test_tool',
+        { input: 'test' },
+        mockContext,
+        2
+      );
 
       expect(result.metadata?.retryCount).toBe(2);
     });
 
     it('应该支持自定义最大重试次数', async () => {
-      const executorFn = jest.fn()
+      const executorFn = jest
+        .fn()
         .mockRejectedValueOnce(new Error('timeout'))
         .mockRejectedValueOnce(new Error('timeout'))
         .mockResolvedValue({
@@ -265,7 +488,12 @@ describe('Executor 重试逻辑', () => {
         });
       toolRegistry.register(createTestToolDef('test_tool'), executorFn);
 
-      const result = await executor.testExecuteWithRetry('test_tool', { input: 'test' }, mockContext, 3);
+      const result = await executor.testExecuteWithRetry(
+        'test_tool',
+        { input: 'test' },
+        mockContext,
+        3
+      );
 
       expect(result.success).toBe(true);
       expect(result.metadata?.retryCount).toBe(2);
@@ -273,7 +501,8 @@ describe('Executor 重试逻辑', () => {
     });
 
     it('应该处理工具返回失败结果（非异常）的可重试错误', async () => {
-      const executorFn = jest.fn()
+      const executorFn = jest
+        .fn()
         .mockResolvedValueOnce({
           success: false,
           output: null,
@@ -289,7 +518,11 @@ describe('Executor 重试逻辑', () => {
         });
       toolRegistry.register(createTestToolDef('test_tool'), executorFn);
 
-      const result = await executor.testExecuteWithRetry('test_tool', { input: 'test' }, mockContext);
+      const result = await executor.testExecuteWithRetry(
+        'test_tool',
+        { input: 'test' },
+        mockContext
+      );
 
       expect(result.success).toBe(true);
       expect(result.output).toBe('ok after 503');
@@ -308,7 +541,11 @@ describe('Executor 重试逻辑', () => {
       });
       toolRegistry.register(createTestToolDef('test_tool'), executorFn);
 
-      const result = await executor.testExecuteWithRetry('test_tool', { input: 'test' }, mockContext);
+      const result = await executor.testExecuteWithRetry(
+        'test_tool',
+        { input: 'test' },
+        mockContext
+      );
 
       expect(result.success).toBe(false);
       expect(result.error).toBe('Permission denied');
@@ -325,16 +562,26 @@ describe('Executor 重试逻辑', () => {
       });
       toolRegistry.register(createTestToolDef('test_tool'), executorFn);
 
-      const result = await executor.testExecuteWithRetry('test_tool', { input: 'test' }, mockContext);
+      const result = await executor.testExecuteWithRetry(
+        'test_tool',
+        { input: 'test' },
+        mockContext
+      );
 
       expect(result.metadata?.retryCount).toBe(0);
     });
 
     it('应该在异常为不可重试错误时立即返回', async () => {
-      const executorFn = jest.fn().mockRejectedValue(new Error('Invalid parameter'));
+      const executorFn = jest
+        .fn()
+        .mockRejectedValue(new Error('Invalid parameter'));
       toolRegistry.register(createTestToolDef('test_tool'), executorFn);
 
-      const result = await executor.testExecuteWithRetry('test_tool', { input: 'test' }, mockContext);
+      const result = await executor.testExecuteWithRetry(
+        'test_tool',
+        { input: 'test' },
+        mockContext
+      );
 
       expect(result.success).toBe(false);
       expect(executorFn).toHaveBeenCalledTimes(1);
@@ -350,7 +597,11 @@ describe('Executor 重试逻辑', () => {
       });
       toolRegistry.register(createTestToolDef('test_tool'), executorFn);
 
-      const result = await executor.testExecuteWithRetry('test_tool', { input: 'test' }, mockContext);
+      const result = await executor.testExecuteWithRetry(
+        'test_tool',
+        { input: 'test' },
+        mockContext
+      );
 
       expect(result.success).toBe(false);
       expect(executorFn).toHaveBeenCalledTimes(1);
@@ -359,7 +610,8 @@ describe('Executor 重试逻辑', () => {
 
   describe('executeWithRetry - retryCount 追踪', () => {
     it('应该在多次重试后正确追踪 retryCount', async () => {
-      const executorFn = jest.fn()
+      const executorFn = jest
+        .fn()
         .mockRejectedValueOnce(new Error('timeout'))
         .mockRejectedValueOnce(new Error('network error'))
         .mockResolvedValue({
@@ -370,14 +622,20 @@ describe('Executor 重试逻辑', () => {
         });
       toolRegistry.register(createTestToolDef('test_tool'), executorFn);
 
-      const result = await executor.testExecuteWithRetry('test_tool', { input: 'test' }, mockContext, 3);
+      const result = await executor.testExecuteWithRetry(
+        'test_tool',
+        { input: 'test' },
+        mockContext,
+        3
+      );
 
       expect(result.success).toBe(true);
       expect(result.metadata?.retryCount).toBe(2);
     });
 
     it('应该在最终失败时正确追踪 retryCount', async () => {
-      const executorFn = jest.fn()
+      const executorFn = jest
+        .fn()
         .mockResolvedValueOnce({
           success: false,
           output: null,
@@ -401,7 +659,12 @@ describe('Executor 重试逻辑', () => {
         });
       toolRegistry.register(createTestToolDef('test_tool'), executorFn);
 
-      const result = await executor.testExecuteWithRetry('test_tool', { input: 'test' }, mockContext, 2);
+      const result = await executor.testExecuteWithRetry(
+        'test_tool',
+        { input: 'test' },
+        mockContext,
+        2
+      );
 
       expect(result.success).toBe(false);
       expect(result.metadata?.retryCount).toBe(2);

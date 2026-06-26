@@ -6,6 +6,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { SecurityAuditor } from '../../../src/monitoring/SecurityAuditor';
+import { AuditService } from '../../../src/security/AuditService';
 
 jest.mock('fs');
 
@@ -18,6 +19,9 @@ describe('SecurityAuditor', () => {
     (fs.appendFileSync as jest.Mock).mockImplementation(() => {});
     (fs.writeFileSync as jest.Mock).mockImplementation(() => {});
     (fs.mkdirSync as jest.Mock).mockImplementation(() => {});
+
+    // 重置单例，避免测试间状态泄漏
+    AuditService.resetInstance();
 
     auditor = new SecurityAuditor();
   });
@@ -501,7 +505,9 @@ describe('SecurityAuditor', () => {
       const report = auditor.generateReport(24);
 
       expect(report.topUsers.length).toBeLessThanOrEqual(10);
-      expect(report.topUsers[0].logCount).toBeGreaterThanOrEqual(report.topUsers[1]?.logCount || 0);
+      expect(report.topUsers[0].logCount).toBeGreaterThanOrEqual(
+        report.topUsers[1]?.logCount || 0
+      );
     });
   });
 

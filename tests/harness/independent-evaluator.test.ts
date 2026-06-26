@@ -9,8 +9,12 @@
 
 import { IndependentEvaluationService } from '../../src/harness/evaluation/IndependentEvaluationService';
 import { Evaluator } from '../../src/harness/loop/Evaluator';
+import type {
+  ChatMessage,
+  LoopTrace,
+  TrajectoryStep,
+} from '../../src/harness/types';
 import { LoopState } from '../../src/harness/types';
-import type { LoopTrace, ChatMessage, TrajectoryStep } from '../../src/harness/types';
 
 describe('P0: Independent Evaluator Agent', () => {
   describe('IndependentEvaluationService - Core Functionality', () => {
@@ -28,7 +32,10 @@ describe('P0: Independent Evaluator Agent', () => {
           userInput: '帮我查一下今天的天气',
           conversationHistory: [
             { role: 'user', content: '帮我查一下今天的天气' },
-            { role: 'assistant', content: '今天天气晴朗，温度25度，适合外出。' },
+            {
+              role: 'assistant',
+              content: '今天天气晴朗，温度25度，适合外出。',
+            },
           ],
         });
 
@@ -70,14 +77,29 @@ describe('P0: Independent Evaluator Agent', () => {
           userInput: '列出当前目录的文件',
           conversationHistory: [
             { role: 'user', content: '列出当前目录的文件' },
-            { role: 'assistant', tool_calls: [{ id: '1', type: 'function', function: { name: 'file_list', arguments: '{}' } }] },
+            {
+              role: 'assistant',
+              tool_calls: [
+                {
+                  id: '1',
+                  type: 'function',
+                  function: { name: 'file_list', arguments: '{}' },
+                },
+              ],
+            },
             { role: 'tool', content: '["file1.txt", "file2.js"]' },
           ],
           executionTrace: {
             totalToolCalls: 1,
             totalDuration: 100,
             loopRounds: 1,
-            toolResults: [{ toolName: 'file_list', success: true, output: '["file1.txt", "file2.js"]' }],
+            toolResults: [
+              {
+                toolName: 'file_list',
+                success: true,
+                output: '["file1.txt", "file2.js"]',
+              },
+            ],
           },
         });
 
@@ -90,7 +112,10 @@ describe('P0: Independent Evaluator Agent', () => {
           userInput: '什么是量子计算',
           conversationHistory: [
             { role: 'user', content: '什么是量子计算' },
-            { role: 'assistant', content: '量子计算是一种使用量子力学原理的计算方式...' },
+            {
+              role: 'assistant',
+              content: '量子计算是一种使用量子力学原理的计算方式...',
+            },
           ],
         });
 
@@ -142,7 +167,9 @@ describe('P0: Independent Evaluator Agent', () => {
         });
 
         expect(result.safety.safe).toBe(false);
-        expect(result.safety.violations.some(v => v.includes('银行卡'))).toBe(true);
+        expect(result.safety.violations.some((v) => v.includes('银行卡'))).toBe(
+          true
+        );
       });
 
       it('should detect API key leakage', async () => {
@@ -155,7 +182,9 @@ describe('P0: Independent Evaluator Agent', () => {
         });
 
         expect(result.safety.safe).toBe(false);
-        expect(result.safety.violations.some(v => v.includes('密钥'))).toBe(true);
+        expect(result.safety.violations.some((v) => v.includes('密钥'))).toBe(
+          true
+        );
       });
 
       it('should sanitize output when violations detected', async () => {
@@ -169,7 +198,9 @@ describe('P0: Independent Evaluator Agent', () => {
 
         expect(result.safety.sanitizedOutput).toBeDefined();
         if (result.safety.sanitizedOutput) {
-          expect(result.safety.sanitizedOutput).not.toContain('test@example.com');
+          expect(result.safety.sanitizedOutput).not.toContain(
+            'test@example.com'
+          );
           expect(result.safety.sanitizedOutput).toContain('已脱敏');
         }
       });
@@ -241,7 +272,16 @@ describe('P0: Independent Evaluator Agent', () => {
           userInput: '执行操作',
           conversationHistory: [
             { role: 'user', content: '执行操作' },
-            { role: 'assistant', tool_calls: [{ id: '1', type: 'function', function: { name: 'test_tool', arguments: '{}' } }] },
+            {
+              role: 'assistant',
+              tool_calls: [
+                {
+                  id: '1',
+                  type: 'function',
+                  function: { name: 'test_tool', arguments: '{}' },
+                },
+              ],
+            },
           ],
           executionTrace: {
             totalToolCalls: 2,
@@ -285,17 +325,33 @@ describe('P0: Independent Evaluator Agent', () => {
       it('should penalize high loop count', async () => {
         const singleLoopResult = await evalService.evaluate({
           userInput: '测试',
-          conversationHistory: [{ role: 'user', content: '测试' }, { role: 'assistant', content: '完成' }],
-          executionTrace: { totalToolCalls: 1, totalDuration: 100, loopRounds: 1 },
+          conversationHistory: [
+            { role: 'user', content: '测试' },
+            { role: 'assistant', content: '完成' },
+          ],
+          executionTrace: {
+            totalToolCalls: 1,
+            totalDuration: 100,
+            loopRounds: 1,
+          },
         });
 
         const multiLoopResult = await evalService.evaluate({
           userInput: '测试',
-          conversationHistory: [{ role: 'user', content: '测试' }, { role: 'assistant', content: '完成' }],
-          executionTrace: { totalToolCalls: 3, totalDuration: 3000, loopRounds: 5 },
+          conversationHistory: [
+            { role: 'user', content: '测试' },
+            { role: 'assistant', content: '完成' },
+          ],
+          executionTrace: {
+            totalToolCalls: 3,
+            totalDuration: 3000,
+            loopRounds: 5,
+          },
         });
 
-        expect(multiLoopResult.quality.efficiency).toBeLessThan(singleLoopResult.quality.efficiency);
+        expect(multiLoopResult.quality.efficiency).toBeLessThan(
+          singleLoopResult.quality.efficiency
+        );
       });
     });
   });
@@ -320,7 +376,12 @@ describe('P0: Independent Evaluator Agent', () => {
             type: 'tool_result',
             timestamp: Date.now() + 100,
             toolName: 'file_list',
-            toolResult: { success: true, output: '["file1.txt"]', duration: 0, validated: false },
+            toolResult: {
+              success: true,
+              output: '["file1.txt"]',
+              duration: 0,
+              validated: false,
+            },
           },
         ];
 
@@ -387,6 +448,11 @@ describe('P0: Independent Evaluator Agent', () => {
           plan: null,
           currentStepIndex: 0,
           stepResults: new Map(),
+          stepOutputs: new Map(),
+          dataFlowChannels: [],
+          crossStepState: new Map(),
+          stepStates: new Map(),
+          stepStateHistory: [],
           budget: {
             roundsUsed: 8,
             softRoundLimit: 4,
@@ -426,6 +492,11 @@ describe('P0: Independent Evaluator Agent', () => {
           plan: null,
           currentStepIndex: 0,
           stepResults: new Map(),
+          stepOutputs: new Map(),
+          dataFlowChannels: [],
+          crossStepState: new Map(),
+          stepStates: new Map(),
+          stepStateHistory: [],
           budget: {
             roundsUsed: 3,
             softRoundLimit: 4,

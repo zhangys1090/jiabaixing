@@ -1,16 +1,17 @@
-import { LoopController } from '../../../src/harness/loop/LoopController';
-import type { LoopControllerDeps, ExecutorOutput, EvaluatorOutput, ReporterOutput } from '../../../src/harness/loop/LoopController';
 import type {
-  UserInput,
+  EvaluatorOutput,
+  ExecutorOutput,
+  LoopControllerDeps,
+  ReporterOutput,
+} from '../../../src/harness/loop/LoopController';
+import { LoopController } from '../../../src/harness/loop/LoopController';
+import type {
   ChatMessage,
   ExecutionPlan,
   LoopContext,
-  BudgetState,
-  BudgetCheckResult,
-  QualityScore,
-  HookResult,
+  UserInput,
 } from '../../../src/harness/types';
-import { LoopState, LifecycleEvent } from '../../../src/harness/types';
+import { LifecycleEvent, LoopState } from '../../../src/harness/types';
 
 jest.mock('../../../src/utils/Logger', () => ({
   Logger: {
@@ -24,17 +25,22 @@ jest.mock('../../../src/utils/Logger', () => ({
 function createPlan(overrides: Partial<ExecutionPlan> = {}): ExecutionPlan {
   return {
     steps: [
-      { 
-        id: 'step-1', 
-        description: '测试步骤', 
-        toolName: 'test_tool', 
-        retryCount: 0, 
+      {
+        id: 'step-1',
+        description: '测试步骤',
+        toolName: 'test_tool',
+        retryCount: 0,
         maxRetries: 2,
-        toUnifiedTaskNode: () => ({ id: 'step-1', status: 'pending' } as any),
+        toUnifiedTaskNode: () => ({ id: 'step-1', status: 'pending' }) as any,
       },
     ],
     dependencies: new Map(),
-    estimatedBudget: { maxRounds: 4, maxToolCalls: 10, maxTokens: 4000, maxDurationMs: 30000 },
+    estimatedBudget: {
+      maxRounds: 4,
+      maxToolCalls: 10,
+      maxTokens: 4000,
+      maxDurationMs: 30000,
+    },
     toolCallMode: 'auto' as const,
     recommendedTools: [],
     simple: false,
@@ -43,11 +49,11 @@ function createPlan(overrides: Partial<ExecutionPlan> = {}): ExecutionPlan {
   };
 }
 
-function createExecutorOutput(overrides: Partial<ExecutorOutput> = {}): ExecutorOutput {
+function createExecutorOutput(
+  overrides: Partial<ExecutorOutput> = {}
+): ExecutorOutput {
   return {
-    messages: [
-      { role: 'assistant', content: '执行结果' },
-    ],
+    messages: [{ role: 'assistant', content: '执行结果' }],
     toolCallsCount: 1,
     toolDuration: 100,
     completedNaturally: true,
@@ -55,7 +61,9 @@ function createExecutorOutput(overrides: Partial<ExecutorOutput> = {}): Executor
   };
 }
 
-function createEvaluatorOutput(overrides: Partial<EvaluatorOutput> = {}): EvaluatorOutput {
+function createEvaluatorOutput(
+  overrides: Partial<EvaluatorOutput> = {}
+): EvaluatorOutput {
   return {
     goalProgress: 0.95,
     suggestedAction: 'continue',
@@ -64,7 +72,9 @@ function createEvaluatorOutput(overrides: Partial<EvaluatorOutput> = {}): Evalua
   };
 }
 
-function createReporterOutput(overrides: Partial<ReporterOutput> = {}): ReporterOutput {
+function createReporterOutput(
+  overrides: Partial<ReporterOutput> = {}
+): ReporterOutput {
   return {
     response: '任务完成',
     quality: {
@@ -90,21 +100,35 @@ function createInput(overrides: Partial<UserInput> = {}): UserInput {
 
 describe('LoopController', () => {
   let mockPlanner: { plan: jest.Mock };
-  let mockExecutor: { execute: jest.Mock };
+  let mockExecutor: { execute: jest.Mock; shouldReplan: jest.Mock };
   let mockEvaluator: { evaluate: jest.Mock };
   let mockReporter: { report: jest.Mock };
-  let mockConstraintsService: { checkBudget: jest.Mock; executeHooks: jest.Mock };
+  let mockConstraintsService: {
+    checkBudget: jest.Mock;
+    executeHooks: jest.Mock;
+  };
   let deps: LoopControllerDeps;
 
   beforeEach(() => {
     jest.clearAllMocks();
 
     mockPlanner = { plan: jest.fn().mockResolvedValue(createPlan()) };
-    mockExecutor = { execute: jest.fn().mockResolvedValue(createExecutorOutput()) };
-    mockEvaluator = { evaluate: jest.fn().mockResolvedValue(createEvaluatorOutput()) };
-    mockReporter = { report: jest.fn().mockResolvedValue(createReporterOutput()) };
+    mockExecutor = {
+      execute: jest.fn().mockResolvedValue(createExecutorOutput()),
+      shouldReplan: jest
+        .fn()
+        .mockReturnValue({ shouldReplan: false, reason: '执行质量正常' }),
+    };
+    mockEvaluator = {
+      evaluate: jest.fn().mockResolvedValue(createEvaluatorOutput()),
+    };
+    mockReporter = {
+      report: jest.fn().mockResolvedValue(createReporterOutput()),
+    };
     mockConstraintsService = {
-      checkBudget: jest.fn().mockReturnValue({ withinBudget: true, warnings: [] }),
+      checkBudget: jest
+        .fn()
+        .mockReturnValue({ withinBudget: true, warnings: [] }),
       executeHooks: jest.fn().mockResolvedValue({ proceed: true }),
     };
 
@@ -151,8 +175,20 @@ describe('LoopController', () => {
 
   describe('multi-round loop', () => {
     it('should continue loop when goalProgress < 0.9 and evaluator returns continue', async () => {
-      mockEvaluator.evaluate.mockResolvedValueOnce(createEvaluatorOutput({ goalProgress: 0.5, suggestedAction: 'continue', reason: '进行中' }));
-      mockEvaluator.evaluate.mockResolvedValueOnce(createEvaluatorOutput({ goalProgress: 0.95, suggestedAction: 'continue', reason: '完成' }));
+      mockEvaluator.evaluate.mockResolvedValueOnce(
+        createEvaluatorOutput({
+          goalProgress: 0.5,
+          suggestedAction: 'continue',
+          reason: '进行中',
+        })
+      );
+      mockEvaluator.evaluate.mockResolvedValueOnce(
+        createEvaluatorOutput({
+          goalProgress: 0.95,
+          suggestedAction: 'continue',
+          reason: '完成',
+        })
+      );
 
       const controller = new LoopController(deps);
       const result = await controller.run(createInput(), []);
@@ -163,21 +199,38 @@ describe('LoopController', () => {
     });
 
     it('should force end when progress is slow and near soft limit', async () => {
-      mockConstraintsService.checkBudget.mockReturnValue({ withinBudget: true, warnings: [] });
+      mockConstraintsService.checkBudget.mockReturnValue({
+        withinBudget: true,
+        warnings: [],
+      });
       mockEvaluator.evaluate.mockResolvedValue(
-        createEvaluatorOutput({ goalProgress: 0.2, suggestedAction: 'continue', reason: '进展缓慢' })
+        createEvaluatorOutput({
+          goalProgress: 0.2,
+          suggestedAction: 'continue',
+          reason: '进展缓慢',
+        })
       );
 
       const controller = new LoopController(deps);
 
       let rounds = 0;
-      mockEvaluator.evaluate.mockImplementation(async (_input: UserInput, context: LoopContext) => {
-        rounds = context.budget.roundsUsed;
-        if (context.budget.roundsUsed >= 4) {
-          return createEvaluatorOutput({ goalProgress: 0.2, suggestedAction: 'abort', reason: '强制结束' });
+      mockEvaluator.evaluate.mockImplementation(
+        async (_input: UserInput, context: LoopContext) => {
+          rounds = context.budget.roundsUsed;
+          if (context.budget.roundsUsed >= 4) {
+            return createEvaluatorOutput({
+              goalProgress: 0.2,
+              suggestedAction: 'abort',
+              reason: '强制结束',
+            });
+          }
+          return createEvaluatorOutput({
+            goalProgress: 0.2,
+            suggestedAction: 'continue',
+            reason: '进展缓慢',
+          });
         }
-        return createEvaluatorOutput({ goalProgress: 0.2, suggestedAction: 'continue', reason: '进展缓慢' });
-      });
+      );
 
       const result = await controller.run(createInput(), []);
       expect(result).toBeDefined();
@@ -187,7 +240,11 @@ describe('LoopController', () => {
   describe('loop abort', () => {
     it('should stop loop when evaluator returns abort', async () => {
       mockEvaluator.evaluate.mockResolvedValue(
-        createEvaluatorOutput({ goalProgress: 0.3, suggestedAction: 'abort', reason: '无法完成' })
+        createEvaluatorOutput({
+          goalProgress: 0.3,
+          suggestedAction: 'abort',
+          reason: '无法完成',
+        })
       );
 
       const controller = new LoopController(deps);
@@ -205,14 +262,20 @@ describe('LoopController', () => {
         .mockReturnValueOnce({ withinBudget: false, warnings: ['轮次超限'] });
 
       mockEvaluator.evaluate.mockResolvedValue(
-        createEvaluatorOutput({ goalProgress: 0.5, suggestedAction: 'continue', reason: '继续' })
+        createEvaluatorOutput({
+          goalProgress: 0.5,
+          suggestedAction: 'continue',
+          reason: '继续',
+        })
       );
 
       const controller = new LoopController(deps);
       const result = await controller.run(createInput(), []);
 
       expect(result).toBeDefined();
-      const hadBudgetExceeded = controller.getState() === LoopState.BUDGET_EXCEEDED || controller.getState() === LoopState.COMPLETED;
+      const hadBudgetExceeded =
+        controller.getState() === LoopState.BUDGET_EXCEEDED ||
+        controller.getState() === LoopState.COMPLETED;
       expect(hadBudgetExceeded).toBe(true);
     });
 
@@ -225,7 +288,11 @@ describe('LoopController', () => {
       };
 
       mockEvaluator.evaluate.mockResolvedValue(
-        createEvaluatorOutput({ goalProgress: 0.95, suggestedAction: 'continue', reason: '完成' })
+        createEvaluatorOutput({
+          goalProgress: 0.95,
+          suggestedAction: 'continue',
+          reason: '完成',
+        })
       );
 
       const controller = new LoopController(depsNoConstraints);
@@ -236,8 +303,20 @@ describe('LoopController', () => {
 
   describe('replan handling', () => {
     it('should replan when evaluator returns replan', async () => {
-      mockEvaluator.evaluate.mockResolvedValueOnce(createEvaluatorOutput({ goalProgress: 0.3, suggestedAction: 'replan', reason: '需要重新规划' }));
-      mockEvaluator.evaluate.mockResolvedValueOnce(createEvaluatorOutput({ goalProgress: 0.95, suggestedAction: 'continue', reason: '完成' }));
+      mockEvaluator.evaluate.mockResolvedValueOnce(
+        createEvaluatorOutput({
+          goalProgress: 0.3,
+          suggestedAction: 'replan',
+          reason: '需要重新规划',
+        })
+      );
+      mockEvaluator.evaluate.mockResolvedValueOnce(
+        createEvaluatorOutput({
+          goalProgress: 0.95,
+          suggestedAction: 'continue',
+          reason: '完成',
+        })
+      );
 
       const controller = new LoopController(deps);
       const result = await controller.run(createInput(), []);
@@ -248,7 +327,11 @@ describe('LoopController', () => {
 
     it('should enforce max replan count', async () => {
       mockEvaluator.evaluate.mockResolvedValue(
-        createEvaluatorOutput({ goalProgress: 0.3, suggestedAction: 'replan', reason: '需要重新规划' })
+        createEvaluatorOutput({
+          goalProgress: 0.3,
+          suggestedAction: 'replan',
+          reason: '需要重新规划',
+        })
       );
 
       const controller = new LoopController(deps);
@@ -264,7 +347,9 @@ describe('LoopController', () => {
       mockExecutor.execute.mockRejectedValue(new Error('执行器崩溃'));
 
       const controller = new LoopController(deps);
-      const result = await controller.run(createInput(), [{ role: 'user', content: '你好' }]);
+      const result = await controller.run(createInput(), [
+        { role: 'user', content: '你好' },
+      ]);
 
       expect(controller.getState()).toBe(LoopState.FAILED);
       expect(result.quality.overall).toBeLessThan(0.5);
@@ -299,7 +384,11 @@ describe('LoopController', () => {
   describe('abort method', () => {
     it('should set aborted flag when abort is called', async () => {
       mockEvaluator.evaluate.mockImplementation(async () => {
-        return createEvaluatorOutput({ goalProgress: 0.5, suggestedAction: 'continue', reason: '继续' });
+        return createEvaluatorOutput({
+          goalProgress: 0.5,
+          suggestedAction: 'continue',
+          reason: '继续',
+        });
       });
 
       const controller = new LoopController(deps);
@@ -322,14 +411,18 @@ describe('LoopController', () => {
 
       const depsWithPersistence: LoopControllerDeps = {
         ...deps,
-        persistenceService: mockPersistenceService as unknown as import('../../../src/harness/persistence/PersistenceService').PersistenceService,
+        persistenceService:
+          mockPersistenceService as unknown as import('../../../src/harness/persistence/PersistenceService').PersistenceService,
       };
 
       const controller = new LoopController(depsWithPersistence);
       await controller.run(createInput(), []);
 
       expect(mockPersistenceService.saveTaskState).toHaveBeenCalledTimes(1);
-      expect(mockPersistenceService.updateTaskStatus).toHaveBeenCalledWith('test-trace', 'completed');
+      expect(mockPersistenceService.updateTaskStatus).toHaveBeenCalledWith(
+        'test-trace',
+        'completed'
+      );
     });
 
     it('should update task status to failed on error', async () => {
@@ -342,13 +435,18 @@ describe('LoopController', () => {
 
       const depsWithPersistence: LoopControllerDeps = {
         ...deps,
-        persistenceService: mockPersistenceService as unknown as import('../../../src/harness/persistence/PersistenceService').PersistenceService,
+        persistenceService:
+          mockPersistenceService as unknown as import('../../../src/harness/persistence/PersistenceService').PersistenceService,
       };
 
       const controller = new LoopController(depsWithPersistence);
       await controller.run(createInput(), []);
 
-      expect(mockPersistenceService.updateTaskStatus).toHaveBeenCalledWith('test-trace', 'failed', '失败');
+      expect(mockPersistenceService.updateTaskStatus).toHaveBeenCalledWith(
+        'test-trace',
+        'failed',
+        '失败'
+      );
     });
   });
 
@@ -364,7 +462,8 @@ describe('LoopController', () => {
 
       const depsWithTrajectory: LoopControllerDeps = {
         ...deps,
-        trajectoryDatabase: mockTrajectoryDatabase as unknown as import('../../../src/harness/persistence/TrajectoryDatabase').TrajectoryDatabase,
+        trajectoryDatabase:
+          mockTrajectoryDatabase as unknown as import('../../../src/harness/persistence/TrajectoryDatabase').TrajectoryDatabase,
       };
 
       const controller = new LoopController(depsWithTrajectory);
@@ -375,7 +474,9 @@ describe('LoopController', () => {
 
     it('should handle trajectory database errors gracefully', async () => {
       const mockTrajectoryDatabase = {
-        recordExecution: jest.fn().mockImplementation(() => { throw new Error('DB错误'); }),
+        recordExecution: jest.fn().mockImplementation(() => {
+          throw new Error('DB错误');
+        }),
         updateExecutionStatus: jest.fn(),
         getExecution: jest.fn().mockReturnValue(null),
         recordStateTransition: jest.fn(),
@@ -384,7 +485,8 @@ describe('LoopController', () => {
 
       const depsWithTrajectory: LoopControllerDeps = {
         ...deps,
-        trajectoryDatabase: mockTrajectoryDatabase as unknown as import('../../../src/harness/persistence/TrajectoryDatabase').TrajectoryDatabase,
+        trajectoryDatabase:
+          mockTrajectoryDatabase as unknown as import('../../../src/harness/persistence/TrajectoryDatabase').TrajectoryDatabase,
       };
 
       const controller = new LoopController(depsWithTrajectory);
@@ -398,28 +500,41 @@ describe('LoopController', () => {
   describe('verification service integration', () => {
     it('should validate tool results when verificationService is provided', async () => {
       const mockVerificationService = {
-        validateToolResult: jest.fn().mockReturnValue({ warnings: [], errors: [] }),
+        validateToolResult: jest
+          .fn()
+          .mockReturnValue({ warnings: [], errors: [] }),
         scoreQuality: jest.fn().mockReturnValue({
-          overall: 0.8, accuracy: 0.8, usefulness: 0.8, friendliness: 0.8, efficiency: 0.8, details: '验证评分',
+          overall: 0.8,
+          accuracy: 0.8,
+          usefulness: 0.8,
+          friendliness: 0.8,
+          efficiency: 0.8,
+          details: '验证评分',
         }),
       };
 
-      mockExecutor.execute.mockResolvedValue(createExecutorOutput({
-        messages: [
-          { role: 'assistant', content: '执行中' },
-          { role: 'tool', content: '工具结果', name: 'test_tool' },
-        ],
-      }));
+      mockExecutor.execute.mockResolvedValue(
+        createExecutorOutput({
+          messages: [
+            { role: 'assistant', content: '执行中' },
+            { role: 'tool', content: '工具结果', name: 'test_tool' },
+          ],
+        })
+      );
 
       const depsWithVerification: LoopControllerDeps = {
         ...deps,
-        verificationService: mockVerificationService as unknown as import('../../../src/harness/verification/VerificationService').VerificationService,
+        verificationService:
+          mockVerificationService as unknown as import('../../../src/harness/verification/VerificationService').VerificationService,
       };
 
       const controller = new LoopController(depsWithVerification);
       const result = await controller.run(createInput(), []);
 
-      expect(mockVerificationService.validateToolResult).toHaveBeenCalledWith('test_tool', expect.objectContaining({ output: '工具结果' }));
+      expect(mockVerificationService.validateToolResult).toHaveBeenCalledWith(
+        'test_tool',
+        expect.objectContaining({ output: '工具结果' })
+      );
       expect(result.quality.overall).toBeCloseTo(0.85, 1);
     });
   });
@@ -456,7 +571,9 @@ describe('LoopController', () => {
 
   describe('simple plan handling', () => {
     it('should handle simple plan that skips planning', async () => {
-      mockPlanner.plan.mockResolvedValue(createPlan({ simple: true, steps: [] }));
+      mockPlanner.plan.mockResolvedValue(
+        createPlan({ simple: true, steps: [] })
+      );
 
       const controller = new LoopController(deps);
       const result = await controller.run(createInput(), []);

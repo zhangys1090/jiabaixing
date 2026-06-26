@@ -12,32 +12,27 @@
 
 import {
   AgentHarness,
-  registerHarnessTools,
-  ToolRegistry,
-  SchemaValidator,
-  PermissionGuard,
-  ContextManager,
-  VerificationService,
   ConstraintsService,
-  LoopController,
-  Planner,
-  Executor,
   Evaluator,
-  Reporter,
+  Executor,
+  LoopController,
+  PermissionGuard,
   PersistenceService,
+  Planner,
+  registerHarnessTools,
+  Reporter,
+  SchemaValidator,
+  ToolRegistry,
+  VerificationService,
 } from '../../src/harness';
 import type { HarnessDeps } from '../../src/harness/AgentHarness';
 import type { HarnessToolDeps } from '../../src/harness/tools/registerHarnessTools';
+import type { UserInput } from '../../src/harness/types';
 import {
   LifecycleEvent,
+  LoopState,
   Permission,
   ToolCategory,
-  LoopState,
-} from '../../src/harness/types';
-import type {
-  UserInput,
-  ChatMessage,
-  ToolDefinition,
 } from '../../src/harness/types';
 
 // ============ 25 个工具的名称列表 ============
@@ -118,6 +113,10 @@ function createMockDeps(): HarnessDeps & { toolDeps: HarnessToolDeps } {
       ]),
     },
     toolDeps: {
+      core: {
+        refreshProjectContext: jest.fn().mockResolvedValue(0),
+        getLoadedContextFiles: jest.fn().mockReturnValue([]),
+      },
       detectEmotionFromInput: jest
         .fn()
         .mockReturnValue({ type: '平静', intensity: 2 }),
@@ -193,8 +192,8 @@ describe('V5.0 Task 1: Harness 系统完整性验证', () => {
     test('应该成功注册所有 25 个工具', () => {
       const result = registerHarnessTools(deps.toolDeps);
 
-      expect(result.registeredCount).toBe(49);
-      expect(result.toolRegistry.size).toBe(49);
+      expect(result.registeredCount).toBe(51);
+      expect(result.toolRegistry.size).toBe(51);
     });
 
     test('所有 25 个工具都应该可以通过名称获取', () => {
@@ -222,21 +221,21 @@ describe('V5.0 Task 1: Harness 系统完整性验证', () => {
       const dailyTools = registry.getByCategory(ToolCategory.DAILY);
       const networkTools = registry.getByCategory(ToolCategory.NETWORK);
 
-      expect(memoryTools.length).toBe(3);
+      expect(memoryTools.length).toBe(4);
       expect(cognitionTools.length).toBe(3);
       expect(desktopTools.length).toBe(2);
-      expect(systemTools.length).toBe(4);
-      expect(fileTools.length).toBe(5);
-      expect(codeTools.length).toBe(3);
-      expect(dailyTools.length).toBe(9);
-      expect(networkTools.length).toBe(4);
+      expect(systemTools.length).toBe(9);
+      expect(fileTools.length).toBe(8);
+      expect(codeTools.length).toBe(6);
+      expect(dailyTools.length).toBe(11);
+      expect(networkTools.length).toBe(8);
     });
 
     test('所有工具应该能转换为 OpenAI 工具格式', () => {
       const result = registerHarnessTools(deps.toolDeps);
       const openaiTools = result.toolRegistry.toOpenAITools();
 
-      expect(openaiTools.length).toBe(49);
+      expect(openaiTools.length).toBe(51);
 
       for (const tool of openaiTools) {
         expect(tool.type).toBe('function');
@@ -424,7 +423,7 @@ describe('V5.0 Task 1: Harness 系统完整性验证', () => {
       const permissionGuard = result.permissionGuard;
 
       // 验证工具注册
-      expect(registry.size).toBe(49);
+      expect(registry.size).toBe(51);
 
       // 验证工具可以获取
       const memoryRecall = registry.get('memory_recall');
@@ -608,7 +607,7 @@ describe('V5.0 Task 1: Harness 系统完整性验证', () => {
       await harness.initialize();
 
       expect(harness.getToolRegistry()).not.toBeNull();
-      expect(harness.getToolRegistry()?.size).toBe(49);
+      expect(harness.getToolRegistry()?.size).toBe(51);
     });
 
     test('processInput 应该能够处理输入并返回结果', async () => {
@@ -801,7 +800,7 @@ describe('V5.0 Task 1: Harness 系统完整性验证', () => {
       // 这个测试用于验证我们的测试框架本身是正常的
       expect(true).toBe(true);
       expect(1 + 1).toBe(2);
-      expect(ALL_TOOL_NAMES.length).toBe(49);
+      expect(ALL_TOOL_NAMES.length).toBe(33);
     });
   });
 });

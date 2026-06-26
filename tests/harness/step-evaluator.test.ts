@@ -2,10 +2,13 @@
  * StepEvaluator 单元测试
  */
 
-import { StepEvaluator, StepEvaluationParams } from '../../src/harness/evaluation/StepEvaluator';
+import {
+  StepEvaluationParams,
+  StepEvaluator,
+} from '../../src/harness/evaluation/StepEvaluator';
 import { Evaluator } from '../../src/harness/loop/Evaluator';
-import { LoopState } from '../../src/harness/types';
 import type { LoopContext, StepResult } from '../../src/harness/types';
+import { LoopState } from '../../src/harness/types';
 
 describe('StepEvaluator', () => {
   let stepEvaluator: StepEvaluator;
@@ -176,7 +179,8 @@ describe('StepEvaluator', () => {
       args: {},
       result: {
         success: true,
-        output: 'Error: Something went wrong\nat Function.test (test.ts:10:5)\nat Object.<anonymous> (index.ts:20:1)',
+        output:
+          'Error: Something went wrong\nat Function.test (test.ts:10:5)\nat Object.<anonymous> (index.ts:20:1)',
       },
       timestamp: Date.now(),
     };
@@ -214,7 +218,8 @@ describe('StepEvaluator', () => {
       args: {},
       result: {
         success: true,
-        output: 'Traceback (most recent call last):\n  File "test.py", line 10, in test\n    raise ValueError("test")',
+        output:
+          'Traceback (most recent call last):\n  File "test.py", line 10, in test\n    raise ValueError("test")',
       },
       timestamp: Date.now(),
     };
@@ -246,18 +251,24 @@ describe('StepEvaluator', () => {
 });
 
 describe('Evaluator 与 StepEvaluator 集成', () => {
-  const createMockContext = (stepResults: Map<string, StepResult>, hasAssistantMsg: boolean = true): LoopContext => ({
+  const createMockContext = (
+    stepResults: Map<string, StepResult>,
+    hasAssistantMsg: boolean = true
+  ): LoopContext => ({
     messages: hasAssistantMsg
       ? [
           { role: 'user' as const, content: '测试任务' },
           { role: 'assistant' as const, content: '任务已完成' },
         ]
-      : [
-          { role: 'user' as const, content: '测试任务' },
-        ],
+      : [{ role: 'user' as const, content: '测试任务' }],
     plan: null,
     currentStepIndex: 0,
     stepResults,
+    stepOutputs: new Map(),
+    dataFlowChannels: [],
+    crossStepState: new Map(),
+    stepStates: new Map(),
+    stepStateHistory: [],
     budget: {
       roundsUsed: 1,
       softRoundLimit: 4,
@@ -295,9 +306,36 @@ describe('Evaluator 与 StepEvaluator 集成', () => {
 
   test('有最终回复时应该返回 goalProgress=1.0', async () => {
     const stepResults = new Map<string, StepResult>([
-      ['step1', { stepId: 'step1', success: true, output: '结果1', duration: 100, toolName: 'tool1' }],
-      ['step2', { stepId: 'step2', success: true, output: '结果2', duration: 100, toolName: 'tool2' }],
-      ['step3', { stepId: 'step3', success: true, output: '结果3', duration: 100, toolName: 'tool3' }],
+      [
+        'step1',
+        {
+          stepId: 'step1',
+          success: true,
+          output: '结果1',
+          duration: 100,
+          toolName: 'tool1',
+        },
+      ],
+      [
+        'step2',
+        {
+          stepId: 'step2',
+          success: true,
+          output: '结果2',
+          duration: 100,
+          toolName: 'tool2',
+        },
+      ],
+      [
+        'step3',
+        {
+          stepId: 'step3',
+          success: true,
+          output: '结果3',
+          duration: 100,
+          toolName: 'tool3',
+        },
+      ],
     ]);
 
     const evaluator = new Evaluator({});
@@ -312,9 +350,37 @@ describe('Evaluator 与 StepEvaluator 集成', () => {
 
   test('多步骤部分失败应该返回 goalProgress=0.5', async () => {
     const stepResults = new Map<string, StepResult>([
-      ['step1', { stepId: 'step1', success: true, output: '结果1', duration: 100, toolName: 'tool1' }],
-      ['step2', { stepId: 'step2', success: false, output: '错误', duration: 100, toolName: 'tool2', error: '执行失败' }],
-      ['step3', { stepId: 'step3', success: true, output: '结果3', duration: 100, toolName: 'tool3' }],
+      [
+        'step1',
+        {
+          stepId: 'step1',
+          success: true,
+          output: '结果1',
+          duration: 100,
+          toolName: 'tool1',
+        },
+      ],
+      [
+        'step2',
+        {
+          stepId: 'step2',
+          success: false,
+          output: '错误',
+          duration: 100,
+          toolName: 'tool2',
+          error: '执行失败',
+        },
+      ],
+      [
+        'step3',
+        {
+          stepId: 'step3',
+          success: true,
+          output: '结果3',
+          duration: 100,
+          toolName: 'tool3',
+        },
+      ],
     ]);
 
     const evaluator = new Evaluator({});
@@ -329,9 +395,38 @@ describe('Evaluator 与 StepEvaluator 集成', () => {
 
   test('多步骤超过50%失败应该返回 goalProgress=0', async () => {
     const stepResults = new Map<string, StepResult>([
-      ['step1', { stepId: 'step1', success: false, output: '错误', duration: 100, toolName: 'tool1', error: '失败' }],
-      ['step2', { stepId: 'step2', success: false, output: '错误', duration: 100, toolName: 'tool2', error: '失败' }],
-      ['step3', { stepId: 'step3', success: true, output: '结果3', duration: 100, toolName: 'tool3' }],
+      [
+        'step1',
+        {
+          stepId: 'step1',
+          success: false,
+          output: '错误',
+          duration: 100,
+          toolName: 'tool1',
+          error: '失败',
+        },
+      ],
+      [
+        'step2',
+        {
+          stepId: 'step2',
+          success: false,
+          output: '错误',
+          duration: 100,
+          toolName: 'tool2',
+          error: '失败',
+        },
+      ],
+      [
+        'step3',
+        {
+          stepId: 'step3',
+          success: true,
+          output: '结果3',
+          duration: 100,
+          toolName: 'tool3',
+        },
+      ],
     ]);
 
     const evaluator = new Evaluator({});
@@ -346,7 +441,17 @@ describe('Evaluator 与 StepEvaluator 集成', () => {
 
   test('步骤评估始终生效，失败步骤应降低 goalProgress', async () => {
     const stepResults = new Map<string, StepResult>([
-      ['step1', { stepId: 'step1', success: false, output: '错误', duration: 100, toolName: 'tool1', error: '失败' }],
+      [
+        'step1',
+        {
+          stepId: 'step1',
+          success: false,
+          output: '错误',
+          duration: 100,
+          toolName: 'tool1',
+          error: '失败',
+        },
+      ],
     ]);
 
     const evaluator = new Evaluator({});
@@ -375,8 +480,27 @@ describe('Evaluator 与 StepEvaluator 集成', () => {
   test('每次evaluate独立——replanCount不跨调用泄漏 (C6 fix)', async () => {
     // Arrange: partial failures → should return 'replan' (within MAX_REPLAN)
     const stepResults = new Map<string, StepResult>([
-      ['step1', { stepId: 'step1', success: false, output: '错误', duration: 100, toolName: 'tool1', error: '失败' }],
-      ['step2', { stepId: 'step2', success: true, output: '结果2', duration: 100, toolName: 'tool2' }],
+      [
+        'step1',
+        {
+          stepId: 'step1',
+          success: false,
+          output: '错误',
+          duration: 100,
+          toolName: 'tool1',
+          error: '失败',
+        },
+      ],
+      [
+        'step2',
+        {
+          stepId: 'step2',
+          success: true,
+          output: '结果2',
+          duration: 100,
+          toolName: 'tool2',
+        },
+      ],
     ]);
 
     const evaluator = new Evaluator({});

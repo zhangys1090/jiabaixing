@@ -16,14 +16,10 @@
  * 4. 质量被评估
  */
 
-import { AgentHarness } from '../../src/harness/AgentHarness';
 import type { HarnessDeps } from '../../src/harness/AgentHarness';
-import {
-  LifecycleEvent,
-  Permission,
-  ToolCategory,
-} from '../../src/harness/types';
-import type { UserInput, ChatMessage } from '../../src/harness/types';
+import { AgentHarness } from '../../src/harness/AgentHarness';
+import type { UserInput } from '../../src/harness/types';
+import { LifecycleEvent, Permission } from '../../src/harness/types';
 
 // ============ Mock 数据 ============
 
@@ -102,6 +98,10 @@ function createMockDeps(): HarnessDeps {
         getSkills: jest.fn().mockResolvedValue([]),
         saveSkill: jest.fn().mockResolvedValue(undefined),
         deleteSkill: jest.fn().mockResolvedValue(undefined),
+      },
+      core: {
+        refreshProjectContext: jest.fn().mockResolvedValue(0),
+        getLoadedContextFiles: jest.fn().mockReturnValue([]),
       },
     },
     persistenceDeps: {

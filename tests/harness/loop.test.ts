@@ -3,26 +3,20 @@
  */
 
 import {
+  Evaluator,
   LoopController,
   Planner,
-  Executor,
-  Evaluator,
   Reporter,
-  ContextManager,
   TokenBudgetAllocator,
-  ToolRegistry,
-  SchemaValidator,
-  PermissionGuard,
 } from '../../src/harness';
-import { LoopState, Permission } from '../../src/harness/types';
 import type {
-  ChatMessage,
-  UserInput,
-  LoopContext,
-  ExecutionPlan,
-  QualityScore,
-} from '../../src/harness/types';
-import type { ExecutorOutput, EvaluatorOutput, ReporterOutput } from '../../src/harness/loop/LoopController';
+  EvaluatorOutput,
+  ExecutorOutput,
+  ReporterOutput,
+} from '../../src/harness/loop/LoopController';
+import type { ExecutionPlan } from '../../src/harness/types';
+import { LoopState } from '../../src/harness/types';
+import { createMockLoopContext } from './helpers/loopContext';
 
 // ============ Planner 测试 ============
 
@@ -33,10 +27,7 @@ describe('Planner', () => {
 
   test('简单问候应该跳过规划', async () => {
     const planner = new Planner({ llm: mockLlm });
-    const plan = await planner.plan(
-      { text: '你好' },
-      { messages: [], plan: null, currentStepIndex: 0, stepResults: new Map(), budget: { roundsUsed: 0, softRoundLimit: 4, hardRoundLimit: 8, tokensUsed: 0, tokenWarningLimit: 4500, tokenHardLimit: 6000, startTime: 0, maxDurationMs: 60000, toolCallsUsed: 0, maxToolCalls: 20 }, trace: { traceId: 'test', state: LoopState.PLANNING, stateTransitions: [], trajectory: [], totalDuration: 0, totalToolCalls: 0, budgetState: { roundsUsed: 0, softRoundLimit: 4, hardRoundLimit: 8, tokensUsed: 0, tokenWarningLimit: 4500, tokenHardLimit: 6000, startTime: 0, maxDurationMs: 60000, toolCallsUsed: 0, maxToolCalls: 20 } }, metadata: {} }
-    );
+    const plan = await planner.plan({ text: '你好' }, createMockLoopContext());
     expect(plan.simple).toBe(true);
     expect(plan.steps.length).toBe(1);
   });
@@ -56,7 +47,7 @@ describe('Planner', () => {
     const planner = new Planner({ llm: mockLlm });
     const plan = await planner.plan(
       { text: '重构这个项目的代码结构' },
-      { messages: [], plan: null, currentStepIndex: 0, stepResults: new Map(), budget: { roundsUsed: 0, softRoundLimit: 4, hardRoundLimit: 8, tokensUsed: 0, tokenWarningLimit: 4500, tokenHardLimit: 6000, startTime: 0, maxDurationMs: 60000, toolCallsUsed: 0, maxToolCalls: 20 }, trace: { traceId: 'test', state: LoopState.PLANNING, stateTransitions: [], trajectory: [], totalDuration: 0, totalToolCalls: 0, budgetState: { roundsUsed: 0, softRoundLimit: 4, hardRoundLimit: 8, tokensUsed: 0, tokenWarningLimit: 4500, tokenHardLimit: 6000, startTime: 0, maxDurationMs: 60000, toolCallsUsed: 0, maxToolCalls: 20 } }, metadata: {} }
+      createMockLoopContext()
     );
     expect(plan.steps.length).toBe(2);
     expect(plan.dependencies.has('step2')).toBe(true);
@@ -69,7 +60,7 @@ describe('Planner', () => {
     const planner = new Planner({ llm: failingLlm });
     const plan = await planner.plan(
       { text: '帮我分析一下' },
-      { messages: [], plan: null, currentStepIndex: 0, stepResults: new Map(), budget: { roundsUsed: 0, softRoundLimit: 4, hardRoundLimit: 8, tokensUsed: 0, tokenWarningLimit: 4500, tokenHardLimit: 6000, startTime: 0, maxDurationMs: 60000, toolCallsUsed: 0, maxToolCalls: 20 }, trace: { traceId: 'test', state: LoopState.PLANNING, stateTransitions: [], trajectory: [], totalDuration: 0, totalToolCalls: 0, budgetState: { roundsUsed: 0, softRoundLimit: 4, hardRoundLimit: 8, tokensUsed: 0, tokenWarningLimit: 4500, tokenHardLimit: 6000, startTime: 0, maxDurationMs: 60000, toolCallsUsed: 0, maxToolCalls: 20 } }, metadata: {} }
+      createMockLoopContext()
     );
     expect(plan.simple).toBe(true);
   });
@@ -82,18 +73,44 @@ describe('Evaluator', () => {
     const evaluator = new Evaluator({});
     const result = await evaluator.evaluate(
       { text: '你好' },
-      {
+      createMockLoopContext({
         messages: [
           { role: 'user', content: '你好' },
           { role: 'assistant', content: '你好！有什么可以帮你的？' },
         ],
-        plan: null,
-        currentStepIndex: 0,
-        stepResults: new Map(),
-        budget: { roundsUsed: 1, softRoundLimit: 4, hardRoundLimit: 8, tokensUsed: 0, tokenWarningLimit: 4500, tokenHardLimit: 6000, startTime: Date.now(), maxDurationMs: 60000, toolCallsUsed: 2, maxToolCalls: 20 },
-        trace: { traceId: 'test', state: LoopState.EVALUATING, stateTransitions: [], trajectory: [], totalDuration: 0, totalToolCalls: 2, budgetState: { roundsUsed: 1, softRoundLimit: 4, hardRoundLimit: 8, tokensUsed: 0, tokenWarningLimit: 4500, tokenHardLimit: 6000, startTime: Date.now(), maxDurationMs: 60000, toolCallsUsed: 2, maxToolCalls: 20 } },
-        metadata: {},
-      }
+        budget: {
+          roundsUsed: 1,
+          softRoundLimit: 4,
+          hardRoundLimit: 8,
+          tokensUsed: 0,
+          tokenWarningLimit: 4500,
+          tokenHardLimit: 6000,
+          startTime: Date.now(),
+          maxDurationMs: 60000,
+          toolCallsUsed: 2,
+          maxToolCalls: 20,
+        },
+        trace: {
+          traceId: 'test',
+          state: LoopState.EVALUATING,
+          stateTransitions: [],
+          trajectory: [],
+          totalDuration: 0,
+          totalToolCalls: 2,
+          budgetState: {
+            roundsUsed: 1,
+            softRoundLimit: 4,
+            hardRoundLimit: 8,
+            tokensUsed: 0,
+            tokenWarningLimit: 4500,
+            tokenHardLimit: 6000,
+            startTime: Date.now(),
+            maxDurationMs: 60000,
+            toolCallsUsed: 2,
+            maxToolCalls: 20,
+          },
+        },
+      })
     );
     expect(result.goalProgress).toBe(1.0);
     expect(result.suggestedAction).toBe('continue');
@@ -103,15 +120,41 @@ describe('Evaluator', () => {
     const evaluator = new Evaluator({});
     const result = await evaluator.evaluate(
       { text: '复杂任务' },
-      {
+      createMockLoopContext({
         messages: [{ role: 'user', content: '复杂任务' }],
-        plan: null,
-        currentStepIndex: 0,
-        stepResults: new Map(),
-        budget: { roundsUsed: 8, softRoundLimit: 4, hardRoundLimit: 8, tokensUsed: 0, tokenWarningLimit: 4500, tokenHardLimit: 6000, startTime: Date.now(), maxDurationMs: 60000, toolCallsUsed: 20, maxToolCalls: 20 },
-        trace: { traceId: 'test', state: LoopState.EVALUATING, stateTransitions: [], trajectory: [], totalDuration: 0, totalToolCalls: 20, budgetState: { roundsUsed: 8, softRoundLimit: 4, hardRoundLimit: 8, tokensUsed: 0, tokenWarningLimit: 4500, tokenHardLimit: 6000, startTime: Date.now(), maxDurationMs: 60000, toolCallsUsed: 20, maxToolCalls: 20 } },
-        metadata: {},
-      }
+        budget: {
+          roundsUsed: 8,
+          softRoundLimit: 4,
+          hardRoundLimit: 8,
+          tokensUsed: 0,
+          tokenWarningLimit: 4500,
+          tokenHardLimit: 6000,
+          startTime: Date.now(),
+          maxDurationMs: 60000,
+          toolCallsUsed: 20,
+          maxToolCalls: 20,
+        },
+        trace: {
+          traceId: 'test',
+          state: LoopState.EVALUATING,
+          stateTransitions: [],
+          trajectory: [],
+          totalDuration: 0,
+          totalToolCalls: 20,
+          budgetState: {
+            roundsUsed: 8,
+            softRoundLimit: 4,
+            hardRoundLimit: 8,
+            tokensUsed: 0,
+            tokenWarningLimit: 4500,
+            tokenHardLimit: 6000,
+            startTime: Date.now(),
+            maxDurationMs: 60000,
+            toolCallsUsed: 20,
+            maxToolCalls: 20,
+          },
+        },
+      })
     );
     expect(result.suggestedAction).toBe('abort');
   });
@@ -122,34 +165,90 @@ describe('Evaluator', () => {
 describe('Reporter', () => {
   test('应该提取最后一条 assistant 消息', async () => {
     const reporter = new Reporter();
-    const result = await reporter.report({
-      messages: [
-        { role: 'system', content: '系统提示' },
-        { role: 'user', content: '你好' },
-        { role: 'assistant', content: '你好！' },
-      ],
-      plan: null,
-      currentStepIndex: 0,
-      stepResults: new Map(),
-      budget: { roundsUsed: 1, softRoundLimit: 4, hardRoundLimit: 8, tokensUsed: 0, tokenWarningLimit: 4500, tokenHardLimit: 6000, startTime: Date.now() - 1000, maxDurationMs: 60000, toolCallsUsed: 1, maxToolCalls: 20 },
-      trace: { traceId: 'test', state: LoopState.REPORTING, stateTransitions: [], trajectory: [], totalDuration: 0, totalToolCalls: 1, budgetState: { roundsUsed: 1, softRoundLimit: 4, hardRoundLimit: 8, tokensUsed: 0, tokenWarningLimit: 4500, tokenHardLimit: 6000, startTime: Date.now() - 1000, maxDurationMs: 60000, toolCallsUsed: 1, maxToolCalls: 20 } },
-      metadata: {},
-    });
+    const result = await reporter.report(
+      createMockLoopContext({
+        messages: [
+          { role: 'system', content: '系统提示' },
+          { role: 'user', content: '你好' },
+          { role: 'assistant', content: '你好！' },
+        ],
+        budget: {
+          roundsUsed: 1,
+          softRoundLimit: 4,
+          hardRoundLimit: 8,
+          tokensUsed: 0,
+          tokenWarningLimit: 4500,
+          tokenHardLimit: 6000,
+          startTime: Date.now() - 1000,
+          maxDurationMs: 60000,
+          toolCallsUsed: 1,
+          maxToolCalls: 20,
+        },
+        trace: {
+          traceId: 'test',
+          state: LoopState.REPORTING,
+          stateTransitions: [],
+          trajectory: [],
+          totalDuration: 0,
+          totalToolCalls: 1,
+          budgetState: {
+            roundsUsed: 1,
+            softRoundLimit: 4,
+            hardRoundLimit: 8,
+            tokensUsed: 0,
+            tokenWarningLimit: 4500,
+            tokenHardLimit: 6000,
+            startTime: Date.now() - 1000,
+            maxDurationMs: 60000,
+            toolCallsUsed: 1,
+            maxToolCalls: 20,
+          },
+        },
+      })
+    );
     expect(result.response).toBe('你好！');
     expect(result.quality.overall).toBeGreaterThan(0);
   });
 
   test('没有 assistant 消息时应返回降级响应', async () => {
     const reporter = new Reporter();
-    const result = await reporter.report({
-      messages: [{ role: 'user', content: '你好' }],
-      plan: null,
-      currentStepIndex: 0,
-      stepResults: new Map(),
-      budget: { roundsUsed: 1, softRoundLimit: 4, hardRoundLimit: 8, tokensUsed: 0, tokenWarningLimit: 4500, tokenHardLimit: 6000, startTime: Date.now() - 1000, maxDurationMs: 60000, toolCallsUsed: 1, maxToolCalls: 20 },
-      trace: { traceId: 'test', state: LoopState.REPORTING, stateTransitions: [], trajectory: [], totalDuration: 0, totalToolCalls: 1, budgetState: { roundsUsed: 1, softRoundLimit: 4, hardRoundLimit: 8, tokensUsed: 0, tokenWarningLimit: 4500, tokenHardLimit: 6000, startTime: Date.now() - 1000, maxDurationMs: 60000, toolCallsUsed: 1, maxToolCalls: 20 } },
-      metadata: {},
-    });
+    const result = await reporter.report(
+      createMockLoopContext({
+        messages: [{ role: 'user', content: '你好' }],
+        budget: {
+          roundsUsed: 1,
+          softRoundLimit: 4,
+          hardRoundLimit: 8,
+          tokensUsed: 0,
+          tokenWarningLimit: 4500,
+          tokenHardLimit: 6000,
+          startTime: Date.now() - 1000,
+          maxDurationMs: 60000,
+          toolCallsUsed: 1,
+          maxToolCalls: 20,
+        },
+        trace: {
+          traceId: 'test',
+          state: LoopState.REPORTING,
+          stateTransitions: [],
+          trajectory: [],
+          totalDuration: 0,
+          totalToolCalls: 1,
+          budgetState: {
+            roundsUsed: 1,
+            softRoundLimit: 4,
+            hardRoundLimit: 8,
+            tokensUsed: 0,
+            tokenWarningLimit: 4500,
+            tokenHardLimit: 6000,
+            startTime: Date.now() - 1000,
+            maxDurationMs: 60000,
+            toolCallsUsed: 1,
+            maxToolCalls: 20,
+          },
+        },
+      })
+    );
     expect(result.response).toBeTruthy();
   });
 });
@@ -169,7 +268,7 @@ describe('TokenBudgetAllocator', () => {
   test('应该估算 Token 数', () => {
     const allocator = new TokenBudgetAllocator();
     const tokens = allocator.estimateTokens('Hello World');
-    expect(tokens).toBe(6); // 11 chars / 2
+    expect(tokens).toBe(3); // 11 chars / 4 ≈ 3 tokens
   });
 
   test('应该按预算截断文本', () => {
@@ -186,15 +285,22 @@ describe('TokenBudgetAllocator', () => {
 describe('LoopController', () => {
   test('应该完成 Plan-Execute-Evaluate 循环', async () => {
     const mockPlan: ExecutionPlan = {
-      steps: [{ 
-        id: 'step1', 
-        description: '回答问题', 
-        retryCount: 0, 
-        maxRetries: 0,
-        toUnifiedTaskNode: () => ({ id: 'step1', status: 'pending' } as any),
-      }],
+      steps: [
+        {
+          id: 'step1',
+          description: '回答问题',
+          retryCount: 0,
+          maxRetries: 0,
+          toUnifiedTaskNode: () => ({ id: 'step1', status: 'pending' }) as any,
+        },
+      ],
       dependencies: new Map(),
-      estimatedBudget: { maxRounds: 4, maxToolCalls: 5, maxTokens: 3000, maxDurationMs: 30000 },
+      estimatedBudget: {
+        maxRounds: 4,
+        maxToolCalls: 5,
+        maxTokens: 3000,
+        maxDurationMs: 30000,
+      },
       simple: true,
       toolCallMode: 'auto',
       recommendedTools: [],
@@ -215,6 +321,10 @@ describe('LoopController', () => {
           toolDuration: 0,
           completedNaturally: true,
         } as ExecutorOutput),
+        shouldReplan: jest.fn().mockReturnValue({
+          shouldReplan: false,
+          reason: '执行质量正常',
+        }),
       },
       evaluator: {
         evaluate: jest.fn().mockResolvedValue({
@@ -226,14 +336,24 @@ describe('LoopController', () => {
       reporter: {
         report: jest.fn().mockResolvedValue({
           response: '你好！有什么可以帮你的？',
-          quality: { overall: 0.9, accuracy: 0.9, usefulness: 0.9, friendliness: 0.9, efficiency: 1.0, details: '测试' },
+          quality: {
+            overall: 0.9,
+            accuracy: 0.9,
+            usefulness: 0.9,
+            friendliness: 0.9,
+            efficiency: 1.0,
+            details: '测试',
+          },
         } as ReporterOutput),
       },
     });
 
     const result = await controller.run(
       { text: '你好', traceId: 'test-loop' },
-      [{ role: 'system', content: '系统提示' }, { role: 'user', content: '你好' }]
+      [
+        { role: 'system', content: '系统提示' },
+        { role: 'user', content: '你好' },
+      ]
     );
 
     expect(result.response).toBe('你好！有什么可以帮你的？');

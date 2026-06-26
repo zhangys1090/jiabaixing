@@ -6,6 +6,7 @@
 
 import { Planner, type PlannerDeps } from '../../src/harness/loop/Planner';
 import { LoopState } from '../../src/harness/types';
+import { createMockLoopContext } from './helpers/loopContext';
 
 function createMockDeps(): PlannerDeps {
   return {
@@ -133,11 +134,7 @@ describe('Planner 质量增强', () => {
 
       await testPlanner.plan(
         { text: '你好' },
-        {
-          messages: [],
-          plan: null,
-          currentStepIndex: 0,
-          stepResults: new Map(),
+        createMockLoopContext({
           budget: {
             roundsUsed: 0,
             softRoundLimit: 4,
@@ -170,8 +167,7 @@ describe('Planner 质量增强', () => {
               maxToolCalls: 10,
             },
           },
-          metadata: {},
-        }
+        })
       );
 
       expect(testPlanner.getReplanRate()).toBe(0);
@@ -187,11 +183,7 @@ describe('Planner 质量增强', () => {
 
       const plan = await testPlanner.plan(
         { text: '你好' },
-        {
-          messages: [],
-          plan: null,
-          currentStepIndex: 0,
-          stepResults: new Map(),
+        createMockLoopContext({
           budget: {
             roundsUsed: 0,
             softRoundLimit: 4,
@@ -224,12 +216,11 @@ describe('Planner 质量增强', () => {
               maxToolCalls: 10,
             },
           },
-          metadata: {},
-        }
+        })
       );
 
       expect(plan.simple).toBe(true);
-      expect(plan.estimatedBudget.maxRounds).toBe(4);
+      expect(plan.estimatedBudget.maxRounds).toBe(1);
     });
   });
 });

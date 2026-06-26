@@ -338,8 +338,8 @@ describe('registerHarnessTools', () => {
     const result = registerHarnessTools(
       mockDeps as unknown as import('../../src/harness/tools/registerHarnessTools').HarnessToolDeps
     );
-    expect(result.registeredCount).toBe(49);
-    expect(result.toolRegistry.size).toBe(49);
+    expect(result.registeredCount).toBe(51);
+    expect(result.toolRegistry.size).toBe(51);
   });
 
   test('所有工具应该能转换为 OpenAI 格式', () => {
@@ -394,7 +394,7 @@ describe('registerHarnessTools', () => {
       mockDeps as unknown as import('../../src/harness/tools/registerHarnessTools').HarnessToolDeps
     );
     const openaiTools = result.toolRegistry.toOpenAITools();
-    expect(openaiTools.length).toBe(49);
+    expect(openaiTools.length).toBe(51);
 
     for (const tool of openaiTools) {
       expect(tool.type).toBe('function');
