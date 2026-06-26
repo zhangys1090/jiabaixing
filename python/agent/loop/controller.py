@@ -184,6 +184,17 @@ class LoopController:
             if context.budget.tool_calls_used >= context.budget.max_tool_calls:
                 break
 
+            # ─── 时间预算检查 ───
+            elapsed_ms = (time.time() - context.budget.start_time) * 1000
+            if context.budget.max_duration_ms > 0 and elapsed_ms >= context.budget.max_duration_ms:
+                log.warning(
+                    "Time budget exceeded, stopping loop",
+                    elapsed_ms=f"{elapsed_ms:.0f}",
+                    budget_ms=context.budget.max_duration_ms,
+                    rounds_used=context.budget.rounds_used,
+                )
+                break
+
             context.budget.rounds_used += 1
 
             # ─── Phase 1: PLANNING ───
@@ -236,12 +247,31 @@ class LoopController:
                     reason=f"第{context.budget.rounds_used}轮执行",
                 ))
 
-            # P1-4: 有链式依赖时使用 execute_chain，否则使用 execute
+            # P1-4: 有链式依赖时使用 execute_chain，有并行组时使用 execute_parallel，否则使用 execute
             has_chain = any(
                 s.input_from_step for s in plan.steps
             ) if plan and plan.steps else False
+            parallel_groups: list[list[str]] = context.metadata.get("parallel_groups", [])
             if has_chain:
                 executor_output = await self.executor.execute_chain(plan.steps, context)
+            elif parallel_groups and len(parallel_groups) > 1 and not plan.simple:
+                # 因果建模识别到多并行组 → 并行执行独立步骤
+                # 收集所有非链式、非已完成的步骤进行并行执行
+                independent_steps = [
+                    s for s in plan.steps
+                    if s.status != "completed" and not s.input_from_step
+                ]
+                if len(independent_steps) > 1:
+                    log.info(
+                        "Parallel execution via causal model",
+                        parallel_groups=len(parallel_groups),
+                        independent_steps=len(independent_steps),
+                    )
+                    executor_output = await self.executor.execute_parallel(
+                        independent_steps, context
+                    )
+                else:
+                    executor_output = await self.executor.execute(plan, context)
             else:
                 executor_output = await self.executor.execute(plan, context)
 
@@ -620,6 +650,25 @@ class LoopController:
 
         while step_count < max_iterations:
             step_count += 1
+
+            # ─── ReAct 预算检查：时间 + 工具调用次数 ───
+            elapsed_ms = (_t.time() - context.budget.start_time) * 1000
+            if context.budget.max_duration_ms > 0 and elapsed_ms >= context.budget.max_duration_ms:
+                log.warning(
+                    "ReAct time budget exceeded",
+                    elapsed_ms=f"{elapsed_ms:.0f}",
+                    budget_ms=context.budget.max_duration_ms,
+                    iterations=step_count,
+                )
+                break
+            if context.budget.tool_calls_used >= context.budget.max_tool_calls:
+                log.warning(
+                    "ReAct tool call budget exceeded",
+                    used=context.budget.tool_calls_used,
+                    max=context.budget.max_tool_calls,
+                    iterations=step_count,
+                )
+                break
 
             structured_step = await self._react_think_structured(input_text, context, step_count)
             structured_steps.append(structured_step)

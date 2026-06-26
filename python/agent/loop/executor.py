@@ -24,6 +24,11 @@ from agent.tools.registry import ToolRegistry
 log = StructuredLogger("executor")
 
 _MAX_REFLECTION_RETRIES = 3
+# 单个工具调用默认超时（秒），可通过环境变量 TOOL_TIMEOUT 覆盖
+import os as _os
+_DEFAULT_TOOL_TIMEOUT = float(_os.environ.get("TOOL_TIMEOUT", "30"))
+# LLM 调用默认超时（秒）
+_DEFAULT_LLM_TIMEOUT = float(_os.environ.get("LLM_TIMEOUT", "60"))
 
 
 class Executor:
@@ -202,6 +207,94 @@ class Executor:
             completed_naturally=completed,
             step_results=all_results,
         )
+
+    async def execute_parallel(
+        self,
+        steps: list[PlanStep],
+        context: LoopContext,
+    ) -> ExecutorOutput:
+        """并行执行无依赖的独立步骤。
+
+        利用 asyncio.gather 并发执行多个步骤，适用于 CausalModeler 识别出的
+        并行组。失败步骤不影响其他步骤的执行，所有步骤均会尝试完成。
+
+        Args:
+            steps: 独立（无依赖）的步骤列表
+            context: 循环上下文
+
+        Returns:
+            执行结果（含所有步骤的结果，顺序与输入一致）
+        """
+        pending = [s for s in steps if s.status != "completed"]
+        if not pending:
+            return ExecutorOutput(
+                messages=list(context.messages),
+                tool_calls_count=0,
+                tool_duration=0.0,
+                completed_naturally=True,
+                step_results=[],
+            )
+
+        log.info(
+            "Parallel execution",
+            step_count=len(pending),
+            step_ids=[s.step_id for s in pending],
+        )
+
+        # 并发执行所有独立步骤
+        tasks = [self._execute_step_safe(step, context) for step in pending]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        all_results: list[StepResult] = []
+        messages = list(context.messages)
+
+        for step, result in zip(pending, results):
+            if isinstance(result, Exception):
+                sr = StepResult(
+                    step_id=step.step_id,
+                    success=False,
+                    error=f"并行执行异常: {result}",
+                    tool_name=step.tool_name,
+                    duration_ms=0.0,
+                )
+                all_results.append(sr)
+                context.step_results[step.step_id] = sr
+                step.status = "failed"
+            else:
+                all_results.append(result)
+                context.step_results[step.step_id] = result
+                if result.success:
+                    step.status = "completed"
+                    if result.content:
+                        messages.append({"role": "assistant", "content": result.content})
+                else:
+                    step.status = "failed"
+
+        completed = all(r.success for r in all_results) if all_results else True
+        return ExecutorOutput(
+            messages=messages,
+            tool_calls_count=sum(1 for r in all_results if r.tool_name),
+            tool_duration=sum(r.duration_ms for r in all_results),
+            completed_naturally=completed,
+            step_results=all_results,
+        )
+
+    async def _execute_step_safe(
+        self,
+        step: PlanStep,
+        context: LoopContext,
+    ) -> StepResult:
+        """安全执行单个步骤，捕获所有异常防止并行执行中一个失败影响其他。"""
+        try:
+            return await self._execute_step(step, context)
+        except Exception as e:
+            return StepResult(
+                step_id=step.step_id,
+                success=False,
+                error=str(e),
+                tool_name=step.tool_name,
+                duration_ms=0.0,
+            )
 
     async def _execute_step(
         self,
@@ -419,7 +512,11 @@ class Executor:
 
         for attempt in range(self._robustness.config.retry_config.max_retries + 1):
             try:
-                result = await self._tool_registry.execute(tool_name, tool_params)
+                # 超时保护：防止单个工具调用无限期阻塞
+                result = await asyncio.wait_for(
+                    self._tool_registry.execute(tool_name, tool_params),
+                    timeout=_DEFAULT_TOOL_TIMEOUT,
+                )
                 duration = (time.time() - start) * 1000
 
                 if result.success:
@@ -453,6 +550,17 @@ class Executor:
                         error_type=last_error_type,
                         attempt=attempt + 1,
                     )
+
+            except asyncio.TimeoutError:
+                # 工具调用超时
+                last_error = f"工具 '{tool_name}' 执行超时 (>{_DEFAULT_TOOL_TIMEOUT}s)"
+                last_error_type = ErrorType.TIMEOUT
+                log.warning(
+                    "Tool timeout",
+                    tool=tool_name,
+                    timeout_s=_DEFAULT_TOOL_TIMEOUT,
+                    attempt=attempt + 1,
+                )
 
             except Exception as e:
                 # 工具执行异常
@@ -514,7 +622,10 @@ class Executor:
                     
                     try:
                         fallback_start = time.time()
-                        result = await self._tool_registry.execute(alt.tool, alt_params)
+                        result = await asyncio.wait_for(
+                            self._tool_registry.execute(alt.tool, alt_params),
+                            timeout=_DEFAULT_TOOL_TIMEOUT,
+                        )
                         fallback_duration = (time.time() - fallback_start) * 1000
                         
                         if result.success:
@@ -590,7 +701,10 @@ class Executor:
                 {"role": "user", "content": step.description},
             ]
 
-            result = await self.llm.chat(messages=messages, use_cache=False)
+            result = await asyncio.wait_for(
+                self.llm.chat(messages=messages, use_cache=False),
+                timeout=_DEFAULT_LLM_TIMEOUT,
+            )
             content = result.get("content", "")
             duration = (time.time() - start) * 1000
 

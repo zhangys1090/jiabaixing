@@ -58,7 +58,24 @@ class Planner:
         return "simple"
 
     async def _analyze_complexity_semantic(self, text: str) -> str:
-        """语义化复杂度分析: 使用 LLM 判断任务复杂度。"""
+        """语义化复杂度分析: 先用快速正则预判，仅对中等复杂度任务调用 LLM。
+
+        优化策略（省 LLM 调用）：
+        - 短文本（<15字符）且无关键词 → 直接判定 simple，不调 LLM
+        - 高复杂度关键词命中 ≥3 → 直接判定 complex，不调 LLM
+        - 其他情况 → 调用 LLM 精确判断
+        """
+        # 快速预判：超短文本直接 simple
+        stripped = text.strip()
+        if len(stripped) < 15 and not re.search(r'[?？!！]', stripped):
+            return "simple"
+
+        # 快速预判：高关键词命中直接 complex
+        keyword_score = self._keyword_complexity_score(text)
+        if keyword_score >= 3:
+            return "complex"
+
+        # 边界情况：1-2 个关键词 → 用 LLM 精确判断
         prompt = (
             "判断以下用户任务的复杂度等级。只回复一个词: simple / moderate / complex\n\n"
             "判断标准:\n"
