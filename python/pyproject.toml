@@ -1,0 +1,37 @@
+[project]
+name = "jiabaixing-agent"
+version = "0.1.0"
+description = "家百星 Agent Python 后端 — 核心 AI 逻辑"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.34.0",
+    "pydantic>=2.10.0",
+    "litellm>=1.60.0",
+    "httpx>=0.28.0",
+    "chromadb>=1.0.0",
+    "jieba>=0.42.1",
+    "sentence-transformers>=3.3.0",
+    "apscheduler>=3.11.0",
+    "sqlalchemy[asyncio]>=2.0.0",
+    "aiosqlite>=0.20.0",
+    "scikit-learn>=1.6.0",
+    "python-dotenv>=1.0.0",
+    "websockets>=14.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.25.0",
+    "httpx>=0.28.0",
+    "ruff>=0.8.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
