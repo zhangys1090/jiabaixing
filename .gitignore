@@ -43,11 +43,14 @@ data/
 # Logs
 logs/
 
-# Python（项目无 Python 运行时依赖，忽略误生成的 Python 文件）
-*.py
-requirements.txt
-__pycache__/
+# Python — python/ 是主后端，必须跟踪；仅忽略根目录误生成的 .py
+python/.venv/
+python/__pycache__/
 *.pyc
+__pycache__/
+# 根目录误生成的零散 Python 文件（fix_test.py 等）
+/*.py
+/requirements.txt
 
 # 备份目录（不参与构建）
 hermes-agent-main/
@@ -62,3 +65,42 @@ hermes-agent-main/
 # Screenshots
 data/screenshots/
 data/debug-screenshots/
+
+# 临时输出和调试文件
+tmp/
+*.bak
+/_test_*.cjs
+/_test_*.mjs
+/_pkg.json
+/tsc*.txt
+/tsc-full.txt
+/jest*.txt
+/hm_err.txt
+/check.txt
+/debug-out.txt
+/quick-result.txt
+/temp_debug.txt
+/conversations_b64.txt
+/ask_clarification_orig.txt
+/e2e_test_result.txt
+/harness-test-output.txt
+/test_output.txt
+/test-json*.txt
+/test-out*.txt
+/coverage/
+/PLAN-*.md
+/fix_*.js
+/fix_*.py
+/restore_*.js
+/analyze_deps.ps1
+/start.sh
+/start.bat
+
+# 运行时状态文件
+.jiabaixing/
+.jiabaixing.pid
+/.tsc_errors.txt
+/.test_errors.txt
+/.patch1.txt
+/.full_errors.txt
+/loop-test-err.txt
