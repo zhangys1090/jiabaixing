@@ -23,6 +23,16 @@ export interface DesktopObservation {
   visionAnalysis: VisionAnalysisResult;
   windows: WindowInfo[];
   summary: string;
+  /** Base64 编码的截图（便于传输和前端展示） */
+  screenshotBase64?: string;
+  /** 屏幕宽度 */
+  screenWidth?: number;
+  /** 屏幕高度 */
+  screenHeight?: number;
+  /** 当前活动窗口标题 */
+  activeWindow?: string;
+  /** 所有窗口标题 */
+  windowTitles?: string[];
 }
 
 export interface DesktopVisionConfig {
@@ -32,20 +42,6 @@ export interface DesktopVisionConfig {
   enableLLMVision?: boolean;
   maxObservations?: number;
 }
-
-const VISION_SYSTEM_PROMPT = `你是贾百姓的桌面视觉分析引擎。你需要精确描述桌面截图的内容。
-
-请按以下格式输出：
-1. 当前活动窗口：窗口标题和内容概要
-2. 可见UI元素：按钮、输入框、菜单等（标注位置和文字）
-3. 屏幕上的文字内容（关键信息）
-4. 当前状态判断：用户正在做什么、界面处于什么状态
-
-要求：
-- 精确描述，不要遗漏可见的按钮和文字
-- 标注元素的大致位置（左上/右上/中央/左下/右下）
-- 如果有对话框或弹窗，优先描述
-- 用中文回答`;
 
 export class DesktopVisionEngine {
   private static instance: DesktopVisionEngine | null = null;
@@ -150,6 +146,11 @@ export class DesktopVisionEngine {
       windows,
       summary:
         visionAnalysis.description || this.generateLocalDescription(windows),
+      screenshotBase64: screenshot.buffer.toString('base64'),
+      screenWidth: screenshot.width,
+      screenHeight: screenshot.height,
+      activeWindow: windows[0]?.title || '',
+      windowTitles: windows.map((w) => w.title),
     };
 
     this.addObservation(observation);
@@ -183,10 +184,9 @@ export class DesktopVisionEngine {
 
       const prompt = `${this.config.visionPrompt}\n\n已知窗口列表: ${windowContext || '无可见窗口'}`;
 
-      const llmDescription = await this.llmProvider!.multimodalChat(
-        prompt,
-        [imageDataUrl]
-      );
+      const llmDescription = await this.llmProvider!.multimodalChat(prompt, [
+        imageDataUrl,
+      ]);
 
       return {
         success: true,

@@ -12,14 +12,28 @@
  * - ConversationCompressor: 对话压缩
  * - MemoryEncryption: 加密管理
  * - MemoryTracker: 验证与追踪
+ *
+ * @deprecated 已迁移到 Python agent/memory/。
+ *
+ * 废弃状态说明：
+ * - 废弃版本：V5.0
+ * - 迁移日期：2026-06-22
+ * - 预计移除版本：V6.0（约 2026-09）
+ * - 替代方案：使用 Python 后端（AGENT_BACKEND=python，默认）
+ * - 回退方式：设置 AGENT_BACKEND=local 可继续使用 TS 本地实现（不推荐）
+ * - 维护状态：仅安全修复，不再新增功能
+ *
+ * 注意：当 AGENT_BACKEND=python（默认）时，此文件不会被使用。
+ *       仅当显式设置 AGENT_BACKEND=local 时才会使用此 TS 实现。
  */
 
 import { EmotionTag, SceneTag } from '../interfaces';
+import { perf } from '../monitoring/PerformanceMonitor';
 import { MultimodalInput } from '../multimodal/MultimodalInput';
 import Logger from '../utils/Logger';
-import { perf } from '../monitoring/PerformanceMonitor';
 import { ConversationCompressor } from './ConversationCompressor';
 import { MemoryDatabase, MemoryRecord } from './Database';
+import { EpisodicMemoryStore } from './EpisodicMemoryStore';
 import { KnowledgeGraphBuilder } from './KnowledgeGraphBuilder';
 import { LongTermMemory } from './LongTermMemory';
 import { MemoryEncryption } from './MemoryEncryption';
@@ -115,6 +129,7 @@ export class MemoryEngine {
   private userProfile: UserProfile;
   private shortTermMemory: ShortTermMemory;
   private longTermMemory: LongTermMemory;
+  private episodicMemoryStore: EpisodicMemoryStore;
   private instantMemory: MemoryItem[] = [];
   private instantMemoryExpiry: number = 3600;
   private embeddingModel: SemanticEmbeddingModel;
@@ -199,6 +214,7 @@ export class MemoryEngine {
     this.userProfile = new UserProfile();
     this.shortTermMemory = new ShortTermMemory();
     this.longTermMemory = new LongTermMemory();
+    this.episodicMemoryStore = new EpisodicMemoryStore();
     this.embeddingModel = new LLMEmbeddingModel();
     this.vectorDatabase = null;
     this.memoryDatabase = MemoryDatabase.getInstance();
@@ -232,6 +248,7 @@ export class MemoryEngine {
     try {
       await this.shortTermMemory.initialize();
       await this.longTermMemory.initialize();
+      await this.episodicMemoryStore.initialize();
       await this.userProfile.load();
       this.memoryDatabase = MemoryDatabase.getInstance();
       this.vectorDatabase = await VectorDatabaseFactory.createVectorDatabase();
@@ -409,6 +426,25 @@ export class MemoryEngine {
     }
   }
 
+  // ==================== P1-2: 情景记忆（EpisodicMemoryStore）====================
+
+  public async storeEpisodicMemory(
+    content: string,
+    options?: import('./EpisodicMemoryStore').StoreOptions
+  ): Promise<import('./EpisodicMemoryStore').EpisodicMemory> {
+    return this.episodicMemoryStore.store(content, options);
+  }
+
+  public retrieveEpisodicMemory(
+    options?: import('./EpisodicMemoryStore').RetrieveOptions
+  ): import('./EpisodicMemoryStore').RetrievalResult {
+    return this.episodicMemoryStore.retrieve(options);
+  }
+
+  public getEpisodicMemoryStats(): Record<string, unknown> {
+    return this.episodicMemoryStore.getStats();
+  }
+
   // ==================== 检索（委托MemoryRetriever）====================
 
   public async preciseHybridRetrieval(
@@ -431,7 +467,8 @@ export class MemoryEngine {
 
         // 应用衰减分数加权：衰减分数影响最终排序
         return results.map((memory) => {
-          const decayScore = memory.decayScore ?? this.calculateDecayScore(memory);
+          const decayScore =
+            memory.decayScore ?? this.calculateDecayScore(memory);
           return {
             ...memory,
             decayScore,
@@ -614,18 +651,15 @@ export class MemoryEngine {
     );
 
     // 启动"做梦"机制：在用户不活跃时自动整理记忆
-    this.dreamTimer = setInterval(
-      () => {
-        this.performDream().catch((err: unknown) => {
-          Logger.error(
-            '记忆整理（做梦）失败',
-            err instanceof Error ? err : new Error(String(err)),
-            'MemoryEngine'
-          );
-        });
-      },
-      MemoryEngine.DECAY_CONFIG.DREAM_INTERVAL
-    );
+    this.dreamTimer = setInterval(() => {
+      this.performDream().catch((err: unknown) => {
+        Logger.error(
+          '记忆整理（做梦）失败',
+          err instanceof Error ? err : new Error(String(err)),
+          'MemoryEngine'
+        );
+      });
+    }, MemoryEngine.DECAY_CONFIG.DREAM_INTERVAL);
   }
 
   // ==================== 衰减计算 ====================
@@ -655,7 +689,7 @@ export class MemoryEngine {
         : MemoryEngine.DECAY_CONFIG.SHORT_TERM_HALF_LIFE;
 
     // 时间衰减：指数衰减
-    const timeDecay = Math.exp(-0.693 * ageHours / halfLife);
+    const timeDecay = Math.exp((-0.693 * ageHours) / halfLife);
 
     // 访问强化：log(1 + accessCount) * boost
     const accessCount = memory.accessCount || 0;
@@ -735,7 +769,7 @@ export class MemoryEngine {
       const duration = Date.now() - startTime;
       Logger.info(
         `💤 记忆整理完成: 衰减=${decayedCount} 去重=${dedupedCount} ` +
-        `晋升=${consolidatedCount} 清理=${cleanedCount} 耗时=${duration}ms`,
+          `晋升=${consolidatedCount} 清理=${cleanedCount} 耗时=${duration}ms`,
         'MemoryEngine'
       );
     } catch (error) {
@@ -754,7 +788,10 @@ export class MemoryEngine {
 
     // 更新短期记忆衰减分数
     const stmMemories = this.shortTermMemory.getAll();
-    for (const memory of stmMemories.slice(0, MemoryEngine.DECAY_CONFIG.DREAM_BATCH_SIZE)) {
+    for (const memory of stmMemories.slice(
+      0,
+      MemoryEngine.DECAY_CONFIG.DREAM_BATCH_SIZE
+    )) {
       const decayScore = this.calculateDecayScore(memory);
       if (memory.decayScore !== decayScore) {
         memory.decayScore = decayScore;
@@ -764,7 +801,10 @@ export class MemoryEngine {
 
     // 更新长期记忆衰减分数
     const ltmMemories = this.longTermMemory.getAll();
-    for (const memory of ltmMemories.slice(0, MemoryEngine.DECAY_CONFIG.DREAM_BATCH_SIZE)) {
+    for (const memory of ltmMemories.slice(
+      0,
+      MemoryEngine.DECAY_CONFIG.DREAM_BATCH_SIZE
+    )) {
       const decayScore = this.calculateDecayScore(memory);
       if (memory.decayScore !== decayScore) {
         memory.decayScore = decayScore;
@@ -808,8 +848,15 @@ export class MemoryEngine {
           // 将旧记忆的关键信息合并到新记忆
           const mergedContent = this.mergeMemoryContent(newer, older);
           newer.content = mergedContent;
-          newer.mergedFrom = [...(newer.mergedFrom || []), older.id, ...(older.mergedFrom || [])];
-          newer.importance = Math.max(newer.importance || 5, older.importance || 5);
+          newer.mergedFrom = [
+            ...(newer.mergedFrom || []),
+            older.id,
+            ...(older.mergedFrom || []),
+          ];
+          newer.importance = Math.max(
+            newer.importance || 5,
+            older.importance || 5
+          );
 
           merged.add(older.id);
           dedupedCount++;
@@ -830,7 +877,10 @@ export class MemoryEngine {
 
     // 短期→长期晋升：衰减分数 > 0.5 且 importance >= 7 的短期记忆
     const stmMemories = this.shortTermMemory.getAll();
-    for (const memory of stmMemories.slice(0, MemoryEngine.DECAY_CONFIG.DREAM_BATCH_SIZE)) {
+    for (const memory of stmMemories.slice(
+      0,
+      MemoryEngine.DECAY_CONFIG.DREAM_BATCH_SIZE
+    )) {
       const decayScore = memory.decayScore ?? this.calculateDecayScore(memory);
       const importance = memory.importance ?? 5;
 
@@ -924,12 +974,14 @@ export class MemoryEngine {
     newer: MemoryItem,
     older: MemoryItem
   ): MemoryContent {
-    const textA = typeof newer.content === 'string'
-      ? newer.content
-      : JSON.stringify(newer.content);
-    const textB = typeof older.content === 'string'
-      ? older.content
-      : JSON.stringify(older.content);
+    const textA =
+      typeof newer.content === 'string'
+        ? newer.content
+        : JSON.stringify(newer.content);
+    const textB =
+      typeof older.content === 'string'
+        ? older.content
+        : JSON.stringify(older.content);
 
     // 如果两条记忆内容非常相似，直接保留较新的
     if (this.computeTextSimilarity(textA, textB) > 0.9) {
@@ -951,7 +1003,11 @@ export class MemoryEngine {
    */
   private memoryToText(memory: MemoryItem): string {
     if (typeof memory.content === 'string') return memory.content;
-    if (memory.content && typeof memory.content === 'object' && !Array.isArray(memory.content)) {
+    if (
+      memory.content &&
+      typeof memory.content === 'object' &&
+      !Array.isArray(memory.content)
+    ) {
       const obj = memory.content as Record<string, unknown>;
       if (obj.input && typeof obj.input === 'string') return obj.input;
       if (obj.summary && typeof obj.summary === 'string') return obj.summary;
@@ -1280,6 +1336,20 @@ export class MemoryEngine {
   ): Promise<KnowledgeGraph> {
     const memories = await this.getAllMemories(userId, limit);
     return this.knowledgeGraphBuilder.getKnowledgeGraph(memories);
+  }
+
+  /**
+   * 识别知识缺口（委托KnowledgeGraphBuilder.identifyGaps）
+   * @param userId - 用户ID
+   * @param limit - 记忆数量限制
+   * @returns 知识缺口列表
+   */
+  public async identifyKnowledgeGaps(
+    userId?: string,
+    limit: number = 100
+  ): Promise<Array<{ entity: string; reason: string; confidence: number }>> {
+    const memories = await this.getAllMemories(userId, limit);
+    return this.knowledgeGraphBuilder.identifyGaps(memories);
   }
 
   private async getAllMemories(

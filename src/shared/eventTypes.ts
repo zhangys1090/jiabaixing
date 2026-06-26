@@ -159,6 +159,24 @@ export interface SchedulerEvents {
       error?: string;
     },
   ];
+  job_completed: [
+    payload: {
+      jobId: string;
+      success: boolean;
+      duration: number;
+      error?: string;
+      timestamp: string;
+    },
+  ];
+  job_failed: [
+    payload: {
+      jobId: string;
+      success: boolean;
+      duration: number;
+      error: string;
+      timestamp: string;
+    },
+  ];
 }
 
 export interface ProactiveEvents {
@@ -255,6 +273,18 @@ export interface EvolutionEvents {
       timestamp: string;
     },
   ];
+  learning_signal: [
+    payload: {
+      signalType: 'positive' | 'negative' | 'task_success' | 'task_failure';
+      toolName?: string;
+      error?: string;
+      quality?: number;
+      duration?: number;
+      userInput?: string;
+      toolCount?: number;
+      timestamp: number;
+    },
+  ];
 }
 
 export interface OptimizationEvents {
@@ -299,6 +329,9 @@ export interface ResourceEvents {
   resource_warning: [resourceType: string, usage: number];
   llm_model_unavailable: [error: string];
   feedback_signal: [traceId: string, feedbackType: string, score?: number];
+  capability_metrics: [
+    payload: { capability: string; score: number; timestamp: string },
+  ];
 }
 
 export interface UserEvents {
@@ -570,6 +603,67 @@ export interface TraceEvents {
   ];
 }
 
+export interface CLIWSEvents {
+  ws_connected: [payload: { url: string }];
+  ws_disconnected: [payload: Record<string, unknown>];
+  tool_start: [
+    payload: {
+      toolName: string;
+      toolId: string;
+      input?: Record<string, unknown>;
+      timestamp: number;
+    },
+  ];
+  tool_complete: [
+    payload: {
+      toolName: string;
+      toolId: string;
+      output?: unknown;
+      duration: number;
+      timestamp: number;
+    },
+  ];
+  tool_error: [
+    payload: {
+      toolName: string;
+      toolId: string;
+      error: string;
+      timestamp: number;
+    },
+  ];
+  agent_plan: [
+    payload: {
+      planId: string;
+      steps: Array<{ description: string; tool?: string }>;
+      timestamp: number;
+    },
+  ];
+  agent_execute: [
+    payload: {
+      planId: string;
+      stepIndex: number;
+      status: 'running' | 'completed' | 'failed';
+      timestamp: number;
+    },
+  ];
+  agent_evaluate: [
+    payload: {
+      planId: string;
+      qualityScore: number;
+      feedback?: string;
+      timestamp: number;
+    },
+  ];
+  evolution_cycle: [
+    payload: {
+      cycleId: string;
+      reason: string;
+      adjustments: Array<{ type: string; target: string; change: string }>;
+      timestamp: number;
+    },
+  ];
+}
+
 export interface EventMap
   extends
     CoreEvents,
@@ -586,4 +680,5 @@ export interface EventMap
     AutomationEvents,
     IntegrationEvents,
     TraceEvents,
-    FileWatchEvents {}
+    FileWatchEvents,
+    CLIWSEvents {}

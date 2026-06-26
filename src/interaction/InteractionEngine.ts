@@ -65,7 +65,11 @@ export interface TrackedResponseResult {
 /**
  * 语音会话状态
  */
-export type VoiceSessionStatus = 'idle' | 'listening' | 'processing' | 'speaking';
+export type VoiceSessionStatus =
+  | 'idle'
+  | 'listening'
+  | 'processing'
+  | 'speaking';
 
 /**
  * 语音会话接口
@@ -717,11 +721,17 @@ export class InteractionEngine {
    * @param audioData - 音频数据 Buffer
    * @returns 语音交互处理结果，包含文本和可选的音频数据
    */
-  public async processVoiceInput(audioData: Buffer): Promise<VoiceProcessResult> {
+  public async processVoiceInput(
+    audioData: Buffer
+  ): Promise<VoiceProcessResult> {
     const startTime = Date.now();
 
     if (!this.voiceSession) {
-      Logger.error('没有活跃的语音会话，请先调用 startVoiceSession', new Error('NoVoiceSession'), 'InteractionEngine');
+      Logger.error(
+        '没有活跃的语音会话，请先调用 startVoiceSession',
+        new Error('NoVoiceSession'),
+        'InteractionEngine'
+      );
       throw new Error('没有活跃的语音会话，请先调用 startVoiceSession');
     }
 

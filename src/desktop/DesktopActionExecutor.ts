@@ -248,7 +248,9 @@ export class DesktopActionExecutor {
     };
   }
 
-  private async handleClick(action: DesktopAction): Promise<DesktopActionResult> {
+  private async handleClick(
+    action: DesktopAction
+  ): Promise<DesktopActionResult> {
     const x = action.params.x as number | undefined;
     const y = action.params.y as number | undefined;
     const result = await this.systemInput.click(x, y);
@@ -260,7 +262,9 @@ export class DesktopActionExecutor {
     };
   }
 
-  private async handleType(action: DesktopAction): Promise<DesktopActionResult> {
+  private async handleType(
+    action: DesktopAction
+  ): Promise<DesktopActionResult> {
     const text = action.params.text as string;
     const result = await this.systemInput.typeText(text);
     return {
@@ -286,7 +290,9 @@ export class DesktopActionExecutor {
     };
   }
 
-  private async handleMoveMouse(action: DesktopAction): Promise<DesktopActionResult> {
+  private async handleMoveMouse(
+    action: DesktopAction
+  ): Promise<DesktopActionResult> {
     const x = action.params.x as number;
     const y = action.params.y as number;
     const result = await this.systemInput.moveMouse(x, y);
@@ -298,7 +304,9 @@ export class DesktopActionExecutor {
     };
   }
 
-  private async handleScroll(action: DesktopAction): Promise<DesktopActionResult> {
+  private async handleScroll(
+    action: DesktopAction
+  ): Promise<DesktopActionResult> {
     const delta = action.params.delta as number;
     const result = await this.systemInput.scroll(delta);
     return {
@@ -309,7 +317,9 @@ export class DesktopActionExecutor {
     };
   }
 
-  private async handleDrag(action: DesktopAction): Promise<DesktopActionResult> {
+  private async handleDrag(
+    action: DesktopAction
+  ): Promise<DesktopActionResult> {
     const fromX = action.params.fromX as number;
     const fromY = action.params.fromY as number;
     const toX = action.params.toX as number;
@@ -425,7 +435,9 @@ $hwnd = [IntPtr]::new(${window.handle})
     };
   }
 
-  private async handleWait(action: DesktopAction): Promise<DesktopActionResult> {
+  private async handleWait(
+    action: DesktopAction
+  ): Promise<DesktopActionResult> {
     const ms = action.params.ms as number;
     await this.sleep(ms);
     return {
@@ -435,7 +447,9 @@ $hwnd = [IntPtr]::new(${window.handle})
     };
   }
 
-  private async handleRightClick(action: DesktopAction): Promise<DesktopActionResult> {
+  private async handleRightClick(
+    action: DesktopAction
+  ): Promise<DesktopActionResult> {
     const x = action.params.x as number | undefined;
     const y = action.params.y as number | undefined;
     const result = await this.systemInput.rightClick(x, y);
@@ -447,14 +461,18 @@ $hwnd = [IntPtr]::new(${window.handle})
     };
   }
 
-  private async handleKeyCombo(action: DesktopAction): Promise<DesktopActionResult> {
+  private async handleKeyCombo(
+    action: DesktopAction
+  ): Promise<DesktopActionResult> {
     const keys = action.params.keys as string[];
     if (!keys || !Array.isArray(keys) || keys.length < 2) {
       return { success: false, action, error: 'keyCombo 需要至少2个按键' };
     }
     try {
       const keyCodes = keys.map((k) => {
-        const code = (SystemInput.Keys as Record<string, number>)[k.toUpperCase()];
+        const code = (SystemInput.Keys as Record<string, number>)[
+          k.toUpperCase()
+        ];
         if (!code) throw new Error(`未知按键: ${k}`);
         return code;
       });
@@ -517,8 +535,10 @@ $hwnd = [IntPtr]::new(${window.handle})
           error: `未找到UI元素: ${description}`,
         };
       }
-      const clickX = element.boundingRect.x + Math.floor(element.boundingRect.width / 2);
-      const clickY = element.boundingRect.y + Math.floor(element.boundingRect.height / 2);
+      const clickX =
+        element.boundingRect.x + Math.floor(element.boundingRect.width / 2);
+      const clickY =
+        element.boundingRect.y + Math.floor(element.boundingRect.height / 2);
       const result = await this.systemInput.click(clickX, clickY);
       return {
         success: result.success,
@@ -545,8 +565,10 @@ $hwnd = [IntPtr]::new(${window.handle})
           error: `未找到UI元素: ${description}`,
         };
       }
-      const clickX = element.boundingRect.x + Math.floor(element.boundingRect.width / 2);
-      const clickY = element.boundingRect.y + Math.floor(element.boundingRect.height / 2);
+      const clickX =
+        element.boundingRect.x + Math.floor(element.boundingRect.width / 2);
+      const clickY =
+        element.boundingRect.y + Math.floor(element.boundingRect.height / 2);
       await this.systemInput.click(clickX, clickY);
       await this.sleep(200);
       const result = await this.systemInput.typeText(text);
@@ -584,17 +606,28 @@ $hwnd = [IntPtr]::new(${window.handle})
     }
   }
 
-  private async handleShell(action: DesktopAction): Promise<DesktopActionResult> {
+  private async handleShell(
+    action: DesktopAction
+  ): Promise<DesktopActionResult> {
     const command = action.params.command as string;
     try {
       const output = await new Promise<string>((resolve, reject) => {
-        exec(command, { encoding: 'utf-8', timeout: 30000, maxBuffer: 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
-          if (err) {
-            reject(err);
-          } else {
-            resolve(stdout || stderr || '(无输出)');
+        exec(
+          command,
+          {
+            encoding: 'utf-8',
+            timeout: 30000,
+            maxBuffer: 1024 * 1024,
+            windowsHide: true,
+          },
+          (err, stdout, stderr) => {
+            if (err) {
+              reject(err);
+            } else {
+              resolve(stdout || stderr || '(无输出)');
+            }
           }
-        });
+        );
       });
       return {
         success: true,

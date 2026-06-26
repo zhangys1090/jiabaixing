@@ -20,8 +20,7 @@ import { EvolutionEngine, EvolutionMetrics } from './EvolutionEngine';
 import {
   EvolutionEngineV2,
   EvolutionCause,
-  EvolutionPriority,
-  EvolutionType,
+  EvolutionMetrics as CodeEvolutionMetrics,
 } from './';
 
 /** 自我增强结果（原 SelfEnhancementEngine 已删除，本地定义） */
@@ -95,6 +94,8 @@ export interface UnifiedEvolutionMetrics {
     recentCycles: OptimizationCycle[];
   };
   evolution: EvolutionMetrics | null;
+  /** 代码进化指标（V2） */
+  codeEvolution: CodeEvolutionMetrics | null;
   engines: {
     toolWeights: Record<string, number>;
     userProfileConfidence: number;
@@ -408,7 +409,7 @@ export class EvolutionOrchestrator {
       // 按顺序触发各引擎的优化（不并行以避免冲突）
       if (this.evolutionEngine && canTriggerEngine('EvolutionEngine')) {
         try {
-          const optLog = await this.evolutionEngine.triggerManualOptimization(
+          const optLog = this.evolutionEngine.triggerManualOptimization(
             `${reason} (编排器触发)`
           );
           this.engineLastTriggered.set('EvolutionEngine', Date.now());
@@ -717,6 +718,10 @@ export class EvolutionOrchestrator {
       ? this.getEvolutionMetricsSafe()
       : null;
 
+    const codeEvolutionMetrics = this.evolutionEngineV2
+      ? this.getCodeEvolutionMetricsSafe()
+      : null;
+
     return {
       summary: {
         totalInteractions: this.interactionCount,
@@ -759,6 +764,7 @@ export class EvolutionOrchestrator {
         recentCycles: this.optimizationCycles.slice(-10),
       },
       evolution: evolutionMetrics,
+      codeEvolution: codeEvolutionMetrics,
       engines: {
         toolWeights,
         userProfileConfidence: this.profileEvolution
@@ -1069,6 +1075,28 @@ export class EvolutionOrchestrator {
       ) {
         return (
           this.evolutionEngine as unknown as { getMetrics(): EvolutionMetrics }
+        ).getMetrics();
+      }
+    } catch {
+      // 静默
+    }
+    return null;
+  }
+
+  /**
+   * 安全获取 V2 代码进化指标
+   */
+  private getCodeEvolutionMetricsSafe(): CodeEvolutionMetrics | null {
+    try {
+      if (
+        this.evolutionEngineV2 &&
+        typeof (this.evolutionEngineV2 as unknown as Record<string, unknown>)
+          .getMetrics === 'function'
+      ) {
+        return (
+          this.evolutionEngineV2 as unknown as {
+            getMetrics(): CodeEvolutionMetrics;
+          }
         ).getMetrics();
       }
     } catch {

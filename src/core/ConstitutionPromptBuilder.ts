@@ -2,6 +2,30 @@ import { ProfileEvolutionManager } from '../user/ProfileEvolutionManager';
 import { Logger } from '../utils/Logger';
 
 /**
+ * 用户画像数据结构（MemoryEngine.getUserProfile 返回类型）
+ */
+export interface MemoryEngineUserProfile {
+  getBasicInfo: () => { name: string };
+  getDevelopmentHabits: () => {
+    preferredLanguages?: string[];
+    preferredFrameworks?: string[];
+    commonTools?: string[];
+  };
+  getLifePreferences: () => {
+    dietaryPreferences?: string[];
+    entertainmentPreferences?: string[];
+    exerciseHabits?: string[];
+  };
+  getEmotionalPatterns: () => {
+    commonEmotions?: Array<{ type: string; frequency: number }>;
+  };
+  getTaskPreferences: () => {
+    preferredWorkStyle?: string;
+  };
+  syncProfileFromEvolution?: (data: unknown) => boolean;
+}
+
+/**
  * ConstitutionPromptBuilder 的依赖接口
  */
 export interface PromptBuilderDependencies {
@@ -30,6 +54,30 @@ export interface PromptBuilderDependencies {
   evolutionEngine: ProfileEvolutionManager | unknown;
 }
 
+/**
+ * ConstitutionPromptBuilder - 上下文系统主实现之一
+ *
+ * 【架构定位】
+ * 上下文系统两大主实现之一：
+ * 1. UnifiedContextPipeline - 负责 AI 上下文构建（记忆、场景、情感、用户画像等）
+ * 2. ConstitutionPromptBuilder（本文件）- 负责系统 Prompt 构建（身份、人格、行为准则、工具清单等）
+ *
+ * 【核心职责】
+ * - 构建完整的 Constitutional 系统提示词
+ * - 身份定位与人格特质描述
+ * - 行为准则与执行纪律
+ * - 工具清单与使用原则
+ * - 用户画像动态注入
+ * - 项目上下文注入
+ *
+ * 【在整体架构中的位置】
+ * 用户输入 → ContextReferenceResolver（@引用解析）→ UnifiedContextPipeline → ConstitutionPromptBuilder → 最终 Prompt
+ *
+ * 【使用场景】
+ * - 每次对话开始时构建系统提示词
+ * - 用户画像更新时重新生成
+ * - 项目上下文变化时更新
+ */
 export class ConstitutionPromptBuilder {
   private _profileSyncCounter = 0;
   /** 项目上下文缓存内容 */

@@ -4,9 +4,10 @@
  * SQLite 轨迹持久化，完整记录 FC 循环执行轨迹
  */
 
-import { createDatabase } from '../../shared/DatabaseShim';
 import fs from 'fs';
 import path from 'path';
+import type { DatabaseAdapter } from '../../shared/DatabaseShim';
+import { createDatabase } from '../../shared/DatabaseShim';
 import { Logger } from '../../utils/Logger';
 
 export interface ExecutionRecord {
@@ -99,8 +100,10 @@ export interface ExecutionStats {
 }
 
 export class TrajectoryDatabase {
-  private db: any;
+  private db: DatabaseAdapter;
   private dbPath: string;
+  /** P3: 嵌入函数 — 将文本转为向量 */
+  private embedFunction: ((text: string) => number[]) | null = null;
 
   constructor(dbPath: string) {
     this.dbPath = dbPath;
@@ -110,7 +113,9 @@ export class TrajectoryDatabase {
     }
     this.db = createDatabase(dbPath);
     if (this.db) {
-      try { this.db.pragma('journal_mode = WAL'); } catch {}
+      try {
+        this.db.pragma('journal_mode = WAL');
+      } catch {}
       this.initializeTables();
       Logger.info(
         `💾 TrajectoryDatabase 初始化: ${dbPath}`,
@@ -216,6 +221,13 @@ export class TrajectoryDatabase {
       CREATE INDEX IF NOT EXISTS idx_evaluation_results_execution_id ON evaluation_results(execution_id);
       CREATE INDEX IF NOT EXISTS idx_evaluation_results_safety ON evaluation_results(safety_risk_level);
     `);
+
+    // P3: 添加 embedding 列（如果不存在）
+    try {
+      this.db.exec(`ALTER TABLE executions ADD COLUMN embedding TEXT;`);
+    } catch {
+      // 列已存在，忽略
+    }
   }
 
   recordExecution(exec: ExecutionRecord): void {
@@ -242,6 +254,25 @@ export class TrajectoryDatabase {
       created_at: exec.created_at,
       updated_at: exec.updated_at,
     });
+
+    // P3: 生成并存储 embedding
+    if (this.embedFunction && exec.input) {
+      try {
+        const embedding = this.embedFunction(exec.input);
+        const updateStmt = this.db.prepare(
+          `UPDATE executions SET embedding = @embedding WHERE id = @id`
+        );
+        updateStmt.run({
+          embedding: JSON.stringify(embedding),
+          id: exec.id,
+        });
+      } catch (err) {
+        Logger.debug(
+          `TrajectoryDatabase embedding 生成失败: ${(err as Error).message}`,
+          'TrajectoryDatabase'
+        );
+      }
+    }
   }
 
   updateExecutionStatus(id: string, status: string, response?: string): void {
@@ -479,6 +510,67 @@ export class TrajectoryDatabase {
     return stmt.all(limit) as ExecutionRecord[];
   }
 
+  querySimilarTasks(
+    query: string,
+    options?: {
+      includeFailed?: boolean;
+      maxResults?: number;
+      minQualityScore?: number;
+    }
+  ): Array<{
+    execution: ExecutionRecord;
+    toolInvocations: ToolInvocationRecord[];
+    similarity: number;
+    relevanceScore: number;
+  }> {
+    const maxResults = options?.maxResults ?? 5;
+    const includeFailed = options?.includeFailed ?? false;
+    const minQualityScore = options?.minQualityScore ?? 0.7;
+    const statusFilter = includeFailed ? '' : "AND status = 'success'";
+    const qualityFilter =
+      minQualityScore > 0 ? `AND quality_overall >= ${minQualityScore}` : '';
+    const stmt = this.db.prepare(
+      `SELECT * FROM executions WHERE input LIKE ? ${statusFilter} ${qualityFilter} ORDER BY created_at DESC LIMIT ?`
+    );
+    const keyword = `%${query.split(' ')[0]}%`;
+    const rows = stmt.all(keyword, maxResults * 2) as ExecutionRecord[];
+
+    const scored = rows.map((execution) => {
+      let relevanceScore = 0.5;
+
+      if (this.embedFunction && execution.input) {
+        const inputEmbedding = this.embedFunction(query);
+        const execEmbedding = this.getExecutionEmbedding(execution.id || '');
+        if (execEmbedding && inputEmbedding) {
+          const vectorSim = this.vectorCosineSimilarity(
+            inputEmbedding,
+            execEmbedding
+          );
+          relevanceScore += vectorSim * 0.5;
+        }
+      }
+
+      if (execution.input) {
+        const cosineSim = this.cosineSimilarity(query, execution.input);
+        relevanceScore += cosineSim * 0.35;
+      }
+
+      const toolInvocations = execution.id
+        ? this.getToolInvocations(execution.id)
+        : [];
+
+      return {
+        execution,
+        toolInvocations,
+        similarity: relevanceScore,
+        relevanceScore,
+      };
+    });
+
+    scored.sort((a, b) => b.relevanceScore - a.relevanceScore);
+    return scored.slice(0, maxResults);
+  }
+
   getExecutionStats(): ExecutionStats {
     const totalStmt = this.db.prepare(
       'SELECT COUNT(*) as count FROM executions'
@@ -519,5 +611,180 @@ export class TrajectoryDatabase {
   close(): void {
     this.db.close();
     Logger.info('💾 TrajectoryDatabase 已关闭', 'TrajectoryDatabase');
+  }
+
+  /**
+   * P3: 设置嵌入函数 — 用于生成语义向量
+   */
+  setEmbedFunction(fn: (text: string) => number[]): void {
+    this.embedFunction = fn;
+    Logger.info('📐 TrajectoryDatabase 嵌入函数已设置', 'TrajectoryDatabase');
+  }
+
+  /** 获取执行的embedding */
+  private getExecutionEmbedding(execId: string): number[] | null {
+    try {
+      const stmt = this.db.prepare(
+        `SELECT embedding FROM executions WHERE id = ?`
+      );
+      const row = stmt.get(execId) as { embedding?: string } | undefined;
+      if (row?.embedding) {
+        return JSON.parse(row.embedding);
+      }
+    } catch {
+      // 忽略
+    }
+    return null;
+  }
+
+  /** 向量余弦相似度 */
+  private vectorCosineSimilarity(a: number[], b: number[]): number {
+    if (a.length !== b.length || a.length === 0) return 0;
+    let dot = 0,
+      normA = 0,
+      normB = 0;
+    for (let i = 0; i < a.length; i++) {
+      dot += a[i] * b[i];
+      normA += a[i] * a[i];
+      normB += b[i] * b[i];
+    }
+    const denom = Math.sqrt(normA) * Math.sqrt(normB);
+    return denom === 0 ? 0 : dot / denom;
+  }
+
+  /** 词频余弦相似度 */
+  private cosineSimilarity(textA: string, textB: string): number {
+    const stopWords = new Set([
+      'the',
+      'a',
+      'an',
+      'is',
+      'are',
+      'was',
+      'were',
+      'be',
+      'been',
+      'have',
+      'has',
+      'had',
+      'do',
+      'does',
+      'did',
+      'will',
+      'would',
+      'could',
+      'should',
+      'may',
+      'might',
+      'can',
+      'shall',
+      'to',
+      'of',
+      'in',
+      'for',
+      'on',
+      'with',
+      'at',
+      'by',
+      'from',
+      'as',
+      'into',
+      'through',
+      'during',
+      'before',
+      'after',
+      'above',
+      'below',
+      'and',
+      'or',
+      'not',
+      'no',
+      'but',
+      'if',
+      'then',
+      'than',
+      '的',
+      '了',
+      '在',
+      '是',
+      '我',
+      '有',
+      '和',
+      '就',
+      '不',
+      '人',
+      '都',
+      '一',
+      '一个',
+      '上',
+      '也',
+      '很',
+      '到',
+      '说',
+      '要',
+      '去',
+    ]);
+    const tokenize = (text: string): Map<string, number> => {
+      const tokens = text
+        .toLowerCase()
+        .split(/[\s\-_./\\:;，。！？、()（）\[\]{}'"`]+/)
+        .filter((w) => w.length > 1 && !stopWords.has(w));
+      const freq = new Map<string, number>();
+      for (const t of tokens) {
+        freq.set(t, (freq.get(t) || 0) + 1);
+      }
+      return freq;
+    };
+    const freqA = tokenize(textA);
+    const freqB = tokenize(textB);
+    if (freqA.size === 0 || freqB.size === 0) return 0;
+    let dotProduct = 0;
+    let normA = 0;
+    let normB = 0;
+    for (const [token, countA] of freqA) {
+      normA += countA * countA;
+      const countB = freqB.get(token) || 0;
+      dotProduct += countA * countB;
+    }
+    for (const [, countB] of freqB) {
+      normB += countB * countB;
+    }
+    const denominator = Math.sqrt(normA) * Math.sqrt(normB);
+    return denominator === 0 ? 0 : dotProduct / denominator;
+  }
+
+  /** 保存环境状态快照 */
+  saveEnvironmentState(state: Record<string, unknown>): void {
+    try {
+      this.db.exec(
+        `CREATE TABLE IF NOT EXISTS environment_state (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          state TEXT NOT NULL,
+          updated_at INTEGER NOT NULL
+        )`
+      );
+      const stmt = this.db.prepare(
+        `INSERT OR REPLACE INTO environment_state (id, state, updated_at) VALUES (1, ?, ?)`
+      );
+      stmt.run(JSON.stringify(state), Date.now());
+    } catch {
+      // 静默处理
+    }
+  }
+
+  /** 加载环境状态快照 */
+  loadEnvironmentState(): Record<string, unknown> | null {
+    try {
+      const stmt = this.db.prepare(
+        `SELECT state FROM environment_state WHERE id = 1`
+      );
+      const row = stmt.get() as { state: string } | undefined;
+      if (row?.state) {
+        return JSON.parse(row.state);
+      }
+    } catch {
+      // 静默处理
+    }
+    return null;
   }
 }

@@ -97,7 +97,9 @@ export function createCsvAnalyzeExecutor() {
       const columnStats: ColumnStats[] = [];
 
       for (let col = 0; col < headers.length; col++) {
-        const values = rows.map((r) => r[col] || '').filter((v) => v.length > 0);
+        const values = rows
+          .map((r) => r[col] || '')
+          .filter((v) => v.length > 0);
         const nullCount = rows.length - values.length;
         const uniqueValues = new Set(values);
 
@@ -138,19 +140,27 @@ export function createCsvAnalyzeExecutor() {
       // 格式化输出
       const lines_out: string[] = [];
       lines_out.push(`📊 CSV 分析报告: ${filePath}`);
-      lines_out.push(`总行数: ${rows.length}${lines.length - 1 > maxRows ? ` (截取前${maxRows}行)` : ''}`);
+      lines_out.push(
+        `总行数: ${rows.length}${lines.length - 1 > maxRows ? ` (截取前${maxRows}行)` : ''}`
+      );
       lines_out.push(`列数: ${headers.length}`);
       lines_out.push('');
 
       for (const col of columnStats) {
         const typeIcon = col.type === 'number' ? '🔢' : '📝';
         lines_out.push(`${typeIcon} ${col.name} (${col.type})`);
-        lines_out.push(`  非空: ${col.nonNullCount}, 空值: ${col.nullCount}, 唯一值: ${col.uniqueCount}`);
+        lines_out.push(
+          `  非空: ${col.nonNullCount}, 空值: ${col.nullCount}, 唯一值: ${col.uniqueCount}`
+        );
         if (col.type === 'number') {
-          lines_out.push(`  范围: ${col.min?.toFixed(2)} ~ ${col.max?.toFixed(2)}, 均值: ${col.mean?.toFixed(2)}`);
+          lines_out.push(
+            `  范围: ${col.min?.toFixed(2)} ~ ${col.max?.toFixed(2)}, 均值: ${col.mean?.toFixed(2)}`
+          );
         }
         if (col.topValues && col.topValues.length > 0) {
-          lines_out.push(`  高频值: ${col.topValues.map((v) => `${v.value}(${v.count})`).join(', ')}`);
+          lines_out.push(
+            `  高频值: ${col.topValues.map((v) => `${v.value}(${v.count})`).join(', ')}`
+          );
         }
         lines_out.push('');
       }
@@ -159,9 +169,15 @@ export function createCsvAnalyzeExecutor() {
       const issues: string[] = [];
       for (const col of columnStats) {
         if (col.nullCount > rows.length * 0.3) {
-          issues.push(`⚠️ ${col.name} 缺失率 ${(col.nullCount / rows.length * 100).toFixed(0)}%`);
+          issues.push(
+            `⚠️ ${col.name} 缺失率 ${((col.nullCount / rows.length) * 100).toFixed(0)}%`
+          );
         }
-        if (col.type === 'number' && col.min !== undefined && col.max !== undefined) {
+        if (
+          col.type === 'number' &&
+          col.min !== undefined &&
+          col.max !== undefined
+        ) {
           const range = col.max - col.min;
           if (range === 0) {
             issues.push(`⚠️ ${col.name} 所有值相同（常量列）`);

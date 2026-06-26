@@ -9,12 +9,31 @@ import * as path from 'path';
 import { JiabaixingCore, ProcessInputResult } from '../../core/JiabaixingCore';
 import { EventBus } from '../../shared/EventBus';
 import { Logger } from '../../utils/Logger';
+import { getPythonBridge, isPythonBackend } from '../bootstrap';
 
 export function registerCoreRoutes(
   app: express.Application,
   core: JiabaixingCore | null
 ): void {
   app.get('/api/health', async (_req, res) => {
+    if (isPythonBackend()) {
+      const bridge = getPythonBridge()!;
+      const pyHealth = await bridge.getLlmStatus();
+      const pyModel = (pyHealth as Record<string, unknown>).models as
+        | Array<Record<string, unknown>>
+        | undefined;
+      const modelName = pyModel?.[0]?.name as string | undefined;
+      res.json({
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        model: modelName || process.env.LLM_MODEL || 'unknown',
+        autoOptimize: process.env.ENABLE_AUTO_OPTIMIZE !== 'false',
+        llm: pyHealth,
+        backend: 'python',
+      });
+      return;
+    }
     const llmHealth = await core
       ?.getLLMHealth?.()
       .catch(() => ({ available: false, message: 'unknown' }));
@@ -25,6 +44,7 @@ export function registerCoreRoutes(
       model: process.env.LLM_MODEL || 'deepseek-chat',
       autoOptimize: process.env.ENABLE_AUTO_OPTIMIZE !== 'false',
       llm: llmHealth || { available: false, message: 'not initialized' },
+      backend: 'typescript',
     });
   });
 
@@ -45,7 +65,8 @@ export function registerCoreRoutes(
 
   app.get('/api/models/status', async (_req, res) => {
     try {
-      const { getProviderManager } = await import('../../models/ProviderManager');
+      const { getProviderManager } =
+        await import('../../models/ProviderManager');
       const pm = getProviderManager();
 
       const currentModel = pm.getPrimary();
@@ -56,7 +77,7 @@ export function registerCoreRoutes(
         data: {
           currentModel: currentModel?.model || 'unknown',
           currentProvider: currentModel?.name || '',
-          models: models.map(p => ({
+          models: models.map((p) => ({
             name: p.name,
             displayName: p.displayName,
             model: p.model,
@@ -205,6 +226,26 @@ export function registerCoreRoutes(
 
         const traceId = Logger.generateTraceId();
 
+        if (isPythonBackend()) {
+          const bridge = getPythonBridge()!;
+          const result = await bridge.processInput(
+            processedInput,
+            userId,
+            traceId,
+            Array.isArray(images) && images.length > 0
+              ? images.map((url: string) => ({ url }))
+              : undefined
+          );
+          res.json({
+            success: true,
+            data: { response: result.response },
+            traceId: result.traceId || traceId,
+            intent: result.intent || 'chat',
+            backend: 'python',
+          });
+          return;
+        }
+
         if (!core) {
           res.status(503).json({ error: '核心系统未初始化' });
           return;
@@ -214,7 +255,9 @@ export function registerCoreRoutes(
           processedInput,
           userId,
           traceId,
-          (Array.isArray(images) && images.length > 0 ? images.map((url: string) => ({ url })) : undefined)
+          Array.isArray(images) && images.length > 0
+            ? images.map((url: string) => ({ url }))
+            : undefined
         );
 
         res.json({

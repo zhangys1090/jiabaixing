@@ -7,6 +7,26 @@
  *   - compressHistory(): 自动上下文压缩，当 Token 预算超阈值时合并早期对话
  *   - summarizeHistory(): LLM 驱动的对话摘要，回退到规则引擎
  *   - offloadHistory(): LRU 策略 + 文件系统卸荷索引
+ *
+ * @deprecated 已废弃，请使用 UnifiedContextPipeline + ConstitutionPromptBuilder 替代。
+ *
+ * 废弃状态说明：
+ * - 废弃版本：V5.0
+ * - 迁移日期：2026-06-22
+ * - 预计移除版本：V6.0（约 2026-09）
+ * - 替代方案：
+ *   - AI 上下文构建（记忆、场景、情感、用户画像）→ UnifiedContextPipeline
+ *   - 系统 Prompt 构建（身份、人格、规则、工具清单）→ ConstitutionPromptBuilder
+ *   - 记忆智能筛选 → LLMContextBuilder
+ *   - Token 预算分配 → TokenBudgetAllocator
+ *   - 上下文窗口管理 → ContextWindowManager
+ *   - @引用解析 → ContextReferenceResolver
+ *   - 项目文件上下文 → ContextFileRegistry
+ * - 回退方式：设置 AGENT_BACKEND=local 可继续使用 TS 本地实现（不推荐）
+ * - 维护状态：仅安全修复，不再新增功能
+ *
+ * 注意：当 AGENT_BACKEND=python（默认）时，此文件不会被使用。
+ *       仅当显式设置 AGENT_BACKEND=local 时才会使用此 TS 实现。
  */
 
 import fs from 'fs';
@@ -128,6 +148,21 @@ export interface ContextManagerDeps {
   };
   /** 卸荷文件目录 */
   offloadDir?: string;
+  /** 引用解析器（@file/@folder/@url/@git_diff 内联展开到用户消息） */
+  referenceResolver?: {
+    resolve(input: string): Promise<{
+      hasReferences: boolean;
+      references: Array<{
+        type: string;
+        target: string;
+        content: string;
+        error?: string;
+        charCount: number;
+      }>;
+      resolvedContent: string;
+      cleanedInput: string;
+    }>;
+  };
 }
 
 export class ContextManager {
@@ -332,6 +367,32 @@ export class ContextManager {
         usedChars += msgChars;
       }
 
+      // P3: 主动检索 — 从卸荷历史中检索与当前任务相关的上下文
+      // 当近期历史不足以覆盖任务关键词时，从已卸荷的旧消息中主动检索
+      if (this.offloadedHistory.length > 0) {
+        try {
+          const proactiveContext = this.activelyRetrieveContext(
+            this.offloadedHistory,
+            input.text
+          );
+          if (proactiveContext.length > 0) {
+            const proactiveBudget = Math.floor(allocation.history * 0.3);
+            const focused = this.focusByAttention(
+              proactiveContext,
+              input.text,
+              proactiveBudget
+            );
+            truncatedHistory.push(...focused);
+            Logger.info(
+              `🔍 P3 主动检索: 从卸荷历史中检索到 ${focused.length} 条相关消息`,
+              'ContextManager'
+            );
+          }
+        } catch {
+          // 主动检索失败不影响主流程
+        }
+      }
+
       messages.push(...truncatedHistory);
       this.entries.push({
         id: 'history',
@@ -354,6 +415,26 @@ export class ContextManager {
           `🗜️ Token 使用率超阈值 (${((historyTokens / historyBudget) * 100).toFixed(0)}%)，触发自动压缩`,
           'ContextManager'
         );
+        // P3: 注意力聚焦 — 在压缩前按注意力权重筛选最相关消息
+        // 将与当前任务最相关的历史消息保留，减少压缩损失
+        const nonSystemMsgs = messages.filter((m) => m.role !== 'system');
+        if (nonSystemMsgs.length > 0) {
+          const attentionBudget = Math.floor(historyBudget * 0.6);
+          const focusedMsgs = this.focusByAttention(
+            nonSystemMsgs,
+            input.text,
+            attentionBudget
+          );
+          if (
+            focusedMsgs.length > 0 &&
+            focusedMsgs.length < nonSystemMsgs.length
+          ) {
+            Logger.info(
+              `🎯 P3 注意力聚焦: ${nonSystemMsgs.length} → ${focusedMsgs.length} 条消息`,
+              'ContextManager'
+            );
+          }
+        }
         const compressionResult = this.compressHistory(messages, historyBudget);
         const historyIdx = messages.findIndex(
           (m) => m.role !== 'system' && m.role !== 'user'
@@ -382,12 +463,35 @@ export class ContextManager {
       // 历史加载失败不影响主流程
     }
 
-    // 6. User Input (skip if already added by compression path above)
+    // 6. User Input — 解析 @ 引用并内联展开到用户消息
+    let finalUserContent = input.text;
+    if (this.deps.referenceResolver) {
+      try {
+        const resolved = await this.deps.referenceResolver.resolve(input.text);
+        if (resolved.hasReferences) {
+          if (resolved.resolvedContent) {
+            finalUserContent = `${resolved.cleanedInput}\n\n[引用内容]\n${resolved.resolvedContent}`;
+          } else {
+            finalUserContent = resolved.cleanedInput;
+          }
+          Logger.info(
+            `📎 引用解析: ${resolved.references.length} 个引用已内联`,
+            'ContextManager'
+          );
+        }
+      } catch (err) {
+        Logger.warn(
+          `引用解析失败: ${(err as Error).message}`,
+          'ContextManager'
+        );
+      }
+    }
+
     const userInputAlreadyAdded = messages.some(
       (m) => m.role === 'user' && m.content === input.text
     );
     if (!userInputAlreadyAdded) {
-      messages.push({ role: 'user', content: input.text });
+      messages.push({ role: 'user', content: finalUserContent });
     }
 
     Logger.info(
@@ -430,7 +534,10 @@ export class ContextManager {
         try {
           const persona = this.deps.personaCore.buildPersonaSummary();
           if (persona) {
-            messages.push({ role: 'system', content: `[语气基调]\n${persona}` });
+            messages.push({
+              role: 'system',
+              content: `[语气基调]\n${persona}`,
+            });
           }
         } catch {
           // non-critical
@@ -498,6 +605,31 @@ export class ContextManager {
         if (history?.length) {
           messages.push(...history);
         }
+
+        // P3: 主动检索 — 从卸荷历史中检索与当前任务相关的上下文（仅执行阶段）
+        if (phase === 'execution' && this.offloadedHistory.length > 0) {
+          try {
+            const proactiveContext = this.activelyRetrieveContext(
+              this.offloadedHistory,
+              input.text
+            );
+            if (proactiveContext.length > 0) {
+              const proactiveBudget = 600;
+              const focused = this.focusByAttention(
+                proactiveContext,
+                input.text,
+                proactiveBudget
+              );
+              messages.push(...focused);
+              Logger.info(
+                `🔍 P3 主动检索(buildPhaseContext): 检索到 ${focused.length} 条相关消息`,
+                'ContextManager'
+              );
+            }
+          } catch {
+            // 主动检索失败不影响主流程
+          }
+        }
       } catch {
         // non-critical
       }
@@ -509,16 +641,26 @@ export class ContextManager {
     // 自动缩减：当消息超过阈值时触发压缩
     const totalTokens = this.estimateMessageTokens(messages);
     const budget = this.allocator.allocate();
-    const totalBudget = budget.systemPrompt + budget.dynamicContext + budget.memory + budget.history + budget.reserve;
+    const totalBudget =
+      budget.systemPrompt +
+      budget.dynamicContext +
+      budget.memory +
+      budget.history +
+      budget.reserve;
 
-    if (totalTokens > totalBudget * this.compressionConfig.tokenUsageThreshold) {
+    if (
+      totalTokens >
+      totalBudget * this.compressionConfig.tokenUsageThreshold
+    ) {
       Logger.info(
         `🗜️ buildPhaseContext Token 超阈值 (${totalTokens} > ${Math.round(totalBudget * this.compressionConfig.tokenUsageThreshold)})，触发自动缩减`,
         'ContextManager'
       );
       const compressionResult = this.compressHistory(messages, totalBudget);
-      if (compressionResult.compressed.length < messages.length ||
-          compressionResult.compressedTokenCount < totalTokens) {
+      if (
+        compressionResult.compressed.length < messages.length ||
+        compressionResult.compressedTokenCount < totalTokens
+      ) {
         messages.length = 0;
         messages.push(...compressionResult.compressed);
 
@@ -1295,5 +1437,237 @@ ${keyPoints.slice(-5).join('\n')}`;
     } catch {
       // 索引加载失败不影响主流程
     }
+  }
+
+  /**
+   * P3: 主动检索 — 基于当前任务从历史消息中检索相关上下文
+   */
+  private activelyRetrieveContext(
+    messages: ChatMessage[],
+    currentTask: string
+  ): ChatMessage[] {
+    const taskKeywords = this.extractTaskKeywords(currentTask);
+    if (taskKeywords.length === 0) return [];
+
+    const retrieved: ChatMessage[] = [];
+    for (const msg of messages) {
+      const content = msg.content || '';
+      const contentLower = content.toLowerCase();
+      const relevanceScore = taskKeywords.filter((k) =>
+        contentLower.includes(k.toLowerCase())
+      ).length;
+      if (relevanceScore > 0) {
+        retrieved.push(msg);
+      }
+    }
+    return retrieved;
+  }
+
+  /**
+   * 提取任务关键词（用于主动检索）
+   */
+  private extractTaskKeywords(task: string): string[] {
+    const stopWords = new Set([
+      '的',
+      '了',
+      '在',
+      '是',
+      '我',
+      '有',
+      '和',
+      '就',
+      '不',
+      '人',
+      '都',
+      '一',
+      '一个',
+      '上',
+      '也',
+      '很',
+      '到',
+      '说',
+      '要',
+      '去',
+      '你',
+      '会',
+      '着',
+      '没有',
+      '看',
+      '好',
+      '自己',
+      '这',
+      '他',
+      '她',
+      'the',
+      'a',
+      'an',
+      'is',
+      'are',
+      'was',
+      'were',
+      'to',
+      'of',
+      'in',
+      'for',
+      'on',
+      'with',
+      'at',
+      'by',
+      'from',
+      'as',
+      'and',
+      'or',
+      'not',
+    ]);
+    const keywords = task
+      .toLowerCase()
+      .split(/[\s\-_.,;:!?，。！？、()（）]+/)
+      .filter((w) => w.length > 1 && !stopWords.has(w));
+
+    // 中文2字切分：将长度>2的中文token切分为2字片段
+    const result: string[] = [];
+    for (const kw of keywords) {
+      if (/[\u4e00-\u9fa5]/.test(kw) && kw.length > 2) {
+        for (let i = 0; i < kw.length - 1; i++) {
+          result.push(kw.substring(i, i + 2));
+        }
+      } else {
+        result.push(kw);
+      }
+    }
+    return result;
+  }
+
+  /**
+   * P3: 注意力聚焦 — 计算每条消息的注意力权重
+   */
+  private calculateAttentionWeights(
+    messages: ChatMessage[],
+    currentTask: string
+  ): number[] {
+    const taskKeywords = this.extractTaskKeywords(currentTask);
+    const totalMessages = messages.length;
+
+    return messages.map((msg, index) => {
+      let weight = 0;
+      const content = msg.content || '';
+      const contentLower = content.toLowerCase();
+
+      // 1. 关键词匹配度（0-0.6，主导因素 — 相关性是注意力聚焦的核心）
+      const matchCount = taskKeywords.filter((k) =>
+        contentLower.includes(k.toLowerCase())
+      ).length;
+      weight += (matchCount / Math.max(taskKeywords.length, 1)) * 0.6;
+
+      // 2. 位置权重（0-0.1）
+      const positionWeight = (index + 1) / totalMessages;
+      weight += positionWeight * 0.1;
+
+      // 3. 角色权重（0-0.1）
+      if (msg.role === 'user') {
+        weight += 0.1;
+      }
+
+      // 4. 信息密度（0-0.2）
+      const hasPath = /\/[a-zA-Z0-9_\-\/]+/.test(content);
+      const hasError = /error|fail|错误|失败|exception/i.test(content);
+      const hasNumber = /\d+/.test(content);
+      if (hasPath) weight += 0.08;
+      if (hasError) weight += 0.07;
+      if (hasNumber) weight += 0.05;
+
+      return Math.min(weight, 1.0);
+    });
+  }
+
+  /**
+   * P3: 注意力聚焦 — 在token预算内保留高权重消息
+   */
+  private focusByAttention(
+    messages: ChatMessage[],
+    currentTask: string,
+    tokenBudget: number
+  ): ChatMessage[] {
+    const weights = this.calculateAttentionWeights(messages, currentTask);
+
+    const indexed = messages.map((msg, index) => ({
+      msg,
+      weight: weights[index],
+      originalIndex: index,
+    }));
+
+    indexed.sort((a, b) => b.weight - a.weight);
+
+    const selected: ChatMessage[] = [];
+    let usedTokens = 0;
+    for (const item of indexed) {
+      const content = item.msg.content || '';
+      const msgTokens = Math.ceil(content.length / 4);
+      if (usedTokens + msgTokens > tokenBudget) continue;
+      selected.push(item.msg);
+      usedTokens += msgTokens;
+    }
+
+    const selectedSet = new Set(selected);
+    return messages.filter((m) => selectedSet.has(m));
+  }
+
+  /**
+   * 上下文围栏 — 限制消息窗口范围
+   *
+   * 仿 Hermes fence_context 设计：在长对话中划定"可见窗口"，
+   * 避免 LLM 被过多历史干扰，同时保留 system 消息。
+   *
+   * @param messages - 完整消息列表
+   * @param options - 围栏选项
+   * @returns 围栏内的消息子集
+   */
+  fenceContext(
+    messages: ChatMessage[],
+    options: {
+      /** 起始索引（0-based，含） */
+      from?: number;
+      /** 结束索引（0-based，不含） */
+      to?: number;
+      /** 从末尾往前取的消息数（优先于 from/to） */
+      fromEnd?: number;
+      /** 最大 token 数（估算），超限则从尾部裁剪 */
+      maxTokens?: number;
+    } = {}
+  ): ChatMessage[] {
+    if (messages.length === 0) return [];
+
+    const systemMsgs = messages.filter((m) => m.role === 'system');
+    const nonSystemMsgs = messages.filter((m) => m.role !== 'system');
+
+    let fenced: ChatMessage[];
+
+    if (options.fromEnd !== undefined && options.fromEnd > 0) {
+      const start = Math.max(0, nonSystemMsgs.length - options.fromEnd);
+      fenced = nonSystemMsgs.slice(start);
+    } else {
+      const from = Math.max(0, options.from ?? 0);
+      const to = Math.min(
+        nonSystemMsgs.length,
+        options.to ?? nonSystemMsgs.length
+      );
+      fenced = nonSystemMsgs.slice(from, to);
+    }
+
+    // maxTokens 裁剪：从尾部移除直到满足 token 限制
+    if (options.maxTokens && options.maxTokens > 0) {
+      let totalTokens = 0;
+      const trimmed: ChatMessage[] = [];
+      for (const msg of fenced) {
+        const msgTokens = this.allocator.estimateTokens(msg.content || '');
+        if (totalTokens + msgTokens > options.maxTokens) break;
+        trimmed.push(msg);
+        totalTokens += msgTokens;
+      }
+      fenced = trimmed;
+    }
+
+    // system 消息始终保留在开头
+    return [...systemMsgs, ...fenced];
   }
 }

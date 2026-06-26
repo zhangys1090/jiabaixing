@@ -11,7 +11,6 @@ import * as path from 'path';
 import * as fs from 'fs';
 
 // screenshot-desktop 是 CommonJS 模块
-// eslint-disable-next-line @typescript-eslint/no-var-requires
 const screenshotDesktop = require('screenshot-desktop');
 
 export const DESKTOP_SCREENSHOT_DEF: ToolDefinition = {
@@ -63,7 +62,7 @@ export interface DesktopScreenshotDeps {
 }
 
 /** 默认截图实现：使用 screenshot-desktop 保存到 /tmp/ */
-async function defaultCaptureScreen(params: {
+async function defaultCaptureScreen(_params: {
   region?: { x: number; y: number; width: number; height: number };
   screenIndex?: number;
 }): Promise<{ buffer: Buffer; width: number; height: number }> {
@@ -75,7 +74,10 @@ async function defaultCaptureScreen(params: {
 
   // 读取文件获取 buffer 和尺寸
   const buffer = await fs.promises.readFile(filename);
-  Logger.info(`截图已保存到 ${filename} (${(buffer.length / 1024).toFixed(1)}KB)`, 'DesktopScreenshot');
+  Logger.info(
+    `截图已保存到 ${filename} (${(buffer.length / 1024).toFixed(1)}KB)`,
+    'DesktopScreenshot'
+  );
 
   // 从 PNG 文件解析宽高
   // PNG header: 8 bytes signature + IHDR chunk (4 len + 4 type + 4 width + 4 height)
@@ -90,7 +92,9 @@ async function defaultCaptureScreen(params: {
 }
 
 /** 创建 desktop_screenshot 执行器 */
-export function createDesktopScreenshotExecutor(deps: DesktopScreenshotDeps = {}) {
+export function createDesktopScreenshotExecutor(
+  deps: DesktopScreenshotDeps = {}
+) {
   return async (
     params: Record<string, unknown>,
     _context?: ToolContext

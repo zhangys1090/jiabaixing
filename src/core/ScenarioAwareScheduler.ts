@@ -240,7 +240,7 @@ export class ScenarioAwareScheduler {
     }
 
     // 3. Git 有未提交的变更（超过30分钟）
-    for (const [repo, state] of this.lastGitState) {
+    for (const [, state] of this.lastGitState) {
       if (state.hasUncommitted && silenceMinutes > 5) {
         triggers.push({
           type: 'proactive_interaction',

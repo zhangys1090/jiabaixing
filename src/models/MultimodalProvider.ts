@@ -119,7 +119,11 @@ export class MultimodalProvider {
         this.executeWithRetry(operation, 'LLM多模态聊天')
       );
     } catch (error) {
-      Logger.error(`⚠️ LLM多模态聊天失败`, error as Error, 'MultimodalProvider');
+      Logger.error(
+        `⚠️ LLM多模态聊天失败`,
+        error as Error,
+        'MultimodalProvider'
+      );
       throw error;
     }
   }

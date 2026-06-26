@@ -53,7 +53,7 @@ export function registerDocsRoutes(
         data: index,
         timestamp: new Date().toISOString(),
       });
-    } catch (error) {
+    } catch {
       res.status(500).json({
         success: false,
         error: 'Failed to build document index',
@@ -71,7 +71,7 @@ export function registerDocsRoutes(
         message: 'Documentation index regenerated',
         timestamp: new Date().toISOString(),
       });
-    } catch (error) {
+    } catch {
       res.status(500).json({
         success: false,
         error: 'Failed to regenerate documentation',

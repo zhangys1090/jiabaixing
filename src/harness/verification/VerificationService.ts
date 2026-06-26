@@ -7,10 +7,7 @@
  * 消除与 ConstraintsService / IndependentEvaluationService 的重复实现
  */
 
-import {
-  checkSensitiveInfo,
-  sanitizeText,
-} from '../security/SensitiveDetector';
+import { checkSensitiveInfo } from '../security/SensitiveDetector';
 import type {
   ToolResult,
   ValidationResult,
@@ -98,6 +95,23 @@ export class VerificationService {
         warnings,
         errors,
         autoFixed: true,
+      };
+    }
+
+    // 5. P0 修复：安全检查 — 敏感信息泄露验证失败应阻断
+    const safetyResult = this.checkOutputSafety(outputStr);
+    if (!safetyResult.safe && safetyResult.riskLevel === 'high') {
+      errors.push(
+        `工具 ${toolName} 输出包含高风险敏感信息: ${safetyResult.violations.join(', ')}`
+      );
+      return {
+        valid: false,
+        sanitizedOutput:
+          safetyResult.sanitizedOutput || '[内容已因安全风险脱敏]',
+        warnings,
+        errors,
+        autoFixed: false,
+        safetyBlocked: true,
       };
     }
 

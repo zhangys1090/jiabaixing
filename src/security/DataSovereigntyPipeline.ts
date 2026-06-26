@@ -50,10 +50,15 @@ export class DataSovereigntyPipeline {
 
       this.auditDb = createDatabase(this.dbPath);
       if (!this.auditDb) {
-        Logger.warn('⚠️ 数据主权审计管道：数据库降级为内存模式', 'DataSovereigntyPipeline');
+        Logger.warn(
+          '⚠️ 数据主权审计管道：数据库降级为内存模式',
+          'DataSovereigntyPipeline'
+        );
         return true;
       }
-      try { this.auditDb.pragma('journal_mode = WAL'); } catch {}
+      try {
+        this.auditDb.pragma('journal_mode = WAL');
+      } catch {}
 
       this.auditDb.exec(`
         CREATE TABLE IF NOT EXISTS data_access_audit (

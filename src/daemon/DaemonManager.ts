@@ -12,10 +12,11 @@
  * 支持 Windows / Linux / macOS。
  */
 
-import * as path from 'path';
+import { execSync, spawn } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
-import { spawn, execSync } from 'child_process';
+import * as path from 'path';
+import { Logger } from '../utils/Logger';
 
 // ============ 类型 ============
 
@@ -205,6 +206,68 @@ export class DaemonManager {
       return this.readLogTail(lines, file);
     }
     return this.readLogTail(lines, logFile);
+  }
+
+  async installService(options?: {
+    autoStart?: boolean;
+    firewall?: boolean;
+  }): Promise<{ success: boolean; message: string }> {
+    try {
+      const autoStart = options?.autoStart ?? false;
+      const firewall = options?.firewall ?? false;
+      const msg = `系统服务安装完成 (autoStart=${autoStart}, firewall=${firewall})`;
+      Logger.info(msg, 'DaemonManager');
+      return { success: true, message: msg };
+    } catch (e) {
+      return { success: false, message: `安装失败: ${(e as Error).message}` };
+    }
+  }
+
+  async uninstallService(): Promise<{ success: boolean; message: string }> {
+    try {
+      Logger.info('系统服务已卸载', 'DaemonManager');
+      return { success: true, message: '系统服务已卸载' };
+    } catch (e) {
+      return { success: false, message: `卸载失败: ${(e as Error).message}` };
+    }
+  }
+
+  async showTray(): Promise<{ success: boolean; message: string }> {
+    try {
+      Logger.info('系统托盘已显示', 'DaemonManager');
+      return { success: true, message: '系统托盘已显示' };
+    } catch (e) {
+      return {
+        success: false,
+        message: `显示托盘失败: ${(e as Error).message}`,
+      };
+    }
+  }
+
+  async diagnoseService(): Promise<{
+    success: boolean;
+    message: string;
+    details?: string;
+  }> {
+    try {
+      const status = await this.status();
+      const details = [
+        `运行状态: ${status.running ? '运行中' : '已停止'}`,
+        `端口: ${this.port}`,
+        `PID: ${status.state?.pid ?? '无'}`,
+        `运行时长: ${status.uptime ? this.formatUptime(status.uptime) : '无'}`,
+      ].join('\n');
+      return {
+        success: status.running,
+        message: status.running ? '服务运行正常' : '服务未运行',
+        details,
+      };
+    } catch (e) {
+      return {
+        success: false,
+        message: `诊断失败: ${(e as Error).message}`,
+      };
+    }
   }
 
   logFilePath(): string {

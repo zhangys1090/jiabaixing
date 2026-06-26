@@ -37,7 +37,11 @@ export const MORNING_BRIEF_DEF: ToolDefinition = {
 
 export interface MorningBriefDeps {
   llm?: {
-    chat(prompt: string, history?: unknown[], systemPrompt?: string): Promise<string>;
+    chat(
+      prompt: string,
+      history?: unknown[],
+      systemPrompt?: string
+    ): Promise<string>;
   };
   searchExecutor?: (
     params: Record<string, unknown>,
@@ -76,7 +80,10 @@ export function createMorningBriefExecutor(deps: MorningBriefDeps) {
               });
             }
           } catch (err) {
-            Logger.warn(`搜索 ${topic} 失败: ${(err as Error).message}`, 'MorningBrief');
+            Logger.warn(
+              `搜索 ${topic} 失败: ${(err as Error).message}`,
+              'MorningBrief'
+            );
           }
         }
       }
@@ -109,7 +116,11 @@ ${searchContext}
 4. 总字数控制在 300-500 字
 5. 用 Markdown 格式输出`;
 
-        const summary = await deps.llm.chat(prompt, [], '你是一个专业的新闻编辑，擅长简洁有力的中文表达。');
+        const summary = await deps.llm.chat(
+          prompt,
+          [],
+          '你是一个专业的新闻编辑，擅长简洁有力的中文表达。'
+        );
 
         return {
           success: true,

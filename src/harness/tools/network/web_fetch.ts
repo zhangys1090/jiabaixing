@@ -65,11 +65,19 @@ function htmlToMarkdown(html: string): string {
   return md.trim();
 }
 
-function ok(output: string, duration: number, metadata?: Record<string, unknown>): ToolResult {
+function ok(
+  output: string,
+  duration: number,
+  metadata?: Record<string, unknown>
+): ToolResult {
   return { success: true, output, duration, validated: false, metadata };
 }
 
-function fail(error: string, duration: number, output: string = ''): ToolResult {
+function fail(
+  error: string,
+  duration: number,
+  output: string = ''
+): ToolResult {
   return { success: false, output, error, duration, validated: false };
 }
 
@@ -85,7 +93,10 @@ export function createWebFetchExecutor(deps: WebFetchDeps = {}) {
 
     try {
       if (!url.match(/^https?:\/\//i)) {
-        return fail('URL必须以 http:// 或 https:// 开头', Date.now() - startTime);
+        return fail(
+          'URL必须以 http:// 或 https:// 开头',
+          Date.now() - startTime
+        );
       }
 
       let html: string;
@@ -103,7 +114,10 @@ export function createWebFetchExecutor(deps: WebFetchDeps = {}) {
         });
 
         if (!response.ok) {
-          return fail(`HTTP ${response.status}: ${response.statusText}`, Date.now() - startTime);
+          return fail(
+            `HTTP ${response.status}: ${response.statusText}`,
+            Date.now() - startTime
+          );
         }
 
         html = await response.text();
@@ -127,12 +141,22 @@ export function createWebFetchExecutor(deps: WebFetchDeps = {}) {
         content = content.substring(0, maxLength) + '\n\n... (内容已截断)';
       }
 
-      Logger.info(`🌐 web_fetch 成功: ${url} (${content.length}字符)`, 'WebFetch');
+      Logger.info(
+        `🌐 web_fetch 成功: ${url} (${content.length}字符)`,
+        'WebFetch'
+      );
 
-      return ok(content, Date.now() - startTime, { url, format, contentLength: content.length });
+      return ok(content, Date.now() - startTime, {
+        url,
+        format,
+        contentLength: content.length,
+      });
     } catch (error) {
       Logger.error('❌ web_fetch 失败', error as Error, 'WebFetch');
-      return fail(`网页抓取失败: ${(error as Error).message}`, Date.now() - startTime);
+      return fail(
+        `网页抓取失败: ${(error as Error).message}`,
+        Date.now() - startTime
+      );
     }
   };
 }

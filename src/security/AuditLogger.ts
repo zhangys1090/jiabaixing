@@ -4,8 +4,8 @@
 
 import fs from 'fs';
 import path from 'path';
-import { createDatabase, nativeAvailable } from '../shared/DatabaseShim';
-import { createLogger, format, transports, Logger } from 'winston';
+import { createLogger, format, Logger, transports } from 'winston';
+import { createDatabase } from '../shared/DatabaseShim';
 import { Logger as AppLogger } from '../utils/Logger';
 import { AuditConfig, AuditLogEntry } from './types';
 
@@ -86,7 +86,9 @@ export class AuditLogger {
       AppLogger.warn('⚠️ 审计日志器：数据库降级为内存模式，日志不会被持久化');
       return;
     }
-    try { this.db.pragma('journal_mode = WAL'); } catch {}
+    try {
+      this.db.pragma('journal_mode = WAL');
+    } catch {}
 
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS audit_logs (
@@ -242,10 +244,10 @@ export class AuditLogger {
 
       const stmt = this.db.prepare(`
         INSERT INTO audit_logs (
-          id, timestamp, action, actor, target, result, category, details, 
+          id, timestamp, action, actor, target, result, category, details,
           ip_address, user_agent, created_at
         ) VALUES (
-          @id, @timestamp, @action, @actor, @target, @result, @category, @details, 
+          @id, @timestamp, @action, @actor, @target, @result, @category, @details,
           @ip_address, @user_agent, @created_at
         )
       `);
@@ -515,6 +517,17 @@ export class AuditLogger {
     } catch (error) {
       AppLogger.error('❌ 审计日志器：关闭失败:', error as Error);
       throw error;
+    }
+  }
+
+  /** 清空所有日志（仅供测试使用） */
+  public clearLogs(): void {
+    if (this.db) {
+      try {
+        this.db.exec('DELETE FROM audit_logs');
+      } catch {
+        // 忽略清理错误
+      }
     }
   }
 

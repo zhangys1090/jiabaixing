@@ -120,7 +120,11 @@ export class ToolCallGuard {
   /**
    * 记录工具调用（在工具执行成功后调用）
    */
-  record(toolName: string, args: Record<string, unknown>, result: ToolResult): void {
+  record(
+    toolName: string,
+    args: Record<string, unknown>,
+    result: ToolResult
+  ): void {
     const argsHash = this.hashArgs(args);
     const now = Date.now();
 
@@ -131,7 +135,10 @@ export class ToolCallGuard {
     }
 
     // 更新每工具计数
-    this.perToolCounts.set(toolName, (this.perToolCounts.get(toolName) || 0) + 1);
+    this.perToolCounts.set(
+      toolName,
+      (this.perToolCounts.get(toolName) || 0) + 1
+    );
 
     // 缓存成功结果
     if (result.success) {
@@ -165,7 +172,11 @@ export class ToolCallGuard {
   /**
    * 获取当前轮次的调用统计
    */
-  getStats(): { totalCalls: number; perTool: Record<string, number>; cacheSize: number } {
+  getStats(): {
+    totalCalls: number;
+    perTool: Record<string, number>;
+    cacheSize: number;
+  } {
     const perTool: Record<string, number> = {};
     for (const [name, count] of this.perToolCounts) {
       perTool[name] = count;

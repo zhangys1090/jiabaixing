@@ -59,8 +59,16 @@ export interface FileSearchDeps {
 }
 
 const SKIP_DIRS = new Set([
-  'node_modules', '.git', 'dist', 'build', '.next',
-  'coverage', '__pycache__', '.cache', 'tmp', 'data',
+  'node_modules',
+  '.git',
+  'dist',
+  'build',
+  '.next',
+  'coverage',
+  '__pycache__',
+  '.cache',
+  'tmp',
+  'data',
 ]);
 
 function matchesFilePattern(fileName: string, pattern: string): boolean {
@@ -126,7 +134,10 @@ async function searchWithFs(
       if (entry.isDirectory()) {
         if (SKIP_DIRS.has(entry.name)) continue;
         await walkAndSearch(fullPath, depth + 1);
-      } else if (entry.isFile() && matchesFilePattern(entry.name, filePattern)) {
+      } else if (
+        entry.isFile() &&
+        matchesFilePattern(entry.name, filePattern)
+      ) {
         try {
           const stat = await fs.stat(fullPath);
           if (stat.size > 1024 * 1024) continue;
@@ -134,7 +145,11 @@ async function searchWithFs(
           const content = await fs.readFile(fullPath, 'utf-8');
           const lines = content.split('\n');
 
-          for (let i = 0; i < lines.length && results.length < maxResults; i++) {
+          for (
+            let i = 0;
+            i < lines.length && results.length < maxResults;
+            i++
+          ) {
             regex.lastIndex = 0;
             if (regex.test(lines[i])) {
               const relativePath = path.relative(projectRoot, fullPath);
@@ -146,7 +161,9 @@ async function searchWithFs(
               });
             }
           }
-        } catch { /* skip unreadable files */ }
+        } catch {
+          /* skip unreadable files */
+        }
       }
     }
   }
@@ -215,7 +232,10 @@ export function createFileSearchExecutor(deps: FileSearchDeps = {}) {
         .map((r, i) => `${i + 1}. ${r.filePath}:${r.line} — ${r.match}`)
         .join('\n');
 
-      Logger.info(`🔍 file_search 成功: "${query}" (${results.length}结果)`, 'FileSearch');
+      Logger.info(
+        `🔍 file_search 成功: "${query}" (${results.length}结果)`,
+        'FileSearch'
+      );
 
       return {
         success: true,

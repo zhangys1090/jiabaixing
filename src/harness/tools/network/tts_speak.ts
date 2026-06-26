@@ -45,7 +45,10 @@ export interface TTSSpeakDeps {
       duration?: number;
       error?: string;
     }>;
-    speak(text: string, emotion?: string): Promise<{
+    speak(
+      text: string,
+      emotion?: string
+    ): Promise<{
       success: boolean;
       audioData?: Buffer;
       duration?: number;
@@ -55,7 +58,11 @@ export interface TTSSpeakDeps {
   };
 }
 
-function ok(output: string, duration: number, metadata?: Record<string, unknown>): ToolResult {
+function ok(
+  output: string,
+  duration: number,
+  metadata?: Record<string, unknown>
+): ToolResult {
   return { success: true, output, duration, validated: false, metadata };
 }
 
@@ -82,16 +89,28 @@ export function createTTSSpeakExecutor(deps: TTSSpeakDeps = {}) {
         try {
           const result = await deps.speechSynthesizer.speak(text);
           if (result.success) {
-            Logger.info(`🔊 tts_speak 成功: "${text.substring(0, 30)}..." voice=${voice} speed=${speed}`, 'TTSSpeak');
+            Logger.info(
+              `🔊 tts_speak 成功: "${text.substring(0, 30)}..." voice=${voice} speed=${speed}`,
+              'TTSSpeak'
+            );
             return ok(
               `语音已生成并播放 (${result.duration || 0}ms)`,
               Date.now() - startTime,
-              { duration: result.duration, voice, speed, textLength: text.length, synthesized: true }
+              {
+                duration: result.duration,
+                voice,
+                speed,
+                textLength: text.length,
+                synthesized: true,
+              }
             );
           }
           return fail(result.error || '语音合成失败', Date.now() - startTime);
         } catch (synthErr) {
-          Logger.warn(`🔊 tts_speak SpeechSynthesizer 调用失败: ${(synthErr as Error).message}，降级到模拟模式`, 'TTSSpeak');
+          Logger.warn(
+            `🔊 tts_speak SpeechSynthesizer 调用失败: ${(synthErr as Error).message}，降级到模拟模式`,
+            'TTSSpeak'
+          );
           return ok(
             `语音指令已接收: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`,
             Date.now() - startTime,
@@ -100,7 +119,10 @@ export function createTTSSpeakExecutor(deps: TTSSpeakDeps = {}) {
         }
       }
 
-      Logger.info(`🔊 tts_speak (模拟): "${text.substring(0, 30)}..." voice=${voice} speed=${speed}`, 'TTSSpeak');
+      Logger.info(
+        `🔊 tts_speak (模拟): "${text.substring(0, 30)}..." voice=${voice} speed=${speed}`,
+        'TTSSpeak'
+      );
       return ok(
         `语音指令已接收: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`,
         Date.now() - startTime,
@@ -108,7 +130,10 @@ export function createTTSSpeakExecutor(deps: TTSSpeakDeps = {}) {
       );
     } catch (error) {
       Logger.error('❌ tts_speak 失败', error as Error, 'TTSSpeak');
-      return fail(`语音合成失败: ${(error as Error).message}`, Date.now() - startTime);
+      return fail(
+        `语音合成失败: ${(error as Error).message}`,
+        Date.now() - startTime
+      );
     }
   };
 }

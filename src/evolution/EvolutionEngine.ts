@@ -1,17 +1,51 @@
 /**
- * EvolutionEngine — 从交互反馈中学习，生成运行时优化参数
+ * EvolutionEngine - 进化引擎 V1（反馈学习层）
  *
- * 闭合 Loop B：
- * 1. collectFeedback() 记录交互结果
- * 2. 从低质量交互中提取 PromptExample（触发→纠正模式）
- * 3. 从工具调用统计中计算进化权重
- * 4. getStrategyOptimizer().getPromptExamples() 返回真实学习结果
- * 5. getToolWeights() 返回工具进化权重
+ * 【架构定位】
+ * 双层进化体系中的 V1 - 反馈学习层（轻量、快速、低风险）
+ *
+ * 与 V2 的关系：
+ * - V1（本文件）= 反馈学习层：从交互中优化参数和 Prompt，不修改代码
+ * - V2 = 自我进化层：真正的代码级自我修改，有完整的规划→执行→回滚机制
+ * - 两者配合形成"快速迭代 + 深度进化"的双层进化体系
+ *
+ * 【核心职责】
+ * - 收集交互反馈（成功/失败、质量评分、工具使用等）
+ * - 从低质量交互中提取 PromptExample（触发→纠正模式）
+ * - 从工具调用统计中计算进化权重
+ * - 生成策略优化建议
+ * - 识别需要持久化的知识
+ * - 从示例中泛化通用技能
+ *
+ * 【特点】
+ * - 轻量：实时运行，性能开销小
+ * - 快速：每次交互都能学习
+ * - 低风险：只修改参数和提示词，不修改代码
+ * - 即时生效：学习结果立即应用
+ *
+ * 【使用场景】
+ * - 工具权重动态调整
+ * - Prompt 示例积累
+ * - 用户偏好学习
+ * - 高频、小幅度的优化
+ *
+ * @deprecated 已迁移到 Python agent/evolution/engine.py。
+ *
+ * 废弃状态说明：
+ * - 废弃版本：V5.0
+ * - 迁移日期：2026-06-22
+ * - 预计移除版本：V6.0（约 2026-09）
+ * - 替代方案：使用 Python 后端（AGENT_BACKEND=python，默认）
+ * - 回退方式：设置 AGENT_BACKEND=local 可继续使用 TS 本地实现（不推荐）
+ * - 维护状态：仅安全修复，不再新增功能
+ *
+ * 注意：当 AGENT_BACKEND=python（默认）时，此文件不会被使用。
+ *       仅当显式设置 AGENT_BACKEND=local 时才会使用此 TS 实现。
  */
 
 import { Logger } from '../utils/Logger';
-import type { PromptExample, OptimizationLog } from './StrategyOptimizer';
 import { skillUsageTracker } from './SkillUsageTracker';
+import type { OptimizationLog, PromptExample } from './StrategyOptimizer';
 
 export interface EvolutionMetrics {
   totalFeedback: number;
@@ -35,6 +69,25 @@ interface ToolStat {
   calls: number;
   successes: number;
   totalDuration: number;
+}
+
+/** Few-shot 示例 */
+export interface FewShotExample {
+  input: string;
+  output: string;
+  category: string;
+  quality_score: number;
+  timestamp: number;
+}
+
+/** 泛化技能 */
+interface GeneralizedSkill {
+  name: string;
+  triggerKeywords: string[];
+  exampleCount: number;
+  avgQuality: number;
+  category: string;
+  createdAt: number;
 }
 
 const MAX_FEEDBACK_HISTORY = 500;
@@ -69,6 +122,10 @@ export class EvolutionEngine {
   private successfulOptimizations = 0;
   private persisted = false;
   private persistencePath: string;
+  /** Few-shot 示例 */
+  private fewShotExamples: FewShotExample[] = [];
+  /** 泛化技能 */
+  private generalizedSkills: GeneralizedSkill[] = [];
 
   constructor(_memoryEngine?: unknown) {
     this.persistencePath = require('path').join(
@@ -211,6 +268,11 @@ _由 jiabaixing EvolutionEngine 于 ${new Date().toLocaleString('zh-CN')} 自动
 
   /**
    * 记录交互反馈 — 从每次交互中学习
+   *
+   * [OVERLAP] 此功能与 V2 中的进化触发机制有重叠
+   * - V1（本方法）：主动收集每次交互的反馈，用于快速参数优化
+   * - V2：被动触发，只在特定条件（如失败、低满意度）下触发深度进化
+   * - 未来合并方向：保留 V1 的高频收集，V2 的深度分析由编排器协调
    */
   collectFeedback(
     input: string,
@@ -270,13 +332,18 @@ _由 jiabaixing EvolutionEngine 于 ${new Date().toLocaleString('zh-CN')} 自动
    * @param qualityScore - 质量评分 (0~1)
    * @param duration - 耗时(ms)
    * @param scene - 场景标识
+   *
+   * [OVERLAP] 此功能与 V2 中的质量触发机制有重叠
+   * - V1（本方法）：详细的质量评估，用于策略优化和技能学习
+   * - V2：简单的质量阈值判断，低于阈值时触发深度进化
+   * - 未来合并方向：统一质量评估标准，由编排器根据质量等级决定触发 V1 还是 V2
    */
   assessQuality(
     _traceId: string,
     success: boolean,
     qualityScore: number,
-    duration: number,
-    scene?: string
+    _duration: number,
+    _scene?: string
   ): void {
     // 更新最近一条反馈的质量分数
     const last = this.feedbackHistory[this.feedbackHistory.length - 1];
@@ -554,6 +621,11 @@ _由 jiabaixing EvolutionEngine 于 ${new Date().toLocaleString('zh-CN')} 自动
 
   /**
    * 获取策略优化器 — 真实实现
+   *
+   * [OVERLAP] 此功能与 V2 中的策略学习（strategyRecords/strategyWeights）高度重叠
+   * - V1（本方法）：StrategyOptimizer 类，负责策略优化，生成优化日志
+   * - V2：strategyRecords 和 strategyWeights 属性，负责策略记录和权重调整
+   * - 未来合并方向：统一策略学习框架，提取共享的策略管理模块
    */
   getStrategyOptimizer(): {
     getPromptExamples(): PromptExample[];
@@ -656,7 +728,6 @@ _由 jiabaixing EvolutionEngine 于 ${new Date().toLocaleString('zh-CN')} 自动
     }
 
     const fs = require('fs');
-    const path = require('path');
     const skillPath = record.path;
 
     if (!fs.existsSync(skillPath)) {
@@ -924,6 +995,11 @@ _由 jiabaixing EvolutionEngine 于 ${new Date().toLocaleString('zh-CN')} 自动
 
   /**
    * 获取指标
+   *
+   * [OVERLAP] 此功能与 V2 中的 EvolutionMetrics 高度重叠
+   * - V1（本方法）：EvolutionMetrics 接口，包含反馈数、优化数、成功率等
+   * - V2：EvolutionMetrics 接口（同名但定义不同），包含进化数、成功率、平均耗时、回滚率等
+   * - 未来合并方向：统一指标格式，设计包含 V1+V2 所有指标的统一接口
    */
   getMetrics(): EvolutionMetrics {
     return {
@@ -1014,5 +1090,197 @@ _由 jiabaixing EvolutionEngine 于 ${new Date().toLocaleString('zh-CN')} 自动
     } catch {
       // 静默失败，不影响启动
     }
+  }
+
+  /**
+   * 添加 Few-shot 示例 — 自动触发泛化
+   */
+  addFewShotExample(example: FewShotExample): void {
+    this.fewShotExamples.push(example);
+
+    // 保留最近 100 条
+    if (this.fewShotExamples.length > 100) {
+      this.fewShotExamples.shift();
+    }
+
+    // 自动触发泛化
+    this.generalizeSkill(example);
+  }
+
+  /**
+   * 泛化技能 — 从相似示例中提取通用模式
+   */
+  private generalizeSkill(newExample: FewShotExample): void {
+    // 找出同类别且输入相似的示例
+    const similarExamples = this.fewShotExamples.filter(
+      (ex) =>
+        ex.category === newExample.category &&
+        this.calculateInputSimilarity(ex.input, newExample.input) > 0.3
+    );
+
+    if (similarExamples.length < 2) {
+      return;
+    }
+
+    // 提取关键词
+    const keywords = this.extractKeywordsFromExamples(
+      similarExamples.map((ex) => ex.input)
+    );
+
+    if (keywords.length === 0) {
+      return;
+    }
+
+    // 查找或创建泛化技能
+    const skillName = `generalized_${newExample.category}_${keywords[0]}`;
+    let skill = this.generalizedSkills.find((s) => s.name === skillName);
+
+    if (!skill) {
+      skill = {
+        name: skillName,
+        triggerKeywords: keywords,
+        exampleCount: similarExamples.length,
+        avgQuality:
+          similarExamples.reduce((sum, ex) => sum + ex.quality_score, 0) /
+          similarExamples.length,
+        category: newExample.category,
+        createdAt: Date.now(),
+      };
+      this.generalizedSkills.push(skill);
+    } else {
+      skill.exampleCount = similarExamples.length;
+      skill.avgQuality =
+        similarExamples.reduce((sum, ex) => sum + ex.quality_score, 0) /
+        similarExamples.length;
+      // 合并关键词
+      for (const kw of keywords) {
+        if (!skill.triggerKeywords.includes(kw)) {
+          skill.triggerKeywords.push(kw);
+        }
+      }
+    }
+  }
+
+  /**
+   * 计算输入相似度 — 基于词汇重叠
+   */
+  private calculateInputSimilarity(a: string, b: string): number {
+    const setA = new Set(a.split(/\s+|,|\.|，|。/).filter(Boolean));
+    const setB = new Set(b.split(/\s+|,|\.|，|。/).filter(Boolean));
+    const intersection = new Set([...setA].filter((x) => setB.has(x)));
+    const union = new Set([...setA, ...setB]);
+    return union.size > 0 ? intersection.size / union.size : 0;
+  }
+
+  /**
+   * 从示例输入列表中提取高频关键词
+   */
+  private extractKeywordsFromExamples(inputs: string[]): string[] {
+    const wordFrequency = new Map<string, number>();
+    for (const input of inputs) {
+      const words = input
+        .split(/\s+|,|\.|，|。|的|了|是|在|我|你|他|她|它|个|一/)
+        .filter((w) => w.length >= 2);
+      for (const word of words) {
+        wordFrequency.set(word, (wordFrequency.get(word) || 0) + 1);
+      }
+    }
+
+    return Array.from(wordFrequency.entries())
+      .filter(([, count]) => count >= 2)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([word]) => word);
+  }
+
+  /**
+   * 匹配泛化技能 — 根据输入查找已学习的技能
+   */
+  matchFewShotSkill(input: string): GeneralizedSkill | null {
+    if (this.generalizedSkills.length === 0) {
+      return null;
+    }
+
+    let bestMatch: GeneralizedSkill | null = null;
+    let bestScore = 0;
+
+    for (const skill of this.generalizedSkills) {
+      let score = 0;
+      for (const keyword of skill.triggerKeywords) {
+        if (input.includes(keyword)) {
+          score += 1;
+        }
+      }
+      // 归一化得分
+      score = score / Math.max(skill.triggerKeywords.length, 1);
+
+      if (score > bestScore && score > 0.2) {
+        bestScore = score;
+        bestMatch = skill;
+      }
+    }
+
+    return bestMatch;
+  }
+
+  /**
+   * 从 Few-shot 示例中学习 — 生成泛化技能
+   */
+  learnFromFewShots(
+    examples: FewShotExample[],
+    category: string
+  ): {
+    name: string;
+    confidence: number;
+    triggerKeywords: string[];
+    exampleCount: number;
+    avgQuality: number;
+  } | null {
+    // 示例不足 2 个时不泛化
+    if (examples.length < 2) {
+      return null;
+    }
+
+    // 提取关键词
+    const keywords = this.extractKeywordsFromExamples(
+      examples.map((ex) => ex.input)
+    );
+
+    // 计算平均质量
+    const avgQuality =
+      examples.reduce((sum, ex) => sum + ex.quality_score, 0) / examples.length;
+
+    // 生成技能名称
+    const skillName = `fewshot-${category}-${Date.now()}`;
+
+    // 计算置信度 — 基于示例数量和平均质量
+    const confidence = Math.min(
+      0.95,
+      avgQuality * (1 - 1 / (examples.length + 1))
+    );
+
+    // 创建并存储泛化技能
+    const skill: GeneralizedSkill = {
+      name: skillName,
+      triggerKeywords: keywords,
+      exampleCount: examples.length,
+      avgQuality,
+      category,
+      createdAt: Date.now(),
+    };
+    this.generalizedSkills.push(skill);
+
+    // 同时添加到 fewShotExamples
+    for (const ex of examples) {
+      this.fewShotExamples.push(ex);
+    }
+
+    return {
+      name: skillName,
+      confidence,
+      triggerKeywords: keywords,
+      exampleCount: examples.length,
+      avgQuality,
+    };
   }
 }

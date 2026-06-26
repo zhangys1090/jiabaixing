@@ -3,10 +3,18 @@
  * 支持通过 OpenAI API 格式调用本地多模态模型（如 qwen2.5-vl）
  * 支持文本+图像的多模态输入
  * 增强功能：指数退避重试、超时熔断、降级回复
+ *
+ * 架构: 本类负责生命周期管理（重试/熔断/降级），
+ *        请求/响应格式转换委托给 ChatCompletionsTransport
  */
 
 import { Logger } from '../utils/Logger';
 import { Model, ModelInput, ModelOutput } from './ModelInterface';
+import type {
+  TransportConfig,
+  TransportResponse,
+} from './transports/BaseTransport';
+import { ChatCompletionsTransport } from './transports/ChatCompletionsTransport';
 
 /**
  * OpenAI 兼容模型的配置
@@ -74,6 +82,8 @@ type ResolvedConfig = Omit<
 export class OpenAICompatibleModel implements Model {
   private config: ResolvedConfig;
   private initialized: boolean = false;
+  /** 传输层 — 负责 Provider 协议格式的请求/响应转换 */
+  private transport: ChatCompletionsTransport;
   /** 连续失败次数 */
   private consecutiveFailures: number = 0;
   /** 连接错误导致的连续失败次数（连接错误不再自动恢复） */
@@ -106,6 +116,22 @@ export class OpenAICompatibleModel implements Model {
       thinkingMode: config.thinkingMode,
       reasoningEffort: config.reasoningEffort,
     };
+
+    // 初始化传输层 — 委托请求/响应格式转换
+    const transportConfig: TransportConfig = {
+      baseUrl: this.config.baseUrl,
+      apiKey: this.config.apiKey,
+      modelName: this.config.modelName,
+      timeout: this.config.timeout,
+      maxTokens: this.config.maxTokens,
+      temperature: this.config.temperature,
+      topP: this.config.topP,
+      extra: {
+        thinkingMode: this.config.thinkingMode,
+        reasoningEffort: this.config.reasoningEffort,
+      },
+    };
+    this.transport = new ChatCompletionsTransport(transportConfig);
   }
 
   async initialize(): Promise<void> {
@@ -218,9 +244,15 @@ export class OpenAICompatibleModel implements Model {
           errorMsg.includes('abort');
 
         // 401 认证错误：立即失败，不重试（让上层 LLMProvider 降级）
-        const isAuthError = errorMsg.includes('401') || errorMsg.includes('invalid api') || errorMsg.includes('invalid_key');
+        const isAuthError =
+          errorMsg.includes('401') ||
+          errorMsg.includes('invalid api') ||
+          errorMsg.includes('invalid_key');
         if (isAuthError) {
-          Logger.warn(`🔒 认证失败(401)，跳过重试让上层降级: ${lastError.message}`, 'OpenAICompatibleModel');
+          Logger.warn(
+            `🔒 认证失败(401)，跳过重试让上层降级: ${lastError.message}`,
+            'OpenAICompatibleModel'
+          );
           skipRetry = true;
           // 不要 break，让循环自然结束到 throw
         }
@@ -276,125 +308,69 @@ export class OpenAICompatibleModel implements Model {
   }
 
   /**
-   * 执行实际生成请求
+   * 执行实际生成请求 — 委托 transport 层构建请求和解析响应
    */
   private async executeGenerate(
     input: ModelInput | MultimodalInput
   ): Promise<ModelOutput> {
     const multimodalInput = input as MultimodalInput;
-    // 如果传入了 messages 数组（Function Calling 循环），直接使用
-    // 否则从 prompt 构建消息
+    // 构建消息（含多模态支持）— 保留在 Model 层因涉及 images 处理
     const messages =
       input.messages && input.messages.length > 0
         ? input.messages
         : this.buildMessages(input, multimodalInput.images);
 
-    const requestBody: Record<string, unknown> = {
-      model: this.config.modelName,
-      messages,
-      temperature: input.temperature ?? this.config.temperature,
-      max_tokens: input.maxTokens ?? this.config.maxTokens,
-      top_p: input.topP ?? this.config.topP,
-      stream: false,
-    };
+    // 委托 transport 层转换工具定义
+    const tools = this.transport.convertTools(
+      input.tools as Array<Record<string, unknown>> | undefined
+    );
 
-    if (this.config.thinkingMode === 'enabled') {
-      requestBody.thinking = { type: 'enabled' };
-      if (this.config.reasoningEffort) {
-        requestBody.reasoning_effort = this.config.reasoningEffort;
-      }
-    }
+    // 委托 transport 层构建完整 HTTP 请求
+    const request = this.transport.buildRequest(input, messages, tools);
 
-    // 如果有工具定义，添加到请求中（Function Calling）
-    if (input.tools && input.tools.length > 0) {
-      requestBody.tools = input.tools;
-      const toolChoice = input.toolChoice || 'auto';
-      requestBody.tool_choice = toolChoice;
+    if (tools && (tools as unknown[]).length > 0) {
       Logger.info(
-        `🔧 Function Calling: ${input.tools.length}个工具可用, tool_choice=${toolChoice}`,
+        `🔧 Function Calling: ${(tools as unknown[]).length}个工具可用, tool_choice=${input.toolChoice || 'auto'}`,
         'OpenAICompatibleModel'
       );
     }
 
     Logger.info(
-      `🚀 发起LLM请求: ${this.config.baseUrl}/chat/completions, model=${this.config.modelName}`,
+      `🚀 发起LLM请求: ${request.url}, model=${this.config.modelName}`,
       'OpenAICompatibleModel'
     );
-    const response = await this.fetchWithTimeout(
-      `${this.config.baseUrl}/chat/completions`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${this.config.apiKey}`,
-        },
-        body: JSON.stringify(requestBody),
-      }
-    );
+
+    // 执行 HTTP 请求（超时控制仍由 Model 层管理）
+    const response = await this.fetchWithTimeout(request.url, {
+      method: request.method,
+      headers: request.headers,
+      body: JSON.stringify(request.body),
+    });
+
+    const responseText = await response.text();
+
+    // 构造 TransportResponse 交给 transport 层解析
+    const transportResponse: TransportResponse = {
+      status: response.status,
+      ok: response.ok,
+      text: responseText,
+    };
 
     if (!response.ok) {
-      const errorBody = await response.text();
       Logger.error(
-        `❌ LLM API请求失败: status=${response.status}, body=${errorBody.substring(0, 200)}`,
+        `❌ LLM API请求失败: status=${response.status}, body=${responseText.substring(0, 200)}`,
         undefined,
         'OpenAICompatibleModel'
       );
-      throw new Error(`API 请求失败 (${response.status}): ${errorBody}`);
-    }
-
-    const responseText = await response.text();
-    Logger.debug(
-      `📨 LLM API响应: 长度=${responseText.length}字符`,
-      'OpenAICompatibleModel'
-    );
-    let data: Record<string, unknown>;
-    try {
-      data = JSON.parse(responseText);
-    } catch {
-      throw new Error(
-        `API 响应 JSON 解析失败: ${responseText.substring(0, 200)}`
+    } else {
+      Logger.debug(
+        `📨 LLM API响应: 长度=${responseText.length}字符`,
+        'OpenAICompatibleModel'
       );
     }
-    const choices = data.choices as
-      | Array<Record<string, Record<string, unknown>>>
-      | undefined;
 
-    if (!choices || choices.length === 0) {
-      throw new Error('模型未返回有效内容');
-    }
-
-    const message = choices[0].message as Record<string, unknown> | undefined;
-    const generatedText = (message?.content as string) || '';
-
-    const reasoningContent = message?.reasoning_content as string | undefined;
-
-    const result: ModelOutput = {
-      text: generatedText,
-      finishReason: String(choices[0].finish_reason || 'stop'),
-    };
-
-    if (reasoningContent) {
-      result.metadata = { reasoningContent };
-    }
-
-    // 解析 tool_calls
-    const rawToolCalls = message?.tool_calls as
-      | Array<Record<string, unknown>>
-      | undefined;
-    if (rawToolCalls && rawToolCalls.length > 0) {
-      result.toolCalls = this.normalizeToolCalls(rawToolCalls);
-    }
-
-    const usage = data.usage as Record<string, number> | undefined;
-    if (usage) {
-      result.tokens = {
-        prompt: usage.prompt_tokens || 0,
-        completion: usage.completion_tokens || 0,
-        total: usage.total_tokens || 0,
-      };
-    }
-
-    return result;
+    // 委托 transport 层解析响应为 ModelOutput
+    return this.transport.normalizeResponse(transportResponse);
   }
 
   /**
@@ -517,25 +493,18 @@ export class OpenAICompatibleModel implements Model {
     try {
       const messages = this.buildMessages(input);
 
-      const requestBody = {
-        model: this.config.modelName,
+      // 委托 transport 层构建流式请求
+      const request = this.transport.buildStreamRequest(
+        input,
         messages,
-        temperature: input.temperature ?? this.config.temperature,
-        max_tokens: input.maxTokens ?? this.config.maxTokens,
-        stream: true,
-      };
-
-      const response = await this.fetchWithTimeout(
-        `${this.config.baseUrl}/chat/completions`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${this.config.apiKey}`,
-          },
-          body: JSON.stringify(requestBody),
-        }
+        undefined
       );
+
+      const response = await this.fetchWithTimeout(request.url, {
+        method: request.method,
+        headers: request.headers,
+        body: JSON.stringify(request.body),
+      });
 
       if (!response.ok) {
         throw new Error(`API 请求失败: ${response.status}`);
@@ -558,28 +527,10 @@ export class OpenAICompatibleModel implements Model {
         buffer = lines.pop() || '';
 
         for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed || !trimmed.startsWith('data:')) continue;
-
-          const data = trimmed.slice(5).trim();
-          if (data === '[DONE]') return;
-
-          try {
-            const parsed = JSON.parse(data) as Record<string, unknown>;
-            const choices = parsed.choices as
-              | Array<Record<string, Record<string, string>>>
-              | undefined;
-            if (choices && choices.length > 0) {
-              const delta = choices[0].delta as
-                | Record<string, string>
-                | undefined;
-              const content = delta?.content;
-              if (content) {
-                yield content;
-              }
-            }
-          } catch {
-            // 忽略解析错误
+          // 委托 transport 层解析流式 chunk
+          const content = this.transport.parseStreamChunk(line);
+          if (content) {
+            yield content;
           }
         }
       }

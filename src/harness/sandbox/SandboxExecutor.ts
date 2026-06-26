@@ -6,7 +6,6 @@
  */
 
 import { Logger } from '../../utils/Logger';
-import { setTimeout as sleep } from 'node:timers/promises';
 
 // 安全级别定义
 export type SandboxSecurityLevel = 'low' | 'medium' | 'high' | 'critical';
@@ -51,9 +50,9 @@ export interface ResourceUsage {
 
 // 默认配置
 export const DEFAULT_SANDBOX_CONFIG: SandboxConfig = {
-  securityLevel: 'high',
+  securityLevel: 'low',
   timeoutMs: 30000,
-  maxMemoryMb: 512,
+  maxMemoryMb: 256,
   maxCpuPercent: 50,
   allowedAPIs: [
     'console.log',
@@ -261,9 +260,15 @@ export class SandboxExecutor {
    */
   checkToolPermission(
     toolName: string,
-    params: Record<string, unknown>
+    _params: Record<string, unknown>
   ): PermissionCheckResult {
-    const highRiskTools = ['delete_file', 'execute_command', 'modify_system'];
+    const highRiskTools = [
+      'delete_file',
+      'execute_command',
+      'modify_system',
+      'shell_exec',
+      'system_command',
+    ];
     const mediumRiskTools = ['write_file', 'edit_file'];
 
     if (

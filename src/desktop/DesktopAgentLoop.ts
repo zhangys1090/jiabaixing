@@ -15,7 +15,7 @@ import { DesktopVisionEngine, DesktopObservation } from './DesktopVisionEngine';
 import { WindowManager } from './WindowManager';
 import { SystemInput } from './SystemInput';
 import { DesktopUIInspector } from './DesktopUIInspector';
-import { StateSnapshotManager, SnapshotMetadata } from './StateSnapshotManager';
+import { StateSnapshotManager } from './StateSnapshotManager';
 import { Logger } from '../utils/Logger';
 import { LLMProvider } from '../models/LLMProvider';
 
@@ -75,42 +75,6 @@ const DEFAULT_MANIFEST: DesktopManifest = {
     'taskkill /f /im svchost',
   ],
 };
-
-const DESKTOP_PLANNING_SYSTEM_PROMPT = `你是贾百姓的桌面操作规划引擎。你的任务是根据用户指令和当前桌面状态，规划一系列桌面操作动作。
-
-可用动作类型：
-- click: 点击坐标 {x, y}
-- rightClick: 右键点击坐标 {x, y}
-- type: 输入文字 {text}
-- key: 按键 {key} (ENTER, ESCAPE, TAB, BACKSPACE, DELETE, UP, DOWN, LEFT, RIGHT, HOME, END, F5, F11)
-- keyCombo: 组合键 {keys: ["CTRL","S"]}
-- moveMouse: 移动鼠标 {x, y}
-- scroll: 滚动 {delta} (正数向上，负数向下)
-- drag: 拖拽 {fromX, fromY, toX, toY}
-- openApp: 打开应用 {app}
-- activateWindow: 激活窗口 {title}
-- closeWindow: 关闭窗口 {title}
-- maximize: 最大化窗口 {title}
-- minimize: 最小化窗口 {title}
-- wait: 等待 {ms}
-- observe: 观察桌面 {}
-- screenshot: 截图 {}
-- clipboardRead: 读取剪贴板 {}
-- clipboardWrite: 写入剪贴板 {text}
-- clickElement: 点击UI元素 {description} (如"保存按钮"、"地址栏")
-- typeIntoElement: 在UI元素中输入 {description, text} (如"搜索框中输入hello")
-- getElementText: 获取UI元素文本 {description}
-- shell: 执行命令 {command}
-
-规则：
-1. 每个动作必须包含 type、params、description
-2. 操作之间加适当的 wait（打开应用后等1-2秒，点击后等200-500ms）
-3. 优先使用 clickElement/typeIntoElement 而非坐标点击，更稳定
-4. 复杂任务分解为小步骤，每步可验证
-5. 只返回 JSON 数组，不要其他文字
-
-返回格式：
-[{"type":"...","params":{...},"description":"..."}]`;
 
 export class DesktopAgentLoop {
   private static instance: DesktopAgentLoop | null = null;
@@ -173,7 +137,10 @@ export class DesktopAgentLoop {
     if (this.llmProvider) {
       try {
         await this.llmProvider.initialize();
-        Logger.info('🤖 DesktopAgentLoop LLM 决策引擎已就绪', 'DesktopAgentLoop');
+        Logger.info(
+          '🤖 DesktopAgentLoop LLM 决策引擎已就绪',
+          'DesktopAgentLoop'
+        );
       } catch (err) {
         Logger.warn(
           `⚠️ LLM 初始化失败，降级为正则模式: ${(err as Error).message}`,
@@ -212,7 +179,11 @@ export class DesktopAgentLoop {
           return {
             success: false,
             taskDescription: userInput,
-            executionResult: { success: false, actions: [], summary: '执行超时' },
+            executionResult: {
+              success: false,
+              actions: [],
+              summary: '执行超时',
+            },
             observations,
             report: `操作超时 (${this.config.executionTimeoutMs}ms)`,
             error: 'EXECUTION_TIMEOUT',
@@ -284,9 +255,8 @@ export class DesktopAgentLoop {
         // ═══════════ CODEX风格: 执行前checkpoint ═══════════
         if (this.config.enableCheckpoint) {
           try {
-            const checkpoint = await this.snapshotManager.checkpointBeforeAction(
-              userInput
-            );
+            const checkpoint =
+              await this.snapshotManager.checkpointBeforeAction(userInput);
             this.lastCheckpointId = checkpoint.snapshotId;
             Logger.info(
               `📸 Checkpoint已保存: ${checkpoint.snapshotId}`,
@@ -345,10 +315,13 @@ export class DesktopAgentLoop {
           // ═══════════ CODEX风格: 从checkpoint恢复 ═══════════
           if (this.config.enableCheckpoint && this.lastCheckpointId) {
             try {
-              await this.snapshotManager.restoreSnapshot(this.lastCheckpointId, {
-                restoreWindows: true,
-                restoreClipboard: true,
-              });
+              await this.snapshotManager.restoreSnapshot(
+                this.lastCheckpointId,
+                {
+                  restoreWindows: true,
+                  restoreClipboard: true,
+                }
+              );
               Logger.info(
                 `♻️ 已从Checkpoint恢复: ${this.lastCheckpointId}`,
                 'DesktopAgentLoop'
@@ -470,7 +443,9 @@ ${observation.visionAnalysis.description ? `\n视觉分析: ${observation.vision
 
 请规划操作步骤。`;
 
-      const images = screenshotBase64 ? [`data:image/png;base64,${screenshotBase64}`] : undefined;
+      const images = screenshotBase64
+        ? [`data:image/png;base64,${screenshotBase64}`]
+        : undefined;
 
       const llmResponse = await this.llmProvider.multimodalChat(
         userPrompt,
@@ -486,10 +461,7 @@ ${observation.visionAnalysis.description ? `\n视觉分析: ${observation.vision
         return actions;
       }
 
-      Logger.warn(
-        '⚠️ LLM 规划结果为空，降级为正则模式',
-        'DesktopAgentLoop'
-      );
+      Logger.warn('⚠️ LLM 规划结果为空，降级为正则模式', 'DesktopAgentLoop');
       return this.planActions(userInput, observation);
     } catch (error) {
       Logger.warn(
@@ -512,11 +484,28 @@ ${observation.visionAnalysis.description ? `\n视觉分析: ${observation.vision
       if (!Array.isArray(parsed)) return [];
 
       const validTypes = new Set([
-        'screenshot', 'click', 'rightClick', 'type', 'key', 'keyCombo',
-        'moveMouse', 'scroll', 'drag', 'openApp', 'activateWindow',
-        'closeWindow', 'maximize', 'minimize', 'observe', 'wait',
-        'shell', 'clipboardRead', 'clipboardWrite', 'clickElement',
-        'typeIntoElement', 'getElementText',
+        'screenshot',
+        'click',
+        'rightClick',
+        'type',
+        'key',
+        'keyCombo',
+        'moveMouse',
+        'scroll',
+        'drag',
+        'openApp',
+        'activateWindow',
+        'closeWindow',
+        'maximize',
+        'minimize',
+        'observe',
+        'wait',
+        'shell',
+        'clipboardRead',
+        'clipboardWrite',
+        'clickElement',
+        'typeIntoElement',
+        'getElementText',
       ]);
 
       return parsed
@@ -708,7 +697,11 @@ ${observation.visionAnalysis.description ? `\n视觉分析: ${observation.vision
     }
 
     if (/复制|拷贝|copy/.test(lower)) {
-      actions.push({ type: 'clipboardRead', params: {}, description: '读取剪贴板' });
+      actions.push({
+        type: 'clipboardRead',
+        params: {},
+        description: '读取剪贴板',
+      });
       return actions;
     }
 
@@ -779,7 +772,7 @@ ${observation.visionAnalysis.description ? `\n视觉分析: ${observation.vision
   public async shutdown(): Promise<void> {
     this.isRunning = false;
     await this.executor.shutdown();
-    await this.snapshotManager.dispose();
+    this.snapshotManager.dispose();
     this.initialized = false;
     Logger.info('🤖 DesktopAgentLoop 已关闭', 'DesktopAgentLoop');
   }
@@ -793,7 +786,7 @@ ${observation.visionAnalysis.description ? `\n视觉分析: ${observation.vision
 
     for (const action of actions) {
       if (action.type === 'shell') {
-        const command = (action.params.command as string || '').toLowerCase();
+        const command = ((action.params.command as string) || '').toLowerCase();
         for (const forbidden of this.manifest.forbiddenActions) {
           if (command.includes(forbidden.toLowerCase())) {
             unsafe.push(action);
@@ -808,7 +801,9 @@ ${observation.visionAnalysis.description ? `\n视觉分析: ${observation.vision
 
       if (this.config.sandboxMode === 'strict') {
         if (action.type === 'shell' && this.manifest.allowedApps.length > 0) {
-          const command = (action.params.command as string || '').toLowerCase();
+          const command = (
+            (action.params.command as string) || ''
+          ).toLowerCase();
           const isAllowed = this.manifest.allowedApps.some((app) =>
             command.includes(app.toLowerCase())
           );
@@ -851,11 +846,7 @@ ${observation.visionAnalysis.description ? `\n视觉分析: ${observation.vision
       );
       return result.success;
     } catch (error) {
-      Logger.error(
-        '❌ Checkpoint恢复失败',
-        error as Error,
-        'DesktopAgentLoop'
-      );
+      Logger.error('❌ Checkpoint恢复失败', error as Error, 'DesktopAgentLoop');
       return false;
     }
   }

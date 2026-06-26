@@ -89,7 +89,8 @@ export function createFileDedupExecutor() {
       }
 
       // 对大小相同的文件计算哈希
-      const duplicates: Array<{ files: string[]; size: number; hash: string }> = [];
+      const duplicates: Array<{ files: string[]; size: number; hash: string }> =
+        [];
       let totalWastedBytes = 0;
 
       for (const [, group] of sizeGroups) {
@@ -131,12 +132,16 @@ export function createFileDedupExecutor() {
       }
 
       const lines: string[] = [];
-      lines.push(`扫描了 ${files.length} 个文件，发现 ${duplicates.length} 组重复文件：`);
+      lines.push(
+        `扫描了 ${files.length} 个文件，发现 ${duplicates.length} 组重复文件：`
+      );
       lines.push(`浪费空间: ${formatSize(totalWastedBytes)}\n`);
 
       for (let i = 0; i < duplicates.length; i++) {
         const dup = duplicates[i];
-        lines.push(`--- 第 ${i + 1} 组 (${formatSize(dup.size)}, hash: ${dup.hash}) ---`);
+        lines.push(
+          `--- 第 ${i + 1} 组 (${formatSize(dup.size)}, hash: ${dup.hash}) ---`
+        );
         for (const filePath of dup.files) {
           lines.push(`  ${filePath}`);
         }
@@ -168,7 +173,11 @@ export function createFileDedupExecutor() {
   };
 }
 
-function scanFiles(dir: string, recursive: boolean, minSize: number): FileInfo[] {
+function scanFiles(
+  dir: string,
+  recursive: boolean,
+  minSize: number
+): FileInfo[] {
   const results: FileInfo[] = [];
   try {
     const entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -188,7 +197,11 @@ function scanFiles(dir: string, recursive: boolean, minSize: number): FileInfo[]
         } catch {
           // 跳过不可读文件
         }
-      } else if (entry.isDirectory() && recursive && !entry.name.startsWith('.')) {
+      } else if (
+        entry.isDirectory() &&
+        recursive &&
+        !entry.name.startsWith('.')
+      ) {
         results.push(...scanFiles(fullPath, recursive, minSize));
       }
     }
@@ -211,6 +224,7 @@ async function hashFile(filePath: string): Promise<string> {
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+  if (bytes < 1024 * 1024 * 1024)
+    return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)}GB`;
 }

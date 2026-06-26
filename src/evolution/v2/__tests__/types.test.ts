@@ -1,10 +1,13 @@
-import { EvolutionType, EvolutionPriority, EvolutionCause, EvolutionPlan, EvolutionAction } from '../types';
+import { EvolutionType, EvolutionPriority, EvolutionPlan } from '../types';
 
 describe('Evolution Types', () => {
   test('EvolutionType values', () => {
     expect(Object.values(EvolutionType)).toEqual([
-      'CODE_FIX', 'CODE_OPTIMIZATION', 'PROMPT_IMPROVEMENT',
-      'TOOL_ENHANCEMENT', 'ARCHITECTURE_CHANGE'
+      'CODE_FIX',
+      'CODE_OPTIMIZATION',
+      'PROMPT_IMPROVEMENT',
+      'TOOL_ENHANCEMENT',
+      'ARCHITECTURE_CHANGE',
     ]);
   });
 
@@ -17,14 +20,14 @@ describe('Evolution Types', () => {
         type: 'FAILURE',
         description: 'Test failure',
         context: {},
-        timestamp: Date.now()
+        timestamp: Date.now(),
       },
       title: 'Test fix',
       description: 'Fix a test',
       actions: [],
       estimatedRisk: 'LOW',
       validationSteps: [],
-      createdAt: Date.now()
+      createdAt: Date.now(),
     };
     expect(plan.id).toBe('test-1');
     expect(plan.priority).toBe(EvolutionPriority.CRITICAL);

@@ -23,6 +23,39 @@ export interface UserFeedbackRecord extends FeedbackRecord {
 }
 
 /**
+ * 会话数据 — 用于学习用户使用模式
+ */
+export interface SessionData {
+  userId: string;
+  duration: number;
+  tasksPerformed: string[];
+  toolsUsed: string[];
+  activityTimestamps: number[];
+  resourcesAccessed: string[];
+  sessionStart: number;
+  sessionEnd: number;
+}
+
+/**
+ * 预测结果
+ */
+export interface ActionPrediction {
+  predictedAction: string;
+  confidence: number;
+  reasoning: string;
+}
+
+/**
+ * 个性化推荐
+ */
+export interface PersonalizedRecommendation {
+  type: string;
+  description: string;
+  confidence: number;
+  action: string;
+}
+
+/**
  * 偏好进化数据
  */
 export interface PreferenceEvolutionData {
@@ -75,6 +108,16 @@ export class ProfileEvolutionManager {
   private updateInterval: number; // 毫秒
   private updateTimer: NodeJS.Timeout | null = null;
   private currentUserId: string;
+  /** 会话模式历史 — key 为 userId */
+  private sessionPatterns: Map<
+    string,
+    {
+      sessions: SessionData[];
+      taskFrequency: Map<string, number>;
+      toolFrequency: Map<string, number>;
+      hourFrequency: Map<number, number>;
+    }
+  > = new Map();
 
   constructor(
     userProfileSystem: UserProfileSystem,
@@ -623,5 +666,139 @@ export class ProfileEvolutionManager {
           ? totalConfidence / this.evolutionData.size
           : 0,
     };
+  }
+
+  /**
+   * 学习使用模式 — 从会话数据中提取用户行为模式
+   */
+  learnUsagePattern(userId: string, sessionData: SessionData): void {
+    if (!this.sessionPatterns.has(userId)) {
+      this.sessionPatterns.set(userId, {
+        sessions: [],
+        taskFrequency: new Map(),
+        toolFrequency: new Map(),
+        hourFrequency: new Map(),
+      });
+    }
+
+    const patterns = this.sessionPatterns.get(userId)!;
+    patterns.sessions.push(sessionData);
+
+    // 统计任务频率
+    for (const task of sessionData.tasksPerformed) {
+      patterns.taskFrequency.set(
+        task,
+        (patterns.taskFrequency.get(task) || 0) + 1
+      );
+    }
+
+    // 统计工具频率
+    for (const tool of sessionData.toolsUsed) {
+      patterns.toolFrequency.set(
+        tool,
+        (patterns.toolFrequency.get(tool) || 0) + 1
+      );
+    }
+
+    // 统计活跃时段
+    for (const ts of sessionData.activityTimestamps) {
+      const hour = new Date(ts).getHours();
+      patterns.hourFrequency.set(
+        hour,
+        (patterns.hourFrequency.get(hour) || 0) + 1
+      );
+    }
+  }
+
+  /**
+   * 预测下一个动作 — 基于历史模式
+   */
+  predictNextAction(userId: string): ActionPrediction | null {
+    const patterns = this.sessionPatterns.get(userId);
+    if (!patterns || patterns.sessions.length < 2) {
+      return null;
+    }
+
+    // 找出最频繁的任务
+    let topTask = '';
+    let topTaskCount = 0;
+    for (const [task, count] of patterns.taskFrequency) {
+      if (count > topTaskCount) {
+        topTask = task;
+        topTaskCount = count;
+      }
+    }
+
+    if (!topTask) {
+      return null;
+    }
+
+    const totalSessions = patterns.sessions.length;
+    const confidence = Math.min(0.95, (topTaskCount / totalSessions) * 0.8);
+
+    return {
+      predictedAction: topTask,
+      confidence,
+      reasoning: `基于 ${totalSessions} 次会话历史，"${topTask}" 出现频率最高 (${topTaskCount} 次)`,
+    };
+  }
+
+  /**
+   * 获取个性化推荐 — 基于学习到的使用模式
+   */
+  getPersonalizedRecommendations(userId: string): PersonalizedRecommendation[] {
+    const patterns = this.sessionPatterns.get(userId);
+    if (!patterns || patterns.sessions.length === 0) {
+      return [];
+    }
+
+    const recommendations: PersonalizedRecommendation[] = [];
+
+    // 基于最常用任务推荐
+    const sortedTasks = Array.from(patterns.taskFrequency.entries()).sort(
+      (a, b) => b[1] - a[1]
+    );
+
+    if (sortedTasks.length > 0 && sortedTasks[0][1] >= 2) {
+      const [task, count] = sortedTasks[0];
+      recommendations.push({
+        type: 'task',
+        description: `您经常执行 "${task}" 任务，建议创建快捷方式`,
+        confidence: Math.min(0.9, count / patterns.sessions.length),
+        action: `create_shortcut:${task}`,
+      });
+    }
+
+    // 基于最常用工具推荐
+    const sortedTools = Array.from(patterns.toolFrequency.entries()).sort(
+      (a, b) => b[1] - a[1]
+    );
+
+    if (sortedTools.length > 0 && sortedTools[0][1] >= 2) {
+      const [tool, count] = sortedTools[0];
+      recommendations.push({
+        type: 'tool',
+        description: `您频繁使用 "${tool}"，建议配置为默认工具`,
+        confidence: Math.min(0.9, count / patterns.sessions.length),
+        action: `set_default_tool:${tool}`,
+      });
+    }
+
+    // 基于活跃时段推荐
+    const sortedHours = Array.from(patterns.hourFrequency.entries()).sort(
+      (a, b) => b[1] - a[1]
+    );
+
+    if (sortedHours.length > 0 && sortedHours[0][1] >= 2) {
+      const [hour, count] = sortedHours[0];
+      recommendations.push({
+        type: 'schedule',
+        description: `您在 ${hour}:00 时段最活跃，建议安排重要任务`,
+        confidence: Math.min(0.85, count / patterns.sessions.length),
+        action: `schedule_around:${hour}`,
+      });
+    }
+
+    return recommendations;
   }
 }

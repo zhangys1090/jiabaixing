@@ -1,3 +1,9 @@
+/**
+ * @deprecated 已迁移到 Python agent/llm/queue.py。当 AGENT_BACKEND=python（默认）时不再使用此文件。
+ *   回退方式：设置 AGENT_BACKEND=local 可继续使用 TS 本地实现。
+ *   迁移日期：2026-06-22
+ */
+
 export class RequestQueue {
   private queue: Array<{
     execute: () => Promise<string>;

@@ -4,7 +4,6 @@ import {
   EvolutionPriority,
   EvolutionCause,
   EvolutionPlan,
-  EvolutionAction
 } from './types';
 
 interface LLMClient {
@@ -22,7 +21,10 @@ export class EvolutionPlanner {
    * 分析进化原因并生成完整计划
    */
   async generateEvolutionPlan(cause: EvolutionCause): Promise<EvolutionPlan> {
-    Logger.info(`📝 Generating evolution plan for: ${cause.type}`, 'EvolutionPlanner');
+    Logger.info(
+      `📝 Generating evolution plan for: ${cause.type}`,
+      'EvolutionPlanner'
+    );
 
     const planId = `plan-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`;
     const systemPrompt = this.getSystemPrompt();
@@ -31,12 +33,19 @@ export class EvolutionPlanner {
     try {
       const llmResponse = await this.llmClient.chat(systemPrompt, userPrompt);
       const plan = this.parseLLMResponse(planId, cause, llmResponse);
-      
-      Logger.info(`✅ Evolution plan generated: ${plan.title} (${plan.actions.length} actions)`, 'EvolutionPlanner');
+
+      Logger.info(
+        `✅ Evolution plan generated: ${plan.title} (${plan.actions.length} actions)`,
+        'EvolutionPlanner'
+      );
       return plan;
     } catch (error) {
-      Logger.error('❌ Failed to generate evolution plan', error as Error, 'EvolutionPlanner');
-      
+      Logger.error(
+        '❌ Failed to generate evolution plan',
+        error as Error,
+        'EvolutionPlanner'
+      );
+
       return {
         id: planId,
         type: EvolutionType.CODE_FIX,
@@ -47,7 +56,7 @@ export class EvolutionPlanner {
         actions: [],
         estimatedRisk: 'LOW',
         validationSteps: ['Check if error resolved'],
-        createdAt: Date.now()
+        createdAt: Date.now(),
       };
     }
   }
@@ -98,15 +107,15 @@ IMPORTANT:
    */
   private getUserPrompt(cause: EvolutionCause): string {
     let contextDetails = '';
-    
+
     if (cause.context.failureInfo) {
       contextDetails += `\nFAILURE INFO:\n${cause.context.failureInfo}`;
     }
-    
+
     if (cause.context.satisfactionScore !== undefined) {
       contextDetails += `\nSATISFACTION SCORE: ${cause.context.satisfactionScore}`;
     }
-    
+
     if (cause.context.performanceMetric) {
       contextDetails += `\nPERFORMANCE ISSUE: ${cause.context.performanceMetric.name} = ${cause.context.performanceMetric.value}, threshold=${cause.context.performanceMetric.threshold}`;
     }
@@ -130,17 +139,17 @@ Analyze this issue and create a REAL evolution plan that MODIFIES CODE to fix/im
   ): EvolutionPlan {
     // 提取 JSON
     let jsonStr = llmResponse;
-    
+
     const jsonStart = llmResponse.indexOf('{');
     const jsonEnd = llmResponse.lastIndexOf('}');
-    
+
     if (jsonStart !== -1 && jsonEnd !== -1) {
       jsonStr = llmResponse.substring(jsonStart, jsonEnd + 1);
     }
 
     try {
       const parsed = JSON.parse(jsonStr);
-      
+
       return {
         id: planId,
         type: parsed.type || EvolutionType.CODE_FIX,
@@ -151,11 +160,14 @@ Analyze this issue and create a REAL evolution plan that MODIFIES CODE to fix/im
         actions: parsed.actions || [],
         estimatedRisk: parsed.estimatedRisk || 'MEDIUM',
         validationSteps: parsed.validationSteps || [],
-        createdAt: Date.now()
+        createdAt: Date.now(),
       };
-    } catch (e) {
-      Logger.warn('Failed to parse LLM response as JSON, using fallback', 'EvolutionPlanner');
-      
+    } catch {
+      Logger.warn(
+        'Failed to parse LLM response as JSON, using fallback',
+        'EvolutionPlanner'
+      );
+
       return {
         id: planId,
         type: EvolutionType.CODE_FIX,
@@ -166,7 +178,7 @@ Analyze this issue and create a REAL evolution plan that MODIFIES CODE to fix/im
         actions: [],
         estimatedRisk: 'LOW',
         validationSteps: [],
-        createdAt: Date.now()
+        createdAt: Date.now(),
       };
     }
   }

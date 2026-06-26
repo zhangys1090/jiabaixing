@@ -19,13 +19,7 @@ export const VOICE_INTERACT_DEF: ToolDefinition = {
       type: 'string',
       description:
         '操作类型：start_session=开始语音会话，stop_session=停止语音会话，speak=将文本转为语音，listen=获取语音输入并识别，status=获取语音会话状态',
-      enum: [
-        'start_session',
-        'stop_session',
-        'speak',
-        'listen',
-        'status',
-      ],
+      enum: ['start_session', 'stop_session', 'speak', 'listen', 'status'],
     },
     text: {
       type: 'string',
@@ -142,11 +136,7 @@ export function createVoiceInteractExecutor(deps: VoiceInteractDeps = {}) {
           );
       }
     } catch (error) {
-      Logger.error(
-        '❌ voice_interact 失败',
-        error as Error,
-        'VoiceInteract'
-      );
+      Logger.error('❌ voice_interact 失败', error as Error, 'VoiceInteract');
       return fail(
         `语音交互失败: ${(error as Error).message}`,
         Date.now() - startTime
@@ -208,11 +198,9 @@ function handleStopSession(
     const turnCount = currentSession.turnCount;
     deps.interactionEngine.stopVoiceSession();
     Logger.info('🎤 voice_interact: 语音会话已停止', 'VoiceInteract');
-    return ok(
-      `语音会话已停止 (轮次=${turnCount})`,
-      Date.now() - startTime,
-      { turnCount }
-    );
+    return ok(`语音会话已停止 (轮次=${turnCount})`, Date.now() - startTime, {
+      turnCount,
+    });
   }
 
   Logger.info('🎤 voice_interact (模拟): 语音会话已停止', 'VoiceInteract');
@@ -301,9 +289,8 @@ async function handleListen(
     // 模拟音频输入（实际实现需要平台特定 API 捕获麦克风数据）
     const mockAudioData = Buffer.from('模拟音频输入数据');
     try {
-      const result = await deps.interactionEngine.processVoiceInput(
-        mockAudioData
-      );
+      const result =
+        await deps.interactionEngine.processVoiceInput(mockAudioData);
       Logger.info(
         `🎤 voice_interact listen: 识别完成 turn=${result.turnCount}`,
         'VoiceInteract'
@@ -339,10 +326,7 @@ async function handleListen(
 /**
  * 处理 status 操作
  */
-function handleStatus(
-  deps: VoiceInteractDeps,
-  startTime: number
-): ToolResult {
+function handleStatus(deps: VoiceInteractDeps, startTime: number): ToolResult {
   if (deps.interactionEngine) {
     const session = deps.interactionEngine.getVoiceSession();
     if (!session) {

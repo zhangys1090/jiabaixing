@@ -43,8 +43,12 @@ export class PersistentVectorDatabase
 
       this.db = createDatabase(this.dbPath);
       if (this.db) {
-        try { this.db.pragma('journal_mode = WAL'); } catch {}
-        try { this.db.pragma('synchronous = NORMAL'); } catch {}
+        try {
+          this.db.pragma('journal_mode = WAL');
+        } catch {}
+        try {
+          this.db.pragma('synchronous = NORMAL');
+        } catch {}
 
         this.db.exec(`
           CREATE TABLE IF NOT EXISTS vectors (

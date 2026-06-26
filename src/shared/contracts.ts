@@ -147,6 +147,21 @@ export const API_ENDPOINTS = {
 
   // Harness status
   HARNESS_STATUS: '/api/tasks/harness/status',
+
+  // Batch processing (Hermes Task 8)
+  BATCH_RUN: '/api/batch/run',
+
+  // ACP IDE integration (Hermes Task 18)
+  IDE_CHAT: '/api/ide/chat',
+  IDE_SESSIONS: '/api/ide/sessions',
+
+  // RL trajectory export (Hermes Task 19)
+  TRAJECTORY_EXPORT: '/api/trajectory/export',
+  TRAJECTORY_STATS: '/api/trajectory/stats',
+
+  // Tool execution (Hermes P2: image_generate / tts_speak / web_fetch)
+  TOOL_EXECUTE: '/api/tools/execute',
+  TOOL_LIST: '/api/tools/list',
 } as const;
 
 export type ApiEndpoint = (typeof API_ENDPOINTS)[keyof typeof API_ENDPOINTS];
@@ -202,6 +217,131 @@ export interface ProcessResponse {
   response: string;
   traceId: string;
   intent: string;
+}
+
+// --- Batch (Hermes Task 8) ---
+
+export interface BatchPromptItem {
+  id: string;
+  text: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface BatchRunRequest {
+  prompts: BatchPromptItem[];
+  config?: {
+    concurrency?: number;
+    timeout?: number;
+    outputFormat?: 'sharegpt' | 'jsonl' | 'raw';
+    continueOnError?: boolean;
+  };
+  outputFormat?: 'sharegpt' | 'jsonl' | 'raw';
+}
+
+export interface BatchResultItem {
+  id: string;
+  response: string;
+  success: boolean;
+  duration: number;
+  error?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface BatchRunResponse {
+  success: boolean;
+  format: string;
+  data: BatchResultItem[] | string;
+}
+
+// --- ACP IDE (Hermes Task 18) ---
+
+export interface IdeChatRequest {
+  message: string;
+  sessionId?: string;
+  contextFiles?: string[];
+}
+
+export interface IdeChatResponse {
+  content: string;
+  sessionId: string;
+  relatedFiles?: string[];
+}
+
+export interface IdeSession {
+  sessionId: string;
+  createdAt: number;
+  lastActiveAt: number;
+  messageCount: number;
+}
+
+// --- RL Trajectory (Hermes Task 19) ---
+
+export interface TrajectoryExportRequest {
+  format?: 'sharegpt' | 'jsonl' | 'openai_finetune';
+}
+
+export interface TrajectoryStatsResponse {
+  total: number;
+  filtered: number;
+  avgQuality: number;
+  avgSteps: number;
+}
+
+// --- Tool Execution (Hermes P2: image_generate / tts_speak / web_fetch) ---
+
+export interface ToolExecuteRequest {
+  toolName: string;
+  params?: Record<string, unknown>;
+  userId?: string;
+}
+
+export interface ToolExecuteResponse {
+  success: boolean;
+  output?: unknown;
+  error?: string;
+  metadata: {
+    duration: number;
+    [key: string]: unknown;
+  };
+}
+
+export interface ToolInfo {
+  name: string;
+  description: string;
+  category: string;
+  parameters?: Record<string, unknown>;
+  riskLevel?: string;
+}
+
+// --- Gateway Integration ---
+
+export interface GatewayStatus {
+  kind: 'im_platform' | 'mcp_server' | 'webhook';
+  name: string;
+  displayName: string;
+  connected: boolean;
+  status: string;
+  enabled: boolean;
+  lastActive: string | null;
+  error: string | null;
+}
+
+export interface GatewayOverview {
+  mode: string;
+  initialized: boolean;
+  started: boolean;
+  workerActive: boolean;
+  imPlatforms: Record<string, GatewayStatus>;
+  mcpPlatforms: Record<string, GatewayStatus>;
+  webhooks: Record<string, GatewayStatus>;
+  queue: {
+    pending: number;
+    processing: number;
+    capacity: number;
+  };
+  totalPlatforms: number;
+  activePlatforms: number;
+  generatedAt: string;
 }
 
 // --- Models ---

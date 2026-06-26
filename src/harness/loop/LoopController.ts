@@ -3,34 +3,50 @@
  *
  * Plan-Execute-Evaluate 状态机
  * 替代 JiabaixingCore.executeFCLoop 的单层 FC 循环
+ *
+ * @deprecated 已迁移到 Python agent/loop/controller.py。
+ *
+ * 废弃状态说明：
+ * - 废弃版本：V5.0
+ * - 迁移日期：2026-06-22
+ * - 预计移除版本：V6.0（约 2026-09）
+ * - 替代方案：使用 Python 后端（AGENT_BACKEND=python，默认）
+ * - 回退方式：设置 AGENT_BACKEND=local 可继续使用 TS 本地实现（不推荐）
+ * - 维护状态：仅安全修复，不再新增功能
+ *
+ * 注意：当 AGENT_BACKEND=python（默认）时，此文件不会被使用。
+ *       仅当显式设置 AGENT_BACKEND=local 时才会使用此 TS 实现。
  */
 
-import { Logger } from '../../utils/Logger';
-import { perf } from '../../monitoring/PerformanceMonitor';
-import { LoopState, LifecycleEvent } from '../types';
-import { EventBus } from '../../shared/EventBus';
 import { TaskComplexityAnalyzer } from '../../core/TaskComplexityAnalyzer';
-import { skillUsageTracker } from '../../evolution/SkillUsageTracker';
 import type { EvolutionEngine } from '../../evolution/EvolutionEngine';
-import type {
-  ChatMessage,
-  UserInput,
-  AgentResult,
-  LoopContext,
-  LoopTrace,
-  BudgetState,
-  BudgetCheckResult,
-  ExecutionPlan,
-  StepResult,
-  QualityScore,
-  HookContext,
-  HookResult,
-} from '../types';
-import type { VerificationService } from '../verification/VerificationService';
+import { ImplicitFeedbackCollector } from '../../evolution/ImplicitFeedbackCollector';
+import { LearningStatusReporter } from '../../evolution/LearningStatusReporter';
+import { skillUsageTracker } from '../../evolution/SkillUsageTracker';
+import { perf } from '../../monitoring/PerformanceMonitor';
+import { EventBus } from '../../shared/EventBus';
+import { Logger } from '../../utils/Logger';
+import type { OrchestratorAgent } from '../orchestration/OrchestratorAgent';
 import type { PersistenceService } from '../persistence/PersistenceService';
 import type { TrajectoryDatabase } from '../persistence/TrajectoryDatabase';
-import type { OrchestratorAgent } from '../orchestration/OrchestratorAgent';
-import type { AggregatedResult } from '../orchestration/ResultAggregator';
+import type {
+  AgentResult,
+  BudgetCheckResult,
+  BudgetState,
+  ChatMessage,
+  ExecutionPlan,
+  HookContext,
+  HookResult,
+  LoopContext,
+  LoopTrace,
+  PlanStep,
+  QualityScore,
+  StepResult,
+  UserInput,
+} from '../types';
+import { LifecycleEvent, LoopState } from '../types';
+import type { VerificationService } from '../verification/VerificationService';
+import { LoopObserver } from './LoopObserver';
 
 /** 辩论器输出 */
 export interface DebaterOutput {
@@ -55,6 +71,10 @@ export interface LoopControllerDeps {
   /** 执行器 */
   executor: {
     execute(plan: ExecutionPlan, context: LoopContext): Promise<ExecutorOutput>;
+    shouldReplan(
+      evaluations: Array<{ score: number; isSufficient: boolean }>,
+      roundsUsed: number
+    ): { shouldReplan: boolean; reason: string; adjustmentHint?: string };
   };
   /** 评估器 */
   evaluator: {
@@ -66,7 +86,11 @@ export interface LoopControllerDeps {
   };
   /** 辩论器（可选，Plan-Battle-Execute 模式） */
   debater?: {
-    debate(plan: ExecutionPlan, input: UserInput, context: LoopContext): Promise<DebaterOutput>;
+    debate(
+      plan: ExecutionPlan,
+      input: UserInput,
+      context: LoopContext
+    ): Promise<DebaterOutput>;
   };
   /** 约束服务 */
   constraintsService?: {
@@ -86,14 +110,28 @@ export interface LoopControllerDeps {
   orchestratorAgent?: OrchestratorAgent;
   /** 进化引擎（可选，用于闭环反馈） */
   evolutionEngine?: {
-    nudgeKnowledgePersistence(input: string, toolsUsed: string[]): string | null;
+    nudgeKnowledgePersistence(
+      input: string,
+      toolsUsed: string[]
+    ): string | null;
     collectFeedback(
       input: string,
       response: string,
-      result: { success: boolean; intent?: string; toolsUsed?: string[]; error?: string },
+      result: {
+        success: boolean;
+        intent?: string;
+        toolsUsed?: string[];
+        error?: string;
+      },
       scene?: string
     ): void;
-    assessQuality(traceId: string, success: boolean, qualityScore: number, duration: number, scene?: string): void;
+    assessQuality(
+      traceId: string,
+      success: boolean,
+      qualityScore: number,
+      duration: number,
+      scene?: string
+    ): void;
     generateSkill(params: {
       input: string;
       response: string;
@@ -102,6 +140,112 @@ export interface LoopControllerDeps {
       qualityScore: number;
       traceId: string;
     }): string | null;
+  };
+  /** 反思引擎（可选，阶段3反思纠错） */
+  reflectionEngine?: {
+    reflect(
+      toolName: string,
+      args: Record<string, unknown>,
+      error: string,
+      context: { traceId: string; loopCount: number }
+    ): Promise<{
+      rootCause: string;
+      correctedArgs: Record<string, unknown> | null;
+      alternativeTool: string | null;
+      shouldRetry: boolean;
+    }>;
+    recordExperience(entry: {
+      toolName: string;
+      args: Record<string, unknown>;
+      error: string;
+      rootCause: string;
+      resolution: string;
+      success: boolean;
+    }): void;
+    deepReflect(
+      userInput: string,
+      trajectory: Array<{
+        toolName: string;
+        success: boolean;
+        error?: string;
+        output?: string;
+      }>,
+      evalResult: {
+        goalProgress: number;
+        suggestedAction: string;
+        reason: string;
+      }
+    ): Promise<{
+      diagnosis: string;
+      rootCause: string;
+      fixStrategy: string;
+      correctedPlan?: Array<{
+        stepDescription: string;
+        toolName?: string;
+        args?: Record<string, unknown>;
+      }>;
+    }>;
+  };
+  /** 工具注册表（可选，用于工具发现与检索） */
+  toolRegistry?: {
+    getRegisteredToolNames(): string[];
+    get(name: string): unknown;
+    getAll(): unknown[];
+  };
+  /** 权限守卫（可选，用于工具调用权限检查） */
+  permissionGuard?: {
+    check(
+      toolName: string,
+      params?: Record<string, unknown>
+    ): {
+      allowed: boolean;
+      missing: string[];
+      reason?: string;
+    };
+  };
+  /** 评估流水线（可选，多阶段评估） */
+  evaluationPipeline?: {
+    run(context: unknown): Promise<unknown>;
+    addStage?(stage: unknown): void;
+  };
+  /** P5: StrategyAdjuster — 策略自适应调整器，驱动反思深度和重试次数自适应 */
+  strategyAdjuster?: {
+    recordSignal(signal: {
+      signalType: 'positive' | 'negative' | 'task_success' | 'task_failure';
+      toolName?: string;
+      error?: string;
+      quality?: number;
+      duration?: number;
+      timestamp: number;
+    }): void;
+    getAdjustedToolPriority(tools: string[]): string[];
+    getAdjustedReflectionConfig(): {
+      enableDeepReflection: boolean;
+      maxRetries: number;
+    };
+  };
+  /** P2: CausalModeler — 因果建模器，识别步骤依赖和并行机会 */
+  causalModeler?: {
+    buildCausalModel(
+      task: string
+    ): Promise<import('./CausalModeler').CausalGraph>;
+    analyzeDependencies(
+      graph: import('./CausalModeler').CausalGraph,
+      stepId: string
+    ): import('./CausalModeler').DependencyAnalysis;
+    findParallelGroups(
+      graph: import('./CausalModeler').CausalGraph
+    ): string[][];
+    getFailureImpact(
+      graph: import('./CausalModeler').CausalGraph,
+      stepId: string
+    ): import('./CausalModeler').FailureImpact;
+  };
+  /** P3: TrajectoryFlywheel — 轨迹飞轮引擎，分析执行模式并生成优化建议 */
+  trajectoryFlywheel?: {
+    analyze(
+      executionId?: string
+    ): import('../persistence/TrajectoryFlywheel').TrajectoryAnalysis;
   };
 }
 
@@ -148,10 +292,177 @@ export class LoopController {
   private aborted = false;
   /** 延迟初始化的 EvolutionEngine 实例（避免循环依赖） */
   private _evolutionEngine: EvolutionEngine | null = null;
+  /** P5: 上一轮反思结论 — 注入到下一轮Thought阶段 */
+  private _lastReflectionInsight: {
+    rootCause: string;
+    correctedArgs?: Record<string, unknown>;
+    shouldRetry: boolean;
+    diagnosis?: string;
+    fixStrategy?: string;
+  } | null = null;
+  /** 最近一次 Pipeline 评估结果（用于持久化） */
+  private lastPipelineResult: any = null;
 
   constructor(deps: LoopControllerDeps) {
     this.deps = deps;
     this.complexityAnalyzer = new TaskComplexityAnalyzer();
+  }
+
+  /**
+   * 构建评估上下文（EvaluationPipeline 集成）
+   * @param input - 用户输入
+   * @param context - 循环上下文
+   * @returns 评估上下文
+   */
+  private buildEvaluationContext(
+    input: { text: string },
+    context: LoopContext
+  ): {
+    stepParams: Array<{
+      toolName: string;
+      result: { success: boolean; output?: unknown; error?: string };
+    }>;
+    evalInput: { userInput: string };
+    scorerMetadata: Record<string, unknown>;
+  } {
+    const stepParams: Array<{
+      toolName: string;
+      result: { success: boolean; output?: unknown; error?: string };
+    }> = [];
+
+    for (const [toolName, result] of context.stepResults) {
+      stepParams.push({
+        toolName,
+        result: {
+          success: result.success,
+          output: result.output,
+          error: result.error,
+        },
+      });
+    }
+
+    return {
+      stepParams,
+      evalInput: { userInput: input.text },
+      scorerMetadata: {
+        roundsUsed: context.budget?.roundsUsed || 0,
+        toolCallsUsed: context.budget?.toolCallsUsed || 0,
+        traceId: context.trace?.traceId,
+      },
+    };
+  }
+
+  /**
+   * 使用 EvaluationPipeline 评估（Pipeline 集成）
+   * @param input - 用户输入
+   * @param context - 循环上下文
+   * @returns 评估器输出
+   */
+  private async evaluateWithPipeline(
+    input: { text: string; userId?: string; traceId?: string },
+    context: LoopContext
+  ): Promise<EvaluatorOutput> {
+    if (!this.deps.evaluationPipeline) {
+      // 无 Pipeline 时降级到 evaluator
+      return this.deps.evaluator.evaluate(input as UserInput, context);
+    }
+
+    try {
+      const evalContext = this.buildEvaluationContext(input, context);
+      const result = (await this.deps.evaluationPipeline.run(
+        evalContext
+      )) as any;
+      this.lastPipelineResult = result;
+
+      // 优先使用独立评估结果
+      if (result.independentResult?.overall) {
+        return {
+          goalProgress: result.independentResult.overall.goalProgress ?? 0.5,
+          suggestedAction: result.independentResult.overall.suggestedAction,
+          reason: result.independentResult.overall.summary || 'Pipeline评估',
+        };
+      }
+
+      // 根据 overallScore 推断 suggestedAction
+      const score = result.overallScore ?? 50;
+      let suggestedAction: 'continue' | 'replan' | 'abort';
+      if (score >= 60) {
+        suggestedAction = 'continue';
+      } else if (score >= 30) {
+        suggestedAction = 'replan';
+      } else {
+        suggestedAction = 'abort';
+      }
+
+      return {
+        goalProgress: Math.max(0, Math.min(1, score / 100)),
+        suggestedAction,
+        reason: result.passed
+          ? 'Pipeline评估通过'
+          : `Pipeline评估未通过（得分 ${score}）`,
+      };
+    } catch (err) {
+      Logger.warn(
+        `Pipeline评估失败，降级到evaluator: ${(err as Error).message}`,
+        'LoopController'
+      );
+      return this.deps.evaluator.evaluate(input as UserInput, context);
+    }
+  }
+
+  /**
+   * 持久化评估结果到 TrajectoryDB（Pipeline 集成）
+   * @param context - 循环上下文
+   * @param evalResult - 评估结果
+   */
+  private persistEvaluationResult(
+    context: LoopContext,
+    evalResult: EvaluatorOutput
+  ): void {
+    const db = this.deps.trajectoryDatabase as any;
+    if (!db) return;
+
+    const traceId = context.trace?.traceId || 'unknown';
+    const phase = context.trace?.state || 'evaluating';
+
+    try {
+      db.recordEvaluationResult({
+        execution_id: traceId,
+        phase,
+        goal_progress: evalResult.goalProgress,
+        suggested_action: evalResult.suggestedAction,
+        reason: evalResult.reason,
+        timestamp: Date.now(),
+      });
+
+      // 如果有 Pipeline 结果，额外持久化
+      if (this.lastPipelineResult) {
+        db.recordEvaluationResult({
+          execution_id: traceId,
+          phase: 'pipeline_quality',
+          goal_progress: this.lastPipelineResult.overallScore
+            ? this.lastPipelineResult.overallScore / 100
+            : evalResult.goalProgress,
+          suggested_action: evalResult.suggestedAction,
+          reason: 'Pipeline质量评分',
+          timestamp: Date.now(),
+        });
+
+        if (db.recordPipelineEvaluationResult) {
+          db.recordPipelineEvaluationResult({
+            executionId: traceId,
+            pipelineResult: this.lastPipelineResult,
+            suggestions: this.lastPipelineResult.suggestions || [],
+            timestamp: Date.now(),
+          });
+        }
+      }
+    } catch (err) {
+      Logger.warn(
+        `持久化评估结果失败: ${(err as Error).message}`,
+        'LoopController'
+      );
+    }
   }
 
   /**
@@ -162,7 +473,8 @@ export class LoopController {
     if (this._evolutionEngine === null && this.deps.evolutionEngine) {
       // 使用 deps.evolutionEngine 作为兼容接口
       // 实际类型是 EvolutionEngineDeps 适配器，来自 initHarness.ts
-      this._evolutionEngine = this.deps.evolutionEngine as unknown as EvolutionEngine;
+      this._evolutionEngine = this.deps
+        .evolutionEngine as unknown as EvolutionEngine;
     }
     return this._evolutionEngine;
   }
@@ -200,14 +512,19 @@ export class LoopController {
     }
 
     // 第一步: 复杂度分析
-    const complexityResult = this.complexityAnalyzer.analyzeComplexity(input.text);
+    const complexityResult = this.complexityAnalyzer.analyzeComplexity(
+      input.text
+    );
     Logger.info(
       `📊 任务复杂度分析: ${complexityResult.complexity}, 预估步骤: ${complexityResult.estimatedSteps}, 可并行: ${complexityResult.parallelizable}`,
       'LoopController'
     );
 
     // 如果是复杂任务且有 OrchestratorAgent，走多Agent编排路径
-    if (this.deps.orchestratorAgent && this.isComplexTask(complexityResult.complexity)) {
+    if (
+      this.deps.orchestratorAgent &&
+      this.isComplexTask(complexityResult.complexity)
+    ) {
       Logger.info(
         `🤖 检测到复杂任务，使用 OrchestratorAgent 处理`,
         'LoopController'
@@ -216,7 +533,9 @@ export class LoopController {
     }
 
     // 初始化循环上下文 — 根据任务复杂度自适应调整预算
-    const adaptiveBudget = this.resolveAdaptiveBudget(complexityResult.complexity);
+    const adaptiveBudget = this.resolveAdaptiveBudget(
+      complexityResult.complexity
+    );
     const context: LoopContext = {
       messages: [...initialMessages],
       plan: null,
@@ -233,12 +552,65 @@ export class LoopController {
         budgetState: adaptiveBudget,
       },
       metadata: { input: input.text },
+      stepOutputs: new Map(),
+      dataFlowChannels: [],
+      crossStepState: new Map(),
+      stepStates: new Map(),
+      stepStateHistory: [],
     };
 
     Logger.info(`🔄 LoopController 启动 [${traceId}]`, 'LoopController');
 
     // Harness Engineering: 启动全链路追踪
     EventBus.startFullTrace(traceId);
+
+    // ========== 集成：循环可观测性 ==========
+    // 【集成点】循环开始时启动观察者
+    // 可通过 LOOP_OBSERVER_ENABLED 环境变量控制是否启用
+    const loopObserver = LoopObserver.getInstance();
+    const observerEnabled =
+      process.env.LOOP_OBSERVER_ENABLED === 'true' ||
+      (loopObserver as any).enabled === true;
+    if (observerEnabled) {
+      try {
+        if (typeof loopObserver.startLoop === 'function') {
+          loopObserver.startLoop(input.text);
+        }
+        Logger.debug('循环观察者已启动', 'LoopController');
+      } catch (obsErr) {
+        Logger.warn(
+          `循环观察者启动失败，已跳过: ${(obsErr as Error).message}`,
+          'LoopController'
+        );
+      }
+    }
+
+    // ========== 集成：隐式反馈收集 ==========
+    // 【集成点】用户消息到达时触发隐式反馈收集
+    // 可通过 IMPLICIT_FEEDBACK_ENABLED 环境变量控制是否启用
+    const feedbackCollector = ImplicitFeedbackCollector.getInstance();
+    const feedbackEnabled =
+      process.env.IMPLICIT_FEEDBACK_ENABLED === 'true' ||
+      (feedbackCollector as any).enabled === true;
+    if (feedbackEnabled) {
+      try {
+        // 异步执行，不阻塞主流程
+        setImmediate(() => {
+          if (typeof feedbackCollector.onUserMessage === 'function') {
+            feedbackCollector.onUserMessage({
+              content: input.text,
+              userId: input.userId,
+              traceId,
+            });
+          }
+        });
+      } catch (fbErr) {
+        Logger.warn(
+          `隐式反馈收集失败，已跳过: ${(fbErr as Error).message}`,
+          'LoopController'
+        );
+      }
+    }
 
     try {
       // Step 2: 保存任务状态 (Phase 1 之前)
@@ -297,6 +669,32 @@ export class LoopController {
 
           this.transition(LoopState.PLANNING, context);
           EventBus.addTracePhase(traceId, 'planning');
+
+          // P0 修复：重规划时收集失败原因，直接传给 Planner
+          if (replanNeeded) {
+            const failureInfo = this.collectFailureInfoForReplan(context);
+            if (failureInfo) {
+              context.metadata.replanFailureReason = failureInfo.reason;
+              context.metadata.replanFailedSteps = failureInfo.failedSteps;
+              Logger.info(
+                `🔄 重规划带入失败原因: ${failureInfo.reason.substring(0, 100)}`,
+                'LoopController'
+              );
+            }
+          }
+
+          // ========== 集成：循环可观测性 ==========
+          // 【集成点】规划阶段开始
+          if (observerEnabled) {
+            try {
+              if (typeof loopObserver.startPhase === 'function') {
+                loopObserver.startPhase('planner', input.text.substring(0, 50));
+              }
+            } catch {
+              // 观察者失败不影响主流程
+            }
+          }
+
           plan = await perf.measure(
             'planner.plan',
             () => this.deps.planner.plan(input, context),
@@ -307,6 +705,20 @@ export class LoopController {
           context.metadata.replanCount =
             currentReplanCount + (replanNeeded ? 1 : 0);
           replanNeeded = false;
+
+          // ========== 集成：循环可观测性 ==========
+          // 【集成点】规划阶段结束
+          if (loopObserver.isEnabled()) {
+            try {
+              loopObserver.endPhase(
+                'planner',
+                true,
+                `步骤数: ${plan.steps.length}`
+              );
+            } catch {
+              // 观察者失败不影响主流程
+            }
+          }
 
           this.recordSnapshot(context, 'planning', context.budget.roundsUsed, {
             planReasoning: plan.planReasoning?.substring(0, 500),
@@ -326,6 +738,29 @@ export class LoopController {
           // F0-02: 将 Planner 的决策注入共享上下文，确保 Executor 和 Evaluator 看到完整规划
           this.injectPlanIntoContext(plan, context);
           EventBus.completeTracePhase(traceId, 'planning', true);
+
+          // P2: CausalModeler — 因果建模分析（识别依赖和并行机会）
+          if (!plan.simple && this.deps.causalModeler) {
+            try {
+              const causalGraph =
+                await this.deps.causalModeler.buildCausalModel(input.text);
+              if (causalGraph.nodes.length > 0) {
+                const parallelGroups =
+                  this.deps.causalModeler.findParallelGroups(causalGraph);
+                context.metadata.causalGraph = causalGraph;
+                context.metadata.parallelGroups = parallelGroups;
+                Logger.info(
+                  `🔗 因果建模完成: ${causalGraph.nodes.length} 节点, ${causalGraph.edges.length} 依赖, ${parallelGroups.length} 并行组`,
+                  'LoopController'
+                );
+              }
+            } catch (causalErr) {
+              Logger.warn(
+                `因果建模失败（不影响主流程）: ${(causalErr as Error).message}`,
+                'LoopController'
+              );
+            }
+          }
 
           await this.executeHook(LifecycleEvent.ON_PLAN_CREATED, context, {
             plan: plan.steps,
@@ -347,25 +782,30 @@ export class LoopController {
               'loop'
             );
 
-            this.recordSnapshot(context, 'debating', context.budget.roundsUsed, {
-              debatePassed: debateResult.passed,
-              debateQuality: debateResult.qualityScore,
-              debateRounds: debateResult.debateRounds,
-              vulnerabilities: debateResult.vulnerabilities,
-              improvements: debateResult.improvements,
-            });
+            this.recordSnapshot(
+              context,
+              'debating',
+              context.budget.roundsUsed,
+              {
+                debatePassed: debateResult.passed,
+                debateQuality: debateResult.qualityScore,
+                debateRounds: debateResult.debateRounds,
+                vulnerabilities: debateResult.vulnerabilities,
+                improvements: debateResult.improvements,
+              }
+            );
 
             if (debateResult.passed) {
               Logger.info(
                 `✅ 辩论通过: quality=${(debateResult.qualityScore * 100).toFixed(0)}% ` +
-                `rounds=${debateResult.debateRounds}`,
+                  `rounds=${debateResult.debateRounds}`,
                 'LoopController'
               );
               EventBus.completeTracePhase(traceId, 'debating', true);
             } else {
               Logger.warn(
                 `⚠️ 辩论未通过: quality=${(debateResult.qualityScore * 100).toFixed(0)}% ` +
-                `vulnerabilities=${debateResult.vulnerabilities.length}`,
+                  `vulnerabilities=${debateResult.vulnerabilities.length}`,
                 'LoopController'
               );
               EventBus.completeTracePhase(traceId, 'debating', false);
@@ -374,10 +814,15 @@ export class LoopController {
               if (debateResult.improvements.length > 0) {
                 context.messages.push({
                   role: 'system',
-                  content: `【辩论反馈】计划存在以下问题：\n` +
-                    debateResult.vulnerabilities.map((v, i) => `${i + 1}. ${v}`).join('\n') +
+                  content:
+                    `【辩论反馈】计划存在以下问题：\n` +
+                    debateResult.vulnerabilities
+                      .map((v, i) => `${i + 1}. ${v}`)
+                      .join('\n') +
                     '\n\n改进建议：\n' +
-                    debateResult.improvements.map((imp, i) => `${i + 1}. ${imp}`).join('\n') +
+                    debateResult.improvements
+                      .map((imp, i) => `${i + 1}. ${imp}`)
+                      .join('\n') +
                     '\n请根据以上反馈重新制定计划。',
                 });
 
@@ -396,11 +841,152 @@ export class LoopController {
           `🏃 Phase 2: 开始执行 (轮次=${context.budget.roundsUsed + 1})`,
           'LoopController'
         );
-        const executorOutput = await perf.measure(
-          'executor.execute',
-          () => this.deps.executor.execute(plan!, context),
-          'loop'
-        );
+
+        // ========== 集成：循环可观测性 ==========
+        // 【集成点】执行阶段开始
+        if (loopObserver.isEnabled()) {
+          try {
+            loopObserver.startPhase(
+              'executor',
+              `轮次: ${context.budget.roundsUsed + 1}`
+            );
+          } catch {
+            // 观察者失败不影响主流程
+          }
+        }
+
+        // P5: 注入上一轮反思结论到本轮执行上下文（打通 ReAct 循环 Thought 阶段）
+        // 反思结论直接影响下一轮 LLM 推理，而非仅作为日志记录
+        if (this._lastReflectionInsight) {
+          const reflectionHint = this.buildThoughtPrompt({
+            userInput: input.text,
+            currentStep: {
+              tool:
+                (plan.steps[context.currentStepIndex]?.toolName as string) ||
+                'unknown',
+              args:
+                (plan.steps[context.currentStepIndex]?.toolParams as Record<
+                  string,
+                  unknown
+                >) || {},
+            },
+          });
+          context.messages.push({
+            role: 'system',
+            content: reflectionHint,
+          });
+          // 注入后清除，避免重复注入
+          this._lastReflectionInsight = null;
+          Logger.info(
+            `🔄 P5 反思结论已注入本轮 Thought 阶段`,
+            'LoopController'
+          );
+        }
+
+        let executorOutput: ExecutorOutput;
+        try {
+          executorOutput = await perf.measure(
+            'executor.execute',
+            () => this.deps.executor.execute(plan!, context),
+            'loop'
+          );
+
+          // ========== 集成：循环可观测性 ==========
+          // 【集成点】执行阶段结束
+          if (loopObserver.isEnabled()) {
+            try {
+              loopObserver.endPhase(
+                'executor',
+                true,
+                `工具调用: ${executorOutput.toolCallsCount}次`
+              );
+            } catch {
+              // 观察者失败不影响主流程
+            }
+          }
+        } catch (execErr) {
+          Logger.warn(
+            `⚠️ 执行失败: ${(execErr as Error).message}，尝试反思纠错`,
+            'LoopController'
+          );
+
+          if (this.deps.reflectionEngine && plan.steps.length > 0) {
+            const failedStep = this.findFailedStep(plan, context);
+            if (failedStep?.toolName) {
+              const toolArgs = failedStep.toolParams ?? {};
+              const reflection = await this.deps.reflectionEngine.reflect(
+                failedStep.toolName,
+                toolArgs,
+                (execErr as Error).message,
+                {
+                  traceId: context.trace.traceId,
+                  loopCount: context.budget.roundsUsed,
+                }
+              );
+
+              Logger.info(
+                `🧠 反思结果: 根因=${reflection.rootCause} shouldRetry=${reflection.shouldRetry}`,
+                'LoopController'
+              );
+
+              this.deps.reflectionEngine.recordExperience({
+                toolName: failedStep.toolName,
+                args: toolArgs,
+                error: (execErr as Error).message,
+                rootCause: reflection.rootCause,
+                resolution: reflection.correctedArgs
+                  ? '修正参数后重试'
+                  : reflection.shouldRetry
+                    ? '重试'
+                    : '不重试',
+                success: reflection.shouldRetry,
+              });
+
+              if (reflection.shouldRetry && reflection.correctedArgs) {
+                failedStep.toolParams = {
+                  ...failedStep.toolParams,
+                  ...reflection.correctedArgs,
+                };
+                Logger.info(
+                  `🔄 参数已修正，重试执行: ${JSON.stringify(reflection.correctedArgs)}`,
+                  'LoopController'
+                );
+                executorOutput = await perf.measure(
+                  'executor.execute',
+                  () => this.deps.executor.execute(plan!, context),
+                  'loop'
+                );
+              } else if (reflection.shouldRetry && reflection.alternativeTool) {
+                const registeredTools =
+                  this.deps.toolRegistry?.getRegisteredToolNames() ?? [];
+                if (registeredTools.includes(reflection.alternativeTool)) {
+                  Logger.info(
+                    `🔄 切换替代工具: ${failedStep.toolName} → ${reflection.alternativeTool}`,
+                    'LoopController'
+                  );
+                  failedStep.toolName = reflection.alternativeTool;
+                  executorOutput = await perf.measure(
+                    'executor.execute',
+                    () => this.deps.executor.execute(plan!, context),
+                    'loop'
+                  );
+                } else {
+                  Logger.warn(
+                    `⚠️ 替代工具 ${reflection.alternativeTool} 未注册，降级处理`,
+                    'LoopController'
+                  );
+                  throw execErr;
+                }
+              } else {
+                throw execErr;
+              }
+            } else {
+              throw execErr;
+            }
+          } else {
+            throw execErr;
+          }
+        }
         Logger.info(
           `✅ Phase 2: 执行完成 (工具调用=${executorOutput.toolCallsCount}次, 消息数=${executorOutput.messages.length})`,
           'LoopController'
@@ -409,9 +995,19 @@ export class LoopController {
         // Harness Engineering: 记录执行阶段完成 + Token/工具调用追踪
         EventBus.completeTracePhase(traceId, 'executing', true);
         if (executorOutput.estimatedTokens) {
-          EventBus.recordTokenUsage(traceId, 'default', executorOutput.estimatedTokens, 0);
+          EventBus.recordTokenUsage(
+            traceId,
+            'default',
+            executorOutput.estimatedTokens,
+            0
+          );
         }
-        EventBus.recordToolCall(traceId, 'batch', executorOutput.toolCallsCount > 0, executorOutput.toolDuration);
+        EventBus.recordToolCall(
+          traceId,
+          'batch',
+          executorOutput.toolCallsCount > 0,
+          executorOutput.toolDuration
+        );
 
         if (
           !executorOutput.completedNaturally &&
@@ -460,6 +1056,25 @@ export class LoopController {
           }
         }
 
+        // P5: 工具执行失败后触发反思，保存结论供下一轮Thought
+        const failedToolMessage = executorOutput.messages.find(
+          (m) =>
+            m.role === 'tool' &&
+            typeof m.content === 'string' &&
+            (m.content.startsWith('错误:') || m.content.startsWith('错误'))
+        );
+        if (failedToolMessage) {
+          await this.triggerReflectionIfNeeded({
+            userInput: input.text,
+            toolResult: {
+              success: false,
+              error: failedToolMessage.content as string,
+              output: failedToolMessage.content,
+            },
+            loopCount: context.budget.roundsUsed,
+          });
+        }
+
         // 更新上下文（含token估算）
         context.messages = executorOutput.messages;
         context.budget.roundsUsed++;
@@ -473,11 +1088,36 @@ export class LoopController {
         // ─── Phase 3: EVALUATING ───
         this.transition(LoopState.EVALUATING, context);
         EventBus.addTracePhase(traceId, 'evaluating');
+
+        // ========== 集成：循环可观测性 ==========
+        // 【集成点】评估阶段开始
+        if (loopObserver.isEnabled()) {
+          try {
+            loopObserver.startPhase('evaluator', '');
+          } catch {
+            // 观察者失败不影响主流程
+          }
+        }
+
         evalResult = await perf.measure(
           'evaluator.evaluate',
           () => this.deps.evaluator.evaluate(input, context),
           'loop'
         );
+
+        // ========== 集成：循环可观测性 ==========
+        // 【集成点】评估阶段结束
+        if (loopObserver.isEnabled()) {
+          try {
+            loopObserver.endPhase(
+              'evaluator',
+              true,
+              `进度: ${(evalResult.goalProgress * 100).toFixed(0)}%`
+            );
+          } catch {
+            // 观察者失败不影响主流程
+          }
+        }
 
         this.recordSnapshot(context, 'evaluating', context.budget.roundsUsed, {
           goalProgress: evalResult.goalProgress,
@@ -493,25 +1133,69 @@ export class LoopController {
         // Harness Engineering: 评估阶段完成
         EventBus.completeTracePhase(traceId, 'evaluating', true);
 
+        // P2: 累积评估历史 — 供 shouldReplan 步骤级动态调整使用
+        if (!context.metadata.evaluationHistory) {
+          context.metadata.evaluationHistory = [];
+        }
+        (
+          context.metadata.evaluationHistory as Array<{
+            score: number;
+            isSufficient: boolean;
+          }>
+        ).push({
+          score: evalResult.goalProgress,
+          isSufficient: evalResult.goalProgress >= 0.9,
+        });
+
         // 根据评估结果决定下一步
         switch (evalResult.suggestedAction) {
           case 'continue':
-            // 继续下一轮迭代，检查是否需要重新规划
             if (evalResult.goalProgress >= 0.9) {
-              // 目标基本达成，结束循环
-              shouldContinueLoop = false;
-              Logger.info('✅ 目标已基本达成，结束循环', 'LoopController');
+              if (
+                plan.steps.length > 1 &&
+                context.budget.roundsUsed < plan.steps.length
+              ) {
+                Logger.info(
+                  `📊 进度高但仍有未完成步骤 (${context.budget.roundsUsed}/${plan.steps.length})，继续执行`,
+                  'LoopController'
+                );
+              } else {
+                shouldContinueLoop = false;
+                Logger.info('✅ 目标已基本达成，结束循环', 'LoopController');
+              }
             } else if (
               context.budget.roundsUsed >= context.budget.softRoundLimit
             ) {
-              // 接近软限制，检查是否还有显著进展
               if (evalResult.goalProgress < 0.3) {
-                // 进展缓慢且接近限制，强制结束
                 shouldContinueLoop = false;
                 Logger.info(
                   '⚠️ 进展缓慢且接近轮次限制，强制结束',
                   'LoopController'
                 );
+              }
+            }
+
+            // P2: 步骤级动态调整 — 检查是否需要提前重规划
+            if (shouldContinueLoop && !replanNeeded) {
+              try {
+                const evalHistory = context.metadata.evaluationHistory as
+                  | Array<{ score: number; isSufficient: boolean }>
+                  | undefined;
+                if (evalHistory && evalHistory.length > 0) {
+                  const replanDecision = this.deps.executor.shouldReplan(
+                    evalHistory,
+                    context.budget.roundsUsed
+                  );
+                  if (replanDecision.shouldReplan) {
+                    replanNeeded = true;
+                    Logger.info(
+                      `🔄 步骤级动态调整触发重规划: ${replanDecision.reason}${replanDecision.adjustmentHint ? ` (${replanDecision.adjustmentHint})` : ''}`,
+                      'LoopController'
+                    );
+                  }
+                }
+              } catch {
+                // shouldReplan 检查失败不影响主流程
               }
             }
             break;
@@ -527,6 +1211,9 @@ export class LoopController {
                   `🔄 上次失败为可重试错误(retryCount=${retryCount})，跳过重新规划，重试当前计划`,
                   'LoopController'
                 );
+                if (lastStepResult && this.deps.reflectionEngine) {
+                  await this.reflectOnFailure(lastStepResult, context);
+                }
               } else {
                 replanNeeded = true;
                 Logger.info(
@@ -535,6 +1222,9 @@ export class LoopController {
                 );
               }
             } else {
+              if (this.deps.reflectionEngine && evalResult.goalProgress < 0.5) {
+                await this.triggerDeepReflection(input, context, evalResult);
+              }
               replanNeeded = true;
               Logger.info('🔄 评估建议重新规划', 'LoopController');
             }
@@ -570,6 +1260,17 @@ export class LoopController {
       // ─── Phase 4: REPORTING ───
       this.transition(LoopState.REPORTING, context);
       EventBus.addTracePhase(traceId, 'reporting');
+
+      // ========== 集成：循环可观测性 ==========
+      // 【集成点】报告阶段开始
+      if (loopObserver.isEnabled()) {
+        try {
+          loopObserver.startPhase('reporter', '');
+        } catch {
+          // 观察者失败不影响主流程
+        }
+      }
+
       const report = await perf.measure(
         'reporter.report',
         () => this.deps.reporter.report(context),
@@ -606,6 +1307,20 @@ export class LoopController {
             (report.quality.efficiency + verificationQuality.efficiency) / 2,
           details: `${report.quality.details} | ${verificationQuality.details}`,
         };
+      }
+
+      // ========== 集成：循环可观测性 ==========
+      // 【集成点】报告阶段结束
+      if (loopObserver.isEnabled()) {
+        try {
+          loopObserver.endPhase(
+            'reporter',
+            true,
+            `质量: ${(finalQuality.overall * 100).toFixed(0)}%`
+          );
+        } catch {
+          // 观察者失败不影响主流程
+        }
       }
 
       // 完成
@@ -649,7 +1364,7 @@ export class LoopController {
           try {
             this.deps.trajectoryDatabase.recordExecution({
               id: traceId,
-              input: context.metadata.input as string || '',
+              input: (context.metadata.input as string) || '',
               response: report.response,
               status: 'success',
               loop_rounds: context.budget.roundsUsed,
@@ -680,6 +1395,108 @@ export class LoopController {
       // 🧬 进化闭环：在 AFTER_RESPONSE 后触发学习
       await this.triggerEvolution闭环(input, report, finalQuality, context);
 
+      // ========== 集成：循环可观测性 ==========
+      // 【集成点】循环结束
+      if (loopObserver.isEnabled()) {
+        try {
+          loopObserver.endLoop(true, null, report.response.substring(0, 100));
+        } catch {
+          // 观察者失败不影响主流程
+        }
+      }
+
+      // ========== 集成：隐式反馈收集 ==========
+      // 【集成点】AI 回复生成后触发隐式反馈收集
+      if (feedbackEnabled) {
+        try {
+          // 异步执行，不阻塞主流程
+          setImmediate(() => {
+            if (typeof feedbackCollector.onAiMessage === 'function') {
+              feedbackCollector.onAiMessage({
+                content: report.response,
+                traceId,
+                quality: finalQuality.overall,
+              });
+            }
+          });
+
+          // 将收集到的反馈传递给进化引擎
+          if (typeof feedbackCollector.getStatistics === 'function') {
+            const stats = feedbackCollector.getStatistics();
+            if (this.evolutionEngine && stats.totalSignals > 0) {
+              try {
+                this.evolutionEngine.collectFeedback(
+                  input.text,
+                  report.response,
+                  {
+                    success: finalQuality.overall >= 0.6,
+                    toolsUsed: [], // 可以从 context 中提取
+                  },
+                  'implicit'
+                );
+              } catch {
+                // 反馈传递失败不影响主流程
+              }
+            }
+          }
+        } catch (fbErr) {
+          Logger.warn(
+            `隐式反馈收集失败，已跳过: ${(fbErr as Error).message}`,
+            'LoopController'
+          );
+        }
+      }
+
+      // ========== 集成：学习效果可视化 ==========
+      // 【集成点】循环结束时生成学习状态报告（仅 debug 模式）
+      if (process.env.DEBUG_LEARNING_STATUS === 'true') {
+        try {
+          const report = LearningStatusReporter.generateSummary({
+            // 从各数据源获取数据
+            summary: {
+              totalInteractions: 1,
+              totalOptimizations: 0,
+              averageQualityScore: finalQuality.overall,
+              weeklyImprovement: 0,
+              enginesActive: [],
+            },
+            quality: {
+              current: finalQuality.overall,
+              trend: 'stable',
+              recentScores: [finalQuality.overall],
+              failureRate: finalQuality.overall >= 0.6 ? 0 : 1,
+            },
+            performance: {
+              averageResponseTime: context.trace.totalDuration,
+              p95ResponseTime: context.trace.totalDuration,
+              throughput: 0,
+            },
+            optimization: {
+              lastCycleTime: null,
+              cyclesToday: 0,
+              totalCycles: 0,
+              successRate: 0,
+              recentCycles: [],
+            },
+            evolution: null,
+            codeEvolution: null,
+            engines: {
+              toolWeights: {},
+              userProfileConfidence: 0,
+              taskAdjustmentCount: 0,
+            },
+            verification: {
+              totalVerifications: 0,
+              successRate: 0,
+              recentResults: [],
+            },
+          });
+          Logger.debug(`学习状态: ${report}`, 'LoopController');
+        } catch {
+          // 学习状态报告失败不影响主流程
+        }
+      }
+
       Logger.info(
         `✅ LoopController 完成 [${traceId}] 耗时=${context.trace.totalDuration}ms 轮次=${context.budget.roundsUsed} 工具=${context.trace.totalToolCalls}次`,
         'LoopController'
@@ -701,6 +1518,18 @@ export class LoopController {
 
       // Harness Engineering: 失败时完成全链路追踪
       EventBus.completeFullTrace(traceId, 'failed');
+
+      // ========== 集成：循环可观测性 ==========
+      // 【集成点】循环失败时结束观察者
+      if (observerEnabled) {
+        try {
+          if (typeof loopObserver.endLoop === 'function') {
+            loopObserver.endLoop(false, (err as Error).message, '');
+          }
+        } catch {
+          // 观察者失败不影响主流程
+        }
+      }
 
       if (this.deps.persistenceService) {
         await this.deps.persistenceService.updateTaskStatus(
@@ -798,6 +1627,162 @@ export class LoopController {
   }
 
   /**
+   * P5: 构建Thought阶段的Prompt — 深度注入上一轮反思结论
+   *
+   * Hermes级别要求：反思结论不是简单的系统提示，而是直接影响下一轮的推理过程
+   * @param params - 包含用户输入和当前步骤信息
+   * @returns 构建好的Thought阶段Prompt字符串
+   */
+  /**
+   * P0 修复：收集失败信息用于重规划
+   * 从 stepResults 中提取失败步骤的工具名、错误原因，传给 Planner
+   */
+  private collectFailureInfoForReplan(context: LoopContext): {
+    reason: string;
+    failedSteps: Array<{ toolName: string; error: string; stepId: string }>;
+  } | null {
+    if (context.stepResults.size === 0) return null;
+
+    const failedSteps: Array<{
+      toolName: string;
+      error: string;
+      stepId: string;
+    }> = [];
+    for (const [stepId, result] of context.stepResults.entries()) {
+      if (!result.success) {
+        failedSteps.push({
+          toolName: result.toolName || `step_${stepId}`,
+          error: result.error || '未知错误',
+          stepId,
+        });
+      }
+    }
+
+    if (failedSteps.length === 0) return null;
+
+    const reason = failedSteps
+      .map((f) => `${f.toolName}(${f.stepId}): ${f.error.substring(0, 80)}`)
+      .join('; ');
+
+    return { reason, failedSteps };
+  }
+
+  private buildThoughtPrompt(params: {
+    userInput: string;
+    currentStep: { tool: string; args: Record<string, unknown> };
+  }): string {
+    const { userInput, currentStep } = params;
+    let prompt = `【当前任务】${userInput}\n【当前步骤】工具: ${currentStep.tool}, 参数: ${JSON.stringify(currentStep.args)}`;
+
+    // P5: 深度注入上一轮反思结论
+    if (this._lastReflectionInsight) {
+      const insight = this._lastReflectionInsight;
+      prompt += `\n\n【上一轮反思结论】`;
+      prompt += `\n- 根因分析: ${insight.rootCause}`;
+      if (insight.diagnosis) {
+        prompt += `\n- 诊断: ${insight.diagnosis}`;
+      }
+      if (insight.fixStrategy) {
+        prompt += `\n- 修复策略: ${insight.fixStrategy}`;
+      }
+      if (insight.correctedArgs) {
+        prompt += `\n- 建议参数: ${JSON.stringify(insight.correctedArgs)}`;
+      }
+      prompt += `\n- 是否重试: ${insight.shouldRetry ? '是' : '否'}`;
+      prompt += `\n\n请基于以上反思结论调整当前步骤的执行策略。`;
+    }
+
+    return prompt;
+  }
+
+  /**
+   * P5: 在需要时触发反思并保存结论
+   * @param params - 包含用户输入、工具结果和循环计数
+   * @returns Promise<void>
+   */
+  private async triggerReflectionIfNeeded(params: {
+    userInput: string;
+    toolResult: { success: boolean; error?: string; output?: unknown };
+    loopCount: number;
+  }): Promise<void> {
+    if (!this.deps?.reflectionEngine) return;
+    if (params.toolResult.success) return;
+
+    // P5: 基于学习信号自适应调整反思深度和重试次数
+    let enableDeepReflection = true;
+    let adjustedMaxRetries = 2;
+    if (this.deps?.strategyAdjuster) {
+      try {
+        const config = this.deps.strategyAdjuster.getAdjustedReflectionConfig();
+        enableDeepReflection = config.enableDeepReflection;
+        adjustedMaxRetries = config.maxRetries;
+        Logger.info(
+          `📊 P5 策略自适应: 深度反思=${enableDeepReflection}, 最大重试=${adjustedMaxRetries}`,
+          'LoopController'
+        );
+      } catch {
+        // 回退到默认配置
+      }
+    }
+
+    // P5: 高成功率时跳过不必要的反思（策略自适应优化）
+    if (!enableDeepReflection && params.loopCount > 1) {
+      Logger.debug('P5 策略自适应: 高成功率，跳过深度反思', 'LoopController');
+      return;
+    }
+
+    try {
+      const reflection = await this.deps.reflectionEngine.reflect(
+        'unknown',
+        {},
+        params.toolResult.error || '执行失败',
+        { traceId: `loop-${params.loopCount}`, loopCount: params.loopCount }
+      );
+
+      // 保存反思结论供下一轮Thought使用
+      // 注：reflect() 返回类型不包含 diagnosis/fixStrategy，使用类型断言以兼容扩展字段
+      const extendedReflection = reflection as {
+        rootCause: string;
+        correctedArgs: Record<string, unknown> | null;
+        shouldRetry: boolean;
+        diagnosis?: string;
+        fixStrategy?: string;
+      };
+
+      this._lastReflectionInsight = {
+        rootCause: extendedReflection.rootCause || '未知根因',
+        correctedArgs: extendedReflection.correctedArgs || undefined,
+        shouldRetry: extendedReflection.shouldRetry ?? false,
+        diagnosis: extendedReflection.diagnosis || undefined,
+        fixStrategy: extendedReflection.fixStrategy || undefined,
+      };
+
+      // P5: 记录任务级学习信号到 StrategyAdjuster
+      if (this.deps?.strategyAdjuster) {
+        try {
+          this.deps.strategyAdjuster.recordSignal({
+            signalType: 'task_failure',
+            error: params.toolResult.error,
+            timestamp: Date.now(),
+          });
+        } catch {
+          // 忽略
+        }
+      }
+
+      Logger.info(
+        `🔄 P5 反思结论已保存，将注入下一轮Thought: ${this._lastReflectionInsight.rootCause}`,
+        'LoopController'
+      );
+    } catch (err) {
+      Logger.debug(
+        `P5 反思触发失败: ${(err as Error).message}`,
+        'LoopController'
+      );
+    }
+  }
+
+  /**
    * 触发进化闭环
    * 在任务完成后调用 EvolutionEngine 的学习相关方法
    */
@@ -838,6 +1823,25 @@ export class LoopController {
         totalDuration
       );
 
+      // P5: 记录任务级学习信号到 StrategyAdjuster（打通学习闭环）
+      // 任务成功时记录 task_success，使策略调整器能准确计算整体成功率
+      if (this.deps?.strategyAdjuster) {
+        try {
+          this.deps.strategyAdjuster.recordSignal({
+            signalType: 'task_success',
+            quality: qualityScore,
+            duration: totalDuration,
+            timestamp: Date.now(),
+          });
+          Logger.debug(
+            `📊 P5 学习闭环: task_success 信号已记录 (quality=${qualityScore.toFixed(2)})`,
+            'LoopController'
+          );
+        } catch {
+          // 忽略策略调整失败
+        }
+      }
+
       // 4. 高质量任务触发 generateSkill() - 自动生成技能
       if (qualityScore >= 0.7) {
         const skillPath = evo.generateSkill({
@@ -850,6 +1854,33 @@ export class LoopController {
         });
         if (skillPath) {
           Logger.info(`🧬 自动生成技能: ${skillPath}`, 'LoopController');
+        }
+      }
+
+      // P3: TrajectoryFlywheel — 轨迹飞轮分析（生成优化建议）
+      if (this.deps.trajectoryFlywheel) {
+        try {
+          const analysis = this.deps.trajectoryFlywheel.analyze(traceId);
+          if (analysis.optimizationSuggestions.length > 0) {
+            Logger.info(
+              `🔄 轨迹飞轮: ${analysis.optimizationSuggestions.length} 条优化建议`,
+              'LoopController'
+            );
+            for (const suggestion of analysis.optimizationSuggestions.slice(
+              0,
+              3
+            )) {
+              Logger.info(
+                `  💡 [${suggestion.priority}] ${suggestion.description} (预期改善: ${suggestion.estimatedImprovement}%)`,
+                'LoopController'
+              );
+            }
+          }
+        } catch (flywheelErr) {
+          Logger.debug(
+            `轨迹飞轮分析失败（不影响主流程）: ${(flywheelErr as Error).message}`,
+            'LoopController'
+          );
         }
       }
 
@@ -876,7 +1907,9 @@ export class LoopController {
       }
       // 也检查 tool_calls
       if (msg.tool_calls && Array.isArray(msg.tool_calls)) {
-        for (const tc of msg.tool_calls as Array<{ function?: { name?: string } }>) {
+        for (const tc of msg.tool_calls as Array<{
+          function?: { name?: string };
+        }>) {
           if (tc.function?.name) {
             tools.add(tc.function.name);
           }
@@ -890,17 +1923,45 @@ export class LoopController {
    * 状态转换
    */
   // Fix: valid state transitions — blocks impossible transitions
-  private static readonly VALID_TRANSITIONS: Map<LoopState, LoopState[]> = new Map([
-    [LoopState.PLANNING, [LoopState.DEBATING, LoopState.EXECUTING, LoopState.FAILED, LoopState.ABORTED]],
-    [LoopState.DEBATING, [LoopState.PLANNING, LoopState.EXECUTING, LoopState.FAILED, LoopState.ABORTED]],
-    [LoopState.EXECUTING, [LoopState.EVALUATING, LoopState.FAILED, LoopState.ABORTED]],
-    [LoopState.EVALUATING, [LoopState.REPORTING, LoopState.PLANNING, LoopState.ABORTED, LoopState.BUDGET_EXCEEDED]],
-    [LoopState.REPORTING, [LoopState.COMPLETED, LoopState.FAILED]],
-    [LoopState.COMPLETED, []],
-    [LoopState.FAILED, []],
-    [LoopState.ABORTED, []],
-    [LoopState.BUDGET_EXCEEDED, [LoopState.COMPLETED, LoopState.FAILED]],
-  ]);
+  private static readonly VALID_TRANSITIONS: Map<LoopState, LoopState[]> =
+    new Map([
+      [
+        LoopState.PLANNING,
+        [
+          LoopState.DEBATING,
+          LoopState.EXECUTING,
+          LoopState.FAILED,
+          LoopState.ABORTED,
+        ],
+      ],
+      [
+        LoopState.DEBATING,
+        [
+          LoopState.PLANNING,
+          LoopState.EXECUTING,
+          LoopState.FAILED,
+          LoopState.ABORTED,
+        ],
+      ],
+      [
+        LoopState.EXECUTING,
+        [LoopState.EVALUATING, LoopState.FAILED, LoopState.ABORTED],
+      ],
+      [
+        LoopState.EVALUATING,
+        [
+          LoopState.REPORTING,
+          LoopState.PLANNING,
+          LoopState.ABORTED,
+          LoopState.BUDGET_EXCEEDED,
+        ],
+      ],
+      [LoopState.REPORTING, [LoopState.COMPLETED, LoopState.FAILED]],
+      [LoopState.COMPLETED, []],
+      [LoopState.FAILED, []],
+      [LoopState.ABORTED, []],
+      [LoopState.BUDGET_EXCEEDED, [LoopState.COMPLETED, LoopState.FAILED]],
+    ]);
 
   private transition(newState: LoopState, context: LoopContext): void {
     const prev = this.state;
@@ -1105,6 +2166,152 @@ export class LoopController {
   }
 
   /**
+   * 查找失败的步骤：优先返回最后一个有工具名的步骤（执行器通常按顺序处理，失败发生在当前步骤）
+   * @param plan - 执行计划
+   * @param context - 循环上下文
+   * @returns 失败的步骤或 null
+   */
+  private findFailedStep(
+    plan: ExecutionPlan,
+    context: LoopContext
+  ): PlanStep | null {
+    for (let i = plan.steps.length - 1; i >= 0; i--) {
+      const step = plan.steps[i];
+      if (!step.toolName) continue;
+      const result = context.stepResults.get(step.id);
+      if (!result || !result.success) {
+        return step;
+      }
+    }
+    const lastStepWithTool = [...plan.steps].reverse().find((s) => s.toolName);
+    return lastStepWithTool || null;
+  }
+
+  /**
+   * 触发深度反思：分析整条执行轨迹，给出修正计划
+   */
+  private async triggerDeepReflection(
+    input: UserInput,
+    context: LoopContext,
+    evalResult: {
+      goalProgress: number;
+      suggestedAction: string;
+      reason: string;
+    }
+  ): Promise<void> {
+    if (!this.deps.reflectionEngine) return;
+
+    try {
+      const trajectory = this.buildTrajectoryFromContext(context);
+      const deepResult = await this.deps.reflectionEngine.deepReflect(
+        input.text,
+        trajectory,
+        evalResult
+      );
+
+      Logger.info(
+        `🧠 深度反思: 诊断=${deepResult.diagnosis} 根因=${deepResult.rootCause}`,
+        'LoopController'
+      );
+
+      if (deepResult.correctedPlan && deepResult.correctedPlan.length > 0) {
+        context.messages.push({
+          role: 'system',
+          content: `【深度反思修正计划】\n诊断: ${deepResult.diagnosis}\n根因: ${deepResult.rootCause}\n修正策略: ${deepResult.fixStrategy}\n建议步骤:\n${deepResult.correctedPlan.map((s: { stepDescription: string; toolName?: string }, i: number) => `${i + 1}. ${s.stepDescription}${s.toolName ? ` (工具: ${s.toolName})` : ''}`).join('\n')}`,
+        });
+      }
+    } catch (err) {
+      Logger.warn(
+        `深度反思失败，降级为普通重规划: ${(err as Error).message}`,
+        'LoopController'
+      );
+    }
+  }
+
+  /**
+   * 从上下文构建执行轨迹
+   */
+  private buildTrajectoryFromContext(context: LoopContext): Array<{
+    toolName: string;
+    success: boolean;
+    error?: string;
+    output?: string;
+  }> {
+    const trajectory: Array<{
+      toolName: string;
+      success: boolean;
+      error?: string;
+      output?: string;
+    }> = [];
+
+    for (const [, result] of context.stepResults) {
+      trajectory.push({
+        toolName: result.toolName || 'unknown',
+        success: result.success,
+        error: result.error,
+        output: result.output,
+      });
+    }
+
+    return trajectory;
+  }
+
+  /**
+   * 反思失败步骤，分析根因并记录经验（阶段3反思纠错）
+   * @param stepResult - 失败的步骤结果
+   * @param context - 循环上下文
+   */
+  private async reflectOnFailure(
+    stepResult: StepResult,
+    context: LoopContext
+  ): Promise<void> {
+    if (!this.deps.reflectionEngine || !stepResult.toolName) return;
+
+    try {
+      const toolArgs =
+        (stepResult.metadata?.args as Record<string, unknown>) ?? {};
+      const reflection = await this.deps.reflectionEngine.reflect(
+        stepResult.toolName,
+        toolArgs,
+        stepResult.error || '未知错误',
+        {
+          traceId: context.trace.traceId,
+          loopCount: context.budget.roundsUsed,
+        }
+      );
+
+      Logger.info(
+        `🧠 反思结果: 根因=${reflection.rootCause} shouldRetry=${reflection.shouldRetry}${
+          reflection.alternativeTool
+            ? ` 替代工具=${reflection.alternativeTool}`
+            : ''
+        }`,
+        'LoopController'
+      );
+
+      this.deps.reflectionEngine.recordExperience({
+        toolName: stepResult.toolName,
+        args: toolArgs,
+        error: stepResult.error || '未知错误',
+        rootCause: reflection.rootCause,
+        resolution: reflection.alternativeTool
+          ? `替换为 ${reflection.alternativeTool}`
+          : reflection.correctedArgs
+            ? '修正参数后重试'
+            : reflection.shouldRetry
+              ? '重试成功'
+              : '不重试',
+        success: reflection.shouldRetry,
+      });
+    } catch (err) {
+      Logger.warn(
+        `反思引擎调用失败，降级为原有重试逻辑: ${(err as Error).message}`,
+        'LoopController'
+      );
+    }
+  }
+
+  /**
    * 获取上下文中最后的助手消息
    * @param context - 循环上下文
    * @returns 助手消息内容或null
@@ -1154,6 +2361,73 @@ export class LoopController {
     }
 
     return { withinBudget: warnings.length === 0, warnings };
+  }
+
+  /**
+   * 动态重规划检查：执行后立即检查，不等 Evaluate 阶段
+   * 基于执行输出判断是否需要重新规划
+   * @param executorOutput - Executor 的输出
+   * @param context - 循环上下文
+   * @returns 重规划决策结果
+   */
+  private checkDynamicReplan(
+    executorOutput: {
+      messages: ChatMessage[];
+      toolCallsCount: number;
+      toolDuration: number;
+      completedNaturally: boolean;
+    },
+    context: LoopContext
+  ): { shouldReplan: boolean; reason: string } {
+    const plan = context.plan;
+
+    // none 模式不触发动态 replan（纯对话，无工具调用预期）
+    if (plan?.toolCallMode === 'none') {
+      return { shouldReplan: false, reason: '纯对话模式，无需重规划' };
+    }
+
+    const toolMessages = executorOutput.messages.filter(
+      (m) => m.role === 'tool'
+    );
+
+    // 有工具调用时检查失败情况
+    if (toolMessages.length > 0) {
+      const failedTools = toolMessages.filter((m) => {
+        const content = typeof m.content === 'string' ? m.content : '';
+        return content.startsWith('错误') || content.includes('错误:');
+      });
+
+      // 全部失败
+      if (failedTools.length === toolMessages.length) {
+        return {
+          shouldReplan: true,
+          reason: `工具全部失败（${failedTools.length}/${toolMessages.length}），需要重新规划`,
+        };
+      }
+
+      // 失败率 > 50%
+      const failureRate = failedTools.length / toolMessages.length;
+      if (failureRate > 0.5) {
+        return {
+          shouldReplan: true,
+          reason: `工具失败率过高: ${(failureRate * 100).toFixed(0)}%（${failedTools.length}/${toolMessages.length}），需要重新规划`,
+        };
+      }
+    }
+
+    // 执行卡住：无工具调用且未自然完成（且有计划需要执行）
+    if (
+      executorOutput.toolCallsCount === 0 &&
+      !executorOutput.completedNaturally &&
+      plan
+    ) {
+      return {
+        shouldReplan: true,
+        reason: '执行卡住：无工具调用且未自然完成，需要重新规划',
+      };
+    }
+
+    return { shouldReplan: false, reason: '执行正常，无需重规划' };
   }
 
   /**
@@ -1263,10 +2537,18 @@ export class LoopController {
           : 'moderate';
 
     // 尝试使用 ConstraintsService 的自适应预算
-    if (this.deps.constraintsService && 'resolveAdaptiveBudget' in this.deps.constraintsService) {
-      const adaptive = (this.deps.constraintsService as unknown as {
-        resolveAdaptiveBudget(l: string, c: boolean): import('../types').BudgetAllocation;
-      }).resolveAdaptiveBudget(level, false);
+    if (
+      this.deps.constraintsService &&
+      'resolveAdaptiveBudget' in this.deps.constraintsService
+    ) {
+      const adaptive = (
+        this.deps.constraintsService as unknown as {
+          resolveAdaptiveBudget(
+            l: string,
+            c: boolean
+          ): import('../types').BudgetAllocation;
+        }
+      ).resolveAdaptiveBudget(level, false);
       return {
         roundsUsed: 0,
         softRoundLimit: Math.floor(adaptive.maxRounds * 0.5),
@@ -1310,11 +2592,16 @@ export class LoopController {
         budgetState: DEFAULT_BUDGET,
       },
       metadata: { input: input.text },
+      stepOutputs: new Map(),
+      dataFlowChannels: [],
+      crossStepState: new Map(),
+      stepStates: new Map(),
+      stepStateHistory: [],
     });
 
     try {
       const contextText = initialMessages
-        .map(m => `${m.role}: ${m.content}`)
+        .map((m) => `${m.role}: ${m.content}`)
         .join('\n');
 
       const orchestratorResult = await this.deps.orchestratorAgent!.processGoal(
@@ -1327,8 +2614,10 @@ export class LoopController {
         overall: orchestratorResult.qualityScore?.overall ?? 0.7,
         accuracy: orchestratorResult.qualityScore?.dimensions?.accuracy ?? 0.7,
         usefulness: orchestratorResult.qualityScore?.dimensions?.persona ?? 0.7,
-        friendliness: orchestratorResult.qualityScore?.dimensions?.stability ?? 0.7,
-        efficiency: orchestratorResult.qualityScore?.dimensions?.efficiency ?? 0.7,
+        friendliness:
+          orchestratorResult.qualityScore?.dimensions?.stability ?? 0.7,
+        efficiency:
+          orchestratorResult.qualityScore?.dimensions?.efficiency ?? 0.7,
         details: `OrchestratorAgent处理完成: ${orchestratorResult.success ? '成功' : '部分成功'}, ${orchestratorResult.completedTasks}/${orchestratorResult.totalTasks}任务完成`,
       };
 
@@ -1373,6 +2662,11 @@ export class LoopController {
           budgetState: DEFAULT_BUDGET,
         },
         metadata: { input: input.text },
+        stepOutputs: new Map(),
+        dataFlowChannels: [],
+        crossStepState: new Map(),
+        stepStates: new Map(),
+        stepStateHistory: [],
       });
 
       return {
@@ -1405,7 +2699,6 @@ export class LoopController {
       return this.run(input, initialMessages);
     }
   }
-
 }
 
 /**
@@ -1416,14 +2709,23 @@ export class LoopController {
  * 如果没有 LLM 可用，则使用基于规则的静态分析
  */
 export class DefaultDebater {
-  private llm: { chat(params: { messages: Array<{ role: string; content: string }> }): Promise<{ content: string }> } | null;
+  private llm: {
+    chat(params: {
+      messages: Array<{ role: string; content: string }>;
+    }): Promise<{ content: string }>;
+  } | null;
   private readonly MAX_DEBATE_ROUNDS = 3;
   private readonly QUALITY_THRESHOLD = 0.7;
 
   constructor(llm?: unknown) {
-    this.llm = (llm && typeof llm === 'object' && 'chat' in llm)
-      ? llm as { chat(params: { messages: Array<{ role: string; content: string }> }): Promise<{ content: string }> }
-      : null;
+    this.llm =
+      llm && typeof llm === 'object' && 'chat' in llm
+        ? (llm as {
+            chat(params: {
+              messages: Array<{ role: string; content: string }>;
+            }): Promise<{ content: string }>;
+          })
+        : null;
   }
 
   /**
@@ -1454,7 +2756,10 @@ export class DefaultDebater {
     input: UserInput
   ): Promise<DebaterOutput> {
     const steps = plan.steps
-      .map((s, i) => `${i + 1}. ${s.description}${s.toolName ? ` (工具: ${s.toolName})` : ''}`)
+      .map(
+        (s, i) =>
+          `${i + 1}. ${s.description}${s.toolName ? ` (工具: ${s.toolName})` : ''}`
+      )
       .join('\n');
 
     const debatePrompt = `你是一个严格的计划审查员。你的任务是找出以下执行计划中的漏洞和风险。
@@ -1489,7 +2794,8 @@ ${steps}
       if (jsonMatch) {
         const parsed = JSON.parse(jsonMatch[0]);
         return {
-          passed: parsed.passed ?? parsed.qualityScore >= this.QUALITY_THRESHOLD,
+          passed:
+            parsed.passed ?? parsed.qualityScore >= this.QUALITY_THRESHOLD,
           vulnerabilities: parsed.vulnerabilities || [],
           improvements: parsed.improvements || [],
           qualityScore: parsed.qualityScore ?? 0.5,
@@ -1497,7 +2803,10 @@ ${steps}
         };
       }
     } catch (err) {
-      Logger.warn(`LLM 辩论失败，降级到规则分析: ${(err as Error).message}`, 'DefaultDebater');
+      Logger.warn(
+        `LLM 辩论失败，降级到规则分析: ${(err as Error).message}`,
+        'DefaultDebater'
+      );
     }
 
     // LLM 失败时降级
@@ -1526,17 +2835,26 @@ ${steps}
 
     // 检查2: 是否有步骤缺少工具
     const stepsWithoutTool = plan.steps.filter(
-      (s) => !s.toolName && !s.description.includes('分析') && !s.description.includes('思考')
+      (s) =>
+        !s.toolName &&
+        !s.description.includes('分析') &&
+        !s.description.includes('思考')
     );
     if (stepsWithoutTool.length > 0 && plan.steps.length > 2) {
-      improvements.push(`步骤 "${stepsWithoutTool[0].description}" 没有指定工具，建议明确使用什么工具`);
+      improvements.push(
+        `步骤 "${stepsWithoutTool[0].description}" 没有指定工具，建议明确使用什么工具`
+      );
       qualityScore -= 0.05;
     }
 
     // 检查3: 输入和计划的相关性
     const inputKeywords = input.text.toLowerCase().split(/\s+/);
-    const planText = plan.steps.map((s) => s.description.toLowerCase()).join(' ');
-    const relevance = inputKeywords.filter((kw) => kw.length > 2 && planText.includes(kw)).length;
+    const planText = plan.steps
+      .map((s) => s.description.toLowerCase())
+      .join(' ');
+    const relevance = inputKeywords.filter(
+      (kw) => kw.length > 2 && planText.includes(kw)
+    ).length;
     if (relevance < inputKeywords.filter((kw) => kw.length > 2).length * 0.3) {
       vulnerabilities.push('计划与用户需求的相关性较低，可能偏离了目标');
       qualityScore -= 0.15;
@@ -1551,7 +2869,8 @@ ${steps}
     qualityScore = Math.max(0, Math.min(1, qualityScore));
 
     return Promise.resolve({
-      passed: qualityScore >= this.QUALITY_THRESHOLD && vulnerabilities.length === 0,
+      passed:
+        qualityScore >= this.QUALITY_THRESHOLD && vulnerabilities.length === 0,
       vulnerabilities,
       improvements,
       qualityScore,

@@ -55,7 +55,7 @@ export function registerContextManageRoutes(
       }
 
       const loadedFiles = core.getLoadedContextFiles();
-      
+
       res.json({
         success: true,
         data: {
@@ -69,9 +69,7 @@ export function registerContextManageRoutes(
       });
     } catch (error) {
       Logger.error('❌ 获取上下文文件列表失败', error as Error, 'ContextAPI');
-      res
-        .status(500)
-        .json({ success: false, error: (error as Error).message });
+      res.status(500).json({ success: false, error: (error as Error).message });
     }
   });
 
@@ -100,9 +98,7 @@ export function registerContextManageRoutes(
       });
     } catch (error) {
       Logger.error('❌ 刷新上下文文件失败', error as Error, 'ContextAPI');
-      res
-        .status(500)
-        .json({ success: false, error: (error as Error).message });
+      res.status(500).json({ success: false, error: (error as Error).message });
     }
   });
 
@@ -139,16 +135,15 @@ export function registerContextManageRoutes(
         data: {
           files: loadedFiles,
           count: loadedFiles.length,
-          message: loadedFiles.length === 0
-            ? '未找到项目上下文文件。可创建的文件：JIABAIXING.md, CONTEXT.md, .jiabaixing/context.md, CLAUDE.md'
-            : `已加载 ${loadedFiles.length} 个上下文文件。`,
+          message:
+            loadedFiles.length === 0
+              ? '未找到项目上下文文件。可创建的文件：JIABAIXING.md, CONTEXT.md, .jiabaixing/context.md, CLAUDE.md'
+              : `已加载 ${loadedFiles.length} 个上下文文件。`,
         },
       });
     } catch (error) {
       Logger.error('❌ 加载上下文文件失败', error as Error, 'ContextAPI');
-      res
-        .status(500)
-        .json({ success: false, error: (error as Error).message });
+      res.status(500).json({ success: false, error: (error as Error).message });
     }
   });
 
@@ -164,13 +159,13 @@ export function registerContextManageRoutes(
 
       // 验证文件名是否在允许列表中
       const allowedFiles = [...CONTEXT_FILE_LIST];
-      if (!allowedFiles.includes(fileName as typeof CONTEXT_FILE_LIST[number])) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            error: `不支持的文件名: ${fileName}。允许的文件名: ${allowedFiles.join(', ')}`,
-          });
+      if (
+        !allowedFiles.includes(fileName as (typeof CONTEXT_FILE_LIST)[number])
+      ) {
+        return res.status(400).json({
+          success: false,
+          error: `不支持的文件名: ${fileName}。允许的文件名: ${allowedFiles.join(', ')}`,
+        });
       }
 
       const projectRoot = process.cwd();
@@ -178,12 +173,10 @@ export function registerContextManageRoutes(
 
       // 检查文件是否已存在
       if (fs.existsSync(filePath)) {
-        return res
-          .status(409)
-          .json({
-            success: false,
-            error: `文件已存在: ${fileName}。如需更新请直接编辑文件后使用 refresh 操作刷新缓存。`,
-          });
+        return res.status(409).json({
+          success: false,
+          error: `文件已存在: ${fileName}。如需更新请直接编辑文件后使用 refresh 操作刷新缓存。`,
+        });
       }
 
       // 确保目录存在（如 .jiabaixing/context.md 需要创建 .jiabaixing 目录）
@@ -205,9 +198,7 @@ export function registerContextManageRoutes(
       });
     } catch (error) {
       Logger.error('❌ 创建上下文文件失败', error as Error, 'ContextAPI');
-      res
-        .status(500)
-        .json({ success: false, error: (error as Error).message });
+      res.status(500).json({ success: false, error: (error as Error).message });
     }
   });
 
@@ -221,13 +212,13 @@ export function registerContextManageRoutes(
 
       // 验证文件名是否在允许列表中
       const allowedFiles = [...CONTEXT_FILE_LIST];
-      if (!allowedFiles.includes(fileName as typeof CONTEXT_FILE_LIST[number])) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            error: `不支持的文件名: ${fileName}。允许的文件名: ${allowedFiles.join(', ')}`,
-          });
+      if (
+        !allowedFiles.includes(fileName as (typeof CONTEXT_FILE_LIST)[number])
+      ) {
+        return res.status(400).json({
+          success: false,
+          error: `不支持的文件名: ${fileName}。允许的文件名: ${allowedFiles.join(', ')}`,
+        });
       }
 
       const projectRoot = process.cwd();
@@ -251,9 +242,7 @@ export function registerContextManageRoutes(
       });
     } catch (error) {
       Logger.error('❌ 读取上下文文件失败', error as Error, 'ContextAPI');
-      res
-        .status(500)
-        .json({ success: false, error: (error as Error).message });
+      res.status(500).json({ success: false, error: (error as Error).message });
     }
   });
 }

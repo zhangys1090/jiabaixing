@@ -162,12 +162,16 @@ function formatLogOutput(
 ): string {
   const lines: string[] = [];
   lines.push(`📋 日志查询: ${logFile}`);
-  lines.push(`过滤: level=${level}, keyword=${keyword || '-'}, module=${module || '-'}`);
+  lines.push(
+    `过滤: level=${level}, keyword=${keyword || '-'}, module=${module || '-'}`
+  );
   lines.push(`匹配: ${logs.length} 条`);
   lines.push('─'.repeat(50));
 
   for (const log of logs) {
-    const icon = { error: '🔴', warn: '🟡', info: '🟢', fatal: '💀' }[String(log.level)] || '⚪';
+    const icon =
+      { error: '🔴', warn: '🟡', info: '🟢', fatal: '💀' }[String(log.level)] ||
+      '⚪';
     const ts = String(log.timestamp || '').substring(11, 19);
     const mod = log.module ? `[${log.module}]` : '';
     const msg = String(log.message || '').substring(0, 200);

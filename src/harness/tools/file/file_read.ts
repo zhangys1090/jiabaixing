@@ -56,7 +56,8 @@ function normalizePath(rawPath: string): string {
   }
   // /home/user/ → USERPROFILE
   if (rawPath.startsWith('/home/') && process.platform === 'win32') {
-    const home = process.env.USERPROFILE || process.env.HOME || 'C:\\Users\\Default';
+    const home =
+      process.env.USERPROFILE || process.env.HOME || 'C:\\Users\\Default';
     return rawPath.replace(/^\/home\/[^/]+\//, home.replace(/\\/g, '/') + '/');
   }
   return rawPath;
@@ -100,7 +101,7 @@ export function createFileReadExecutor(deps: FileReadDeps = {}) {
         if (!path.isAbsolute(rawPath)) {
           pathCandidates.push(
             path.resolve(process.cwd(), rawPath),
-            path.resolve(process.cwd(), 'src', rawPath),
+            path.resolve(process.cwd(), 'src', rawPath)
           );
         }
 
@@ -115,18 +116,20 @@ export function createFileReadExecutor(deps: FileReadDeps = {}) {
         }
 
         if (!statResult) {
-          const stat = await fs.stat(resolvedPath);
+          await fs.stat(resolvedPath);
         } else if (statResult.size > MAX_FILE_SIZE) {
           return {
             success: false,
             output: null,
-            error: `文件过大 (${(statResult.size / 1024 / 1024).toFixed(1)}MB)，超过最大限制 2MB。请使用 offset 和 limit 参数分段读取。`,
+            error: `文件过大 (${(Number(statResult.size) / 1024 / 1024).toFixed(1)}MB)，超过最大限制 2MB。请使用 offset 和 limit 参数分段读取。`,
             duration: Date.now() - startTime,
             validated: false,
           };
         }
 
-        content = await fs.readFile(resolvedPath, { encoding: encoding as BufferEncoding });
+        content = await fs.readFile(resolvedPath, {
+          encoding: encoding as BufferEncoding,
+        });
       }
 
       if (limit > 0 || offset > 1) {
@@ -141,10 +144,14 @@ export function createFileReadExecutor(deps: FileReadDeps = {}) {
       }
 
       if (content.length > MAX_OUTPUT_LENGTH) {
-        content = content.substring(0, MAX_OUTPUT_LENGTH) + '\n\n... (内容已截断)';
+        content =
+          content.substring(0, MAX_OUTPUT_LENGTH) + '\n\n... (内容已截断)';
       }
 
-      Logger.info(`📄 file_read 成功: ${rawPath} (${content.length}字符)`, 'FileRead');
+      Logger.info(
+        `📄 file_read 成功: ${rawPath} (${content.length}字符)`,
+        'FileRead'
+      );
 
       return {
         success: true,

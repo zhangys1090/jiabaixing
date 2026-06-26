@@ -76,7 +76,8 @@ export async function initEvolution(
     const recentScores = metrics.quality.recentScores;
     const avgScore =
       recentScores.length > 0
-        ? recentScores.reduce((a: number, b: number) => a + b, 0) / recentScores.length
+        ? recentScores.reduce((a: number, b: number) => a + b, 0) /
+          recentScores.length
         : 0;
 
     if (metrics.summary.totalInteractions === 0) {

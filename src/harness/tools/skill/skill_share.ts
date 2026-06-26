@@ -51,11 +51,12 @@ interface SkillPackage {
   author: string;
   createdAt: string;
   // 技能定义
-  trigger: string;        // 触发条件（正则或自然语言描述）
-  tools: string[];        // 使用的工具列表
-  steps: SkillStep[];     // 执行步骤
-  prompt: string;         // LLM 指令
-  examples: Array<{       // 示例
+  trigger: string; // 触发条件（正则或自然语言描述）
+  tools: string[]; // 使用的工具列表
+  steps: SkillStep[]; // 执行步骤
+  prompt: string; // LLM 指令
+  examples: Array<{
+    // 示例
     input: string;
     output: string;
   }>;
@@ -121,7 +122,10 @@ export function createSkillShareExecutor() {
   };
 }
 
-async function exportSkill(name: string, startTime: number): Promise<ToolResult> {
+async function exportSkill(
+  name: string,
+  startTime: number
+): Promise<ToolResult> {
   const filePath = path.join(SKILLS_DIR, `${name}.json`);
   if (!fs.existsSync(filePath)) {
     return {
@@ -166,7 +170,10 @@ ${skill.steps.map((s, i) => `${i + 1}. ${s.description} (${s.tool})`).join('\n')
   };
 }
 
-async function importSkill(filePath: string, startTime: number): Promise<ToolResult> {
+async function importSkill(
+  filePath: string,
+  startTime: number
+): Promise<ToolResult> {
   if (!fs.existsSync(filePath)) {
     return {
       success: false,
@@ -216,7 +223,11 @@ async function importSkill(filePath: string, startTime: number): Promise<ToolRes
   };
 }
 
-async function runSkill(name: string, userPrompt: string, startTime: number): Promise<ToolResult> {
+async function runSkill(
+  name: string,
+  userPrompt: string,
+  startTime: number
+): Promise<ToolResult> {
   const filePath = path.join(SKILLS_DIR, `${name}.json`);
   if (!fs.existsSync(filePath)) {
     return {
@@ -263,7 +274,8 @@ function listSkills(startTime: number): ToolResult {
   if (files.length === 0) {
     return {
       success: true,
-      output: '暂无已保存的技能。使用 skill_create 创建新技能，或使用 action=import 导入技能包。',
+      output:
+        '暂无已保存的技能。使用 skill_create 创建新技能，或使用 action=import 导入技能包。',
       duration: Date.now() - startTime,
       validated: true,
     };
@@ -277,7 +289,9 @@ function listSkills(startTime: number): ToolResult {
       const skill = JSON.parse(content) as SkillPackage;
       lines.push(`• ${skill.name} v${skill.version || '1.0'}`);
       lines.push(`  ${skill.description}`);
-      lines.push(`  步骤: ${skill.steps?.length || 0} | 工具: ${skill.tools?.join(', ') || '无'}`);
+      lines.push(
+        `  步骤: ${skill.steps?.length || 0} | 工具: ${skill.tools?.join(', ') || '无'}`
+      );
       lines.push('');
     } catch {
       lines.push(`• ${file} (格式错误)`);

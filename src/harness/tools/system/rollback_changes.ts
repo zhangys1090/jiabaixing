@@ -45,6 +45,16 @@ export interface RollbackChangesDeps {
     filePath: string,
     steps: number
   ) => Promise<FileChangeHistoryEntry[] | null>;
+  /** 检查点服务（优先使用检查点回滚整个工作目录） */
+  checkpointService?: {
+    createCheckpoint(label: string): Promise<unknown>;
+    listCheckpoints(): Array<{
+      id: string;
+      label: string;
+      timestamp: number;
+    }>;
+    rollback(labelOrId: string): Promise<boolean>;
+  };
 }
 
 /** 创建 rollback_changes 执行器 */
@@ -75,6 +85,44 @@ export function createRollbackChangesExecutor(deps: RollbackChangesDeps) {
         duration: 0,
         validated: false,
       };
+    }
+
+    // 优先使用检查点回滚整个工作目录
+    if (deps.checkpointService) {
+      try {
+        const checkpoints = deps.checkpointService.listCheckpoints();
+        if (checkpoints.length >= steps) {
+          const target = checkpoints[steps - 1];
+          const rolledBack = await deps.checkpointService.rollback(target.id);
+          if (rolledBack) {
+            Logger.info(
+              `↩️ 通过检查点回滚工作目录: ${target.label} (${target.id})`,
+              'RollbackChanges'
+            );
+
+            void EventBus.emit('file_rollback', {
+              traceId,
+              filePath,
+              success: true,
+              timestamp: new Date().toISOString(),
+            });
+
+            return {
+              success: true,
+              output: `已通过检查点回滚工作目录到 ${steps} 步前的状态\n检查点: ${target.label}`,
+              duration: 0,
+              validated: false,
+            };
+          }
+          // 检查点回滚失败，回退到历史记录模式
+          Logger.warn('检查点回滚失败，回退到历史记录模式', 'RollbackChanges');
+        }
+      } catch (cpErr) {
+        Logger.warn(
+          `检查点回滚异常，回退到历史记录模式: ${(cpErr as Error).message}`,
+          'RollbackChanges'
+        );
+      }
     }
 
     const history = await deps.getHistory(filePath);

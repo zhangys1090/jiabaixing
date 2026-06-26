@@ -39,7 +39,11 @@ export const CODE_REVIEW_DEF: ToolDefinition = {
 
 export interface CodeReviewDeps {
   llm?: {
-    chat(prompt: string, history?: unknown[], systemPrompt?: string): Promise<string>;
+    chat(
+      prompt: string,
+      history?: unknown[],
+      systemPrompt?: string
+    ): Promise<string>;
   };
 }
 
@@ -92,14 +96,31 @@ export function createCodeReviewExecutor(deps: CodeReviewDeps) {
       }
 
       // 合并结果
-      const allFindings = [...ruleFindings, ...securityFindings, ...llmFindings];
+      const allFindings = [
+        ...ruleFindings,
+        ...securityFindings,
+        ...llmFindings,
+      ];
 
       // 按严重度排序
-      const severityOrder = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
-      allFindings.sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]);
+      const severityOrder = {
+        critical: 0,
+        high: 1,
+        medium: 2,
+        low: 3,
+        info: 4,
+      };
+      allFindings.sort(
+        (a, b) => severityOrder[a.severity] - severityOrder[b.severity]
+      );
 
       // 格式化输出
-      const output = formatReviewReport(filePath, lines.length, allFindings, focus);
+      const output = formatReviewReport(
+        filePath,
+        lines.length,
+        allFindings,
+        focus
+      );
 
       return {
         success: true,
@@ -110,7 +131,8 @@ export function createCodeReviewExecutor(deps: CodeReviewDeps) {
           filePath,
           totalLines: lines.length,
           findingsCount: allFindings.length,
-          criticalCount: allFindings.filter((f) => f.severity === 'critical').length,
+          criticalCount: allFindings.filter((f) => f.severity === 'critical')
+            .length,
           highCount: allFindings.filter((f) => f.severity === 'high').length,
         },
       };
@@ -126,13 +148,20 @@ export function createCodeReviewExecutor(deps: CodeReviewDeps) {
   };
 }
 
-function runRuleChecks(content: string, lines: string[], ext: string): ReviewFinding[] {
+function runRuleChecks(
+  content: string,
+  lines: string[],
+  ext: string
+): ReviewFinding[] {
   const findings: ReviewFinding[] = [];
 
   // 检查 console.log（生产代码）
   if (ext === '.ts' || ext === '.js') {
     for (let i = 0; i < lines.length; i++) {
-      if (lines[i].includes('console.log') && !lines[i].trim().startsWith('//')) {
+      if (
+        lines[i].includes('console.log') &&
+        !lines[i].trim().startsWith('//')
+      ) {
         findings.push({
           severity: 'low',
           category: 'quality',
@@ -188,7 +217,11 @@ function runSecurityChecks(content: string, lines: string[]): ReviewFinding[] {
 
   // 检查硬编码密钥
   const secretPatterns = [
-    { pattern: /(?:api[_-]?key|apikey|secret|token|password)\s*[:=]\s*['"][^'"]{8,}['"]/gi, name: '硬编码密钥' },
+    {
+      pattern:
+        /(?:api[_-]?key|apikey|secret|token|password)\s*[:=]\s*['"][^'"]{8,}['"]/gi,
+      name: '硬编码密钥',
+    },
     { pattern: /(?:sk-|api_)[a-zA-Z0-9]{20,}/g, name: 'API密钥' },
   ];
 
@@ -236,7 +269,13 @@ function runSecurityChecks(content: string, lines: string[]): ReviewFinding[] {
 }
 
 async function runLLMReview(
-  llm: { chat(prompt: string, history?: unknown[], systemPrompt?: string): Promise<string> },
+  llm: {
+    chat(
+      prompt: string,
+      history?: unknown[],
+      systemPrompt?: string
+    ): Promise<string>;
+  },
   content: string,
   filePath: string,
   focus: string
@@ -256,7 +295,11 @@ ${content.substring(0, 6000)}
 
 只输出 JSON，不要其他内容。最多输出 5 个最重要的问题。`;
 
-  const response = await llm.chat(prompt, [], '你是一个资深代码审查专家。只输出 JSON 数组。');
+  const response = await llm.chat(
+    prompt,
+    [],
+    '你是一个资深代码审查专家。只输出 JSON 数组。'
+  );
 
   try {
     const jsonMatch = response.match(/\[[\s\S]*\]/);
@@ -298,7 +341,13 @@ function formatReviewReport(
   lines.push('');
 
   for (const finding of findings) {
-    const icon = { critical: '🔴', high: '🟠', medium: '🟡', low: '🟢', info: 'ℹ️' }[finding.severity];
+    const icon = {
+      critical: '🔴',
+      high: '🟠',
+      medium: '🟡',
+      low: '🟢',
+      info: 'ℹ️',
+    }[finding.severity];
     const lineRef = finding.line ? ` (行 ${finding.line})` : '';
     lines.push(`${icon} [${finding.category}]${lineRef} ${finding.message}`);
     lines.push(`   建议: ${finding.suggestion}`);

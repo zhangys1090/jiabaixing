@@ -1,6 +1,14 @@
 /**
- * 向量数据库管理模块
+ * 向量数据库管理模块（主实现）
  * 提供向量数据库工厂，支持持久化、ChromaDB 和内存模式
+ *
+ * 注意：这是向量数据库的完整实现。
+ *       VectorDatabaseFactory.ts 为简化版存根（已废弃），仅用于向后兼容。
+ *
+ * 支持的数据库类型：
+ * - persistent: 持久化向量数据库（默认），支持跨会话记忆
+ * - chroma: ChromaDB 向量数据库（可选依赖）
+ * - memory: 内存向量索引，重启后数据丢失
  */
 
 import { Logger } from '../utils/Logger';

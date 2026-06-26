@@ -3,14 +3,36 @@ import * as net from 'net';
 import * as path from 'path';
 import { JiabaixingCore } from '../core/JiabaixingCore';
 import { ScenarioAwareScheduler } from '../core/ScenarioAwareScheduler';
-import { Logger } from '../utils/Logger';
-import { initSecurity } from './init/initSecurity';
-import { initMemory } from './init/initMemory';
-import { initInteraction } from './init/initInteraction';
-import { initEvolution } from './init/initEvolution';
-import { initHarness } from './init/initHarness';
-import { initGateway } from './init/initGateway';
+import {
+  PythonAgentBridge,
+  type PythonAgentConfig,
+} from '../ide/PythonAgentBridge';
 import { MCPServerManager } from '../mcp/MCPServerManager';
+import { Logger } from '../utils/Logger';
+import { initEvolution } from './init/initEvolution';
+import { initGateway } from './init/initGateway';
+import { initHarness } from './init/initHarness';
+import { initInteraction } from './init/initInteraction';
+import { initMemory } from './init/initMemory';
+import { initSecurity } from './init/initSecurity';
+
+/** Python Agent 桥接实例（AGENT_BACKEND=python 时启用） */
+let pythonBridge: PythonAgentBridge | null = null;
+
+/** 获取 PythonAgentBridge 实例 */
+export function getPythonBridge(): PythonAgentBridge | null {
+  return pythonBridge;
+}
+
+/** 检查是否使用 Python 后端 */
+export function isPythonBackend(): boolean {
+  return process.env.AGENT_BACKEND === 'python' && pythonBridge !== null;
+}
+
+/** 获取 Python Agent 后端 URL */
+function getPythonAgentUrl(): string {
+  return process.env.PYTHON_AGENT_URL || 'http://localhost:3112';
+}
 
 /** IPC 请求接口 */
 interface IpcRequest {
@@ -76,29 +98,50 @@ async function handleIpcRequest(
         if (!input) {
           return { id, error: { code: -1, message: '缺少 input 参数' } };
         }
-        const processResult = await core.processInput(input);
-        result = processResult.response;
+        if (isPythonBackend()) {
+          const bridgeResult = await pythonBridge!.processInput(input);
+          result = bridgeResult.response;
+        } else {
+          const processResult = await core.processInput(input);
+          result = processResult.response;
+        }
         break;
       }
       case 'status': {
-        const scheduler = core.getScenarioScheduler();
-        const memoryEngine = core.getMemoryEngine();
-        const llmHealth = await core.getLLMHealth();
-        result = {
-          initialized: true,
-          uptime: process.uptime(),
-          llm: llmHealth,
-          scheduler: scheduler ? { running: true } : { running: false },
-          memory: memoryEngine ? { available: true } : { available: false },
-          pid: process.pid,
-        };
+        if (isPythonBackend()) {
+          const llmStatus = await pythonBridge!.getLlmStatus();
+          result = {
+            initialized: true,
+            uptime: process.uptime(),
+            llm: llmStatus,
+            backend: 'python',
+            pid: process.pid,
+          };
+        } else {
+          const scheduler = core.getScenarioScheduler();
+          const memoryEngine = core.getMemoryEngine();
+          const llmHealth = await core.getLLMHealth();
+          result = {
+            initialized: true,
+            uptime: process.uptime(),
+            llm: llmHealth,
+            scheduler: scheduler ? { running: true } : { running: false },
+            memory: memoryEngine ? { available: true } : { available: false },
+            backend: 'typescript',
+            pid: process.pid,
+          };
+        }
         break;
       }
       case 'skill.list': {
-        const { SkillRegistry } = await import('../skills/SkillRegistry');
-        const registry = SkillRegistry.getInstance();
-        const skills = registry.getAllSkillMeta();
-        result = { skills, count: skills.length };
+        if (isPythonBackend()) {
+          result = await pythonBridge!.listSkills();
+        } else {
+          const { SkillRegistry } = await import('../skills/SkillRegistry');
+          const registry = SkillRegistry.getInstance();
+          const skills = registry.getAllSkillMeta();
+          result = { skills, count: skills.length };
+        }
         break;
       }
       case 'skill.execute': {
@@ -107,46 +150,76 @@ async function handleIpcRequest(
         if (!skillName) {
           return { id, error: { code: -1, message: '缺少 name 参数' } };
         }
-        const { SkillRegistry: SR } = await import('../skills/SkillRegistry');
-        const reg = SR.getInstance();
-        const skillResult = await reg.executeSkill(skillName, skillParams);
-        result = skillResult;
+        if (isPythonBackend()) {
+          result = await pythonBridge!.executeSkill(skillName, skillParams);
+        } else {
+          const { SkillRegistry: SR } = await import('../skills/SkillRegistry');
+          const reg = SR.getInstance();
+          const skillResult = await reg.executeSkill(skillName, skillParams);
+          result = skillResult;
+        }
         break;
       }
       case 'schedule.list': {
-        const scheduler = core.getScenarioScheduler();
-        if (!scheduler) {
-          result = { tasks: [], count: 0 };
+        if (isPythonBackend()) {
+          result = await pythonBridge!.listCronJobs();
         } else {
-          const tasks = scheduler.getTasks();
-          result = { tasks, count: tasks.length };
+          const scheduler = core.getScenarioScheduler();
+          if (!scheduler) {
+            result = { tasks: [], count: 0 };
+          } else {
+            const tasks = scheduler.getTasks();
+            result = { tasks, count: tasks.length };
+          }
         }
         break;
       }
       case 'schedule.add': {
-        const scheduler = core.getScenarioScheduler();
-        if (!scheduler) {
-          return { id, error: { code: -1, message: '调度器未初始化' } };
+        if (isPythonBackend()) {
+          const name = (params?.name as string) || '';
+          const cronExpression =
+            (params?.cron as string) || (params?.schedule as string) || '';
+          const description = (params?.description as string) || '';
+          if (!name || !cronExpression) {
+            return {
+              id,
+              error: { code: -1, message: '缺少 name 或 cron 参数' },
+            };
+          }
+          result = await pythonBridge!.registerCronJob({
+            name,
+            schedule: cronExpression,
+            description,
+          });
+        } else {
+          const scheduler = core.getScenarioScheduler();
+          if (!scheduler) {
+            return { id, error: { code: -1, message: '调度器未初始化' } };
+          }
+          const name = (params?.name as string) || '';
+          const cronExpression =
+            (params?.cron as string) || (params?.schedule as string) || '';
+          const description = (params?.description as string) || '';
+          if (!name || !cronExpression) {
+            return {
+              id,
+              error: { code: -1, message: '缺少 name 或 cron 参数' },
+            };
+          }
+          const taskId = `ipc_${Date.now()}`;
+          scheduler.addTask({
+            id: taskId,
+            name,
+            schedule: cronExpression,
+            description,
+            enabled: true,
+            priority: (params?.priority as number) || 5,
+            executionCount: 0,
+            successCount: 0,
+            averageExecutionTime: 0,
+          });
+          result = { success: true, taskId };
         }
-        const name = (params?.name as string) || '';
-        const cronExpression = (params?.cron as string) || (params?.schedule as string) || '';
-        const description = (params?.description as string) || '';
-        if (!name || !cronExpression) {
-          return { id, error: { code: -1, message: '缺少 name 或 cron 参数' } };
-        }
-        const taskId = `ipc_${Date.now()}`;
-        scheduler.addTask({
-          id: taskId,
-          name,
-          schedule: cronExpression,
-          description,
-          enabled: true,
-          priority: (params?.priority as number) || 5,
-          executionCount: 0,
-          successCount: 0,
-          averageExecutionTime: 0,
-        });
-        result = { success: true, taskId };
         break;
       }
       case 'memory.search': {
@@ -154,25 +227,38 @@ async function handleIpcRequest(
         if (!query) {
           return { id, error: { code: -1, message: '缺少 query 参数' } };
         }
-        const memEngine = core.getMemoryEngine();
-        if (!memEngine || !memEngine.retrieveRelevant) {
-          result = { memories: [], count: 0 };
-        } else {
+        if (isPythonBackend()) {
           const limit = (params?.limit as number) || 10;
-          const memories = await memEngine.retrieveRelevant({
-            query,
-            limit,
-            includeBehaviorPatterns: true,
-          });
-          result = { memories, count: Array.isArray(memories) ? memories.length : 0 };
+          result = await pythonBridge!.searchMemory(query, limit);
+        } else {
+          const memEngine = core.getMemoryEngine();
+          if (!memEngine || !memEngine.retrieveRelevant) {
+            result = { memories: [], count: 0 };
+          } else {
+            const limit = (params?.limit as number) || 10;
+            const memories = await memEngine.retrieveRelevant({
+              query,
+              limit,
+              includeBehaviorPatterns: true,
+            });
+            result = {
+              memories,
+              count: Array.isArray(memories) ? memories.length : 0,
+            };
+          }
         }
         break;
       }
       case 'evolution.status': {
-        const { EvolutionOrchestrator } = await import('../evolution/EvolutionOrchestrator');
-        const orchestrator = EvolutionOrchestrator.getInstance();
-        const metrics = orchestrator.getUnifiedMetrics();
-        result = metrics;
+        if (isPythonBackend()) {
+          result = await pythonBridge!.getEvolutionStatus();
+        } else {
+          const { EvolutionOrchestrator } =
+            await import('../evolution/EvolutionOrchestrator');
+          const orchestrator = EvolutionOrchestrator.getInstance();
+          const metrics = orchestrator.getUnifiedMetrics();
+          result = metrics;
+        }
         break;
       }
       case 'context.list': {
@@ -197,17 +283,34 @@ async function handleIpcRequest(
       }
       case 'context.create': {
         const { fileName = 'JIABAIXING.md' } = params as { fileName?: string };
-        const allowedFiles = ['JIABAIXING.md', 'CONTEXT.md', '.jiabaixing/context.md', 'CLAUDE.md'];
+        const allowedFiles = [
+          'JIABAIXING.md',
+          'CONTEXT.md',
+          '.jiabaixing/context.md',
+          'CLAUDE.md',
+        ];
 
         if (!allowedFiles.includes(fileName)) {
-          return { id, error: { code: -1, message: `不支持的文件名: ${fileName}。允许的文件名: ${allowedFiles.join(', ')}` } };
+          return {
+            id,
+            error: {
+              code: -1,
+              message: `不支持的文件名: ${fileName}。允许的文件名: ${allowedFiles.join(', ')}`,
+            },
+          };
         }
 
         const projectRoot = process.cwd();
         const filePath = path.join(projectRoot, fileName);
 
         if (fs.existsSync(filePath)) {
-          return { id, error: { code: -1, message: `文件已存在: ${fileName}。如需更新请直接编辑文件后使用 refresh 操作刷新缓存。` } };
+          return {
+            id,
+            error: {
+              code: -1,
+              message: `文件已存在: ${fileName}。如需更新请直接编辑文件后使用 refresh 操作刷新缓存。`,
+            },
+          };
         }
 
         const dir = path.dirname(filePath);
@@ -249,16 +352,30 @@ async function handleIpcRequest(
           return { id, error: { code: -1, message: '缺少 fileName 参数' } };
         }
 
-        const allowedFiles = ['JIABAIXING.md', 'CONTEXT.md', '.jiabaixing/context.md', 'CLAUDE.md'];
+        const allowedFiles = [
+          'JIABAIXING.md',
+          'CONTEXT.md',
+          '.jiabaixing/context.md',
+          'CLAUDE.md',
+        ];
         if (!allowedFiles.includes(fileName)) {
-          return { id, error: { code: -1, message: `不支持的文件名: ${fileName}。允许的文件名: ${allowedFiles.join(', ')}` } };
+          return {
+            id,
+            error: {
+              code: -1,
+              message: `不支持的文件名: ${fileName}。允许的文件名: ${allowedFiles.join(', ')}`,
+            },
+          };
         }
 
         const projectRoot = process.cwd();
         const filePath = path.join(projectRoot, fileName);
 
         if (!fs.existsSync(filePath)) {
-          return { id, error: { code: -1, message: `文件不存在: ${fileName}` } };
+          return {
+            id,
+            error: { code: -1, message: `文件不存在: ${fileName}` },
+          };
         }
 
         const content = fs.readFileSync(filePath, 'utf-8');
@@ -324,7 +441,10 @@ export async function startIpcServer(core: JiabaixingCore): Promise<void> {
           continue;
         }
 
-        if (typeof request.id !== 'number' || typeof request.method !== 'string') {
+        if (
+          typeof request.id !== 'number' ||
+          typeof request.method !== 'string'
+        ) {
           const errorResponse: IpcErrorResponse = {
             id: request.id ?? 0,
             error: { code: -4, message: '请求格式错误：缺少 id 或 method' },
@@ -450,6 +570,35 @@ export async function bootstrap(): Promise<JiabaixingCore> {
     const mcpManager = MCPServerManager.getInstance();
     await mcpManager.startAutoStartServers();
     console.log('✅');
+
+    // ── Python Agent 桥接 ──
+    if (process.env.AGENT_BACKEND === 'python') {
+      process.stdout.write('  🐍 Python Agent 桥接... ');
+      const pythonConfig: PythonAgentConfig = {
+        baseUrl: getPythonAgentUrl(),
+        timeout: 60000,
+      };
+      pythonBridge = new PythonAgentBridge(pythonConfig);
+      const pyHealthy = await pythonBridge.healthCheck();
+      if (pyHealthy) {
+        pythonBridge.connectEvents();
+        console.log('✅');
+        Logger.info(
+          `Python Agent 桥接已启用: ${getPythonAgentUrl()}`,
+          'Bootstrap'
+        );
+      } else {
+        console.log('⚠️ (不可用，降级到 TS 本地)');
+        Logger.warn(
+          `Python Agent 不可用: ${getPythonAgentUrl()}，降级到 TS 本地`,
+          'Bootstrap'
+        );
+        pythonBridge = null;
+      }
+    } else {
+      process.stdout.write('  🐍 Python Agent 桥接... ');
+      console.log('⏭️ (使用 TS 本地)');
+    }
 
     process.stdout.write('  🔗 IPC 服务器... ');
     await startIpcServer(core);

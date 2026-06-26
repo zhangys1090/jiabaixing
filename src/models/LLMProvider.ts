@@ -2,19 +2,24 @@
  * LLM Provider - 统一使用 OpenAI 兼容接口
  * 支持重试机制和健康检查，增强连接稳定性
  * v2: 支持多模型热切换和自动故障转移
+ *
+ * @deprecated 已迁移到 Python agent/llm/provider.py。当 AGENT_BACKEND=python（默认）时不再使用此文件。
+ *   回退方式：设置 AGENT_BACKEND=local 可继续使用 TS 本地实现。
+ *   迁移日期：2026-06-22
  */
 
+import { getPromptTemplate } from '../llm/prompt-templates';
 import { injectPreferences } from '../memory/PreferenceInjector';
 import { Logger } from '../utils/Logger';
-import { Model, ModelInput } from './ModelInterface';
-import { OpenAICompatibleModel } from './OpenAICompatibleModel';
-import { LLMResponseCache } from './LLMResponseCache';
-import { RequestQueue } from './RequestQueue';
-import { PromptOptimizer } from './PromptOptimizer';
-import { getPromptTemplate } from '../llm/prompt-templates';
 import { ChatProvider } from './ChatProvider';
 import { CodeProvider } from './CodeProvider';
+import { LLMResponseCache } from './LLMResponseCache';
+import { MessageSanitizer } from './MessageSanitizer';
+import { Model, ModelInput } from './ModelInterface';
 import { MultimodalProvider } from './MultimodalProvider';
+import { OpenAICompatibleModel } from './OpenAICompatibleModel';
+import { PromptOptimizer } from './PromptOptimizer';
+import { RequestQueue } from './RequestQueue';
 
 export class LLMProvider {
   private model: Model;
@@ -57,8 +62,18 @@ export class LLMProvider {
         const { getProviderManager } = require('./ProviderManager');
         const pm = getProviderManager();
         const pk = pm.getPrimary();
-        return pk ? { key: pk.apiKey, base: pk.baseUrl, model: pk.model, name: pk.name, extra: pk.extra } : null;
-      } catch { return null; }
+        return pk
+          ? {
+              key: pk.apiKey,
+              base: pk.baseUrl,
+              model: pk.model,
+              name: pk.name,
+              extra: pk.extra,
+            }
+          : null;
+      } catch {
+        return null;
+      }
     })();
 
     if (model) {
@@ -69,53 +84,65 @@ export class LLMProvider {
       // 优先使用 ProviderManager 主模型
       if (pmPrimary) {
         this.modelName = pmPrimary.model;
-        Logger.info(`🔌 使用 ProviderManager 主模型: ${pmPrimary.name} (${pmPrimary.model})`, 'LLMProvider');
+        Logger.info(
+          `🔌 使用 ProviderManager 主模型: ${pmPrimary.name} (${pmPrimary.model})`,
+          'LLMProvider'
+        );
         this.model = new OpenAICompatibleModel({
-          baseUrl: pmPrimary.base, apiKey: pmPrimary.key, modelName: pmPrimary.model,
-          timeout: 90000, maxTokens: 8192, temperature: 0.7, topP: 0.9,
-          thinkingMode: ((pmPrimary.extra?.thinkingMode as string) || 'disabled') as 'enabled' | 'disabled',
-          reasoningEffort: (pmPrimary.extra?.reasoningEffort as 'high' | 'max') || undefined,
+          baseUrl: pmPrimary.base,
+          apiKey: pmPrimary.key,
+          modelName: pmPrimary.model,
+          timeout: 90000,
+          maxTokens: 8192,
+          temperature: 0.7,
+          topP: 0.9,
+          thinkingMode: ((pmPrimary.extra?.thinkingMode as string) ||
+            'disabled') as 'enabled' | 'disabled',
+          reasoningEffort:
+            (pmPrimary.extra?.reasoningEffort as 'high' | 'max') || undefined,
         });
       } else {
-      this.modelName = modelName || process.env.LLM_MODEL || 'deepseek-chat';
-      Logger.info('🔌 使用 OpenAI 兼容模式', 'LLMProvider');
-      this.model = new OpenAICompatibleModel({
-        baseUrl:
-          process.env.OPENAI_API_BASE ||
-          process.env.LLM_BASE_URL ||
-          'https://api.deepseek.com',
-        apiKey:
-          process.env.OPENAI_API_KEY || process.env.LLM_API_KEY || 'not-needed',
-        modelName: this.modelName,
-        thinkingMode:
-          (process.env.DEEPSEEK_THINKING_MODE as 'enabled' | 'disabled') ||
-          'disabled',
-        reasoningEffort: process.env.DEEPSEEK_REASONING_EFFORT as
-          | 'high'
-          | 'max'
-          | undefined,
-      });
-
-      if (process.env.ZHIPU_API_KEY) {
-        this.zhipuModel = new OpenAICompatibleModel({
+        this.modelName = modelName || process.env.LLM_MODEL || 'deepseek-chat';
+        Logger.info('🔌 使用 OpenAI 兼容模式', 'LLMProvider');
+        this.model = new OpenAICompatibleModel({
           baseUrl:
-            process.env.ZHIPU_BASE_URL ||
-            'https://open.bigmodel.cn/api/paas/v4',
-          apiKey: process.env.ZHIPU_API_KEY,
-          modelName: process.env.ZHIPU_MODEL || 'glm-4.5-air',
-          timeout: 60000,
+            process.env.OPENAI_API_BASE ||
+            process.env.LLM_BASE_URL ||
+            'https://api.deepseek.com',
+          apiKey:
+            process.env.OPENAI_API_KEY ||
+            process.env.LLM_API_KEY ||
+            'not-needed',
+          modelName: this.modelName,
+          thinkingMode:
+            (process.env.DEEPSEEK_THINKING_MODE as 'enabled' | 'disabled') ||
+            'disabled',
+          reasoningEffort: process.env.DEEPSEEK_REASONING_EFFORT as
+            | 'high'
+            | 'max'
+            | undefined,
         });
-        Logger.info(
-          `✅ LLMProvider 已加载智谱降级模型: ${process.env.ZHIPU_MODEL || 'glm-4.5-air'}`,
-          'LLMProvider'
-        );
-      } else {
-        Logger.info(
-          'ℹ️ 未配置 ZHIPU_API_KEY，不加载智谱降级模型',
-          'LLMProvider'
-        );
+
+        if (process.env.ZHIPU_API_KEY) {
+          this.zhipuModel = new OpenAICompatibleModel({
+            baseUrl:
+              process.env.ZHIPU_BASE_URL ||
+              'https://open.bigmodel.cn/api/paas/v4',
+            apiKey: process.env.ZHIPU_API_KEY,
+            modelName: process.env.ZHIPU_MODEL || 'glm-4.5-air',
+            timeout: 60000,
+          });
+          Logger.info(
+            `✅ LLMProvider 已加载智谱降级模型: ${process.env.ZHIPU_MODEL || 'glm-4.5-air'}`,
+            'LLMProvider'
+          );
+        } else {
+          Logger.info(
+            'ℹ️ 未配置 ZHIPU_API_KEY，不加载智谱降级模型',
+            'LLMProvider'
+          );
+        }
       }
-    }
     }
 
     this.responseCache = new LLMResponseCache();
@@ -124,7 +151,10 @@ export class LLMProvider {
     // v5.1 Task 7: 初始化三个子 Provider（门面模式）
     this.chatProvider = new ChatProvider(this.model, this.modelName);
     this.codeProvider = new CodeProvider(this.model, this.modelName);
-    this.multimodalProvider = new MultimodalProvider(this.model, this.modelName);
+    this.multimodalProvider = new MultimodalProvider(
+      this.model,
+      this.modelName
+    );
   }
 
   /**
@@ -133,11 +163,15 @@ export class LLMProvider {
    * 复杂任务（代码/分析）→ 主模型（能力最强）
    * 如果主模型不可用，降级到备用模型
    */
-  selectModel(input: string): Model {
+  selectModel(_input: string): Model {
     if (this.localUnavailable || !this.serviceAvailable) {
       // 自动恢复：如果已过恢复间隔，重置标志并重试主模型
-      if (this.localUnavailable && this.localUnavailableSince > 0 &&
-          Date.now() - this.localUnavailableSince > LLMProvider.RECOVERY_INTERVAL_MS) {
+      if (
+        this.localUnavailable &&
+        this.localUnavailableSince > 0 &&
+        Date.now() - this.localUnavailableSince >
+          LLMProvider.RECOVERY_INTERVAL_MS
+      ) {
         Logger.info('🔄 主模型恢复间隔已过，重新尝试使用主模型', 'LLMProvider');
         this.localUnavailable = false;
         this.localUnavailableSince = 0;
@@ -149,13 +183,22 @@ export class LLMProvider {
         return this.zhipuModel;
       }
       // 没有降级模型时，仍然返回主模型让调用方处理（而非直接抛异常阻塞所有请求）
-      Logger.warn('⚠️ 主模型不可用且无降级模型，仍尝试使用主模型', 'LLMProvider');
+      Logger.warn(
+        '⚠️ 主模型不可用且无降级模型，仍尝试使用主模型',
+        'LLMProvider'
+      );
       return this.model;
     }
 
     // 检查主模型熔断状态
-    if (this.model && typeof (this.model as unknown as { isCircuitOpen?: () => boolean }).isCircuitOpen === 'function') {
-      const modelWithCircuit = this.model as unknown as { isCircuitOpen: () => boolean };
+    if (
+      this.model &&
+      typeof (this.model as unknown as { isCircuitOpen?: () => boolean })
+        .isCircuitOpen === 'function'
+    ) {
+      const modelWithCircuit = this.model as unknown as {
+        isCircuitOpen: () => boolean;
+      };
       if (modelWithCircuit.isCircuitOpen()) {
         Logger.warn('⚠️ 主模型熔断中，切换到降级模型', 'LLMProvider');
         if (this.zhipuModel) return this.zhipuModel;
@@ -248,52 +291,6 @@ export class LLMProvider {
     }
   }
 
-  private async executeWithRetry<T>(
-    operation: () => Promise<T>,
-    operationName: string,
-    maxRetries: number = this.maxRetries
-  ): Promise<T> {
-    let lastError: Error | null = null;
-
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        return await operation();
-      } catch (error) {
-        lastError = error as Error;
-        const errorMsg = lastError.message.toLowerCase();
-
-        const isConnectionError = LLMProvider.CONNECTION_ERRORS.some((e) =>
-          errorMsg.includes(e)
-        );
-
-        const isAuthError = errorMsg.includes('401') || errorMsg.includes('invalid') || errorMsg.includes('authentication');
-
-        if (isConnectionError || isAuthError) {
-          Logger.warn(
-            `🚫 ${operationName} ${isAuthError ? '认证失败' : '连接错误'}，跳过重试: ${lastError.message}`,
-            'LLMProvider'
-          );
-          break;
-        }
-
-        if (attempt < maxRetries) {
-          const delay = this.baseRetryInterval * Math.pow(2, attempt - 1);
-          Logger.warn(
-            `${operationName} 第${attempt}次失败，${delay}ms后重试: ${lastError.message}`,
-            'LLMProvider'
-          );
-          await new Promise((resolve) => setTimeout(resolve, delay));
-        }
-      }
-    }
-
-    const errorMessage = lastError
-      ? `${operationName}失败: ${lastError.message}`
-      : `${operationName}失败，请检查 LLM 服务是否运行`;
-
-    throw new Error(errorMessage);
-  }
-
   async multimodalChat(
     message: string,
     images?: string[],
@@ -312,7 +309,11 @@ export class LLMProvider {
     filePath?: string
   ): Promise<string> {
     // v5.1 Task 7: 委托给 MultimodalProvider
-    return this.multimodalProvider.multimodalCodeAnalysis(userQuery, images, filePath);
+    return this.multimodalProvider.multimodalCodeAnalysis(
+      userQuery,
+      images,
+      filePath
+    );
   }
 
   async analyzeCode(
@@ -330,7 +331,11 @@ export class LLMProvider {
     userQuery: string
   ): Promise<string> {
     // v5.1 Task 7: 委托给 CodeProvider
-    return this.codeProvider.generateModificationPlan(filePath, content, userQuery);
+    return this.codeProvider.generateModificationPlan(
+      filePath,
+      content,
+      userQuery
+    );
   }
 
   async generateModifiedFileContent(
@@ -340,7 +345,12 @@ export class LLMProvider {
     fileExists: boolean
   ): Promise<string> {
     // v5.1 Task 7: 委托给 CodeProvider
-    return this.codeProvider.generateModifiedFileContent(filePath, currentContent, userRequest, fileExists);
+    return this.codeProvider.generateModifiedFileContent(
+      filePath,
+      currentContent,
+      userRequest,
+      fileExists
+    );
   }
 
   async chat(
@@ -393,7 +403,11 @@ export class LLMProvider {
 
     // 委托给 ChatProvider 执行主调用
     try {
-      return await this.chatProvider.chat(message, history, systemPromptOverride);
+      return await this.chatProvider.chat(
+        message,
+        history,
+        systemPromptOverride
+      );
     } catch (error) {
       Logger.warn(
         `⚠️ 主模型 LLM聊天失败: ${(error as Error).message}`,
@@ -461,7 +475,10 @@ export class LLMProvider {
   }> {
     // 如果本地模型不可用，直接走智谱降级
     if ((this.localUnavailable || !this.serviceAvailable) && this.zhipuModel) {
-      Logger.info('🚀 chatWithTools 主模型不可用，直接降级到智谱模型', 'LLMProvider');
+      Logger.info(
+        '🚀 chatWithTools 主模型不可用，直接降级到智谱模型',
+        'LLMProvider'
+      );
       try {
         const sanitizedMessages = this.sanitizeMessagesForAPI(messages);
         const response = await this.zhipuModel.generate({
@@ -489,7 +506,12 @@ export class LLMProvider {
 
     // 委托给 ChatProvider 执行主调用
     try {
-      return await this.chatProvider.chatWithTools(messages, tools, maxTokens, toolChoice);
+      return await this.chatProvider.chatWithTools(
+        messages,
+        tools,
+        maxTokens,
+        toolChoice
+      );
     } catch (error) {
       Logger.warn(
         `⚠️ chatWithTools 主模型失败: ${(error as Error).message}`,
@@ -561,6 +583,8 @@ export class LLMProvider {
 
   /**
    * v3: 清理 messages 数组，确保符合 OpenAI API 规范
+   *
+   * 已委托给 MessageSanitizer.sanitizeMessagesForAPI 统一实现。
    * - 合并多条 system 消息为一条
    * - 为 tool 消息添加 name 字段
    * - 移除空 content 的 assistant 消息（除非有 tool_calls）
@@ -578,68 +602,7 @@ export class LLMProvider {
       name?: string;
     }>
   ): Array<Record<string, unknown>> {
-    // 1. 合并所有 system 消息
-    const systemParts: string[] = [];
-    const nonSystemMessages: Array<Record<string, unknown>> = [];
-
-    for (const msg of messages) {
-      if (msg.role === 'system') {
-        if (msg.content) {
-          systemParts.push(msg.content);
-        }
-      } else {
-        const sanitized: Record<string, unknown> = { role: msg.role };
-
-        // assistant 消息：有 tool_calls 时 content 可以为 null
-        if (msg.role === 'assistant') {
-          if (msg.tool_calls && msg.tool_calls.length > 0) {
-            sanitized.tool_calls = msg.tool_calls;
-            sanitized.content = msg.content || '';
-          } else if (msg.content) {
-            sanitized.content = msg.content;
-          } else {
-            continue; // 跳过空 assistant 消息
-          }
-        } else if (msg.role === 'tool') {
-          // tool 消息前面必须有 assistant+tool_calls，否则 DeepSeek 等 API 会报错
-          // 检查上一条非 tool 消息是否为 assistant+tool_calls
-          const lastNonTool = [...nonSystemMessages]
-            .reverse()
-            .find((m) => m.role !== 'tool');
-          if (lastNonTool?.role !== 'assistant' || !lastNonTool?.tool_calls) {
-            Logger.warn(
-              `⚠️ tool 消息前无 assistant+tool_calls，跳过（tool_call_id=${msg.tool_call_id?.substring(0, 20)}）`,
-              'LLMProvider'
-            );
-            continue;
-          }
-          // tool 消息必须有 tool_call_id 和 content
-          sanitized.tool_call_id = msg.tool_call_id || '';
-          sanitized.content = msg.content || '';
-          // 某些 API 需要 name 字段
-          if (msg.name) {
-            sanitized.name = msg.name;
-          }
-        } else {
-          // user 消息
-          sanitized.content = msg.content || '';
-        }
-
-        nonSystemMessages.push(sanitized);
-      }
-    }
-
-    // 2. 构建最终消息数组：一条 system + 其余消息
-    const result: Array<Record<string, unknown>> = [];
-    if (systemParts.length > 0) {
-      result.push({
-        role: 'system',
-        content: systemParts.join('\n\n'),
-      });
-    }
-    result.push(...nonSystemMessages);
-
-    return result;
+    return MessageSanitizer.sanitizeMessages(messages);
   }
 
   /**
@@ -652,7 +615,11 @@ export class LLMProvider {
     filePath?: string,
     existingContent?: string
   ): Promise<string> {
-    return this.codeProvider.devGenerateCode(userRequest, filePath, existingContent);
+    return this.codeProvider.devGenerateCode(
+      userRequest,
+      filePath,
+      existingContent
+    );
   }
 
   isAvailable(): boolean {

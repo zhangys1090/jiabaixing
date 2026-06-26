@@ -2,6 +2,10 @@
  * 中文分词工具
  * 基于N-gram的轻量级中文分词，无需外部依赖
  * 支持中英混合文本，优先使用双字gram（bigram）捕获中文语义
+ *
+ * @deprecated 已迁移到 Python agent/memory/tokenizer.py（使用 jieba 分词库）。当 AGENT_BACKEND=python（默认）时不再使用此文件。
+ *   回退方式：设置 AGENT_BACKEND=local 可继续使用 TS 本地实现。
+ *   迁移日期：2026-06-22
  */
 
 export class ChineseTokenizer {

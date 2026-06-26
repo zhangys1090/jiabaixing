@@ -5,10 +5,10 @@
  */
 
 import React, { createContext, useCallback, useContext, useEffect, useReducer, useRef } from 'react';
-import { Message } from '../types/chat';
 import { apiService } from '../api/apiService';
+import type { BrainStageUpdate, EvolutionEvent, PerceptionUpdate, SkillExecutionUpdate } from '../hooks/useWebSocket';
 import { connectionManager } from '../hooks/websocket';
-import type { BrainStageUpdate, PerceptionUpdate, SkillExecutionUpdate, EvolutionEvent } from '../hooks/useWebSocket';
+import { Message } from '../types/chat';
 
 // ═══════════════════════════════════════════════════════════════
 // 类型定义
@@ -203,16 +203,12 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
     case 'APPEND_STREAM_CHUNK':
       return {
         ...state,
-        messages: state.messages.map((m) =>
-          m.id === action.id ? { ...m, content: m.content + action.chunk } : m
-        ),
+        messages: state.messages.map((m) => (m.id === action.id ? { ...m, content: m.content + action.chunk } : m)),
       };
     case 'FINISH_STREAM':
       return {
         ...state,
-        messages: state.messages.map((m) =>
-          m.id === action.id ? { ...m, status: 'sent' as const } : m
-        ),
+        messages: state.messages.map((m) => (m.id === action.id ? { ...m, status: 'sent' as const } : m)),
         isTyping: false,
       };
     default:
@@ -365,17 +361,18 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // 订阅 WebSocket 事件
   useEffect(() => {
-    const streamMessageIdRef = useRef<string | null>(null);
+    let streamMessageId: string | null = null;
 
     const handleResponseReady = (response: unknown, traceId?: string) => {
       const data = response as Record<string, unknown> | undefined;
-      const responseText = typeof data?.response === 'string'
-        ? data.response
-        : typeof data?.text === 'string'
-          ? data.text
-          : typeof data?.message === 'string'
-            ? data.message
-            : '';
+      const responseText =
+        typeof data?.response === 'string'
+          ? data.response
+          : typeof data?.text === 'string'
+            ? data.text
+            : typeof data?.message === 'string'
+              ? data.message
+              : '';
 
       if (responseText) {
         dispatch({
@@ -399,7 +396,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const handleStreamStart = (data: { traceId?: string; totalLength?: number; timestamp?: number }) => {
       const msgId = `msg_stream_${Date.now().toString(36)}`;
-      streamMessageIdRef.current = msgId;
+      streamMessageId = msgId;
       dispatch({
         type: 'ADD_MESSAGE',
         payload: {
@@ -417,17 +414,17 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     const handleStreamChunk = (data: { traceId?: string; chunk?: string; offset?: number; timestamp?: number }) => {
-      const msgId = streamMessageIdRef.current;
+      const msgId = streamMessageId;
       if (msgId && data.chunk) {
         dispatch({ type: 'APPEND_STREAM_CHUNK', id: msgId, chunk: data.chunk });
       }
     };
 
     const handleStreamDone = (data: { traceId?: string; fullText?: string; timestamp?: number }) => {
-      const msgId = streamMessageIdRef.current;
+      const msgId = streamMessageId;
       if (msgId) {
         dispatch({ type: 'FINISH_STREAM', id: msgId });
-        streamMessageIdRef.current = null;
+        streamMessageId = null;
       }
       dispatch({ type: 'SET_IS_TYPING', payload: false });
       dispatch({ type: 'SET_IS_RUNNING', payload: false });

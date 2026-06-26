@@ -5,7 +5,16 @@
 
 import { ConnectionStatus as ContractConnectionStatus, WsServerEventType, WS_EVENTS } from '@shared/contracts';
 
-export type MessageStatus = 'idle' | 'sending' | 'thinking' | 'typing' | 'streaming' | 'sent' | 'error' | 'retrying' | 'progress';
+export type MessageStatus =
+  | 'idle'
+  | 'sending'
+  | 'thinking'
+  | 'typing'
+  | 'streaming'
+  | 'sent'
+  | 'error'
+  | 'retrying'
+  | 'progress';
 
 export type MessageSender = 'user' | 'assistant' | 'system';
 

@@ -75,7 +75,12 @@ export class PersonaRules {
     let rulesSection = '';
     if (enabledRules.length > 0) {
       const ruleLines = enabledRules.map((r) => {
-        const prefix = r.type === 'mandatory' ? '【必须】' : r.type === 'emotion' ? '【情感】' : '【风格】';
+        const prefix =
+          r.type === 'mandatory'
+            ? '【必须】'
+            : r.type === 'emotion'
+              ? '【情感】'
+              : '【风格】';
         return `${prefix} ${r.content}`;
       });
       rulesSection = `\n\n【行为规则】\n${ruleLines.join('\n')}`;

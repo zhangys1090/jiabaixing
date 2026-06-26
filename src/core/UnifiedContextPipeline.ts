@@ -1,8 +1,25 @@
 /**
- * 统一上下文管道 v2
+ * 统一上下文管道 v2 - 上下文系统主实现之一
+ *
+ * 【架构定位】
+ * 上下文系统两大主实现之一：
+ * 1. UnifiedContextPipeline（本文件）- 负责 AI 上下文构建（记忆、场景、情感、用户画像等）
+ * 2. ConstitutionPromptBuilder - 负责系统 Prompt 构建（身份、人格、行为准则、工具清单等）
+ *
  * 三重组合架构核心：数据主权 × 记忆深度 × 主动关怀的集成枢纽
  * 所有交互（主动/被动）都经过此管道构建上下文
  * 确保记忆深度被充分利用，同时数据访问经过主权审计
+ *
+ * 【核心职责】
+ * - 场景检测与分类
+ * - 情感分析与强度评估
+ * - 时间上下文构建
+ * - 记忆检索与智能筛选（通过 LLMContextBuilder）
+ * - 用户画像构建
+ * - 数据主权评分
+ *
+ * 【在整体架构中的位置】
+ * 用户输入 → ContextReferenceResolver（@引用解析）→ UnifiedContextPipeline → ConstitutionPromptBuilder → 最终 Prompt
  *
  * v2 优化：
  * 1. 集成 LLMContextBuilder 进行智能记忆筛选

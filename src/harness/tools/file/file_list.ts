@@ -116,7 +116,9 @@ async function listWithFs(
         try {
           const stat = await fs.stat(fullPath);
           size = stat.size;
-        } catch { /* best-effort */ }
+        } catch {
+          /* best-effort */
+        }
         results.push({
           name: entry.name,
           path: relativePath || fullPath,
@@ -177,7 +179,10 @@ export function createFileListExecutor(deps: FileListDeps = {}) {
         .map((e) => `${e.type === 'directory' ? '📁' : '📄'} ${e.path}`)
         .join('\n');
 
-      Logger.info(`📂 file_list 成功: ${directory} (${entries.length}项)`, 'FileList');
+      Logger.info(
+        `📂 file_list 成功: ${directory} (${entries.length}项)`,
+        'FileList'
+      );
 
       return {
         success: true,

@@ -137,12 +137,18 @@ export class MemoryAssistant {
   }
 
   /** 搜索用户历史记忆的上下文方法 - 供 memory_recall 工具调用 */
-  async retrieveContext(input: string, _userId?: string): Promise<{
+  async retrieveContext(
+    input: string,
+    _userId?: string
+  ): Promise<{
     memories: Array<{ type: string; relevance: number; content: string }>;
     preferences: { codingStyle: string[]; namingRules: string[] };
   }> {
     if (!this.memoryEngine?.retrieveRelevant) {
-      return { memories: [], preferences: { codingStyle: [], namingRules: [] } };
+      return {
+        memories: [],
+        preferences: { codingStyle: [], namingRules: [] },
+      };
     }
     try {
       const results = await this.memoryEngine.retrieveRelevant({
@@ -151,11 +157,13 @@ export class MemoryAssistant {
         includeBehaviorPatterns: true,
       });
 
-      const memories = (results as Array<{
-        type?: string;
-        relevance?: number;
-        content: string;
-      }>).map((item) => ({
+      const memories = (
+        results as Array<{
+          type?: string;
+          relevance?: number;
+          content: string;
+        }>
+      ).map((item) => ({
         type: item.type || '记忆',
         relevance: item.relevance || 0.5,
         content: item.content,
@@ -169,7 +177,10 @@ export class MemoryAssistant {
 
       return { memories, preferences };
     } catch {
-      return { memories: [], preferences: { codingStyle: [], namingRules: [] } };
+      return {
+        memories: [],
+        preferences: { codingStyle: [], namingRules: [] },
+      };
     }
   }
 
@@ -184,7 +195,11 @@ export class MemoryAssistant {
   ): Promise<void> {
     if (!this.memoryEngine?.storeShortTermMemory) return;
 
-    const extracted: Array<{ content: string; category: string; importance: number }> = [];
+    const extracted: Array<{
+      content: string;
+      category: string;
+      importance: number;
+    }> = [];
 
     const preferencePatterns = [
       {
@@ -214,17 +229,20 @@ export class MemoryAssistant {
         importance: 0.95,
       },
       {
-        pattern: /我(?:的|工作|公司|团队|项目)\s*(?:是|在|叫)\s*([^。，！？]{2,30})/,
+        pattern:
+          /我(?:的|工作|公司|团队|项目)\s*(?:是|在|叫)\s*([^。，！？]{2,30})/,
         category: 'fact',
         importance: 0.85,
       },
       {
-        pattern: /(?:用|使用|技术栈|框架|语言)\s*(?:是|用)\s*([^。，！？]{2,30})/,
+        pattern:
+          /(?:用|使用|技术栈|框架|语言)\s*(?:是|用)\s*([^。，！？]{2,30})/,
         category: 'preference',
         importance: 0.75,
       },
       {
-        pattern: /(?:重要|关键|必须|一定|别忘了|记住)\s*[:：]?\s*([^。，！？]{3,50})/,
+        pattern:
+          /(?:重要|关键|必须|一定|别忘了|记住)\s*[:：]?\s*([^。，！？]{3,50})/,
         category: 'fact',
         importance: 0.9,
       },

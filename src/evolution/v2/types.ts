@@ -1,23 +1,28 @@
 // 进化类型枚举
 export enum EvolutionType {
-  CODE_FIX = 'CODE_FIX',           // 代码修复
-  CODE_OPTIMIZATION = 'CODE_OPTIMIZATION',  // 代码优化
-  PROMPT_IMPROVEMENT = 'PROMPT_IMPROVEMENT',  // Prompt 优化
-  TOOL_ENHANCEMENT = 'TOOL_ENHANCEMENT',  // 工具增强
-  ARCHITECTURE_CHANGE = 'ARCHITECTURE_CHANGE',  // 架构调整
+  CODE_FIX = 'CODE_FIX', // 代码修复
+  CODE_OPTIMIZATION = 'CODE_OPTIMIZATION', // 代码优化
+  PROMPT_IMPROVEMENT = 'PROMPT_IMPROVEMENT', // Prompt 优化
+  TOOL_ENHANCEMENT = 'TOOL_ENHANCEMENT', // 工具增强
+  ARCHITECTURE_CHANGE = 'ARCHITECTURE_CHANGE', // 架构调整
 }
 
 // 进化优先级
 export enum EvolutionPriority {
-  CRITICAL = 'CRITICAL',   // 紧急修复
-  HIGH = 'HIGH',          // 高优先级
-  MEDIUM = 'MEDIUM',      // 中优先级
-  LOW = 'LOW',            // 低优先级
+  CRITICAL = 'CRITICAL', // 紧急修复
+  HIGH = 'HIGH', // 高优先级
+  MEDIUM = 'MEDIUM', // 中优先级
+  LOW = 'LOW', // 低优先级
 }
 
 // 进化原因
 export interface EvolutionCause {
-  type: 'FAILURE' | 'LOW_SATISFACTION' | 'BUG_REPORT' | 'PROACTIVE_IMPROVEMENT' | 'PERFORMANCE_ISSUE';
+  type:
+    | 'FAILURE'
+    | 'LOW_SATISFACTION'
+    | 'BUG_REPORT'
+    | 'PROACTIVE_IMPROVEMENT'
+    | 'PERFORMANCE_ISSUE';
   description: string;
   context: {
     failureInfo?: string;
@@ -37,10 +42,15 @@ export interface CodeLocation {
 
 // 单个进化操作
 export interface EvolutionAction {
-  type: 'MODIFY_FILE' | 'CREATE_FILE' | 'DELETE_FILE' | 'UPDATE_PROMPT' | 'UPDATE_CONFIG';
-  target: CodeLocation | string;  // 位置或目标
-  content: string;  // 新内容
-  originalContent?: string;  // 原内容（用于回滚）
+  type:
+    | 'MODIFY_FILE'
+    | 'CREATE_FILE'
+    | 'DELETE_FILE'
+    | 'UPDATE_PROMPT'
+    | 'UPDATE_CONFIG';
+  target: CodeLocation | string; // 位置或目标
+  content: string; // 新内容
+  originalContent?: string; // 原内容（用于回滚）
   description: string;
 }
 
@@ -77,7 +87,7 @@ export interface RollbackCheckpoint {
   id: string;
   planId: string;
   timestamp: number;
-  snapshot: Record<string, string>;  // key: file path, value: original content
+  snapshot: Record<string, string>; // key: file path, value: original content
   gitCommitHash?: string;
 }
 
@@ -99,4 +109,35 @@ export interface EvolutionMetrics {
   evolutionsByType: Partial<Record<EvolutionType, number>>;
   rollbackRate: number;
   qualityImprovement: number;
+}
+
+/** 策略记录 — 记录进化策略的执行结果 */
+export interface StrategyRecord {
+  strategyType: string;
+  appliedAt: number;
+  outcome: 'success' | 'failure';
+  impactScore: number;
+  context: string;
+}
+
+/** 策略推荐结果 */
+export interface StrategyRecommendation {
+  recommendedType: string;
+  confidence: number;
+  reasoning: string;
+}
+
+/** 策略趋势 */
+export interface StrategyTrend {
+  strategyType: string;
+  direction: 'improving' | 'declining' | 'stable';
+  dataPoints: number;
+  successRate: number;
+}
+
+/** 资源预加载提示 */
+export interface ResourcePreloadHint {
+  resourceType: string;
+  probability: number;
+  preloadAction: string;
 }

@@ -1,12 +1,12 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { BaseIntegrationAdapter } from './BaseIntegrationAdapter';
 import {
+  IncomingMessageEvent,
   PlatformConfig,
   SendMessageResponse,
-  IncomingMessageEvent,
 } from '../../shared/contracts';
 import { Logger } from '../../utils/Logger';
+import { BaseIntegrationAdapter } from './BaseIntegrationAdapter';
 
 interface QRLoginState {
   qrCodePath: string | null;
@@ -159,7 +159,7 @@ export class WeChatQRAdapter extends BaseIntegrationAdapter {
 
   async handleWebhook(
     _payload: Record<string, unknown>
-  ): Promise<{ success: boolean; response?: unknown }> {
+  ): Promise<{ success: boolean; response?: unknown; error?: string }> {
     return { success: true, response: { handled: false } };
   }
 

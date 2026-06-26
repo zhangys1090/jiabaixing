@@ -952,4 +952,44 @@ export class UserProfile {
     );
     Logger.info('=====================================', 'UserProfile');
   }
+
+  /**
+   * 从情绪反馈中学习 — 调整安慰策略的有效性
+   */
+  public learnFromEmotionFeedback(
+    emotion: EmotionTag,
+    strategy: string,
+    effective: boolean
+  ): void {
+    const existing = this.emotionalPatterns.comfortStrategies.find(
+      (s) => s.emotionType === emotion.type && s.strategy === strategy
+    );
+
+    if (existing) {
+      // 调整有效性：有效则提升，无效则降低
+      const delta = effective ? 0.1 : -0.1;
+      existing.effectiveness = Math.max(
+        0,
+        Math.min(1, existing.effectiveness + delta)
+      );
+    }
+
+    this.basicInfo.updatedAt = new Date();
+  }
+
+  /**
+   * 获取指定情绪的最佳安慰策略
+   */
+  public getBestComfortStrategy(emotionType: string): string {
+    const strategies = this.emotionalPatterns.comfortStrategies
+      .filter((s) => s.emotionType === emotionType)
+      .sort((a, b) => b.effectiveness - a.effectiveness);
+
+    if (strategies.length === 0) {
+      // 无匹配策略时返回默认值
+      return '通用安慰策略';
+    }
+
+    return strategies[0].strategy;
+  }
 }

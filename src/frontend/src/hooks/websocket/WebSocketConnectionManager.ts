@@ -518,7 +518,11 @@ class WebSocketConnectionManager {
         break;
       }
       case 'stream_start': {
-        const streamStartData = message.data as unknown as { traceId?: string; totalLength?: number; timestamp?: number };
+        const streamStartData = message.data as unknown as {
+          traceId?: string;
+          totalLength?: number;
+          timestamp?: number;
+        };
         this.streamStartListeners.forEach((listener) => {
           try {
             listener(streamStartData);
@@ -529,7 +533,12 @@ class WebSocketConnectionManager {
         break;
       }
       case 'stream_chunk': {
-        const streamChunkData = message.data as unknown as { traceId?: string; chunk?: string; offset?: number; timestamp?: number };
+        const streamChunkData = message.data as unknown as {
+          traceId?: string;
+          chunk?: string;
+          offset?: number;
+          timestamp?: number;
+        };
         this.streamChunkListeners.forEach((listener) => {
           try {
             listener(streamChunkData);

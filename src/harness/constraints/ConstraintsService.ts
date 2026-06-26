@@ -8,26 +8,26 @@
  */
 
 import { Logger } from '../../utils/Logger';
+import { HookManager } from '../hooks/HookManager';
 import {
-  checkSensitiveInfo,
   checkDangerousCommand,
-  type SensitiveCheckScene,
+  checkSensitiveInfo,
 } from '../security/SensitiveDetector';
 import type {
-  BudgetState,
-  BudgetCheckResult,
+  AdaptiveBudgetConfig,
   BudgetAllocation,
+  BudgetCheckResult,
+  BudgetState,
+  ConstraintDefinition,
+  ConstraintLevel,
+  CreativeExplorationConfig,
+  HookContext,
+  HookResult,
+  LifecycleEvent,
+  LifecycleHook,
   Permission,
   PermissionResult,
   ToolContext,
-  LifecycleEvent,
-  LifecycleHook,
-  HookContext,
-  HookResult,
-  ConstraintLevel,
-  ConstraintDefinition,
-  AdaptiveBudgetConfig,
-  CreativeExplorationConfig,
 } from '../types';
 
 /** 约束服务依赖 */
@@ -41,6 +41,8 @@ export interface ConstraintsServiceDeps {
       context: ToolContext
     ): { allowed: boolean; missing: Permission[]; reason?: string };
   };
+  /** Hook 管理器 — 注入时委托给 HookManager 统一管理 */
+  hookManager?: HookManager;
 }
 
 export class ConstraintsService {
@@ -142,10 +144,43 @@ export class ConstraintsService {
     return { allowed: true };
   }
 
+  private static LIFECYCLE_TO_HOOK_EVENT: Record<string, string | undefined> = {
+    before_tool_call: 'beforeToolCall',
+    after_tool_call: 'afterToolCall',
+    on_error: 'onToolError',
+    before_loop: 'beforeLoop',
+    after_loop: 'afterLoop',
+    on_budget_exceeded: 'onBudgetExceeded',
+  };
+
   /**
    * 注册生命周期钩子
    */
   registerHook(event: LifecycleEvent, hook: LifecycleHook): void {
+    // 委托给 HookManager（如果已注入且事件可映射）
+    if (this.deps.hookManager) {
+      const mappedEvent =
+        ConstraintsService.LIFECYCLE_TO_HOOK_EVENT[event as string];
+      if (mappedEvent) {
+        this.deps.hookManager.registerHook(
+          mappedEvent,
+          hook as (
+            context: unknown
+          ) => Promise<{ proceed: boolean; reason?: string }>
+        );
+        Logger.debug(
+          `委托 HookManager 注册钩子: ${event} → ${mappedEvent}`,
+          'ConstraintsService'
+        );
+        return;
+      }
+      // 不可映射的事件回退到本地注册
+      Logger.debug(
+        `事件 ${event} 无 HookManager 映射，回退本地注册`,
+        'ConstraintsService'
+      );
+    }
+
     const existing = this.hooks.get(event) || [];
     existing.push(hook);
     this.hooks.set(event, existing);
@@ -159,6 +194,16 @@ export class ConstraintsService {
     event: LifecycleEvent,
     context: HookContext
   ): Promise<HookResult> {
+    // 委托给 HookManager（如果已注入且事件可映射）
+    if (this.deps.hookManager) {
+      const mappedEvent =
+        ConstraintsService.LIFECYCLE_TO_HOOK_EVENT[event as string];
+      if (mappedEvent) {
+        return this.deps.hookManager.executeHooks(mappedEvent, context);
+      }
+      // 不可映射的事件回退到本地执行
+    }
+
     const hooks = this.hooks.get(event) || [];
 
     for (const hook of hooks) {
@@ -248,9 +293,15 @@ export class ConstraintsService {
           const result = checkSensitiveInfo(outputStr, 'output');
           if (!result.safe) {
             const topViolation = result.violations[0];
+            // 密码和密钥类违规合并显示为"密码/密钥"
+            const displayName =
+              topViolation?.name === '密码泄露' ||
+              topViolation?.name === '密钥/Token泄露'
+                ? '密码/密钥'
+                : topViolation?.name || '未知';
             return {
               compliant: false,
-              violation: `检测到可能泄露的敏感信息: ${topViolation?.name || '未知'}`,
+              violation: `检测到可能泄露的敏感信息: ${displayName}`,
             };
           }
         }
@@ -273,7 +324,24 @@ export class ConstraintsService {
         // 委托给统一敏感信息检测器（storage 场景使用更严格的模式）
         const result = checkSensitiveInfo(content, 'storage');
         if (!result.safe) {
-          const topViolation = result.violations[0];
+          // 优先选择更具体的违规类型（非通用的"密钥/Token泄露"）
+          const specificNames = [
+            'API密钥',
+            'AWS密钥',
+            'GitHub令牌',
+            'GitHub OAuth令牌',
+            'Slack令牌',
+            '密钥凭证',
+            '银行卡号',
+            '身份证号',
+            '身份证号(18位)',
+            'CVV码',
+            '密码泄露',
+            '敏感凭证关键词',
+          ];
+          const topViolation =
+            result.violations.find((v) => specificNames.includes(v.name)) ||
+            result.violations[0];
           return {
             compliant: false,
             violation: `禁止存储敏感信息 (${topViolation?.name || '未知'})，请勿将密钥、凭证等敏感数据保存到记忆中`,
@@ -292,7 +360,8 @@ export class ConstraintsService {
         if (result.dangerous) {
           return {
             compliant: false,
-            violation: result.reason || `检测到危险命令: ${cmd.substring(0, 50)}`,
+            violation:
+              result.reason || `检测到危险命令: ${cmd.substring(0, 50)}`,
           };
         }
         return { compliant: true };
@@ -334,12 +403,36 @@ export class ConstraintsService {
    * 建议约束：仅供参考，不拦截不警告
    */
   private static readonly CONSTRAINT_DEFINITIONS: ConstraintDefinition[] = [
-    { name: 'no-sensitive-data-leak', level: 'hard', description: '禁止泄露敏感信息（密钥、密码、身份证等）' },
-    { name: 'no-sensitive-storage', level: 'hard', description: '禁止存储敏感信息到记忆' },
-    { name: 'no-dangerous-commands', level: 'hard', description: '禁止执行危险命令（rm -rf、drop table等）' },
-    { name: 'no-unauthorized-file-access', level: 'hard', description: '禁止访问系统目录' },
-    { name: 'no-unbounded-recursion', level: 'hard', description: '禁止无限递归' },
-    { name: 'resource-limit-check', level: 'soft', description: '资源使用建议限制' },
+    {
+      name: 'no-sensitive-data-leak',
+      level: 'hard',
+      description: '禁止泄露敏感信息（密钥、密码、身份证等）',
+    },
+    {
+      name: 'no-sensitive-storage',
+      level: 'hard',
+      description: '禁止存储敏感信息到记忆',
+    },
+    {
+      name: 'no-dangerous-commands',
+      level: 'hard',
+      description: '禁止执行危险命令（rm -rf、drop table等）',
+    },
+    {
+      name: 'no-unauthorized-file-access',
+      level: 'hard',
+      description: '禁止访问系统目录',
+    },
+    {
+      name: 'no-unbounded-recursion',
+      level: 'hard',
+      description: '禁止无限递归',
+    },
+    {
+      name: 'resource-limit-check',
+      level: 'soft',
+      description: '资源使用建议限制',
+    },
   ];
 
   /**
@@ -371,10 +464,7 @@ export class ConstraintsService {
 
     // 软约束不拦截，只记录
     if (!result.compliant && level === 'soft') {
-      Logger.warn(
-        `⚠️ 软约束建议: ${result.violation}`,
-        'ConstraintsService'
-      );
+      Logger.warn(`⚠️ 软约束建议: ${result.violation}`, 'ConstraintsService');
       return { compliant: true, level };
     }
 
@@ -390,9 +480,24 @@ export class ConstraintsService {
 
   /** 默认自适应预算配置 */
   private static readonly DEFAULT_ADAPTIVE_BUDGET: AdaptiveBudgetConfig = {
-    simple: { maxRounds: 4, maxToolCalls: 5, maxTokens: 3000, maxDurationMs: 30000 },
-    moderate: { maxRounds: 8, maxToolCalls: 10, maxTokens: 5000, maxDurationMs: 60000 },
-    complex: { maxRounds: 12, maxToolCalls: 15, maxTokens: 8000, maxDurationMs: 120000 },
+    simple: {
+      maxRounds: 4,
+      maxToolCalls: 5,
+      maxTokens: 3000,
+      maxDurationMs: 30000,
+    },
+    moderate: {
+      maxRounds: 8,
+      maxToolCalls: 10,
+      maxTokens: 5000,
+      maxDurationMs: 60000,
+    },
+    complex: {
+      maxRounds: 12,
+      maxToolCalls: 15,
+      maxTokens: 8000,
+      maxDurationMs: 120000,
+    },
     creativeBonus: { maxToolCalls: 4, maxRounds: 3, maxTokens: 2000 },
   };
 
@@ -402,7 +507,8 @@ export class ConstraintsService {
     maxExtraToolCalls: 4,
     maxExtraRounds: 3,
     qualityThreshold: 0.7,
-    explorationPrompt: '当前任务进展良好。你可以尝试更有创造性的方法来提升结果质量，例如探索额外信息、优化输出格式、或提供更深入的见解。',
+    explorationPrompt:
+      '当前任务进展良好。你可以尝试更有创造性的方法来提升结果质量，例如探索额外信息、优化输出格式、或提供更深入的见解。',
   };
 
   private adaptiveBudget: AdaptiveBudgetConfig | undefined;
@@ -501,5 +607,114 @@ export class ConstraintsService {
     }
 
     return { allowed: true };
+  }
+
+  // ===== 预算压力警告 =====
+
+  /**
+   * 预算压力级别
+   *
+   * none — 预算充裕，无需警告
+   * caution — 达 70% 阈值，建议 LLM 注意效率
+   * critical — 达 90% 阈值，强烈建议 LLM 收敛
+   */
+  static readonly PRESSURE_THRESHOLDS = {
+    caution: 0.7,
+    critical: 0.9,
+  };
+
+  /**
+   * 计算当前预算压力
+   *
+   * 仿 Hermes _budget_warning 设计：综合评估轮次/token/工具调用/时间四维度，
+   * 取最高压力级别，注入到工具结果中让 LLM 自主调整行为。
+   *
+   * @param budget - 当前预算状态
+   * @returns 压力评估结果
+   */
+  getBudgetPressure(budget: BudgetState): {
+    level: 'none' | 'caution' | 'critical';
+    warning?: string;
+    details: {
+      rounds: number;
+      tokens: number;
+      toolCalls: number;
+      duration: number;
+    };
+  } {
+    const rounds =
+      budget.hardRoundLimit > 0 ? budget.roundsUsed / budget.hardRoundLimit : 0;
+    const tokens =
+      budget.tokenHardLimit > 0 ? budget.tokensUsed / budget.tokenHardLimit : 0;
+    const toolCalls =
+      budget.maxToolCalls > 0 ? budget.toolCallsUsed / budget.maxToolCalls : 0;
+    const elapsed = Date.now() - budget.startTime;
+    const duration =
+      budget.maxDurationMs > 0 ? elapsed / budget.maxDurationMs : 0;
+
+    const details = { rounds, tokens, toolCalls, duration };
+    const maxUsage = Math.max(rounds, tokens, toolCalls, duration);
+
+    if (maxUsage >= ConstraintsService.PRESSURE_THRESHOLDS.critical) {
+      const dimension = this.getHighestDimension(details);
+      const warning = this.buildCriticalWarning(dimension, budget);
+      return { level: 'critical', warning, details };
+    }
+
+    if (maxUsage >= ConstraintsService.PRESSURE_THRESHOLDS.caution) {
+      const dimension = this.getHighestDimension(details);
+      const warning = this.buildCautionWarning(dimension, budget);
+      return { level: 'caution', warning, details };
+    }
+
+    return { level: 'none', details };
+  }
+
+  private getHighestDimension(details: Record<string, number>): string {
+    let max = 0;
+    let dim = 'rounds';
+    for (const [k, v] of Object.entries(details)) {
+      if (v > max) {
+        max = v;
+        dim = k;
+      }
+    }
+    return dim;
+  }
+
+  private buildCautionWarning(dimension: string, budget: BudgetState): string {
+    const labels: Record<string, string> = {
+      rounds: `轮次 ${budget.roundsUsed}/${budget.hardRoundLimit}`,
+      tokens: `Token ${budget.tokensUsed}/${budget.tokenHardLimit}`,
+      toolCalls: `工具调用 ${budget.toolCallsUsed}/${budget.maxToolCalls}`,
+      duration: `时间 ${Math.round((Date.now() - budget.startTime) / 1000)}s/${Math.round(budget.maxDurationMs / 1000)}s`,
+    };
+    return `预算注意: ${labels[dimension] || '未知'} 已达 70%，请注意效率`;
+  }
+
+  private buildCriticalWarning(dimension: string, budget: BudgetState): string {
+    const labels: Record<string, string> = {
+      rounds: `轮次 ${budget.roundsUsed}/${budget.hardRoundLimit}`,
+      tokens: `Token ${budget.tokensUsed}/${budget.tokenHardLimit}`,
+      toolCalls: `工具调用 ${budget.toolCallsUsed}/${budget.maxToolCalls}`,
+      duration: `时间 ${Math.round((Date.now() - budget.startTime) / 1000)}s/${Math.round(budget.maxDurationMs / 1000)}s`,
+    };
+    return `预算紧急: ${labels[dimension] || '未知'} 已达 90%，请尽快收敛`;
+  }
+
+  /**
+   * 将预算压力格式化为可注入工具结果的 _budget_warning 字符串
+   *
+   * 格式仿 Hermes: 在工具结果末尾追加 JSON 块，LLM 可识别并自主调整
+   *
+   * @param pressure - getBudgetPressure 的返回值
+   * @returns 格式化的警告字符串，none 级别返回空字符串
+   */
+  static formatBudgetWarning(pressure: {
+    level: 'none' | 'caution' | 'critical';
+    warning?: string;
+  }): string {
+    if (pressure.level === 'none') return '';
+    return `\n{"_budget_warning": {"level": "${pressure.level}", "message": "${pressure.warning}"}}`;
   }
 }

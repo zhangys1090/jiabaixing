@@ -77,23 +77,6 @@ function isTaskBlocked(
   return { blocked: blockers.length > 0, blockers };
 }
 
-function getBlockingTasks(tasks: TaskEntry[], taskId: string): string[] {
-  const blocked: string[] = [];
-  const task = tasks.find((t) => t.id === taskId);
-  if (!task) return blocked;
-
-  for (const other of tasks) {
-    if (
-      other.id !== taskId &&
-      other.dependencies?.includes(taskId) &&
-      other.status === 'pending'
-    ) {
-      blocked.push(other.id);
-    }
-  }
-  return blocked;
-}
-
 export function createTaskDependencyExecutor(deps: TaskDependencyDeps) {
   return async (
     params: Record<string, unknown>,

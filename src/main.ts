@@ -18,17 +18,21 @@ if (process.platform === 'win32') {
   process.stdout.setDefaultEncoding?.('utf8');
 }
 
-require('dotenv/config');
-
-if (!process.env.CONSOLE_LOG_LEVEL) {
-  process.env.CONSOLE_LOG_LEVEL = 'warn';
-}
+// Windows DNS 修复：Node.js 默认 IPv6 优先导致 DeepSeek API 连接超时
 import cors from 'cors';
+import dns from 'dns';
 import express from 'express';
 import * as fs from 'fs';
 import * as http from 'http';
 import path from 'path';
 import * as WebSocket from 'ws';
+dns.setDefaultResultOrder('ipv4first');
+
+require('dotenv/config');
+
+if (!process.env.CONSOLE_LOG_LEVEL) {
+  process.env.CONSOLE_LOG_LEVEL = 'warn';
+}
 
 import { Logger } from './utils/Logger';
 
@@ -37,26 +41,32 @@ type WSServer = WebSocket.Server;
 import { JiabaixingCore } from './core/JiabaixingCore';
 
 import automationRoutes from './routes/automation';
-import taskRoutes, { setHarnessInstance } from './routes/tasks';
 import chatRoutes, { setChatCore } from './routes/chat';
 import orchestrateRoutes, { setOrchestrateCore } from './routes/orchestrate';
+import taskRoutes, { setHarnessInstance } from './routes/tasks';
 import integrationRoutes from './server/routes/integrationRoutes';
 import {
-  systemStateRoutes,
   setSystemStateCore,
+  systemStateRoutes,
 } from './server/routes/systemStateRoutes';
 
+import { registerACPRoutes } from './server/routes/acpRoutes';
+import { registerBatchRoutes } from './server/routes/batchRoutes';
+import { registerContextManageRoutes } from './server/routes/contextManageRoutes';
 import { registerCoreRoutes } from './server/routes/coreRoutes';
+import conversationRoutes from './server/routes/conversationRoutes';
+import approvalRoutes from './server/routes/approvalRoutes';
 import { registerDebugRoutes } from './server/routes/debugRoutes';
 import { registerDocsRoutes } from './server/routes/docsRoutes';
 import { registerEvolutionRoutes } from './server/routes/evolutionRoutes';
+import { registerMCPRoutes } from './server/routes/mcpRoutes';
 import { registerMemoryRoutes } from './server/routes/memoryRoutes';
 import { registerPerformanceRoutes } from './server/routes/performanceRoutes';
 import { registerSecurityRoutes } from './server/routes/securityRoutes';
 import { registerSkillRoutes } from './server/routes/skillRoutes';
+import { registerToolRoutes } from './server/routes/toolRoutes';
 import { registerTraeRoutes } from './server/routes/traeRoutes';
-import { registerMCPRoutes } from './server/routes/mcpRoutes';
-import { registerContextManageRoutes } from './server/routes/contextManageRoutes';
+import { registerTrajectoryRoutes } from './server/routes/trajectoryRoutes';
 
 import { bootstrap } from './server/bootstrap';
 import { setupEventBus } from './server/eventBusSetup';
@@ -104,7 +114,17 @@ function setupRoutes(broadcast: (data: Record<string, unknown>) => void): void {
   registerTraeRoutes(app, core);
   registerMCPRoutes(app);
   registerContextManageRoutes(app, core);
+  registerBatchRoutes(app, core);
+  registerACPRoutes(app, core);
+  registerTrajectoryRoutes(app, core);
+  registerToolRoutes(app, core);
   registerDebugRoutes(app, core, broadcast);
+
+  // 会话持久化 API（ConversationStore + FTS5 搜索）
+  app.use('/api/conversations', conversationRoutes);
+
+  // 审批 API（ApprovalEngine）
+  app.use('/api/approvals', approvalRoutes);
 }
 
 async function setupStaticFiles(): Promise<void> {
@@ -163,8 +183,11 @@ function listenServer(): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     server!
       .listen(PORT, () => {
-        const ipcPath = process.env.IPC_PATH
-          || (process.platform === 'win32' ? '\\\\.\\pipe\\jiabaixing' : '/tmp/jiabaixing.sock');
+        const ipcPath =
+          process.env.IPC_PATH ||
+          (process.platform === 'win32'
+            ? '\\\\.\\pipe\\jiabaixing'
+            : '/tmp/jiabaixing.sock');
         console.log(
           '  ==========================================================='
         );
@@ -222,7 +245,54 @@ async function startServerWithRetry(maxRetries = 3): Promise<void> {
   }
 }
 
-startServerWithRetry().catch((error) => {
-  Logger.error('启动失败', error as Error, 'Main');
-  process.exit(1);
+// ── ACP stdio 模式入口 ──
+// 如果命令行参数包含 --acp-stdio，启动 ACP stdio 服务器而非 HTTP 服务
+if (process.argv.includes('--acp-stdio')) {
+  (async () => {
+    const { startACPStdio } = await import('./ide/ACPStdioServer');
+    const { JiabaixingCore } = await import('./core/JiabaixingCore');
+    // JiabaixingCore 没有静态 create 方法，需要先实例化再初始化
+    const core = new JiabaixingCore();
+    if (typeof (core as any).initialize === 'function') {
+      await (core as any).initialize();
+    }
+
+    startACPStdio({
+      processInput: async (message, sessionId) => {
+        const result = await core.processInput(message, sessionId);
+        return { response: result.response, traceId: result.traceId };
+      },
+      getFileDiffs: () => [],
+      getTerminalCommands: () => [],
+      getToolActivities: () => [],
+    });
+  })().catch((err) => {
+    Logger.error('ACP stdio 启动失败', err as Error, 'Main');
+    process.exit(1);
+  });
+} else {
+  startServerWithRetry().catch((error) => {
+    Logger.error('启动失败', error as Error, 'Main');
+    process.exit(1);
+  });
+}
+
+process.on('uncaughtException', (error) => {
+  if (
+    error &&
+    'code' in error &&
+    (error as any).code === 'WS_ERR_INVALID_CLOSE_CODE'
+  ) {
+    Logger.warn(`WS帧解析错误（已忽略）: ${error.message}`, 'Main');
+    return;
+  }
+  Logger.error('未捕获异常', error as Error, 'Main');
+});
+
+process.on('unhandledRejection', (reason) => {
+  Logger.error(
+    `未处理的Promise拒绝: ${reason}`,
+    new Error(String(reason)),
+    'Main'
+  );
 });

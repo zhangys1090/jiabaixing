@@ -83,11 +83,25 @@ export interface SkillDefinition {
 }
 
 /**
+ * 技能章节（用于展示技能的执行步骤等信息）
+ */
+export interface SkillSection {
+  /** 章节标题 */
+  title: string;
+  /** 章节内容 */
+  content: string;
+}
+
+/**
  * 技能接口 - 所有技能必须实现
  */
 export interface Skill {
   /** 技能定义元数据 */
   definition: SkillDefinition;
+  /** 技能摘要（渐进式披露 — 优先展示，省 token） */
+  summary?: string;
+  /** 技能章节（可选，用于展示执行步骤等） */
+  sections?: SkillSection[];
   /**
    * 执行技能
    * @param params 参数键值对
@@ -172,4 +186,26 @@ export interface SkillValidationResult {
   errors: string[];
   /** 警告信息 */
   warnings: string[];
+}
+
+/** 技能状态 */
+export type SkillState = 'active' | 'stale' | 'archived' | 'pinned';
+
+/** 技能使用统计条目 */
+export interface SkillUsageEntry {
+  name: string;
+  view_count: number;
+  use_count: number;
+  patch_count: number;
+  last_viewed_at: string | null;
+  last_used_at: string | null;
+  last_patched_at: string | null;
+  created_at: string;
+  state: SkillState;
+  pinned: boolean;
+  archived_at: string | null;
+  skill_path: string | null;
+  quality_score: number;
+  recent_quality_scores: number[];
+  successRate?: number;
 }

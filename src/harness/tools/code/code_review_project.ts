@@ -48,13 +48,35 @@ export const CODE_REVIEW_PROJECT_DEF: ToolDefinition = {
 
 // 默认代码文件扩展名
 const CODE_EXTENSIONS = new Set([
-  '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs',
-  '.py', '.java', '.go', '.rs', '.cpp', '.c', '.h', '.hpp',
-  '.cs', '.rb', '.php', '.swift', '.kt', '.scala',
-  '.vue', '.svelte',
+  '.ts',
+  '.tsx',
+  '.js',
+  '.jsx',
+  '.mjs',
+  '.cjs',
+  '.py',
+  '.java',
+  '.go',
+  '.rs',
+  '.cpp',
+  '.c',
+  '.h',
+  '.hpp',
+  '.cs',
+  '.rb',
+  '.php',
+  '.swift',
+  '.kt',
+  '.scala',
+  '.vue',
+  '.svelte',
 ]);
 
-function collectCodeFiles(dir: string, maxFiles: number, filePattern?: string): string[] {
+function collectCodeFiles(
+  dir: string,
+  maxFiles: number,
+  filePattern?: string
+): string[] {
   const results: string[] = [];
 
   function walk(currentDir: string) {
@@ -72,7 +94,17 @@ function collectCodeFiles(dir: string, maxFiles: number, filePattern?: string): 
 
       // 跳过常见非代码目录
       if (entry.isDirectory()) {
-        if (['node_modules', '.git', 'dist', 'build', '__pycache__', '.next', 'coverage'].includes(entry.name)) {
+        if (
+          [
+            'node_modules',
+            '.git',
+            'dist',
+            'build',
+            '__pycache__',
+            '.next',
+            'coverage',
+          ].includes(entry.name)
+        ) {
           continue;
         }
         walk(fullPath);
@@ -151,20 +183,27 @@ function formatProjectReport(
 
   // 严重度分布
   const sevParts: string[] = [];
-  if (bySeverity.critical.length) sevParts.push(`🔴 严重: ${bySeverity.critical.length}`);
+  if (bySeverity.critical.length)
+    sevParts.push(`🔴 严重: ${bySeverity.critical.length}`);
   if (bySeverity.high.length) sevParts.push(`🟠 高: ${bySeverity.high.length}`);
-  if (bySeverity.medium.length) sevParts.push(`🟡 中: ${bySeverity.medium.length}`);
+  if (bySeverity.medium.length)
+    sevParts.push(`🟡 中: ${bySeverity.medium.length}`);
   if (bySeverity.low.length) sevParts.push(`🔵 低: ${bySeverity.low.length}`);
-  if (bySeverity.info.length) sevParts.push(`ℹ️ 信息: ${bySeverity.info.length}`);
+  if (bySeverity.info.length)
+    sevParts.push(`ℹ️ 信息: ${bySeverity.info.length}`);
   lines.push(sevParts.join('  '));
   lines.push('');
 
   // 类别分布
   const catParts: string[] = [];
-  if (byCategory.security.length) catParts.push(`安全: ${byCategory.security.length}`);
-  if (byCategory.performance.length) catParts.push(`性能: ${byCategory.performance.length}`);
-  if (byCategory.quality.length) catParts.push(`质量: ${byCategory.quality.length}`);
-  if (byCategory.style.length) catParts.push(`风格: ${byCategory.style.length}`);
+  if (byCategory.security.length)
+    catParts.push(`安全: ${byCategory.security.length}`);
+  if (byCategory.performance.length)
+    catParts.push(`性能: ${byCategory.performance.length}`);
+  if (byCategory.quality.length)
+    catParts.push(`质量: ${byCategory.quality.length}`);
+  if (byCategory.style.length)
+    catParts.push(`风格: ${byCategory.style.length}`);
   if (catParts.length) {
     lines.push(`按类别: ${catParts.join('  ')}`);
     lines.push('');
@@ -180,7 +219,13 @@ function formatProjectReport(
     lines.push(`📄 ${relativePath} (${fileResult.totalLines}行)`);
 
     for (const f of fileResult.findings) {
-      const icon = { critical: '🔴', high: '🟠', medium: '🟡', low: '🔵', info: 'ℹ️' }[f.severity];
+      const icon = {
+        critical: '🔴',
+        high: '🟠',
+        medium: '🟡',
+        low: '🔵',
+        info: 'ℹ️',
+      }[f.severity];
       const lineRef = f.line ? `:L${f.line}` : '';
       lines.push(`  ${icon} [${f.category}${lineRef}] ${f.message}`);
       lines.push(`     → ${f.suggestion}`);
@@ -200,7 +245,13 @@ function formatProjectReport(
     lines.push('━'.repeat(20) + ' 优先修复建议 ' + '━'.repeat(18));
     lines.push('');
     topIssues.forEach((f, i) => {
-      const icon = { critical: '🔴', high: '🟠', medium: '🟡', low: '🔵', info: 'ℹ️' }[f.severity];
+      const icon = {
+        critical: '🔴',
+        high: '🟠',
+        medium: '🟡',
+        low: '🔵',
+        info: 'ℹ️',
+      }[f.severity];
       lines.push(`${i + 1}. ${icon} ${f.message}`);
       lines.push(`   → ${f.suggestion}`);
     });
@@ -222,7 +273,9 @@ export function createCodeReviewProjectExecutor(deps: CodeReviewDeps) {
       const targetPath = String(params.path || '');
       const focus = String(params.focus || 'all');
       const maxFiles = Number(params.max_files) || 20;
-      const filePattern = params.file_pattern ? String(params.file_pattern) : undefined;
+      const filePattern = params.file_pattern
+        ? String(params.file_pattern)
+        : undefined;
 
       // 路径校验
       if (!fs.existsSync(targetPath)) {
@@ -251,7 +304,11 @@ export function createCodeReviewProjectExecutor(deps: CodeReviewDeps) {
           output: `📋 项目代码审查报告\n路径: ${targetPath}\n\n✅ 未找到匹配的代码文件。`,
           duration: Date.now() - startTime,
           validated: true,
-          metadata: { filePath: targetPath, findingsCount: 0, filesReviewed: 0 },
+          metadata: {
+            filePath: targetPath,
+            findingsCount: 0,
+            filesReviewed: 0,
+          },
         };
       }
 
@@ -290,17 +347,43 @@ export function createCodeReviewProjectExecutor(deps: CodeReviewDeps) {
           const findings: FileReviewResult['findings'] = [];
 
           // 规则检查
-          if (ext === '.ts' || ext === '.js' || ext === '.tsx' || ext === '.jsx') {
+          if (
+            ext === '.ts' ||
+            ext === '.js' ||
+            ext === '.tsx' ||
+            ext === '.jsx'
+          ) {
             for (let i = 0; i < fileLines.length; i++) {
               const line = fileLines[i];
-              if (line.includes('console.log') && !line.trim().startsWith('//')) {
-                findings.push({ severity: 'low', category: 'quality', line: i + 1, message: '生产代码中包含 console.log', suggestion: '使用 Logger 替代或移除' });
+              if (
+                line.includes('console.log') &&
+                !line.trim().startsWith('//')
+              ) {
+                findings.push({
+                  severity: 'low',
+                  category: 'quality',
+                  line: i + 1,
+                  message: '生产代码中包含 console.log',
+                  suggestion: '使用 Logger 替代或移除',
+                });
               }
               if (line.includes(': any') && !line.trim().startsWith('//')) {
-                findings.push({ severity: 'low', category: 'quality', line: i + 1, message: '使用了 any 类型', suggestion: '考虑使用更具体的类型定义' });
+                findings.push({
+                  severity: 'low',
+                  category: 'quality',
+                  line: i + 1,
+                  message: '使用了 any 类型',
+                  suggestion: '考虑使用更具体的类型定义',
+                });
               }
               if (line.match(/catch\s*\(\s*\w*\s*\)\s*\{\s*\}/)) {
-                findings.push({ severity: 'medium', category: 'quality', line: i + 1, message: '空的 catch 块', suggestion: '至少记录错误日志' });
+                findings.push({
+                  severity: 'medium',
+                  category: 'quality',
+                  line: i + 1,
+                  message: '空的 catch 块',
+                  suggestion: '至少记录错误日志',
+                });
               }
             }
           }
@@ -308,22 +391,56 @@ export function createCodeReviewProjectExecutor(deps: CodeReviewDeps) {
           // 安全检查
           for (let i = 0; i < fileLines.length; i++) {
             const line = fileLines[i];
-            if (/(?:api[_-]?key|secret|token|password)\s*[:=]\s*['"][^'"]{8,}['"]/i.test(line) && !line.trim().startsWith('//')) {
-              findings.push({ severity: 'critical', category: 'security', line: i + 1, message: '检测到硬编码密钥', suggestion: '使用环境变量替代' });
+            if (
+              /(?:api[_-]?key|secret|token|password)\s*[:=]\s*['"][^'"]{8,}['"]/i.test(
+                line
+              ) &&
+              !line.trim().startsWith('//')
+            ) {
+              findings.push({
+                severity: 'critical',
+                category: 'security',
+                line: i + 1,
+                message: '检测到硬编码密钥',
+                suggestion: '使用环境变量替代',
+              });
             }
             if (/(?:sk-|api_)[a-zA-Z0-9]{20,}/.test(line)) {
-              findings.push({ severity: 'critical', category: 'security', line: i + 1, message: '检测到 API 密钥', suggestion: '移除硬编码密钥' });
+              findings.push({
+                severity: 'critical',
+                category: 'security',
+                line: i + 1,
+                message: '检测到 API 密钥',
+                suggestion: '移除硬编码密钥',
+              });
             }
             if (/query\(.*\$\{/i.test(line) && !line.trim().startsWith('//')) {
-              findings.push({ severity: 'high', category: 'security', line: i + 1, message: 'SQL 注入风险', suggestion: '使用参数化查询' });
+              findings.push({
+                severity: 'high',
+                category: 'security',
+                line: i + 1,
+                message: 'SQL 注入风险',
+                suggestion: '使用参数化查询',
+              });
             }
             if (/\beval\s*\(/.test(line) && !line.trim().startsWith('//')) {
-              findings.push({ severity: 'high', category: 'security', line: i + 1, message: '使用 eval()，代码注入风险', suggestion: '避免使用 eval' });
+              findings.push({
+                severity: 'high',
+                category: 'security',
+                line: i + 1,
+                message: '使用 eval()，代码注入风险',
+                suggestion: '避免使用 eval',
+              });
             }
           }
 
           if (fileLines.length > 500) {
-            findings.push({ severity: 'low', category: 'quality', message: `文件过长 (${fileLines.length} 行)`, suggestion: '考虑拆分' });
+            findings.push({
+              severity: 'low',
+              category: 'quality',
+              message: `文件过长 (${fileLines.length} 行)`,
+              suggestion: '考虑拆分',
+            });
           }
 
           structuredResults.push({
@@ -338,12 +455,19 @@ export function createCodeReviewProjectExecutor(deps: CodeReviewDeps) {
 
       // 生成报告
       const output = formatProjectReport(targetPath, structuredResults, focus);
-      const totalFindings = structuredResults.reduce((sum, r) => sum + r.findings.length, 0);
+      const totalFindings = structuredResults.reduce(
+        (sum, r) => sum + r.findings.length,
+        0
+      );
       const criticalCount = structuredResults.reduce(
-        (sum, r) => sum + r.findings.filter((f) => f.severity === 'critical').length, 0
+        (sum, r) =>
+          sum + r.findings.filter((f) => f.severity === 'critical').length,
+        0
       );
       const highCount = structuredResults.reduce(
-        (sum, r) => sum + r.findings.filter((f) => f.severity === 'high').length, 0
+        (sum, r) =>
+          sum + r.findings.filter((f) => f.severity === 'high').length,
+        0
       );
 
       return {
@@ -354,7 +478,10 @@ export function createCodeReviewProjectExecutor(deps: CodeReviewDeps) {
         metadata: {
           filePath: targetPath,
           filesReviewed: structuredResults.length,
-          totalLines: structuredResults.reduce((sum, r) => sum + r.totalLines, 0),
+          totalLines: structuredResults.reduce(
+            (sum, r) => sum + r.totalLines,
+            0
+          ),
           findingsCount: totalFindings,
           criticalCount,
           highCount,

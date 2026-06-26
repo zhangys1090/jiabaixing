@@ -12,19 +12,20 @@
  * P10增强：复杂度分析集成、Sub-Agent扇出、降级处理
  */
 
+import { TaskComplexityAnalyzer } from '../../core/TaskComplexityAnalyzer';
+import { EvolutionOrchestrator } from '../../evolution/EvolutionOrchestrator';
 import { Logger } from '../../utils/Logger';
-import {
-  TaskDispatcher,
-  type TaskNode,
-  type TaskExecutor,
-} from './TaskDispatcher';
-import { ResultAggregator, type AggregatedResult } from './ResultAggregator';
-import { AgentRegistry } from './AgentRegistry';
-import { SubAgentFanout, type FanoutConfig } from './SubAgentFanout';
+import { AgentFactory } from '../agents/AgentFactory';
 import { QualityScorer, ScorerMetadata } from '../evaluation/QualityScorer';
 import { StepEvaluator } from '../evaluation/StepEvaluator';
-import { EvolutionOrchestrator } from '../../evolution/EvolutionOrchestrator';
-import { TaskComplexityAnalyzer } from '../../core/TaskComplexityAnalyzer';
+import { AgentRegistry } from './AgentRegistry';
+import { ResultAggregator, type AggregatedResult } from './ResultAggregator';
+import { SubAgentFanout, type FanoutConfig } from './SubAgentFanout';
+import {
+  TaskDispatcher,
+  type TaskExecutor,
+  type TaskNode,
+} from './TaskDispatcher';
 
 /** LLM 接口（遵循现有系统风格） */
 export interface OrchestratorLLM {
@@ -65,6 +66,8 @@ export interface OrchestratorAgentDeps {
   executor?: TaskExecutor;
   /** 配置（可选） */
   config?: Partial<OrchestratorConfig>;
+  /** Chat LLM 接口（可选，用于冲突仲裁） */
+  chatLLM?: { chat(prompt: string, systemPrompt?: string): Promise<string> };
 }
 
 const COMPLEXITY_ORDER: Record<string, number> = {
@@ -79,13 +82,18 @@ export class OrchestratorAgent {
   private aggregator: ResultAggregator;
   private fanout: SubAgentFanout;
   private llm: OrchestratorLLM;
+  private chatLLM?: {
+    chat(prompt: string, systemPrompt?: string): Promise<string>;
+  };
   private qualityScorer: QualityScorer;
   private stepEvaluator: StepEvaluator;
   private complexityAnalyzer: TaskComplexityAnalyzer;
   private config: OrchestratorConfig;
+  private registry: AgentRegistry;
 
   constructor(deps: OrchestratorAgentDeps) {
     this.config = { ...DEFAULT_ORCHESTRATOR_CONFIG, ...deps.config };
+    this.registry = deps.registry;
     this.dispatcher = new TaskDispatcher(deps.registry, deps.executor);
     this.aggregator = new ResultAggregator();
     this.fanout = new SubAgentFanout(
@@ -94,6 +102,7 @@ export class OrchestratorAgent {
       this.config.fanoutConfig
     );
     this.llm = deps.llm;
+    this.chatLLM = deps.chatLLM;
     this.qualityScorer = new QualityScorer();
     this.stepEvaluator = new StepEvaluator();
     this.complexityAnalyzer = new TaskComplexityAnalyzer();
@@ -166,6 +175,28 @@ export class OrchestratorAgent {
         'OrchestratorAgent'
       );
 
+      // 动态角色分配
+      try {
+        const roleAssignments = await this.assignDynamicRoles(tasks);
+        if (roleAssignments.length > 0) {
+          Logger.info(
+            `🎭 动态角色分配完成: ${roleAssignments.length}/${tasks.length} 个任务已分配角色`,
+            'OrchestratorAgent'
+          );
+          for (const assignment of roleAssignments) {
+            Logger.debug(
+              `  → 任务 ${assignment.taskId} → Agent ${assignment.agentId} (角色: ${assignment.role})`,
+              'OrchestratorAgent'
+            );
+          }
+        }
+      } catch (roleError) {
+        Logger.warn(
+          `⚠️ 动态角色分配失败（不影响执行）: ${(roleError as Error).message}`,
+          'OrchestratorAgent'
+        );
+      }
+
       // Step 2: 判断是否需要扇出执行
       if (tasks.length > 1 && complexityResult.parallelizable) {
         Logger.info(
@@ -187,6 +218,10 @@ export class OrchestratorAgent {
         }
 
         const aggregated = this.aggregator.aggregate(results, tasks);
+
+        // 置信度合并
+        this.mergeResultsWithConsensus(results, tasks);
+
         const finalResult: AggregatedResult = {
           ...aggregated,
           duration: Date.now() - startTime,
@@ -194,6 +229,9 @@ export class OrchestratorAgent {
             ? `✅ 目标完成(扇出): ${userGoal.substring(0, 60)}`
             : `⚠️ 目标部分完成(扇出): ${userGoal.substring(0, 60)} (${fanoutResult.failedCount} 个子任务失败)`,
         };
+
+        // 冲突仲裁（在 finalResult 创建后调用，确保仲裁文本附加到最终摘要）
+        await this.resolveConflictsIfAny(finalResult);
 
         const qualityScore = this.evaluateExecution(
           tasks,
@@ -211,6 +249,33 @@ export class OrchestratorAgent {
       Logger.info('🚀 使用 DAG 分发执行...', 'OrchestratorAgent');
       const results = await this.dispatcher.dispatch(tasks);
 
+      // 失败任务重平衡
+      const failedTasks = tasks.filter((t) => t.status === 'failed');
+      if (failedTasks.length > 0) {
+        Logger.info(
+          `🔄 检测到 ${failedTasks.length} 个失败任务，尝试重平衡...`,
+          'OrchestratorAgent'
+        );
+        try {
+          const roleAssignments = await this.assignDynamicRoles(tasks);
+          const rebalanced = await this.rebalanceRoles(tasks, roleAssignments);
+          const rebalancedCount = rebalanced.filter(
+            (r, i) => r.agentId !== roleAssignments[i]?.agentId
+          ).length;
+          if (rebalancedCount > 0) {
+            Logger.info(
+              `🔄 重平衡: ${rebalancedCount} 个任务已重新分配`,
+              'OrchestratorAgent'
+            );
+          }
+        } catch (rebalanceError) {
+          Logger.warn(
+            `⚠️ 重平衡失败（不影响结果）: ${(rebalanceError as Error).message}`,
+            'OrchestratorAgent'
+          );
+        }
+      }
+
       // Step 4: 聚合结果
       Logger.info('📊 聚合执行结果...', 'OrchestratorAgent');
       const aggregated = this.aggregator.aggregate(results, tasks);
@@ -223,6 +288,9 @@ export class OrchestratorAgent {
           ? `✅ 目标完成: ${userGoal.substring(0, 60)}`
           : `⚠️ 目标部分完成: ${userGoal.substring(0, 60)}`,
       };
+
+      // 冲突仲裁（在 finalResult 创建后调用，确保仲裁文本附加到最终摘要）
+      await this.resolveConflictsIfAny(finalResult);
 
       const qualityScore = this.evaluateExecution(
         tasks,
@@ -268,6 +336,43 @@ export class OrchestratorAgent {
     context: string | undefined,
     startTime: number
   ): Promise<AggregatedResult> {
+    // 尝试选择专业化 Agent 执行
+    try {
+      const agent = AgentFactory.selectAgentByGoal(userGoal);
+      if (agent && agent.isReady) {
+        Logger.info(
+          `🤖 使用专业化 Agent: ${agent.name} 执行简单任务`,
+          'OrchestratorAgent'
+        );
+        const agentResult = await agent.execute(userGoal, context || '');
+        const duration = Date.now() - startTime;
+        return {
+          success: true,
+          summary: `✅ 任务完成(Agent): ${userGoal.substring(0, 60)}`,
+          details: new Map([
+            [
+              'agent',
+              {
+                taskId: 'agent',
+                status: 'completed' as const,
+                result: agentResult,
+              },
+            ],
+          ]),
+          totalTasks: 1,
+          completedTasks: 1,
+          failedTasks: 0,
+          duration,
+        };
+      }
+    } catch (agentError) {
+      Logger.warn(
+        `⚠️ 专业化 Agent 执行失败，降级到通用执行器: ${(agentError as Error).message}`,
+        'OrchestratorAgent'
+      );
+    }
+
+    // 降级：通用执行器
     const singleTask: TaskNode = {
       id: `simple_${Date.now()}`,
       goal: userGoal,
@@ -339,6 +444,220 @@ export class OrchestratorAgent {
    */
   getFanout(): SubAgentFanout {
     return this.fanout;
+  }
+
+  /**
+   * 获取 Chat LLM 接口（用于冲突仲裁）
+   * 优先使用显式传入的 chatLLM，否则检查 llm 是否也实现了 chat 方法
+   * @returns Chat LLM 接口，不可用时返回 null
+   */
+  private getChatLLM(): {
+    chat(prompt: string, systemPrompt?: string): Promise<string>;
+  } | null {
+    if (this.chatLLM) return this.chatLLM;
+    // 鸭子类型检查：llm 是否也实现了 chat 方法
+    const llm = this.llm as unknown as {
+      chat?: (prompt: string, systemPrompt?: string) => Promise<string>;
+    };
+    if (typeof llm.chat === 'function') {
+      const chatFn = llm.chat;
+      return { chat: chatFn };
+    }
+    return null;
+  }
+
+  /**
+   * 冲突仲裁 — 当聚合结果检测到冲突时，使用 LLM 仲裁
+   * @param aggregated - 聚合结果
+   */
+  private async resolveConflictsIfAny(
+    aggregated: AggregatedResult
+  ): Promise<void> {
+    if (!aggregated.conflicts || aggregated.conflicts.length === 0) return;
+
+    Logger.warn(
+      `⚠️ 检测到 ${aggregated.conflicts.length} 个结果冲突，启动 LLM 仲裁...`,
+      'OrchestratorAgent'
+    );
+
+    try {
+      const chatLLM = this.getChatLLM();
+      if (!chatLLM) {
+        Logger.debug('Chat LLM 不可用，跳过冲突仲裁', 'OrchestratorAgent');
+        return;
+      }
+
+      const resolutions = await this.aggregator.resolveConflictsWithLLM(
+        aggregated.conflicts,
+        chatLLM
+      );
+
+      for (const res of resolutions) {
+        Logger.info(
+          `🔧 冲突仲裁: ${res.conflict.description} → 获胜: ${res.winnerTaskId}`,
+          'OrchestratorAgent'
+        );
+      }
+
+      aggregated.summary += `\n🔧 已仲裁 ${resolutions.length} 个冲突`;
+    } catch (err) {
+      Logger.warn(
+        `⚠️ 冲突仲裁失败: ${(err as Error).message}`,
+        'OrchestratorAgent'
+      );
+    }
+  }
+
+  /**
+   * 置信度合并 — 当多个结果包含置信度时，选择最高置信度结果
+   * @param results - 任务结果映射
+   * @param tasks - 任务节点列表
+   */
+  private mergeResultsWithConsensus(
+    results: Map<string, unknown>,
+    tasks: TaskNode[]
+  ): void {
+    const resultsWithConfidence: Array<{
+      taskId: string;
+      result: unknown;
+      confidence: number;
+      agentId: string;
+    }> = [];
+
+    for (const [taskId, result] of results) {
+      if (result && typeof result === 'object' && 'confidence' in result) {
+        const confidence = (result as { confidence: number }).confidence;
+        if (typeof confidence === 'number') {
+          resultsWithConfidence.push({
+            taskId,
+            result,
+            confidence,
+            agentId:
+              tasks.find((t) => t.id === taskId)?.assignedTo || 'unknown',
+          });
+        }
+      }
+    }
+
+    if (resultsWithConfidence.length > 1) {
+      const consensus = this.aggregator.mergeWithConsensus(
+        resultsWithConfidence
+      );
+      Logger.info(
+        `📊 置信度合并: 选择任务 ${consensus.selectedTaskId} (平均置信度: ${consensus.averageConfidence.toFixed(2)})`,
+        'OrchestratorAgent'
+      );
+    }
+  }
+
+  /**
+   * 动态角色分配 — 根据任务需求和能力匹配为 Agent 分配角色
+   * @param tasks - 待分配的任务列表
+   * @returns 角色分配结果
+   */
+  async assignDynamicRoles(tasks: TaskNode[]): Promise<
+    Array<{
+      agentId: string;
+      role: string;
+      taskId: string;
+      capability: string;
+    }>
+  > {
+    const assignments: Array<{
+      agentId: string;
+      role: string;
+      taskId: string;
+      capability: string;
+    }> = [];
+
+    for (const task of tasks) {
+      const requiredTools = task.tools || [];
+      if (requiredTools.length === 0) continue;
+
+      const bestAgent = this.registry.findBestAgent(requiredTools[0]);
+      if (!bestAgent) continue;
+
+      const matchingCap = bestAgent.capabilities.find((c) =>
+        requiredTools.some((t) => c.tools.includes(t))
+      );
+      const role = this.inferRoleFromCapability(
+        matchingCap?.name || 'execution'
+      );
+
+      assignments.push({
+        agentId: bestAgent.id,
+        role,
+        taskId: task.id,
+        capability: matchingCap?.name || 'execution',
+      });
+    }
+
+    return assignments;
+  }
+
+  /**
+   * 重新平衡角色分配 — 过载 Agent 的任务转移给空闲 Agent
+   * @param tasks - 任务列表
+   * @param previousAssignments - 之前的分配结果
+   * @returns 重新平衡后的分配结果
+   */
+  async rebalanceRoles(
+    tasks: TaskNode[],
+    previousAssignments: Array<{
+      agentId: string;
+      role: string;
+      taskId: string;
+      capability: string;
+    }>
+  ): Promise<
+    Array<{
+      agentId: string;
+      role: string;
+      taskId: string;
+      capability: string;
+    }>
+  > {
+    const rebalanced: Array<{
+      agentId: string;
+      role: string;
+      taskId: string;
+      capability: string;
+    }> = [];
+
+    for (const assignment of previousAssignments) {
+      const agentInfo = this.registry.getAgent(assignment.agentId);
+      if (agentInfo && agentInfo.status === 'busy') {
+        const task = tasks.find((t) => t.id === assignment.taskId);
+        const requiredTools = task?.tools || [];
+        if (requiredTools.length > 0) {
+          const altAgent = this.registry.findBestAgent(requiredTools[0]);
+          if (altAgent && altAgent.id !== assignment.agentId) {
+            rebalanced.push({ ...assignment, agentId: altAgent.id });
+            continue;
+          }
+        }
+      }
+      rebalanced.push(assignment);
+    }
+
+    return rebalanced;
+  }
+
+  /**
+   * 根据能力名称推断角色
+   * @param capabilityName - 能力名称
+   * @returns 角色名称
+   */
+  private inferRoleFromCapability(capabilityName: string): string {
+    const roleMap: Record<string, string> = {
+      coding: 'developer',
+      file_operation: 'file_manager',
+      desktop_automation: 'desktop_agent',
+      web_search: 'researcher',
+      research: 'researcher',
+      analysis: 'analyst',
+    };
+    return roleMap[capabilityName] || 'executor';
   }
 
   /**

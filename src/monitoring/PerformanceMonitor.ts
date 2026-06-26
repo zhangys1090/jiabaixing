@@ -655,8 +655,8 @@ export class PerformanceMonitor extends EventEmitter {
         ? this.tokenUsage.totalTokens / this.tokenUsage.sessionCount
         : 0;
     const estimatedCost =
-      (this.tokenUsage.totalInputTokens * 0.00000014) +
-      (this.tokenUsage.totalOutputTokens * 0.00000028);
+      this.tokenUsage.totalInputTokens * 0.00000014 +
+      this.tokenUsage.totalOutputTokens * 0.00000028;
     return {
       totalInputTokens: this.tokenUsage.totalInputTokens,
       totalOutputTokens: this.tokenUsage.totalOutputTokens,

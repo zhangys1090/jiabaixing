@@ -97,7 +97,9 @@ export function registerMCPRoutes(app: express.Application): void {
         res.json({ success: true, data: result });
       } catch (error) {
         Logger.error('MCP工具调用失败', error as Error, 'MCPRoutes');
-        res.status(500).json({ success: false, error: (error as Error).message });
+        res
+          .status(500)
+          .json({ success: false, error: (error as Error).message });
       }
     }
   );
@@ -120,7 +122,9 @@ export function registerMCPRoutes(app: express.Application): void {
         res.json({ success: true, data: response });
       } catch (error) {
         Logger.error('MCP消息发送失败', error as Error, 'MCPRoutes');
-        res.status(500).json({ success: false, error: (error as Error).message });
+        res
+          .status(500)
+          .json({ success: false, error: (error as Error).message });
       }
     }
   );

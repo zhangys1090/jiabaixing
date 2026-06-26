@@ -1,6 +1,19 @@
 /**
- * VectorDatabaseFactory 存根
+ * VectorDatabaseFactory 存根（已废弃）
  * 为 MemoryEngine 提供向量数据库创建能力
+ *
+ * @deprecated 已废弃，请使用 VectorDatabase.ts 中的完整实现。
+ *
+ * 废弃状态说明：
+ * - 废弃版本：V5.0
+ * - 废弃日期：2026-06-24
+ * - 预计移除版本：V6.0（约 2026-09）
+ * - 替代方案：使用 VectorDatabase.ts 中的 VectorDatabaseFactory
+ * - 维护状态：仅安全修复，不再新增功能
+ *
+ * 注意：此文件为简化版实现，仅支持内存模式。
+ *       完整实现请参考 VectorDatabase.ts，支持 persistent/chroma/memory 三种模式。
+ *       由于 MemoryEngine 整体已废弃迁移到 Python，此文件暂不做重构。
  */
 
 import { Logger } from '../utils/Logger';

@@ -587,6 +587,20 @@ export class SemanticSimilarityEngine {
       memoryTypeDistribution,
     };
   }
+
+  /**
+   * 同步生成文本的语义向量（用于嵌入函数注入场景）
+   * 使用基础词频向量，无需异步模型调用
+   */
+  generateVectorSync(text: string): number[] {
+    if (this.embeddingCache.has(text)) {
+      return this.embeddingCache.get(text)!;
+    }
+    const vector = this.generateBasicVector(text);
+    const normalized = this.normalizeVector(vector);
+    this.cacheEmbedding(text, normalized);
+    return normalized;
+  }
 }
 
 export default SemanticSimilarityEngine;

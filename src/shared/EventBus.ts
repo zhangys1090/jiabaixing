@@ -1,4 +1,4 @@
-import { createDatabase, nativeAvailable } from './DatabaseShim';
+import { createDatabase } from './DatabaseShim';
 import { EventEmitter } from 'events';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -107,22 +107,25 @@ class JiabaixingEventBus extends EventEmitter {
   private readonly MAX_TOOL_CALL_RECORDS = 5000;
 
   /** 全链路追踪：从用户输入到最终响应 */
-  private fullTraces: Map<string, {
-    traceId: string;
-    startTime: number;
-    endTime?: number;
-    phases: Array<{
-      phase: string;
+  private fullTraces: Map<
+    string,
+    {
+      traceId: string;
       startTime: number;
       endTime?: number;
-      duration?: number;
-      success?: boolean;
-      metadata?: Record<string, unknown>;
-    }>;
-    totalTokens: number;
-    totalToolCalls: number;
-    status: 'running' | 'completed' | 'failed';
-  }> = new Map();
+      phases: Array<{
+        phase: string;
+        startTime: number;
+        endTime?: number;
+        duration?: number;
+        success?: boolean;
+        metadata?: Record<string, unknown>;
+      }>;
+      totalTokens: number;
+      totalToolCalls: number;
+      status: 'running' | 'completed' | 'failed';
+    }
+  > = new Map();
   private readonly MAX_FULL_TRACES = 100;
 
   private constructor(options?: EventBusOptions) {
@@ -158,10 +161,14 @@ class JiabaixingEventBus extends EventEmitter {
         fs.mkdirSync(dbDir, { recursive: true });
       }
 
-      this.db = createDatabase(dbPath) as any;
+      this.db = createDatabase(dbPath) as unknown as typeof this.db;
       if (this.db) {
-        try { this.db.pragma('journal_mode = WAL'); } catch {}
-        try { this.db.pragma('synchronous = NORMAL'); } catch {}
+        try {
+          this.db.pragma('journal_mode = WAL');
+        } catch {}
+        try {
+          this.db.pragma('synchronous = NORMAL');
+        } catch {}
 
         this.db.exec(`
         CREATE TABLE IF NOT EXISTS events (
@@ -645,7 +652,9 @@ class JiabaixingEventBus extends EventEmitter {
     });
 
     if (this.toolCallRecords.length > this.MAX_TOOL_CALL_RECORDS) {
-      this.toolCallRecords = this.toolCallRecords.slice(-this.MAX_TOOL_CALL_RECORDS);
+      this.toolCallRecords = this.toolCallRecords.slice(
+        -this.MAX_TOOL_CALL_RECORDS
+      );
     }
 
     // 更新全链路追踪的工具调用统计
@@ -703,11 +712,7 @@ class JiabaixingEventBus extends EventEmitter {
    * @param phase - 阶段名称
    * @param success - 是否成功
    */
-  completeTracePhase(
-    traceId: string,
-    phase: string,
-    success: boolean
-  ): void {
+  completeTracePhase(traceId: string, phase: string, success: boolean): void {
     const fullTrace = this.fullTraces.get(traceId);
     if (!fullTrace) return;
 
@@ -726,10 +731,7 @@ class JiabaixingEventBus extends EventEmitter {
    * @param traceId - 追踪ID
    * @param status - 最终状态
    */
-  completeFullTrace(
-    traceId: string,
-    status: 'completed' | 'failed'
-  ): void {
+  completeFullTrace(traceId: string, status: 'completed' | 'failed'): void {
     const fullTrace = this.fullTraces.get(traceId);
     if (!fullTrace) return;
 
@@ -745,18 +747,30 @@ class JiabaixingEventBus extends EventEmitter {
     totalTokens: number;
     totalPromptTokens: number;
     totalCompletionTokens: number;
-    byModel: Record<string, { tokens: number; calls: number; avgTokens: number }>;
+    byModel: Record<
+      string,
+      { tokens: number; calls: number; avgTokens: number }
+    >;
     byHour: Array<{ hour: string; tokens: number }>;
   } {
     const cutoff = Date.now() - hours * 3600 * 1000;
     const recent = this.tokenUsage.filter((r) => r.timestamp >= cutoff);
 
     const totalTokens = recent.reduce((sum, r) => sum + r.totalTokens, 0);
-    const totalPromptTokens = recent.reduce((sum, r) => sum + r.promptTokens, 0);
-    const totalCompletionTokens = recent.reduce((sum, r) => sum + r.completionTokens, 0);
+    const totalPromptTokens = recent.reduce(
+      (sum, r) => sum + r.promptTokens,
+      0
+    );
+    const totalCompletionTokens = recent.reduce(
+      (sum, r) => sum + r.completionTokens,
+      0
+    );
 
     // 按模型分组
-    const byModel: Record<string, { tokens: number; calls: number; avgTokens: number }> = {};
+    const byModel: Record<
+      string,
+      { tokens: number; calls: number; avgTokens: number }
+    > = {};
     for (const record of recent) {
       if (!byModel[record.model]) {
         byModel[record.model] = { tokens: 0, calls: 0, avgTokens: 0 };
@@ -778,7 +792,13 @@ class JiabaixingEventBus extends EventEmitter {
       .map(([hour, tokens]) => ({ hour, tokens }))
       .sort((a, b) => a.hour.localeCompare(b.hour));
 
-    return { totalTokens, totalPromptTokens, totalCompletionTokens, byModel, byHour };
+    return {
+      totalTokens,
+      totalPromptTokens,
+      totalCompletionTokens,
+      byModel,
+      byHour,
+    };
   }
 
   /**
@@ -789,7 +809,10 @@ class JiabaixingEventBus extends EventEmitter {
     totalCalls: number;
     successRate: number;
     avgDuration: number;
-    byTool: Record<string, { calls: number; successRate: number; avgDuration: number }>;
+    byTool: Record<
+      string,
+      { calls: number; successRate: number; avgDuration: number }
+    >;
     slowestTools: Array<{ toolName: string; avgDuration: number }>;
     unreliableTools: Array<{ toolName: string; successRate: number }>;
   } {
@@ -801,16 +824,26 @@ class JiabaixingEventBus extends EventEmitter {
     const totalDuration = recent.reduce((sum, r) => sum + r.duration, 0);
 
     // 按工具分组
-    const byToolMap = new Map<string, { calls: number; successes: number; totalDuration: number }>();
+    const byToolMap = new Map<
+      string,
+      { calls: number; successes: number; totalDuration: number }
+    >();
     for (const record of recent) {
-      const existing = byToolMap.get(record.toolName) || { calls: 0, successes: 0, totalDuration: 0 };
+      const existing = byToolMap.get(record.toolName) || {
+        calls: 0,
+        successes: 0,
+        totalDuration: 0,
+      };
       existing.calls++;
       if (record.success) existing.successes++;
       existing.totalDuration += record.duration;
       byToolMap.set(record.toolName, existing);
     }
 
-    const byTool: Record<string, { calls: number; successRate: number; avgDuration: number }> = {};
+    const byTool: Record<
+      string,
+      { calls: number; successRate: number; avgDuration: number }
+    > = {};
     for (const [toolName, stats] of byToolMap) {
       byTool[toolName] = {
         calls: stats.calls,
@@ -823,13 +856,19 @@ class JiabaixingEventBus extends EventEmitter {
     const slowestTools = Object.entries(byTool)
       .sort((a, b) => b[1].avgDuration - a[1].avgDuration)
       .slice(0, 5)
-      .map(([toolName, stats]) => ({ toolName, avgDuration: stats.avgDuration }));
+      .map(([toolName, stats]) => ({
+        toolName,
+        avgDuration: stats.avgDuration,
+      }));
 
     // 最不可靠的工具
     const unreliableTools = Object.entries(byTool)
       .filter(([, stats]) => stats.calls >= 3 && stats.successRate < 0.9)
       .sort((a, b) => a[1].successRate - b[1].successRate)
-      .map(([toolName, stats]) => ({ toolName, successRate: stats.successRate }));
+      .map(([toolName, stats]) => ({
+        toolName,
+        successRate: stats.successRate,
+      }));
 
     return {
       totalCalls,
@@ -924,7 +963,9 @@ class JiabaixingEventBus extends EventEmitter {
    * Agent 广播消息
    * @param message - 消息内容
    */
-  broadcastAgentMessage(message: Omit<AgentMessage, 'id' | 'timestamp'>): string {
+  broadcastAgentMessage(
+    message: Omit<AgentMessage, 'id' | 'timestamp'>
+  ): string {
     const fullMessage: AgentMessage = {
       id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
       timestamp: Date.now(),
@@ -1038,8 +1079,8 @@ class JiabaixingEventBus extends EventEmitter {
    * @param capability - 需要的能力
    */
   findAgentsByCapability(capability: string): AgentProfile[] {
-    return Array.from(this.agentRegistry.values()).filter(
-      (profile) => profile.capabilities.includes(capability)
+    return Array.from(this.agentRegistry.values()).filter((profile) =>
+      profile.capabilities.includes(capability)
     );
   }
 
@@ -1048,18 +1089,18 @@ class JiabaixingEventBus extends EventEmitter {
    */
   private capabilityToTopic(capability: string): string {
     const topicMap: Record<string, string> = {
-      'code_generation': 'code',
-      'code_review': 'code',
-      'code_analysis': 'code',
-      'file_operations': 'file',
-      'web_search': 'network',
-      'web_fetch': 'network',
-      'memory_operations': 'memory',
-      'shell_execution': 'system',
-      'desktop_automation': 'desktop',
-      'voice_interaction': 'voice',
-      'task_planning': 'planning',
-      'quality_evaluation': 'evaluation',
+      code_generation: 'code',
+      code_review: 'code',
+      code_analysis: 'code',
+      file_operations: 'file',
+      web_search: 'network',
+      web_fetch: 'network',
+      memory_operations: 'memory',
+      shell_execution: 'system',
+      desktop_automation: 'desktop',
+      voice_interaction: 'voice',
+      task_planning: 'planning',
+      quality_evaluation: 'evaluation',
     };
 
     return topicMap[capability] || capability;

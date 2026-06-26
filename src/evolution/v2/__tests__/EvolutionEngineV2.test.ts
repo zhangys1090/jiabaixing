@@ -28,7 +28,9 @@ describe('EvolutionEngineV2 - 真正自我进化', () => {
   afterEach(() => {
     try {
       fs.rmSync(tempDir, { recursive: true, force: true });
-    } catch (e) { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   });
 
   describe('核心功能测试', () => {
@@ -36,31 +38,33 @@ describe('EvolutionEngineV2 - 真正自我进化', () => {
       const testFile = path.join(tempDir, 'target-file.ts');
       fs.writeFileSync(testFile, 'const oldCode = "old";\n', 'utf-8');
 
-      mockLLM.chat.mockResolvedValue(JSON.stringify({
-        type: EvolutionType.CODE_FIX,
-        priority: EvolutionPriority.HIGH,
-        title: '修复代码Bug',
-        description: '修复测试文件中的bug',
-        actions: [
-          {
-            type: 'MODIFY_FILE',
-            target: { filePath: testFile },
-            content: 'const newCode = "new";\n',
-            originalContent: 'const oldCode = "old";\n',
-            description: '修复bug'
-          }
-        ],
-        estimatedRisk: 'LOW',
-        validationSteps: ['检查文件修改']
-      }));
+      mockLLM.chat.mockResolvedValue(
+        JSON.stringify({
+          type: EvolutionType.CODE_FIX,
+          priority: EvolutionPriority.HIGH,
+          title: '修复代码Bug',
+          description: '修复测试文件中的bug',
+          actions: [
+            {
+              type: 'MODIFY_FILE',
+              target: { filePath: testFile },
+              content: 'const newCode = "new";\n',
+              originalContent: 'const oldCode = "old";\n',
+              description: '修复bug',
+            },
+          ],
+          estimatedRisk: 'LOW',
+          validationSteps: ['检查文件修改'],
+        })
+      );
 
       const cause: EvolutionCause = {
         type: 'FAILURE',
         description: '代码执行失败',
         context: {
-          failureInfo: '测试文件中的代码有bug'
+          failureInfo: '测试文件中的代码有bug',
         },
-        timestamp: Date.now()
+        timestamp: Date.now(),
       };
 
       const result = await engine.triggerEvolution(cause);
@@ -68,7 +72,9 @@ describe('EvolutionEngineV2 - 真正自我进化', () => {
       expect(result).not.toBeNull();
       expect(result!.success).toBe(true);
       expect(result!.executedActions).toBe(1);
-      expect(fs.readFileSync(testFile, 'utf-8')).toBe('const newCode = "new";\n');
+      expect(fs.readFileSync(testFile, 'utf-8')).toBe(
+        'const newCode = "new";\n'
+      );
     });
 
     test('应该执行成功的进化并修改文件', async () => {
@@ -76,31 +82,33 @@ describe('EvolutionEngineV2 - 真正自我进化', () => {
       const originalContent = 'const original = true;\n';
       fs.writeFileSync(testFile, originalContent, 'utf-8');
 
-      mockLLM.chat.mockResolvedValue(JSON.stringify({
-        type: EvolutionType.CODE_FIX,
-        priority: EvolutionPriority.HIGH,
-        title: '成功修改文件',
-        description: '修改测试文件',
-        actions: [
-          {
-            type: 'MODIFY_FILE',
-            target: { filePath: testFile },
-            content: 'const modified = false;\n',
-            originalContent: originalContent,
-            description: '修改文件'
-          }
-        ],
-        estimatedRisk: 'LOW',
-        validationSteps: ['检查文件修改']
-      }));
+      mockLLM.chat.mockResolvedValue(
+        JSON.stringify({
+          type: EvolutionType.CODE_FIX,
+          priority: EvolutionPriority.HIGH,
+          title: '成功修改文件',
+          description: '修改测试文件',
+          actions: [
+            {
+              type: 'MODIFY_FILE',
+              target: { filePath: testFile },
+              content: 'const modified = false;\n',
+              originalContent: originalContent,
+              description: '修改文件',
+            },
+          ],
+          estimatedRisk: 'LOW',
+          validationSteps: ['检查文件修改'],
+        })
+      );
 
       const cause: EvolutionCause = {
         type: 'FAILURE',
         description: '测试成功进化',
         context: {
-          failureInfo: '测试用例'
+          failureInfo: '测试用例',
         },
-        timestamp: Date.now()
+        timestamp: Date.now(),
       };
 
       const result = await engine.triggerEvolution(cause);
@@ -108,34 +116,38 @@ describe('EvolutionEngineV2 - 真正自我进化', () => {
       expect(result).not.toBeNull();
       expect(result!.success).toBe(true);
       // 成功的进化应该修改文件，而不是回滚
-      expect(fs.readFileSync(testFile, 'utf-8')).toBe('const modified = false;\n');
+      expect(fs.readFileSync(testFile, 'utf-8')).toBe(
+        'const modified = false;\n'
+      );
     });
 
     test('应该创建新文件作为进化结果', async () => {
       const newFilePath = path.join(tempDir, 'new-evolved-file.ts');
 
-      mockLLM.chat.mockResolvedValue(JSON.stringify({
-        type: EvolutionType.CODE_OPTIMIZATION,
-        priority: EvolutionPriority.MEDIUM,
-        title: '创建优化文件',
-        description: '创建新的优化文件',
-        actions: [
-          {
-            type: 'CREATE_FILE',
-            target: newFilePath,
-            content: 'export const optimized = true;\n',
-            description: '创建优化文件'
-          }
-        ],
-        estimatedRisk: 'LOW',
-        validationSteps: ['检查文件创建']
-      }));
+      mockLLM.chat.mockResolvedValue(
+        JSON.stringify({
+          type: EvolutionType.CODE_OPTIMIZATION,
+          priority: EvolutionPriority.MEDIUM,
+          title: '创建优化文件',
+          description: '创建新的优化文件',
+          actions: [
+            {
+              type: 'CREATE_FILE',
+              target: newFilePath,
+              content: 'export const optimized = true;\n',
+              description: '创建优化文件',
+            },
+          ],
+          estimatedRisk: 'LOW',
+          validationSteps: ['检查文件创建'],
+        })
+      );
 
       const cause: EvolutionCause = {
         type: 'PROACTIVE_IMPROVEMENT',
         description: '主动优化性能',
         context: {},
-        timestamp: Date.now()
+        timestamp: Date.now(),
       };
 
       const result = await engine.triggerEvolution(cause);
@@ -143,25 +155,29 @@ describe('EvolutionEngineV2 - 真正自我进化', () => {
       expect(result).not.toBeNull();
       expect(result!.success).toBe(true);
       expect(fs.existsSync(newFilePath)).toBe(true);
-      expect(fs.readFileSync(newFilePath, 'utf-8')).toBe('export const optimized = true;\n');
+      expect(fs.readFileSync(newFilePath, 'utf-8')).toBe(
+        'export const optimized = true;\n'
+      );
     });
 
     test('应该拒绝空计划（无操作）', async () => {
-      mockLLM.chat.mockResolvedValue(JSON.stringify({
-        type: EvolutionType.CODE_FIX,
-        priority: EvolutionPriority.LOW,
-        title: '空计划',
-        description: '没有操作的计划',
-        actions: [],
-        estimatedRisk: 'LOW',
-        validationSteps: []
-      }));
+      mockLLM.chat.mockResolvedValue(
+        JSON.stringify({
+          type: EvolutionType.CODE_FIX,
+          priority: EvolutionPriority.LOW,
+          title: '空计划',
+          description: '没有操作的计划',
+          actions: [],
+          estimatedRisk: 'LOW',
+          validationSteps: [],
+        })
+      );
 
       const cause: EvolutionCause = {
         type: 'PROACTIVE_IMPROVEMENT',
         description: '测试空计划',
         context: {},
-        timestamp: Date.now()
+        timestamp: Date.now(),
       };
 
       const result = await engine.triggerEvolution(cause);
@@ -174,21 +190,23 @@ describe('EvolutionEngineV2 - 真正自我进化', () => {
 
   describe('进化历史和指标', () => {
     test('应该记录进化历史', async () => {
-      mockLLM.chat.mockResolvedValue(JSON.stringify({
-        type: EvolutionType.CODE_FIX,
-        priority: EvolutionPriority.HIGH,
-        title: '测试进化',
-        description: '测试进化历史记录',
-        actions: [],
-        estimatedRisk: 'LOW',
-        validationSteps: []
-      }));
+      mockLLM.chat.mockResolvedValue(
+        JSON.stringify({
+          type: EvolutionType.CODE_FIX,
+          priority: EvolutionPriority.HIGH,
+          title: '测试进化',
+          description: '测试进化历史记录',
+          actions: [],
+          estimatedRisk: 'LOW',
+          validationSteps: [],
+        })
+      );
 
       const cause: EvolutionCause = {
         type: 'FAILURE',
         description: '测试',
         context: {},
-        timestamp: Date.now()
+        timestamp: Date.now(),
       };
 
       await engine.triggerEvolution(cause);
@@ -199,15 +217,17 @@ describe('EvolutionEngineV2 - 真正自我进化', () => {
     });
 
     test('应该计算进化指标', async () => {
-      mockLLM.chat.mockResolvedValue(JSON.stringify({
-        type: EvolutionType.CODE_OPTIMIZATION,
-        priority: EvolutionPriority.MEDIUM,
-        title: '性能优化',
-        description: '优化性能',
-        actions: [],
-        estimatedRisk: 'LOW',
-        validationSteps: []
-      }));
+      mockLLM.chat.mockResolvedValue(
+        JSON.stringify({
+          type: EvolutionType.CODE_OPTIMIZATION,
+          priority: EvolutionPriority.MEDIUM,
+          title: '性能优化',
+          description: '优化性能',
+          actions: [],
+          estimatedRisk: 'LOW',
+          validationSteps: [],
+        })
+      );
 
       const cause: EvolutionCause = {
         type: 'PERFORMANCE_ISSUE',
@@ -216,10 +236,10 @@ describe('EvolutionEngineV2 - 真正自我进化', () => {
           performanceMetric: {
             name: 'response_time',
             value: 5000,
-            threshold: 1000
-          }
+            threshold: 1000,
+          },
         },
-        timestamp: Date.now()
+        timestamp: Date.now(),
       };
 
       await engine.triggerEvolution(cause);
@@ -233,7 +253,7 @@ describe('EvolutionEngineV2 - 真正自我进化', () => {
   describe('并发控制', () => {
     test('应该在进化进行中时拒绝新的进化请求', async () => {
       mockLLM.chat.mockImplementation(async () => {
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await new Promise((resolve) => setTimeout(resolve, 100));
         return JSON.stringify({
           type: EvolutionType.CODE_FIX,
           priority: EvolutionPriority.HIGH,
@@ -241,7 +261,7 @@ describe('EvolutionEngineV2 - 真正自我进化', () => {
           description: '模拟长时间运行的进化',
           actions: [],
           estimatedRisk: 'LOW',
-          validationSteps: []
+          validationSteps: [],
         });
       });
 
@@ -249,7 +269,7 @@ describe('EvolutionEngineV2 - 真正自我进化', () => {
         type: 'FAILURE',
         description: '测试并发',
         context: {},
-        timestamp: Date.now()
+        timestamp: Date.now(),
       };
 
       const result1Promise = engine.triggerEvolution(cause);

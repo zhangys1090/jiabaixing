@@ -90,7 +90,11 @@ export class PermissionGuard {
   private userPermissions: Map<string, Set<Permission>> = new Map();
   private pendingConfirmations: Map<
     string,
-    { toolName: string; riskLevel: RiskLevel; resolve: (confirmed: boolean) => void }
+    {
+      toolName: string;
+      riskLevel: RiskLevel;
+      resolve: (confirmed: boolean) => void;
+    }
   > = new Map();
 
   private toolPolicies: Map<string, ToolPolicyEntry> = new Map();
@@ -103,7 +107,11 @@ export class PermissionGuard {
   }
 
   private loadDefaultPolicies(): void {
-    const defaultAskTools = ['shell_exec', 'desktop_automate', 'multi_file_edit'];
+    const defaultAskTools = [
+      'shell_exec',
+      'desktop_automate',
+      'multi_file_edit',
+    ];
     for (const tool of defaultAskTools) {
       this.toolPolicies.set(tool, { toolName: tool, policy: 'ask' });
     }
@@ -125,19 +133,53 @@ export class PermissionGuard {
     const stats = this.getOrCreateStats(sessionId);
     const limits = this.getOrCreateLimits(sessionId);
     if (stats.toolCallCount >= limits.maxToolCalls) {
-      this.recordAudit(traceId, toolName, false, `会话工具调用已达上限 (${limits.maxToolCalls})`, riskLevel);
-      return { allowed: false, missing: [], reason: `会话工具调用已达上限 (${limits.maxToolCalls})` };
+      this.recordAudit(
+        traceId,
+        toolName,
+        false,
+        `会话工具调用已达上限 (${limits.maxToolCalls})`,
+        riskLevel
+      );
+      return {
+        allowed: false,
+        missing: [],
+        reason: `会话工具调用已达上限 (${limits.maxToolCalls})`,
+      };
     }
-    if (stats.consecutiveTool?.tool === toolName && stats.consecutiveTool.count >= limits.maxConsecutiveSame) {
-      this.recordAudit(traceId, toolName, false, `连续调用 ${toolName} 已达上限`, riskLevel);
-      return { allowed: false, missing: [], reason: `连续调用 ${toolName} 已达上限 (${limits.maxConsecutiveSame})` };
+    if (
+      stats.consecutiveTool?.tool === toolName &&
+      stats.consecutiveTool.count >= limits.maxConsecutiveSame
+    ) {
+      this.recordAudit(
+        traceId,
+        toolName,
+        false,
+        `连续调用 ${toolName} 已达上限`,
+        riskLevel
+      );
+      return {
+        allowed: false,
+        missing: [],
+        reason: `连续调用 ${toolName} 已达上限 (${limits.maxConsecutiveSame})`,
+      };
     }
 
     // 2. 工具策略检查
     const policy = this.getEffectivePolicy(toolName);
     if (policy.policy === 'deny') {
-      this.recordAudit(traceId, toolName, false, policy.reason || '工具已被禁用', riskLevel);
-      return { allowed: false, missing: [], reason: policy.reason || '该工具已被禁用', policy: 'deny' };
+      this.recordAudit(
+        traceId,
+        toolName,
+        false,
+        policy.reason || '工具已被禁用',
+        riskLevel
+      );
+      return {
+        allowed: false,
+        missing: [],
+        reason: policy.reason || '该工具已被禁用',
+        policy: 'deny',
+      };
     }
 
     // 3. 基础权限检查
@@ -148,33 +190,74 @@ export class PermissionGuard {
       }
     }
     if (missing.length > 0) {
-      Logger.warn(`🚫 权限不足: ${toolName} 缺少 [${missing.join(', ')}]`, 'PermissionGuard');
-      this.recordAudit(traceId, toolName, false, `缺少权限: ${missing.join(', ')}`, riskLevel);
-      return { allowed: false, missing, reason: `缺少权限: ${missing.join(', ')}` };
+      Logger.warn(
+        `🚫 权限不足: ${toolName} 缺少 [${missing.join(', ')}]`,
+        'PermissionGuard'
+      );
+      this.recordAudit(
+        traceId,
+        toolName,
+        false,
+        `缺少权限: ${missing.join(', ')}`,
+        riskLevel
+      );
+      return {
+        allowed: false,
+        missing,
+        reason: `缺少权限: ${missing.join(', ')}`,
+      };
     }
 
     // 4. 风险阈值检查
     const riskIndex = RISK_ORDER.indexOf(riskLevel);
     const thresholdIndex = RISK_ORDER.indexOf(limits.riskThreshold);
     if (riskIndex >= thresholdIndex && policy.policy !== 'allow') {
-      this.recordAudit(traceId, toolName, false, `风险超过阈值: ${riskLevel}`, riskLevel);
-      return { allowed: false, missing: [], reason: `需要确认: ${riskLevel} 风险操作`, needsConfirmation: true, policy: 'ask' };
+      this.recordAudit(
+        traceId,
+        toolName,
+        false,
+        `风险超过阈值: ${riskLevel}`,
+        riskLevel
+      );
+      return {
+        allowed: false,
+        missing: [],
+        reason: `需要确认: ${riskLevel} 风险操作`,
+        needsConfirmation: true,
+        policy: 'ask',
+      };
     }
 
     // 5. 高风险确认标记
-    const needsConfirmation = policy.policy === 'ask' || RISK_CONFIRMATION_MAP[riskLevel];
+    const needsConfirmation =
+      policy.policy === 'ask' || RISK_CONFIRMATION_MAP[riskLevel];
     if (needsConfirmation) {
       Logger.info(`⚠️ 需确认: ${toolName} (${riskLevel})`, 'PermissionGuard');
     }
 
-    this.recordAudit(traceId, toolName, true, needsConfirmation ? '等待确认' : '权限检查通过', riskLevel);
-    return { allowed: true, missing: [], needsConfirmation, policy: policy.policy };
+    this.recordAudit(
+      traceId,
+      toolName,
+      true,
+      needsConfirmation ? '等待确认' : '权限检查通过',
+      riskLevel
+    );
+    return {
+      allowed: true,
+      missing: [],
+      needsConfirmation,
+      policy: policy.policy,
+    };
   }
 
   /**
    * 记录工具执行结果 — 更新会话统计
    */
-  recordExecution(sessionId: string, toolName: string, result: ToolResult): void {
+  recordExecution(
+    sessionId: string,
+    toolName: string,
+    result: ToolResult
+  ): void {
     const stats = this.getOrCreateStats(sessionId);
     stats.toolCallCount++;
 
@@ -188,7 +271,10 @@ export class PermissionGuard {
       stats.errorCount++;
       const limits = this.getOrCreateLimits(sessionId);
       if (stats.errorCount >= limits.autoStopThreshold) {
-        Logger.warn(`🛑 错误次数已达阈值 (${limits.autoStopThreshold})`, 'PermissionGuard');
+        Logger.warn(
+          `🛑 错误次数已达阈值 (${limits.autoStopThreshold})`,
+          'PermissionGuard'
+        );
       }
     }
   }
@@ -258,10 +344,18 @@ export class PermissionGuard {
     this.sessionLimits.delete(sessionId);
   }
 
-  async requestConfirmation(toolName: string, riskLevel: RiskLevel, timeoutMs: number = 30000): Promise<boolean> {
+  async requestConfirmation(
+    toolName: string,
+    riskLevel: RiskLevel,
+    timeoutMs: number = 30000
+  ): Promise<boolean> {
     const confirmationId = `${toolName}-${Date.now()}`;
     return new Promise<boolean>((resolve) => {
-      this.pendingConfirmations.set(confirmationId, { toolName, riskLevel, resolve });
+      this.pendingConfirmations.set(confirmationId, {
+        toolName,
+        riskLevel,
+        resolve,
+      });
       setTimeout(() => {
         const pending = this.pendingConfirmations.get(confirmationId);
         if (pending) {
@@ -316,8 +410,21 @@ export class PermissionGuard {
     return limits;
   }
 
-  private recordAudit(traceId: string, toolName: string, allowed: boolean, reason: string, riskLevel: RiskLevel): void {
-    this.auditTrail.push({ timestamp: Date.now(), traceId, toolName, allowed, reason, riskLevel });
+  private recordAudit(
+    traceId: string,
+    toolName: string,
+    allowed: boolean,
+    reason: string,
+    riskLevel: RiskLevel
+  ): void {
+    this.auditTrail.push({
+      timestamp: Date.now(),
+      traceId,
+      toolName,
+      allowed,
+      reason,
+      riskLevel,
+    });
     if (this.auditTrail.length > 10000) this.auditTrail.shift();
   }
 }

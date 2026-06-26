@@ -24,7 +24,11 @@ export interface TaskDetail {
 /** 结果冲突 */
 export interface ResultConflict {
   /** 冲突类型 */
-  type: 'file_write' | 'data_inconsistency' | 'resource_contention';
+  type:
+    | 'file_write'
+    | 'data_inconsistency'
+    | 'resource_contention'
+    | 'goal_overlap';
   /** 冲突描述 */
   description: string;
   /** 涉及的任务ID */
@@ -194,6 +198,8 @@ ${taskSummaries}
     const conflicts: ResultConflict[] = [];
 
     const fileWriteMap = new Map<string, string[]>();
+    const goalMap = new Map<string, string[]>();
+
     for (const task of taskNodes) {
       if (task.status !== 'completed') continue;
       const result = agentResults.get(task.id);
@@ -208,6 +214,13 @@ ${taskSummaries}
         }
         fileWriteMap.get(filePath)!.push(task.id);
       }
+
+      if (task.goal) {
+        if (!goalMap.has(task.goal)) {
+          goalMap.set(task.goal, []);
+        }
+        goalMap.get(task.goal)!.push(task.id);
+      }
     }
 
     for (const [filePath, taskIds] of fileWriteMap) {
@@ -221,7 +234,113 @@ ${taskSummaries}
       }
     }
 
+    for (const [goal, taskIds] of goalMap) {
+      if (taskIds.length > 1) {
+        conflicts.push({
+          type: 'goal_overlap',
+          description: `多个Agent执行相同目标: ${goal}`,
+          involvedTasks: taskIds,
+          severity: 'medium',
+        });
+      }
+    }
+
     return conflicts;
+  }
+
+  /**
+   * 使用 LLM 仲裁解决结果冲突
+   * @param conflicts - 待解决的冲突列表
+   * @param llm - LLM 接口
+   * @returns 仲裁结果列表
+   */
+  async resolveConflictsWithLLM(
+    conflicts: ResultConflict[],
+    llm: { chat(prompt: string, systemPrompt?: string): Promise<string> }
+  ): Promise<
+    Array<{
+      conflict: ResultConflict;
+      winnerTaskId: string;
+      resolution: string;
+    }>
+  > {
+    const resolutions: Array<{
+      conflict: ResultConflict;
+      winnerTaskId: string;
+      resolution: string;
+    }> = [];
+
+    for (const conflict of conflicts) {
+      const prompt = `请仲裁以下任务结果冲突，选择最佳结果：
+
+冲突类型: ${conflict.type}
+冲突描述: ${conflict.description}
+涉及任务: ${conflict.involvedTasks.join(', ')}
+
+请以 JSON 格式返回仲裁结果，包含 winnerTaskId（获胜任务ID）和 reasoning（仲裁理由）。`;
+
+      try {
+        const response = await llm.chat(prompt);
+        const parsed = JSON.parse(response);
+        resolutions.push({
+          conflict,
+          winnerTaskId: parsed.winnerTaskId,
+          resolution: `${parsed.winnerTaskId}: ${parsed.reasoning || ''}`,
+        });
+      } catch (err) {
+        Logger.warn(
+          `LLM 仲裁失败: ${(err as Error).message}`,
+          'ResultAggregator'
+        );
+        resolutions.push({
+          conflict,
+          winnerTaskId: conflict.involvedTasks[0],
+          resolution: `默认选择第一个任务: ${conflict.involvedTasks[0]}`,
+        });
+      }
+    }
+
+    return resolutions;
+  }
+
+  /**
+   * 置信度加权合并 — 选择最高置信度的结果
+   * @param results - 带置信度的结果列表
+   * @returns 合并后的共识结果
+   */
+  mergeWithConsensus(
+    results: Array<{
+      taskId: string;
+      result: unknown;
+      confidence: number;
+      agentId: string;
+    }>
+  ): {
+    selectedTaskId: string;
+    result: unknown;
+    averageConfidence: number;
+    selectedAgentId: string;
+  } {
+    if (results.length === 0) {
+      return {
+        selectedTaskId: '',
+        result: null,
+        averageConfidence: 0,
+        selectedAgentId: '',
+      };
+    }
+
+    const sorted = [...results].sort((a, b) => b.confidence - a.confidence);
+    const winner = sorted[0];
+    const avgConfidence =
+      results.reduce((sum, r) => sum + r.confidence, 0) / results.length;
+
+    return {
+      selectedTaskId: winner.taskId,
+      result: winner.result,
+      averageConfidence: avgConfidence,
+      selectedAgentId: winner.agentId,
+    };
   }
 
   /**

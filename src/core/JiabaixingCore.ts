@@ -1,32 +1,34 @@
-import path from 'path';
 import fs from 'fs';
-import { EvolutionOrchestrator } from '../evolution/EvolutionOrchestrator';
+import path from 'path';
 import { EvolutionEngine } from '../evolution/EvolutionEngine';
+import { EvolutionOrchestrator } from '../evolution/EvolutionOrchestrator';
 import { FeedbackCollector } from '../evolution/FeedbackCollector';
 import { LLMProvider } from '../models/LLMProvider';
 import { PerformanceMonitor } from '../monitoring/PerformanceMonitor';
 import { SecurityAuditor } from '../monitoring/SecurityAuditor';
 import { PersonaCore } from '../persona/PersonaCore';
 import { PersonaRules } from '../persona/PersonaRules';
-import { EventBus } from '../shared/EventBus';
-import { Logger } from '../utils/Logger';
-import { SYSTEM_CONSTANTS } from '../shared/contracts';
 import { ITRAEOptimizationIntegrator } from '../server/init/types';
+import { SYSTEM_CONSTANTS } from '../shared/contracts';
+import { EventBus } from '../shared/EventBus';
+import type { TrajectoryData } from '../training/TrajectoryExporter';
+import {
+  ExportFormat,
+  TrajectoryExporter,
+} from '../training/TrajectoryExporter';
+import { Logger } from '../utils/Logger';
 import {
   ConstitutionPromptBuilder,
   type PromptBuilderDependencies,
 } from './ConstitutionPromptBuilder';
-import {
-  ConversationEntry,
-  ConversationHistoryManager,
-} from './ConversationHistoryManager';
+import { ConversationHistoryManager } from './ConversationHistoryManager';
 import { MemoryAssistant } from './MemoryAssistant';
-import { StreamResponseService } from './StreamResponseService';
 import {
   OptimizationDependencies,
   OptimizationScheduler,
 } from './OptimizationScheduler';
 import { ScenarioAwareScheduler } from './ScenarioAwareScheduler';
+import { StreamResponseService } from './StreamResponseService';
 
 /**
  * 记忆引擎接口（避免循环依赖）
@@ -158,6 +160,10 @@ export class JiabaixingCore {
   private memoryAssistant!: MemoryAssistant;
   private conversationHistoryManager: ConversationHistoryManager;
   private streamResponseService: StreamResponseService;
+
+  // RL 训练轨迹导出器
+  private trajectoryExporter: TrajectoryExporter = new TrajectoryExporter();
+  private trajectoryBuffer: TrajectoryData[] = [];
 
   // 项目上下文文件缓存
   private _contextFileCache: ContextFileEntry[] = [];
@@ -354,6 +360,27 @@ export class JiabaixingCore {
     return this.harness;
   }
 
+  exportTrajectories(
+    format: 'sharegpt' | 'jsonl' | 'openai_finetune' = 'sharegpt'
+  ): string | unknown[] {
+    const fmt =
+      format === 'jsonl'
+        ? ExportFormat.JSONL
+        : format === 'openai_finetune'
+          ? ExportFormat.OPENAI_FINETUNE
+          : ExportFormat.SHAREGPT;
+    return this.trajectoryExporter.export(this.trajectoryBuffer, fmt);
+  }
+
+  getTrajectoryStats(): {
+    total: number;
+    filtered: number;
+    avgQuality: number;
+    avgSteps: number;
+  } {
+    return this.trajectoryExporter.getStats(this.trajectoryBuffer);
+  }
+
   /**
    * 获取记忆引擎实例
    */
@@ -542,6 +569,24 @@ export class JiabaixingCore {
         );
         requestSuccess = qualityScore >= 0.5;
 
+        // 累积 RL 训练轨迹
+        this.trajectoryBuffer.push({
+          id: finalTraceId,
+          steps: [
+            { role: 'user', content: input },
+            { role: 'assistant', content: safeResponse },
+          ],
+          quality: qualityScore,
+          metadata: {
+            loopRounds: harnessResult.metadata.loopRounds,
+            toolCalls: harnessResult.trace.totalToolCalls,
+            userId,
+          },
+        });
+        if (this.trajectoryBuffer.length > 1000) {
+          this.trajectoryBuffer.splice(0, this.trajectoryBuffer.length - 1000);
+        }
+
         // 更新对话历史
         this.conversationHistoryManager.addUserMessage(input);
         this.conversationHistoryManager.addAssistantMessage(safeResponse);
@@ -674,23 +719,6 @@ export class JiabaixingCore {
     }
   }
 
-  // 兼容层：保留原有属性，委托给 ConversationHistoryManager
-  private get recentConversationHistory(): Array<{
-    role: string;
-    content: string;
-    timestamp: Date;
-  }> {
-    return this.conversationHistoryManager.getAll();
-  }
-
-  private set recentConversationHistory(
-    value: Array<{ role: string; content: string; timestamp: Date }>
-  ) {
-    this.conversationHistoryManager.setHistory(value as ConversationEntry[]);
-  }
-
-  private readonly MAX_CONVERSATION_HISTORY = 20;
-
   /**
    * 生成主动消息 — 使用 LLM 生成人格化的主动消息
    */
@@ -702,7 +730,8 @@ export class JiabaixingCore {
   }): Promise<string> {
     // 主动消息原因 → 引导文案映射
     const reasonGuidance: Record<string, string> = {
-      long_silence: '用户已经很久没有互动了，用温暖的方式打个招呼，不要有压力感',
+      long_silence:
+        '用户已经很久没有互动了，用温暖的方式打个招呼，不要有压力感',
       negative_emotion_trend: '用户之前的情绪不太好，用关心但不刻意的语气问候',
       morning_greeting: '早上好，用轻松的方式开启新的一天',
       evening_checkin: '晚上好，关心一下今天过得怎么样',
@@ -753,17 +782,5 @@ export class JiabaixingCore {
       idle_reminder: '闲着的话，要不要看看待办事项？',
     };
     return fallbacks[reason] || '在呢，需要什么帮忙吗？';
-  }
-
-  public getLastToolResults(): Array<{
-    toolCall: {
-      id: string;
-      type: string;
-      function: { name: string; arguments: string };
-    };
-    validated: { valid: boolean; sanitizedOutput: string; warning?: string };
-    duration: number;
-  }> {
-    return [];
   }
 }

@@ -14,7 +14,6 @@ import {
   TrajectoryDatabase,
   ExecutionRecord,
   ToolInvocationRecord,
-  StateTransitionRecord,
 } from './TrajectoryDatabase';
 
 export interface TrajectoryAnalysis {
@@ -103,7 +102,7 @@ export class TrajectoryFlywheel {
   /**
    * 执行完整分析
    */
-  analyze(executionId?: string): TrajectoryAnalysis {
+  analyze(_executionId?: string): TrajectoryAnalysis {
     const startTime = Date.now();
 
     Logger.info('📊 开始轨迹数据分析', 'TrajectoryFlywheel');
@@ -556,9 +555,7 @@ export class TrajectoryFlywheel {
   /**
    * 获取最近工具调用（从数据库）
    */
-  private getRecentToolInvocations(
-    cutoffTime: number
-  ): ToolInvocationRecord[] {
+  private getRecentToolInvocations(cutoffTime: number): ToolInvocationRecord[] {
     const executions = this.getRecentExecutions(cutoffTime);
     return executions.flatMap((exec) =>
       this.trajectoryDB

@@ -72,12 +72,17 @@ export class DesktopUIInspector {
     const allElements = this.getInteractiveElements();
     const lower = description.toLowerCase();
     const interactiveElements = allElements.filter(
-      (e) => e.isClickable || e.isEditable || e.controlTypeName === 'Edit' || e.controlTypeName === 'Button'
+      (e) =>
+        e.isClickable ||
+        e.isEditable ||
+        e.controlTypeName === 'Edit' ||
+        e.controlTypeName === 'Button'
     );
     const byName = interactiveElements.find(
       (e) =>
         e.name &&
-        (e.name.toLowerCase().includes(lower) || lower.includes(e.name.toLowerCase()))
+        (e.name.toLowerCase().includes(lower) ||
+          lower.includes(e.name.toLowerCase()))
     );
     if (byName) return byName;
     return null;

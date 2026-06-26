@@ -1,0 +1,845 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>桌面执行Agent监控面板</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    .container {
+      display: grid;
+      grid-template-columns: 1fr 400px;
+      grid-template-rows: 60px 1fr 200px;
+      height: 100vh;
+      gap: 1px;
+      background: #1e293b;
+    }
+
+    /* 顶部状态栏 */
+    .header {
+      grid-column: 1 / -1;
+      background: #1e293b;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      border-bottom: 1px solid #334155;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 15px;
+    }
+
+    .logo {
+      font-size: 18px;
+      font-weight: 600;
+      color: #38bdf8;
+    }
+
+    .status-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 12px;
+      background: #1e3a5f;
+      border-radius: 20px;
+      font-size: 12px;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #22c55e;
+      animation: pulse 2s infinite;
+    }
+
+    .status-dot.warning {
+      background: #f59e0b;
+    }
+
+    .status-dot.error {
+      background: #ef4444;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .btn {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      transition: all 0.2s;
+    }
+
+    .btn-primary {
+      background: #38bdf8;
+      color: #0f172a;
+    }
+
+    .btn-primary:hover {
+      background: #0ea5e9;
+    }
+
+    .btn-danger {
+      background: #ef4444;
+      color: white;
+    }
+
+    .btn-danger:hover {
+      background: #dc2626;
+    }
+
+    .btn-secondary {
+      background: #334155;
+      color: #e2e8f0;
+    }
+
+    .btn-secondary:hover {
+      background: #475569;
+    }
+
+    /* 主区域 - 截图预览 */
+    .main-area {
+      background: #0f172a;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .screenshot-container {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      overflow: auto;
+      position: relative;
+    }
+
+    .screenshot {
+      max-width: 100%;
+      max-height: 100%;
+      border-radius: 8px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+      border: 2px solid #334155;
+    }
+
+    .screenshot-placeholder {
+      text-align: center;
+      color: #64748b;
+    }
+
+    .screenshot-placeholder svg {
+      width: 80px;
+      height: 80px;
+      margin-bottom: 16px;
+      opacity: 0.5;
+    }
+
+    .mouse-indicator {
+      position: absolute;
+      width: 20px;
+      height: 20px;
+      border: 2px solid #ef4444;
+      border-radius: 50%;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      transition: all 0.1s ease-out;
+      box-shadow: 0 0 10px rgba(239, 68, 68, 0.5);
+    }
+
+    .mouse-indicator::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 4px;
+      height: 4px;
+      background: #ef4444;
+      border-radius: 50%;
+      transform: translate(-50%, -50%);
+    }
+
+    /* 右侧面板 */
+    .side-panel {
+      background: #1e293b;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      border-left: 1px solid #334155;
+    }
+
+    .panel-section {
+      padding: 16px;
+      border-bottom: 1px solid #334155;
+    }
+
+    .panel-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #94a3b8;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .stat-item {
+      background: #0f172a;
+      padding: 12px;
+      border-radius: 8px;
+    }
+
+    .stat-value {
+      font-size: 24px;
+      font-weight: 700;
+      color: #38bdf8;
+    }
+
+    .stat-label {
+      font-size: 11px;
+      color: #64748b;
+      margin-top: 4px;
+    }
+
+    .task-info {
+      background: #0f172a;
+      padding: 12px;
+      border-radius: 8px;
+      font-size: 13px;
+    }
+
+    .task-description {
+      color: #e2e8f0;
+      margin-bottom: 8px;
+      word-break: break-all;
+    }
+
+    .task-meta {
+      display: flex;
+      justify-content: space-between;
+      color: #64748b;
+      font-size: 12px;
+    }
+
+    /* 底部事件流 */
+    .event-stream {
+      grid-column: 1 / -1;
+      background: #0f172a;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      border-top: 1px solid #334155;
+    }
+
+    .event-header {
+      padding: 10px 16px;
+      background: #1e293b;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid #334155;
+    }
+
+    .event-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #94a3b8;
+    }
+
+    .event-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px 0;
+    }
+
+    .event-item {
+      padding: 8px 16px;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      font-size: 13px;
+      transition: background 0.2s;
+    }
+
+    .event-item:hover {
+      background: #1e293b;
+    }
+
+    .event-time {
+      color: #64748b;
+      font-size: 11px;
+      min-width: 70px;
+      padding-top: 2px;
+    }
+
+    .event-type {
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 500;
+      min-width: 70px;
+      text-align: center;
+    }
+
+    .event-type.task_start { background: #1e3a5f; color: #38bdf8; }
+    .event-type.task_end { background: #14532d; color: #22c55e; }
+    .event-type.action_start { background: #422006; color: #f59e0b; }
+    .event-type.action_end { background: #14532d; color: #22c55e; }
+    .event-type.action_error { background: #450a0a; color: #ef4444; }
+    .event-type.observation { background: #2e1065; color: #a78bfa; }
+    .event-type.planning { background: #1e3a5f; color: #38bdf8; }
+    .event-type.safety_warning { background: #450a0a; color: #ef4444; }
+    .event-type.retry { background: #422006; color: #f59e0b; }
+
+    .event-content {
+      flex: 1;
+      color: #e2e8f0;
+    }
+
+    .event-details {
+      color: #64748b;
+      font-size: 12px;
+      margin-top: 4px;
+    }
+
+    /* 滚动条样式 */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: #0f172a;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #475569;
+      border-radius: 3px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: #64748b;
+    }
+
+    /* 连接状态提示 */
+    .connection-status {
+      position: fixed;
+      top: 70px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 10px 20px;
+      background: #450a0a;
+      color: #ef4444;
+      border-radius: 8px;
+      font-size: 14px;
+      z-index: 1000;
+      display: none;
+    }
+
+    .connection-status.show {
+      display: block;
+      animation: slideDown 0.3s ease-out;
+    }
+
+    @keyframes slideDown {
+      from {
+        opacity: 0;
+        transform: translateX(-50%) translateY(-20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="connection-status" id="connectionStatus">
+    ⚠️ WebSocket 连接断开，正在重连...
+  </div>
+
+  <div class="container">
+    <!-- 顶部状态栏 -->
+    <div class="header">
+      <div class="header-left">
+        <div class="logo">🖥️ 桌面执行Agent监控面板</div>
+        <div class="status-badge">
+          <div class="status-dot" id="statusDot"></div>
+          <span id="statusText">就绪</span>
+        </div>
+      </div>
+      <div class="header-right">
+        <button class="btn btn-secondary" onclick="clearEvents()">清空日志</button>
+        <button class="btn btn-secondary" onclick="captureScreenshot()">截图</button>
+        <button class="btn btn-danger" onclick="emergencyStop()">⏹️ 紧急停止</button>
+      </div>
+    </div>
+
+    <!-- 主区域 - 截图预览 -->
+    <div class="main-area">
+      <div class="screenshot-container" id="screenshotContainer">
+        <div class="screenshot-placeholder" id="screenshotPlaceholder">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+            <line x1="8" y1="21" x2="16" y2="21"></line>
+            <line x1="12" y1="17" x2="12" y2="21"></line>
+          </svg>
+          <div>等待截图...</div>
+          <div style="font-size: 12px; margin-top: 8px;">执行桌面任务时会自动显示屏幕内容</div>
+        </div>
+        <img class="screenshot" id="screenshot" style="display: none;" alt="屏幕截图">
+        <div class="mouse-indicator" id="mouseIndicator" style="display: none;"></div>
+      </div>
+    </div>
+
+    <!-- 右侧面板 -->
+    <div class="side-panel">
+      <div class="panel-section">
+        <div class="panel-title">📊 统计信息</div>
+        <div class="stats-grid">
+          <div class="stat-item">
+            <div class="stat-value" id="actionCount">0</div>
+            <div class="stat-label">执行动作</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value" id="screenshotCount">0</div>
+            <div class="stat-label">观察次数</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value" id="errorCount">0</div>
+            <div class="stat-label">错误次数</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value" id="retryCount">0</div>
+            <div class="stat-label">重试次数</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel-section">
+        <div class="panel-title">🎯 当前任务</div>
+        <div class="task-info" id="taskInfo">
+          <div class="task-description" style="color: #64748b;">暂无任务</div>
+        </div>
+      </div>
+
+      <div class="panel-section">
+        <div class="panel-title">⚙️ 系统状态</div>
+        <div class="task-info">
+          <div class="task-meta">
+            <span>安全等级</span>
+            <span id="safetyLevel" style="color: #22c55e;">Moderate</span>
+          </div>
+          <div class="task-meta" style="margin-top: 8px;">
+            <span>技能数量</span>
+            <span id="skillCount">21</span>
+          </div>
+          <div class="task-meta" style="margin-top: 8px;">
+            <span>MCP工具</span>
+            <span id="mcpToolCount">18</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 底部事件流 -->
+    <div class="event-stream">
+      <div class="event-header">
+        <div class="event-title">📜 事件流</div>
+        <div style="font-size: 12px; color: #64748b;">
+          共 <span id="eventCount">0</span> 条事件
+        </div>
+      </div>
+      <div class="event-list" id="eventList">
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // 状态管理
+    const state = {
+      connected: false,
+      actionCount: 0,
+      screenshotCount: 0,
+      errorCount: 0,
+      retryCount: 0,
+      eventCount: 0,
+      currentTask: null,
+      mousePosition: { x: 0, y: 0 }
+    };
+
+    // DOM 元素
+    const elements = {
+      statusDot: document.getElementById('statusDot'),
+      statusText: document.getElementById('statusText'),
+      screenshot: document.getElementById('screenshot'),
+      screenshotPlaceholder: document.getElementById('screenshotPlaceholder'),
+      mouseIndicator: document.getElementById('mouseIndicator'),
+      screenshotContainer: document.getElementById('screenshotContainer'),
+      actionCount: document.getElementById('actionCount'),
+      screenshotCount: document.getElementById('screenshotCount'),
+      errorCount: document.getElementById('errorCount'),
+      retryCount: document.getElementById('retryCount'),
+      eventCount: document.getElementById('eventCount'),
+      eventList: document.getElementById('eventList'),
+      taskInfo: document.getElementById('taskInfo'),
+      connectionStatus: document.getElementById('connectionStatus')
+    };
+
+    // WebSocket 连接
+    let ws = null;
+    let reconnectAttempts = 0;
+    const MAX_RECONNECT_ATTEMPTS = 10;
+
+    function connectWebSocket() {
+      // 尝试连接到 WebSocket 服务器
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const host = window.location.hostname || 'localhost';
+      const port = window.location.port || '3000';
+      
+      // 这里可以配置实际的 WebSocket 地址
+      const wsUrl = `${protocol}//${host}:${port}/desktop-events`;
+      
+      try {
+        ws = new WebSocket(wsUrl);
+        
+        ws.onopen = () => {
+          console.log('WebSocket 连接成功');
+          state.connected = true;
+          reconnectAttempts = 0;
+          updateConnectionStatus(true);
+          addEvent('system', 'info', '监控面板已连接', 'WebSocket 连接建立成功');
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            handleEvent(data);
+          } catch (e) {
+            console.error('解析消息失败:', e);
+          }
+        };
+
+        ws.onclose = () => {
+          console.log('WebSocket 连接断开');
+          state.connected = false;
+          updateConnectionStatus(false);
+          
+          if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+            reconnectAttempts++;
+            console.log(`尝试重连 (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
+            setTimeout(connectWebSocket, 2000 * reconnectAttempts);
+          }
+        };
+
+        ws.onerror = (error) => {
+          console.error('WebSocket 错误:', error);
+        };
+      } catch (e) {
+        console.error('创建 WebSocket 失败:', e);
+        updateConnectionStatus(false);
+      }
+    }
+
+    function updateConnectionStatus(connected) {
+      if (connected) {
+        elements.statusDot.className = 'status-dot';
+        elements.statusText.textContent = '已连接';
+        elements.connectionStatus.classList.remove('show');
+      } else {
+        elements.statusDot.className = 'status-dot error';
+        elements.statusText.textContent = '未连接';
+        elements.connectionStatus.classList.add('show');
+      }
+    }
+
+    // 处理事件
+    function handleEvent(event) {
+      const type = event.type || event.eventType;
+      
+      switch (type) {
+        case 'task_start':
+          state.currentTask = event.data || {};
+          updateTaskInfo();
+          updateStatus('running', '执行中');
+          break;
+          
+        case 'task_end':
+          state.currentTask = null;
+          updateTaskInfo();
+          updateStatus('idle', '就绪');
+          break;
+          
+        case 'observation':
+          state.screenshotCount++;
+          elements.screenshotCount.textContent = state.screenshotCount;
+          if (event.data?.screenshotBase64) {
+            updateScreenshot(event.data.screenshotBase64);
+          }
+          break;
+          
+        case 'action_start':
+          state.actionCount++;
+          elements.actionCount.textContent = state.actionCount;
+          break;
+          
+        case 'action_end':
+          break;
+          
+        case 'action_error':
+          state.errorCount++;
+          elements.errorCount.textContent = state.errorCount;
+          break;
+          
+        case 'retry':
+          state.retryCount++;
+          elements.retryCount.textContent = state.retryCount;
+          break;
+          
+        case 'safety_warning':
+          updateStatus('warning', '安全警告');
+          break;
+      }
+
+      addEvent(type, getEventCategory(type), getEventDescription(event), getEventDetails(event));
+    }
+
+    function getEventCategory(type) {
+      const categories = {
+        'task_start': 'task_start',
+        'task_end': 'task_end',
+        'action_start': 'action_start',
+        'action_end': 'action_end',
+        'action_error': 'action_error',
+        'observation': 'observation',
+        'planning': 'planning',
+        'safety_warning': 'safety_warning',
+        'retry': 'retry',
+        'checkpoint': 'action_start',
+        'status_change': 'planning',
+        'user_intervention_required': 'safety_warning'
+      };
+      return categories[type] || 'action_start';
+    }
+
+    function getEventDescription(event) {
+      const type = event.type || event.eventType;
+      const data = event.data || {};
+      
+      const descriptions = {
+        'task_start': `任务开始: ${data.taskDescription || '未知任务'}`,
+        'task_end': `任务${data.success ? '成功' : '失败'}`,
+        'action_start': `执行动作: ${data.actionType || data.description || '未知动作'}`,
+        'action_end': `动作完成: ${data.actionType || data.description || '未知动作'}`,
+        'action_error': `动作错误: ${data.error || '未知错误'}`,
+        'observation': '屏幕观察',
+        'planning': '规划中...',
+        'safety_warning': `安全警告: ${data.message || data.warningType || '未知警告'}`,
+        'retry': `重试 (${data.retryCount || 0}/${data.maxRetries || 0})`,
+        'checkpoint': `检查点: ${data.checkpointId || data.description || '未知检查点'}`,
+        'status_change': `状态变化: ${data.status || '未知状态'}`,
+        'user_intervention_required': `需要用户干预: ${data.reason || '未知原因'}`
+      };
+      
+      return descriptions[type] || type;
+    }
+
+    function getEventDetails(event) {
+      const data = event.data || {};
+      
+      if (data.description && data.description !== getEventDescription(event)) {
+        return data.description;
+      }
+      if (data.result) {
+        return typeof data.result === 'string' ? data.result : JSON.stringify(data.result).substring(0, 100);
+      }
+      if (data.reason) {
+        return data.reason;
+      }
+      return '';
+    }
+
+    function addEvent(type, category, content, details) {
+      state.eventCount++;
+      elements.eventCount.textContent = state.eventCount;
+      
+      const eventItem = document.createElement('div');
+      eventItem.className = 'event-item';
+      
+      const time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+      
+      eventItem.innerHTML = `
+        <div class="event-time">${time}</div>
+        <div class="event-type ${category}">${type}</div>
+        <div class="event-content">
+          ${content}
+          ${details ? `<div class="event-details">${details}</div>` : ''}
+        </div>
+      `;
+      
+      elements.eventList.appendChild(eventItem);
+      elements.eventList.scrollTop = elements.eventList.scrollHeight;
+      
+      // 限制事件数量
+      while (elements.eventList.children.length > 500) {
+        elements.eventList.removeChild(elements.eventList.firstChild);
+      }
+    }
+
+    function updateScreenshot(base64) {
+      elements.screenshotPlaceholder.style.display = 'none';
+      elements.screenshot.style.display = 'block';
+      elements.screenshot.src = `data:image/png;base64,${base64}`;
+    }
+
+    function updateStatus(status, text) {
+      elements.statusText.textContent = text;
+      
+      if (status === 'running') {
+        elements.statusDot.className = 'status-dot';
+      } else if (status === 'warning') {
+        elements.statusDot.className = 'status-dot warning';
+      } else if (status === 'error') {
+        elements.statusDot.className = 'status-dot error';
+      } else {
+        elements.statusDot.className = 'status-dot';
+      }
+    }
+
+    function updateTaskInfo() {
+      if (state.currentTask) {
+        elements.taskInfo.innerHTML = `
+          <div class="task-description">${state.currentTask.taskDescription || '未知任务'}</div>
+          <div class="task-meta">
+            <span>任务ID</span>
+            <span style="font-family: monospace; font-size: 11px;">${(state.currentTask.taskId || '').substring(0, 12)}...</span>
+          </div>
+          <div class="task-meta" style="margin-top: 8px;">
+            <span>已执行步骤</span>
+            <span>${state.currentTask.stepsCompleted || 0}</span>
+          </div>
+        `;
+      } else {
+        elements.taskInfo.innerHTML = `
+          <div class="task-description" style="color: #64748b;">暂无任务</div>
+        `;
+      }
+    }
+
+    // 控制功能
+    function clearEvents() {
+      elements.eventList.innerHTML = '';
+      state.eventCount = 0;
+      elements.eventCount.textContent = '0';
+      addEvent('system', 'info', '日志已清空', '用户手动清空事件日志');
+    }
+
+    function captureScreenshot() {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'capture_screenshot' }));
+      } else {
+        // 演示模式：添加一个模拟事件
+        addEvent('system', 'info', '截图请求已发送', 'WebSocket 未连接，仅演示');
+      }
+    }
+
+    function emergencyStop() {
+      if (confirm('确定要紧急停止当前任务吗？')) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'emergency_stop' }));
+        } else {
+          addEvent('safety_warning', 'safety_warning', '紧急停止', 'WebSocket 未连接，仅演示');
+          updateStatus('error', '已停止');
+        }
+      }
+    }
+
+    // 鼠标位置模拟（演示用）
+    function updateMousePosition(x, y) {
+      const img = elements.screenshot;
+      if (!img || img.style.display === 'none') return;
+      
+      const rect = img.getBoundingClientRect();
+      const containerRect = elements.screenshotContainer.getBoundingClientRect();
+      
+      // 归一化坐标转换
+      const pixelX = (x / 1000) * img.naturalWidth;
+      const pixelY = (y / 1000) * img.naturalHeight;
+      
+      const scaleX = rect.width / img.naturalWidth;
+      const scaleY = rect.height / img.naturalHeight;
+      
+      const displayX = rect.left - containerRect.left + pixelX * scaleX;
+      const displayY = rect.top - containerRect.top + pixelY * scaleY;
+      
+      elements.mouseIndicator.style.display = 'block';
+      elements.mouseIndicator.style.left = displayX + 'px';
+      elements.mouseIndicator.style.top = displayY + 'px';
+    }
+
+    // 初始化
+    function init() {
+      console.log('桌面执行Agent监控面板初始化');
+      
+      // 尝试连接 WebSocket
+      connectWebSocket();
+      
+      // 添加欢迎事件
+      addEvent('system', 'info', '监控面板已启动', '等待桌面执行Agent连接...');
+      addEvent('system', 'info', '系统就绪', '21个预置技能已加载，18个MCP工具可用');
+      
+      // 演示：如果没有 WebSocket 连接，添加一些示例事件
+      setTimeout(() => {
+        if (!state.connected) {
+          addEvent('system', 'info', '演示模式', 'WebSocket 未连接，当前为演示模式');
+        }
+      }, 3000);
+    }
+
+    // 页面加载完成后初始化
+    window.addEventListener('load', init);
+
+    // 暴露一些方法供外部调用
+    window.desktopMonitor = {
+      addEvent,
+      updateScreenshot,
+      updateStatus,
+      updateMousePosition,
+      handleEvent
+    };
+  </script>
+</body>
+</html>

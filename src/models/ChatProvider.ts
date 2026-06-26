@@ -4,13 +4,14 @@
  * 专注于文本对话和工具调用，不含模型选择/降级逻辑
  */
 
+import { getPromptTemplate } from '../llm/prompt-templates';
 import { injectPreferences } from '../memory/PreferenceInjector';
 import { Logger } from '../utils/Logger';
-import { Model, ModelInput } from './ModelInterface';
 import { LLMResponseCache } from './LLMResponseCache';
-import { RequestQueue } from './RequestQueue';
+import { MessageSanitizer } from './MessageSanitizer';
+import { Model, ModelInput } from './ModelInterface';
 import { PromptOptimizer } from './PromptOptimizer';
-import { getPromptTemplate } from '../llm/prompt-templates';
+import { RequestQueue } from './RequestQueue';
 
 export class ChatProvider {
   private model: Model;
@@ -256,6 +257,8 @@ export class ChatProvider {
 
   /**
    * 清理 messages 数组，确保符合 OpenAI API 规范
+   *
+   * 已委托给 MessageSanitizer.sanitizeMessagesForAPI 统一实现。
    * - 合并多条 system 消息为一条
    * - 为 tool 消息添加 name 字段
    * - 移除空 content 的 assistant 消息（除非有 tool_calls）
@@ -273,60 +276,7 @@ export class ChatProvider {
       name?: string;
     }>
   ): Array<Record<string, unknown>> {
-    const systemParts: string[] = [];
-    const nonSystemMessages: Array<Record<string, unknown>> = [];
-
-    for (const msg of messages) {
-      if (msg.role === 'system') {
-        if (msg.content) {
-          systemParts.push(msg.content);
-        }
-      } else {
-        const sanitized: Record<string, unknown> = { role: msg.role };
-
-        if (msg.role === 'assistant') {
-          if (msg.tool_calls && msg.tool_calls.length > 0) {
-            sanitized.tool_calls = msg.tool_calls;
-            sanitized.content = msg.content || '';
-          } else if (msg.content) {
-            sanitized.content = msg.content;
-          } else {
-            continue;
-          }
-        } else if (msg.role === 'tool') {
-          const lastNonTool = [...nonSystemMessages]
-            .reverse()
-            .find((m) => m.role !== 'tool');
-          if (lastNonTool?.role !== 'assistant' || !lastNonTool?.tool_calls) {
-            Logger.warn(
-              `⚠️ tool 消息前无 assistant+tool_calls，跳过（tool_call_id=${msg.tool_call_id?.substring(0, 20)}）`,
-              'ChatProvider'
-            );
-            continue;
-          }
-          sanitized.tool_call_id = msg.tool_call_id || '';
-          sanitized.content = msg.content || '';
-          if (msg.name) {
-            sanitized.name = msg.name;
-          }
-        } else {
-          sanitized.content = msg.content || '';
-        }
-
-        nonSystemMessages.push(sanitized);
-      }
-    }
-
-    const result: Array<Record<string, unknown>> = [];
-    if (systemParts.length > 0) {
-      result.push({
-        role: 'system',
-        content: systemParts.join('\n\n'),
-      });
-    }
-    result.push(...nonSystemMessages);
-
-    return result;
+    return MessageSanitizer.sanitizeMessages(messages);
   }
 
   /**

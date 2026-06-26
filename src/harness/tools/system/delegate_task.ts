@@ -25,12 +25,14 @@ export const DELEGATE_TASK_DEF: ToolDefinition = {
     },
     context: {
       type: 'string',
-      description: '子 Agent 需要的上下文信息（如文件路径、错误信息、参考数据）',
+      description:
+        '子 Agent 需要的上下文信息（如文件路径、错误信息、参考数据）',
     },
     tools: {
       type: 'array',
       items: { type: 'string', description: '工具名称' },
-      description: '限制子 Agent 可用的工具列表，如 ["file_read", "code_analyze"]。不填则可用全部工具',
+      description:
+        '限制子 Agent 可用的工具列表，如 ["file_read", "code_analyze"]。不填则可用全部工具',
     },
     max_iterations: {
       type: 'number',
@@ -48,7 +50,11 @@ export const DELEGATE_TASK_DEF: ToolDefinition = {
 
 export interface DelegateTaskDeps {
   llm: {
-    chat(prompt: string, history?: unknown[], systemPrompt?: string): Promise<string>;
+    chat(
+      prompt: string,
+      history?: unknown[],
+      systemPrompt?: string
+    ): Promise<string>;
   };
   toolRegistry: ToolRegistry;
   constitutionBuilder?: {
@@ -81,15 +87,7 @@ async function runSubAgent(
   const toolsUsed: string[] = [];
   let iterations = 0;
 
-  // 构建工具子集
-  const allTools = deps.toolRegistry.toOpenAITools() as Array<{ function?: { name?: string } }>;
-  const effectiveTools = allowedTools && allowedTools.length > 0
-    ? allTools.filter((t) => {
-        const name = t.function?.name || '';
-        return allowedTools.includes(name);
-      })
-    : allTools;
-
+  // 构建工具子集（删除未使用的 allTools 声明）
   // 构建子 Agent 的 system prompt
   const systemPrompt = [
     '你是一个专注执行子任务的 Agent。',
@@ -97,20 +95,26 @@ async function runSubAgent(
     '使用提供的工具来完成任务，完成后输出简洁的结果摘要。',
     '不要闲聊，直接执行。',
     allowedTools?.length ? `\n可用工具: ${allowedTools.join(', ')}` : '',
-  ].filter(Boolean).join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 
   // 构建初始消息
-  const messages: Array<{ role: string; content: string; tool_calls?: unknown[]; tool_call_id?: string }> = [
+  const messages: Array<{
+    role: string;
+    content: string;
+    tool_calls?: unknown[];
+    tool_call_id?: string;
+  }> = [
     {
       role: 'system',
       content: systemPrompt,
     },
     {
       role: 'user',
-      content: [
-        `## 目标\n${goal}`,
-        context ? `\n## 上下文\n${context}` : '',
-      ].filter(Boolean).join('\n'),
+      content: [`## 目标\n${goal}`, context ? `\n## 上下文\n${context}` : '']
+        .filter(Boolean)
+        .join('\n'),
     },
   ];
 
@@ -121,7 +125,7 @@ async function runSubAgent(
     let response: string;
     try {
       response = await deps.llm.chat(
-        messages.map(m => m.content).join('\n'),
+        messages.map((m) => m.content).join('\n'),
         [],
         systemPrompt
       );
@@ -159,13 +163,19 @@ async function runSubAgent(
 
     if (functionCallMatch) {
       toolName = functionCallMatch[1];
-      try { toolParams = JSON.parse(functionCallMatch[2]); } catch { toolParams = {}; }
+      try {
+        toolParams = JSON.parse(functionCallMatch[2]);
+      } catch {
+        toolParams = {};
+      }
     } else if (toolCallMatch) {
       try {
         const parsed = JSON.parse(toolCallMatch[1]);
         toolName = parsed.tool || parsed.name || '';
         toolParams = parsed.params || parsed.parameters || {};
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
 
     if (!toolName) {
@@ -182,12 +192,20 @@ async function runSubAgent(
     // 执行工具
     let toolResult: string;
     try {
-      const result = await deps.toolRegistry.execute(
-        toolName,
-        toolParams,
-        { permissions: new Set([Permission.FILE_READ, Permission.FILE_WRITE, Permission.CODE_EXECUTE, Permission.NETWORK_ACCESS, Permission.SYSTEM_ADMIN]), metadata: {} }
-      );
-      toolResult = typeof result.output === 'string' ? result.output : JSON.stringify(result.output);
+      const result = await deps.toolRegistry.execute(toolName, toolParams, {
+        permissions: new Set([
+          Permission.FILE_READ,
+          Permission.FILE_WRITE,
+          Permission.CODE_EXECUTE,
+          Permission.NETWORK_ACCESS,
+          Permission.SYSTEM_ADMIN,
+        ]),
+        metadata: {},
+      });
+      toolResult =
+        typeof result.output === 'string'
+          ? result.output
+          : JSON.stringify(result.output);
       toolsUsed.push(toolName);
     } catch (err) {
       toolResult = `工具执行失败: ${(err as Error).message}`;
@@ -196,7 +214,10 @@ async function runSubAgent(
     // 将工具结果加入消息继续循环
     messages.push(
       { role: 'assistant', content: response },
-      { role: 'user', content: `工具 ${toolName} 的结果:\n${toolResult.substring(0, 3000)}\n\n请继续执行任务或给出最终结果。` }
+      {
+        role: 'user',
+        content: `工具 ${toolName} 的结果:\n${toolResult.substring(0, 3000)}\n\n请继续执行任务或给出最终结果。`,
+      }
     );
   }
 
@@ -234,9 +255,18 @@ export function createDelegateTaskExecutor(deps: DelegateTaskDeps) {
     }
 
     try {
-      Logger.info(`🎯 delegate_task 启动: "${goal.substring(0, 60)}"`, 'DelegateTask');
+      Logger.info(
+        `🎯 delegate_task 启动: "${goal.substring(0, 60)}"`,
+        'DelegateTask'
+      );
 
-      const result = await runSubAgent(goal, context, tools, maxIterations, deps);
+      const result = await runSubAgent(
+        goal,
+        context,
+        tools,
+        maxIterations,
+        deps
+      );
 
       const icon = result.success ? '✅' : '⚠️';
       const output = [
@@ -244,11 +274,15 @@ export function createDelegateTaskExecutor(deps: DelegateTaskDeps) {
         ``,
         `📋 目标: ${goal}`,
         `⏱️ 耗时: ${(result.duration / 1000).toFixed(1)}s | 轮次: ${result.iterations}`,
-        result.toolsUsed.length > 0 ? `🔧 使用工具: ${result.toolsUsed.join(', ')}` : '',
+        result.toolsUsed.length > 0
+          ? `🔧 使用工具: ${result.toolsUsed.join(', ')}`
+          : '',
         ``,
         `📄 结果:`,
         result.output,
-      ].filter(Boolean).join('\n');
+      ]
+        .filter(Boolean)
+        .join('\n');
 
       Logger.info(
         `🎯 delegate_task 完成: ${result.success ? '成功' : '失败'} (${result.iterations}轮, ${(result.duration / 1000).toFixed(1)}s)`,

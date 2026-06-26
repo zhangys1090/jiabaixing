@@ -32,11 +32,7 @@ const DEFAULT_AUTONOMOUS_CONFIG: AutonomousTriggerConfig = {
     'file_list',
     'system_status',
   ],
-  forbiddenActions: [
-    'desktop_automate',
-    'shell_exec',
-    'incremental_edit',
-  ],
+  forbiddenActions: ['desktop_automate', 'shell_exec', 'incremental_edit'],
   requireConfirmation: true,
 };
 
@@ -78,10 +74,7 @@ export class AutonomousTrigger {
 
   public start(): void {
     if (!this.config.enabled) {
-      Logger.info(
-        '🤖 自主触发器未启用，跳过启动',
-        'AutonomousTrigger'
-      );
+      Logger.info('🤖 自主触发器未启用，跳过启动', 'AutonomousTrigger');
       return;
     }
 
@@ -109,7 +102,7 @@ export class AutonomousTrigger {
       this.patrolTimer = null;
     }
 
-    for (const [_id, task] of this.activeTasks) {
+    for (const task of this.activeTasks.values()) {
       if (task.status === 'running') {
         task.status = 'failed';
         task.completedAt = Date.now();
@@ -122,10 +115,7 @@ export class AutonomousTrigger {
 
   private async patrol(): Promise<void> {
     if (this.activeTasks.size >= this.config.maxConcurrentTasks) {
-      Logger.debug(
-        '🤖 巡检跳过：活跃任务数已达上限',
-        'AutonomousTrigger'
-      );
+      Logger.debug('🤖 巡检跳过：活跃任务数已达上限', 'AutonomousTrigger');
       return;
     }
 
@@ -170,11 +160,7 @@ export class AutonomousTrigger {
       task.completedAt = Date.now();
       task.result = (err as Error).message;
 
-      Logger.error(
-        '🤖 巡检失败',
-        err as Error,
-        'AutonomousTrigger'
-      );
+      Logger.error('🤖 巡检失败', err as Error, 'AutonomousTrigger');
     }
 
     this.activeTasks.delete(taskId);
@@ -191,10 +177,7 @@ export class AutonomousTrigger {
     if (!this.config.enabled || !this.harness) return null;
 
     if (this.activeTasks.size >= this.config.maxConcurrentTasks) {
-      Logger.warn(
-        '🤖 事件触发跳过：活跃任务数已达上限',
-        'AutonomousTrigger'
-      );
+      Logger.warn('🤖 事件触发跳过：活跃任务数已达上限', 'AutonomousTrigger');
       return null;
     }
 
@@ -211,7 +194,9 @@ export class AutonomousTrigger {
 
     try {
       const prompt = `系统事件触发：${eventDescription}${
-        eventData ? `\n事件数据: ${JSON.stringify(eventData).substring(0, 500)}` : ''
+        eventData
+          ? `\n事件数据: ${JSON.stringify(eventData).substring(0, 500)}`
+          : ''
       }\n\n请分析此事件并决定是否需要采取行动。如果不需要行动，回复"无需行动"。`;
 
       const input: UserInput = { text: prompt, traceId: taskId };
@@ -238,9 +223,7 @@ export class AutonomousTrigger {
     }
   }
 
-  public async triggerGoal(
-    goalDescription: string
-  ): Promise<string | null> {
+  public async triggerGoal(goalDescription: string): Promise<string | null> {
     if (!this.harness) return null;
 
     const taskId = `goal_${Date.now()}`;
@@ -279,9 +262,7 @@ export class AutonomousTrigger {
     }
   }
 
-  public updateConfig(
-    updates: Partial<AutonomousTriggerConfig>
-  ): void {
+  public updateConfig(updates: Partial<AutonomousTriggerConfig>): void {
     this.config = { ...this.config, ...updates };
 
     if (updates.patrolIntervalMs && this.patrolTimer) {
@@ -314,9 +295,7 @@ export class AutonomousTrigger {
     const completed = this.taskHistory.filter(
       (t) => t.status === 'completed'
     ).length;
-    const failed = this.taskHistory.filter(
-      (t) => t.status === 'failed'
-    ).length;
+    const failed = this.taskHistory.filter((t) => t.status === 'failed').length;
 
     return {
       enabled: this.config.enabled,

@@ -39,12 +39,17 @@ export const KNOWLEDGE_QUERY_DEF: ToolDefinition = {
 };
 
 export interface KnowledgeQueryDeps {
-  memoryRecall?: (query: string, limit: number) => Promise<Array<{
-    content: unknown;
-    type?: string;
-    timestamp?: Date;
-    relevanceScore?: number;
-  }>>;
+  memoryRecall?: (
+    query: string,
+    limit: number
+  ) => Promise<
+    Array<{
+      content: unknown;
+      type?: string;
+      timestamp?: Date;
+      relevanceScore?: number;
+    }>
+  >;
   getUserProfile?: () => {
     name?: string;
     preferences?: Record<string, unknown>;
@@ -71,14 +76,24 @@ export function createKnowledgeQueryExecutor(deps: KnowledgeQueryDeps) {
       const results: string[] = [];
 
       // 1. 从记忆中检索
-      if (deps.memoryRecall && (scope === 'all' || scope === 'knowledge' || scope === 'history')) {
+      if (
+        deps.memoryRecall &&
+        (scope === 'all' || scope === 'knowledge' || scope === 'history')
+      ) {
         const memories = await deps.memoryRecall(query, maxResults);
         if (memories.length > 0) {
           results.push('📚 相关记忆:');
           for (const mem of memories) {
-            const content = typeof mem.content === 'string' ? mem.content : JSON.stringify(mem.content);
-            const time = mem.timestamp ? new Date(mem.timestamp).toLocaleString('zh-CN') : '';
-            results.push(`  • ${content.substring(0, 150)}${time ? ` (${time})` : ''}`);
+            const content =
+              typeof mem.content === 'string'
+                ? mem.content
+                : JSON.stringify(mem.content);
+            const time = mem.timestamp
+              ? new Date(mem.timestamp).toLocaleString('zh-CN')
+              : '';
+            results.push(
+              `  • ${content.substring(0, 150)}${time ? ` (${time})` : ''}`
+            );
           }
           results.push('');
         }
@@ -103,13 +118,20 @@ export function createKnowledgeQueryExecutor(deps: KnowledgeQueryDeps) {
       }
 
       // 3. 对话历史
-      if (deps.getConversationHistory && (scope === 'all' || scope === 'history')) {
+      if (
+        deps.getConversationHistory &&
+        (scope === 'all' || scope === 'history')
+      ) {
         const history = deps.getConversationHistory(10);
         if (history.length > 0) {
           results.push('💬 最近对话:');
           for (const msg of history.slice(-5)) {
-            const time = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('zh-CN') : '';
-            results.push(`  [${msg.role}] ${msg.content.substring(0, 100)}${time ? ` (${time})` : ''}`);
+            const time = msg.timestamp
+              ? new Date(msg.timestamp).toLocaleTimeString('zh-CN')
+              : '';
+            results.push(
+              `  [${msg.role}] ${msg.content.substring(0, 100)}${time ? ` (${time})` : ''}`
+            );
           }
           results.push('');
         }

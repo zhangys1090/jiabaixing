@@ -55,7 +55,11 @@ const CORRECTION_PATTERNS = [
 const RETRY_WINDOW_MS = 60_000; // 1分钟内
 
 export class FeedbackCollector {
-  private recentInputs: Array<{ input: string; timestamp: number; userId?: string }> = [];
+  private recentInputs: Array<{
+    input: string;
+    timestamp: number;
+    userId?: string;
+  }> = [];
   private deps: FeedbackCollectorDeps;
   private feedbackHistory: FeedbackRecord[] = [];
   private readonly MAX_HISTORY = 200;
@@ -230,7 +234,10 @@ export class FeedbackCollector {
       try {
         this.deps.onFeedback(record);
       } catch (err) {
-        Logger.warn(`反馈通知失败: ${(err as Error).message}`, 'FeedbackCollector');
+        Logger.warn(
+          `反馈通知失败: ${(err as Error).message}`,
+          'FeedbackCollector'
+        );
       }
     }
   }
@@ -241,5 +248,102 @@ export class FeedbackCollector {
     const intersection = new Set([...setA].filter((x) => setB.has(x)));
     const union = new Set([...setA, ...setB]);
     return union.size > 0 ? intersection.size / union.size : 0;
+  }
+
+  /** 情绪模式记录 */
+  private emotionPatterns: Map<
+    string,
+    { emotionType: string; frequency: number; lastSeen: number }
+  > = new Map();
+
+  /**
+   * 检测情绪转变 — 分析用户输入中的情绪变化
+   */
+  detectEmotionShift(
+    currentInput: string,
+    _previousResponse: string
+  ): {
+    emotionType: 'positive' | 'negative' | 'neutral';
+    intensity: number;
+    triggerPhrase: string;
+    suggestedResponseAdjustment: string;
+  } | null {
+    // 消极情绪关键词
+    const negativePatterns: Array<{ regex: RegExp; phrase: string }> = [
+      {
+        regex: /烦死|讨厌|糟糕|失败|错误|问题|不行|不能|不可以/i,
+        phrase: '消极情绪',
+      },
+      { regex: /生气|愤怒|气死|可恶|该死|混蛋/i, phrase: '愤怒' },
+      { regex: /累|疲惫|困|睡|休息|不想|放弃/i, phrase: '疲惫' },
+    ];
+
+    // 积极情绪关键词
+    const positivePatterns: Array<{ regex: RegExp; phrase: string }> = [
+      { regex: /太好了|好棒|完美|成功|搞定|解决|可以|行/i, phrase: '积极情绪' },
+      { regex: /开心|高兴|快乐|棒|赞|好/i, phrase: '开心' },
+      { regex: /谢谢|感谢|多谢|辛苦/i, phrase: '感谢' },
+    ];
+
+    // 检测消极情绪
+    for (const pattern of negativePatterns) {
+      if (pattern.regex.test(currentInput)) {
+        const intensity = Math.min(10, currentInput.length / 5);
+        this.recordEmotionPattern('negative');
+        return {
+          emotionType: 'negative',
+          intensity,
+          triggerPhrase: pattern.phrase,
+          suggestedResponseAdjustment:
+            '建议采用更谨慎、安抚性的回复风格，先确认问题再提供解决方案',
+        };
+      }
+    }
+
+    // 检测积极情绪
+    for (const pattern of positivePatterns) {
+      if (pattern.regex.test(currentInput)) {
+        const intensity = Math.min(10, currentInput.length / 5);
+        this.recordEmotionPattern('positive');
+        return {
+          emotionType: 'positive',
+          intensity,
+          triggerPhrase: pattern.phrase,
+          suggestedResponseAdjustment: '建议保持当前风格，可适当简化回复',
+        };
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * 记录情绪模式
+   */
+  private recordEmotionPattern(emotionType: string): void {
+    const existing = this.emotionPatterns.get(emotionType);
+    if (existing) {
+      existing.frequency++;
+      existing.lastSeen = Date.now();
+    } else {
+      this.emotionPatterns.set(emotionType, {
+        emotionType,
+        frequency: 1,
+        lastSeen: Date.now(),
+      });
+    }
+  }
+
+  /**
+   * 获取学习到的情绪模式
+   */
+  getEmotionPatterns(): Array<{
+    emotionType: string;
+    frequency: number;
+    lastSeen: number;
+  }> {
+    return Array.from(this.emotionPatterns.values()).sort(
+      (a, b) => b.frequency - a.frequency
+    );
   }
 }

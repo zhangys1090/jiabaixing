@@ -27,10 +27,7 @@ describe('ErrorMonitor', () => {
 
   test('should initialize error monitoring', () => {
     // 模拟 window.addEventListener
-    const addEventListenerSpy = jest.spyOn(
-      window as unknown as { addEventListener: jest.Mock },
-      'addEventListener'
-    );
+    const addEventListenerSpy = jest.spyOn(window as unknown as { addEventListener: jest.Mock }, 'addEventListener');
 
     // 初始化错误监控
     errorMonitor.initialize();

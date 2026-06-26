@@ -801,9 +801,24 @@ router.get('/api/recommendations', (req, res) => {
       description: string;
       priority: number;
     }> = [
-      { type: 'usage', title: '查看帮助', description: '输入 /help 了解所有可用命令和功能', priority: 1 },
-      { type: 'usage', title: '试试桌面自动化', description: '对jiabaixing说"截图"或"打开记事本"体验桌面控制', priority: 2 },
-      { type: 'usage', title: '配置主动提醒', description: '设置日程提醒让jiabaixing主动通知你', priority: 3 },
+      {
+        type: 'usage',
+        title: '查看帮助',
+        description: '输入 /help 了解所有可用命令和功能',
+        priority: 1,
+      },
+      {
+        type: 'usage',
+        title: '试试桌面自动化',
+        description: '对jiabaixing说"截图"或"打开记事本"体验桌面控制',
+        priority: 2,
+      },
+      {
+        type: 'usage',
+        title: '配置主动提醒',
+        description: '设置日程提醒让jiabaixing主动通知你',
+        priority: 3,
+      },
     ];
 
     res.json({

@@ -4,9 +4,12 @@
  * 真实子进程启动 + JSON-RPC over stdio 通信
  */
 
-import { EventEmitter } from 'events';
 import { ChildProcess, spawn } from 'child_process';
+import { EventEmitter } from 'events';
+import * as path from 'path';
 import { Logger } from '../utils/Logger';
+
+const MCP_CONFIG_PATH = path.join(process.cwd(), 'data', 'mcp-servers.json');
 
 export interface MCPServerConfig {
   name: string;
@@ -16,6 +19,9 @@ export interface MCPServerConfig {
   description?: string;
   enabled?: boolean;
   autoStart?: boolean;
+  toolFiltering?: boolean;
+  allowedTools?: string[];
+  deniedTools?: string[];
 }
 
 export interface MCPMessage {
@@ -47,6 +53,8 @@ interface MCPServerProcess {
   initialized: boolean;
   serverInfo?: Record<string, unknown>;
   capabilities?: Record<string, unknown>;
+  restartCount: number;
+  lastHealthCheck: number | null;
 }
 
 export class MCPServerManager extends EventEmitter {
@@ -66,8 +74,23 @@ export class MCPServerManager extends EventEmitter {
   public static getInstance(): MCPServerManager {
     if (!MCPServerManager.instance) {
       MCPServerManager.instance = new MCPServerManager();
+      MCPServerManager.instance.loadConfigFromFile();
     }
     return MCPServerManager.instance;
+  }
+
+  /**
+   * 重置单例（仅供测试使用）
+   */
+  public static resetInstance(): void {
+    if (MCPServerManager.instance) {
+      MCPServerManager.instance.stopAllServers();
+      MCPServerManager.instance.removeAllListeners();
+      MCPServerManager.instance.servers.clear();
+      MCPServerManager.instance.serverProcesses.clear();
+      MCPServerManager.instance.messageHandlers.clear();
+    }
+    MCPServerManager.instance = null;
   }
 
   private initializeDefaultServers(): void {
@@ -114,12 +137,14 @@ export class MCPServerManager extends EventEmitter {
       enabled: config.enabled !== false,
       autoStart: config.autoStart ?? false,
     });
+    this.saveConfigToFile();
     Logger.info(`📡 MCP服务器已注册: ${config.name}`, 'MCPServerManager');
   }
 
   public unregisterServer(name: string): boolean {
     this.stopServer(name);
     this.servers.delete(name);
+    this.saveConfigToFile();
     return true;
   }
 
@@ -160,6 +185,8 @@ export class MCPServerManager extends EventEmitter {
         pendingRequests: new Map(),
         outputBuffer: '',
         initialized: false,
+        restartCount: 0,
+        lastHealthCheck: null,
       };
 
       childProcess.stdout!.on('data', (data: Buffer) => {
@@ -169,7 +196,10 @@ export class MCPServerManager extends EventEmitter {
       childProcess.stderr!.on('data', (data: Buffer) => {
         const msg = data.toString().trim();
         if (msg) {
-          Logger.debug(`MCP[${name}] stderr: ${msg.substring(0, 200)}`, 'MCPServerManager');
+          Logger.debug(
+            `MCP[${name}] stderr: ${msg.substring(0, 200)}`,
+            'MCPServerManager'
+          );
         }
       });
 
@@ -179,7 +209,10 @@ export class MCPServerManager extends EventEmitter {
       });
 
       childProcess.on('exit', (code) => {
-        Logger.warn(`MCP服务器进程退出: ${name} (code=${code})`, 'MCPServerManager');
+        Logger.warn(
+          `MCP服务器进程退出: ${name} (code=${code})`,
+          'MCPServerManager'
+        );
         this.cleanupServer(name, serverProc);
       });
 
@@ -227,7 +260,10 @@ export class MCPServerManager extends EventEmitter {
         const result = response.result as Record<string, unknown>;
         serverProc.initialized = true;
         serverProc.serverInfo = result.serverInfo as Record<string, unknown>;
-        serverProc.capabilities = result.capabilities as Record<string, unknown>;
+        serverProc.capabilities = result.capabilities as Record<
+          string,
+          unknown
+        >;
       }
 
       await this.sendMessage(name, {
@@ -388,7 +424,11 @@ export class MCPServerManager extends EventEmitter {
     return new Promise<MCPMessage>((resolve, reject) => {
       const timer = setTimeout(() => {
         serverProc.pendingRequests.delete(id);
-        reject(new Error(`MCP请求超时 (${MCPServerManager.REQUEST_TIMEOUT_MS}ms): ${serverName}/${message.method}`));
+        reject(
+          new Error(
+            `MCP请求超时 (${MCPServerManager.REQUEST_TIMEOUT_MS}ms): ${serverName}/${message.method}`
+          )
+        );
       }, MCPServerManager.REQUEST_TIMEOUT_MS);
 
       serverProc.pendingRequests.set(id, { resolve, reject, timer });
@@ -404,11 +444,58 @@ export class MCPServerManager extends EventEmitter {
     });
   }
 
+  /**
+   * 根据服务器配置过滤工具列表
+   * @param serverName - 服务器名称
+   * @param tools - 待过滤的工具列表
+   * @returns 过滤后的工具列表
+   */
+  public filterTools<T extends { name: string }>(
+    serverName: string,
+    tools: T[]
+  ): T[] {
+    const config = this.servers.get(serverName);
+    if (!config || !config.toolFiltering) {
+      return tools;
+    }
+
+    const { allowedTools, deniedTools } = config;
+
+    return tools.filter((tool) => {
+      // 黑名单优先级高于白名单
+      if (deniedTools && deniedTools.includes(tool.name)) {
+        return false;
+      }
+      // 如果配置了白名单，只保留白名单中的工具
+      if (allowedTools && allowedTools.length > 0) {
+        return allowedTools.includes(tool.name);
+      }
+      return true;
+    });
+  }
+
   public async callTool(
     serverName: string,
     toolName: string,
     args: Record<string, unknown> = {}
   ): Promise<unknown> {
+    const config = this.servers.get(serverName);
+    if (config?.toolFiltering) {
+      const { allowedTools, deniedTools } = config;
+      // 黑名单检查
+      if (deniedTools && deniedTools.includes(toolName)) {
+        throw new Error(`工具 ${toolName} 已被禁用`);
+      }
+      // 白名单检查
+      if (
+        allowedTools &&
+        allowedTools.length > 0 &&
+        !allowedTools.includes(toolName)
+      ) {
+        throw new Error(`工具 ${toolName} 不在允许列表中`);
+      }
+    }
+
     const response = await this.sendMessage(serverName, {
       jsonrpc: '2.0',
       method: 'tools/call',
@@ -435,9 +522,7 @@ export class MCPServerManager extends EventEmitter {
     });
 
     if (response.error) {
-      throw new Error(
-        `MCP工具列表获取失败: ${response.error.message}`
-      );
+      throw new Error(`MCP工具列表获取失败: ${response.error.message}`);
     }
 
     const result = response.result as { tools?: unknown[] } | null;
@@ -503,6 +588,113 @@ export class MCPServerManager extends EventEmitter {
 
   public getRunningServerCount(): number {
     return this.serverProcesses.size;
+  }
+
+  /**
+   * 获取单个服务器的健康状态
+   */
+  public getServerHealth(name: string): {
+    name: string;
+    running: boolean;
+    initialized: boolean;
+    healthy: boolean;
+    restartCount: number;
+    lastHealthCheck: number | null;
+    uptime: number;
+  } {
+    const status = this.getServerStatus(name);
+    const proc = this.serverProcesses.get(name);
+    return {
+      name,
+      running: status.running,
+      initialized: status.initialized,
+      healthy: status.running && status.initialized,
+      restartCount: proc?.restartCount || 0,
+      lastHealthCheck: proc?.lastHealthCheck || null,
+      uptime: proc?.process?.pid
+        ? Date.now() - (proc.lastHealthCheck || Date.now())
+        : 0,
+    };
+  }
+
+  /**
+   * 获取所有服务器的健康状态
+   */
+  public getAllServerHealth(): Record<
+    string,
+    ReturnType<MCPServerManager['getServerHealth']>
+  > {
+    const health: Record<string, ReturnType<typeof this.getServerHealth>> = {};
+    this.servers.forEach((_, name) => {
+      health[name] = this.getServerHealth(name);
+    });
+    return health;
+  }
+
+  /**
+   * 从文件加载配置
+   */
+  private loadConfigFromFile(): void {
+    const fs = require('fs');
+    try {
+      let content: string;
+      try {
+        content = fs.readFileSync(MCP_CONFIG_PATH, 'utf-8');
+      } catch {
+        // 文件不存在时直接返回
+        return;
+      }
+      const configs: MCPServerConfig[] = JSON.parse(content);
+      for (const cfg of configs) {
+        if (!this.servers.has(cfg.name)) {
+          this.servers.set(cfg.name, {
+            ...cfg,
+            enabled: cfg.enabled !== false,
+            autoStart: cfg.autoStart ?? false,
+          });
+        }
+      }
+      Logger.info(
+        `📦 从文件加载了 ${configs.length} 个 MCP 服务器配置`,
+        'MCPServerManager'
+      );
+    } catch (err) {
+      Logger.warn(
+        `加载 MCP 配置文件失败: ${(err as Error).message}`,
+        'MCPServerManager'
+      );
+    }
+  }
+
+  /**
+   * 保存配置到文件
+   */
+  private saveConfigToFile(): void {
+    const fs = require('fs');
+    try {
+      const dir = path.dirname(MCP_CONFIG_PATH);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      const configs = Array.from(this.servers.values());
+      fs.writeFileSync(MCP_CONFIG_PATH, JSON.stringify(configs, null, 2));
+    } catch (err) {
+      Logger.warn(
+        `保存 MCP 配置文件失败: ${(err as Error).message}`,
+        'MCPServerManager'
+      );
+    }
+  }
+
+  /**
+   * 重新加载配置
+   */
+  public reloadConfig(): void {
+    this.servers.clear();
+    this.initializeDefaultServers();
+    this.loadConfigFromFile();
+    this.emit('configReloaded');
+    Logger.info('MCP 服务器配置已重新加载', 'MCPServerManager');
   }
 }
 

@@ -7,10 +7,11 @@
 import * as WebSocket from 'ws';
 
 import { JiabaixingCore, ProcessInputResult } from '../core/JiabaixingCore';
-import { Logger } from '../utils/Logger';
 import { SecurityPolicyEngine } from '../security/SecurityPolicyEngine';
 import { EventBus } from '../shared/EventBus';
 import { SYSTEM_CONSTANTS } from '../shared/contracts';
+import { Logger } from '../utils/Logger';
+import { getPythonBridge, isPythonBackend } from './bootstrap';
 
 type WSServer = WebSocket.Server;
 
@@ -113,7 +114,7 @@ export function setupWebSocket(
           if (!task.aborted && task.loopController) {
             try {
               task.loopController.abort();
-            } catch (e) {
+            } catch {
               // 忽略
             }
           }
@@ -336,7 +337,7 @@ export function setupWebSocket(
           if (!task.aborted && task.loopController) {
             try {
               task.loopController.abort();
-            } catch (e) {
+            } catch {
               // 忽略
             }
           }
@@ -497,6 +498,66 @@ async function processInputOnce(
   core: JiabaixingCore | null,
   taskHandle: { aborted: boolean; loopController?: { abort(): void } }
 ): Promise<void> {
+  // ── Python 后端路径 ──
+  if (isPythonBackend()) {
+    const bridge = getPythonBridge()!;
+
+    const PROCESSING_TIMEOUT_MS = 120000;
+    const timeoutId = setTimeout(() => {
+      if (!taskHandle.aborted && ws.readyState === 1) {
+        Logger.warn(
+          `Python Agent 处理超时 (${PROCESSING_TIMEOUT_MS}ms): traceId=${traceId}`,
+          'WebSocket'
+        );
+        ws.send(
+          JSON.stringify({
+            type: 'response_ready',
+            data: {
+              response: '抱歉，处理时间过长，已自动终止。请稍后重试。',
+              traceId,
+              success: false,
+              timeout: true,
+            },
+          })
+        );
+        taskHandle.aborted = true;
+      }
+    }, PROCESSING_TIMEOUT_MS);
+
+    try {
+      Logger.info(
+        `[Python] 开始处理输入 [${traceId}]: "${input.substring(0, 50)}..."`,
+        'WebSocket'
+      );
+
+      const result = await bridge.processInput(input, userId, traceId);
+
+      clearTimeout(timeoutId);
+
+      if (taskHandle.aborted) return;
+
+      const policyEngine = SecurityPolicyEngine.getInstance();
+      policyEngine.getCircuitBreaker('llm_processing').recordSuccess();
+
+      if (ws.readyState === 1) {
+        Logger.info(
+          `[Python] 处理完成, traceId: ${result.traceId || traceId}`,
+          'WebSocket'
+        );
+      }
+    } catch (error) {
+      clearTimeout(timeoutId);
+      Logger.error(
+        '[Python] processInputOnce 执行失败',
+        error as Error,
+        'WebSocket'
+      );
+      throw error;
+    }
+    return;
+  }
+
+  // ── TS 本地路径 ──
   if (!core) {
     throw new Error('核心系统未初始化');
   }

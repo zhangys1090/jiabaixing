@@ -1,7 +1,13 @@
+/**
+ * @deprecated 已迁移到 Python agent/llm/cache.py。当 AGENT_BACKEND=python（默认）时不再使用此文件。
+ *   回退方式：设置 AGENT_BACKEND=local 可继续使用 TS 本地实现。
+ *   迁移日期：2026-06-22
+ */
+
 import crypto from 'crypto';
+import { perf } from '../monitoring/PerformanceMonitor';
 import { Logger } from '../utils/Logger';
 import { RedisCache } from './RedisCache';
-import { perf } from '../monitoring/PerformanceMonitor';
 
 export class LLMResponseCache {
   private cache: RedisCache<string>;
@@ -58,7 +64,7 @@ export class LLMResponseCache {
               'LLMResponseCache'
             );
           }
-          return result;
+          return result ?? null;
         }
 
         // 旧接口兼容

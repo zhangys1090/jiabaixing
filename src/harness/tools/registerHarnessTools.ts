@@ -32,53 +32,118 @@ import { PREVIEW_EXECUTION_DEF } from './system/preview_execution';
 import { ROLLBACK_CHANGES_DEF } from './system/rollback_changes';
 
 // === 文件工具 ===
+import { FILE_DEDUP_DEF } from './file/file_dedup';
+import { FILE_GREP_DEF } from './file/file_grep';
 import { FILE_LIST_DEF } from './file/file_list';
 import { FILE_READ_DEF } from './file/file_read';
 import { FILE_SEARCH_DEF } from './file/file_search';
-import { FILE_GREP_DEF } from './file/file_grep';
-import { FILE_DEDUP_DEF } from './file/file_dedup';
 import { GET_ACTIVE_FILE_DEF } from './file/get_active_file';
 import { INCREMENTAL_EDIT_DEF } from './file/incremental_edit';
 import { MULTI_FILE_EDIT_DEF } from './file/multi_file_edit';
 
 // === 代码工具 ===
 import { CODE_ANALYZE_DEF } from './code/code_analyze';
-import { CSV_ANALYZE_DEF, createCsvAnalyzeExecutor } from './code/csv_analyze';
-import { CODE_REVIEW_DEF, createCodeReviewExecutor, type CodeReviewDeps } from './code/code_review';
-import { CODE_REVIEW_PROJECT_DEF, createCodeReviewProjectExecutor } from './code/code_review_project';
 import { CODE_FIX_DEF } from './code/code_fix';
 import { CODE_GENERATE_DEF } from './code/code_generate';
+import {
+  CODE_REVIEW_DEF,
+  createCodeReviewExecutor,
+  type CodeReviewDeps,
+} from './code/code_review';
+import {
+  CODE_REVIEW_PROJECT_DEF,
+  createCodeReviewProjectExecutor,
+} from './code/code_review_project';
+import { CSV_ANALYZE_DEF, createCsvAnalyzeExecutor } from './code/csv_analyze';
 
 // === 日常管理工具 ===
+import { BATCH_TASK_DEF } from './daily/batch_task';
+import { CALENDAR_DEF } from './daily/calendar';
+import {
+  MORNING_BRIEF_DEF,
+  createMorningBriefExecutor,
+  type MorningBriefDeps,
+} from './daily/morning_brief';
+import {
+  NATURAL_SCHEDULE_DEF,
+  createNaturalScheduleExecutor,
+} from './daily/natural_schedule';
 import { NOTE_TAKE_DEF } from './daily/note_take';
 import { REMINDER_SET_DEF } from './daily/reminder_set';
 import { SYSTEM_STATUS_DEF } from './daily/system_status';
+import { TASK_ANALYTICS_DEF } from './daily/task_analytics';
+import { TASK_DEPENDENCY_DEF } from './daily/task_dependency';
 import { TASK_MANAGE_DEF } from './daily/task_manage';
 import { TASK_PRIORITY_DEF } from './daily/task_priority';
-import { TASK_DEPENDENCY_DEF } from './daily/task_dependency';
-import { BATCH_TASK_DEF } from './daily/batch_task';
-import { TASK_ANALYTICS_DEF } from './daily/task_analytics';
-import { MORNING_BRIEF_DEF, createMorningBriefExecutor, type MorningBriefDeps } from './daily/morning_brief';
-import { NATURAL_SCHEDULE_DEF, createNaturalScheduleExecutor } from './daily/natural_schedule';
+import {
+  KNOWLEDGE_QUERY_DEF,
+  createKnowledgeQueryExecutor,
+  type KnowledgeQueryDeps,
+} from './memory/knowledge_query';
 import { SKILL_SHARE_DEF, createSkillShareExecutor } from './skill/skill_share';
-import { KNOWLEDGE_QUERY_DEF, createKnowledgeQueryExecutor, type KnowledgeQueryDeps } from './memory/knowledge_query';
-import { CALENDAR_DEF } from './daily/calendar';
 
 // === 网络工具 ===
-import { WEB_SEARCH_DEF } from './network/web_search';
-import { SKILL_CREATE_DEF } from './network/skill_create';
-import { WEB_FETCH_DEF } from './network/web_fetch';
-import { IMAGE_GENERATE_DEF } from './network/image_generate';
-import { TTS_SPEAK_DEF } from './network/tts_speak';
 import { CHART_GENERATE_DEF } from './network/chart_generate';
+import { IMAGE_GENERATE_DEF } from './network/image_generate';
 import { MESSAGE_PUSH_DEF } from './network/message_push';
+import { SKILL_CREATE_DEF } from './network/skill_create';
+import { TTS_SPEAK_DEF } from './network/tts_speak';
+import { WEB_FETCH_DEF } from './network/web_fetch';
+import { WEB_SEARCH_DEF } from './network/web_search';
 
 // === 系统工具(扩展) ===
-import { SHELL_EXEC_DEF } from './system/shell_exec';
-import { SHELL_GENERATE_DEF, createShellGenerateExecutor } from './system/shell_generate';
-import { DELEGATE_TASK_DEF, createDelegateTaskExecutor } from './system/delegate_task';
 import { CONTEXT_MANAGE_DEF } from './system/context_manage';
-import { VOICE_INTERACT_DEF, createVoiceInteractExecutor, type VoiceInteractDeps } from './system/voice_interact';
+import {
+  DELEGATE_TASK_DEF,
+  createDelegateTaskExecutor,
+} from './system/delegate_task';
+import {
+  EXECUTE_CODE_DEF,
+  createExecuteCodeExecutor,
+  type ExecuteCodeDeps,
+} from './system/execute_code';
+import { SHELL_EXEC_DEF } from './system/shell_exec';
+import {
+  SHELL_GENERATE_DEF,
+  createShellGenerateExecutor,
+} from './system/shell_generate';
+import {
+  VOICE_INTERACT_DEF,
+  createVoiceInteractExecutor,
+  type VoiceInteractDeps,
+} from './system/voice_interact';
+
+// ── LSP 工具定义与执行器 ──
+import {
+  LSP_COMPLETION_DEF,
+  createLspCompletionExecutor,
+  type LspCompletionDeps,
+} from './lsp/lsp_completion';
+import {
+  LSP_DEFINITION_DEF,
+  createLspDefinitionExecutor,
+  type LspDefinitionDeps,
+} from './lsp/lsp_definition';
+import {
+  LSP_DIAGNOSTICS_DEF,
+  createLspDiagnosticsExecutor,
+  type LspDiagnosticsDeps,
+} from './lsp/lsp_diagnostics';
+import {
+  LSP_HOVER_DEF,
+  createLspHoverExecutor,
+  type LspHoverDeps,
+} from './lsp/lsp_hover';
+import {
+  LSP_REFERENCES_DEF,
+  createLspReferencesExecutor,
+  type LspReferencesDeps,
+} from './lsp/lsp_references';
+import {
+  LSP_SYMBOLS_DEF,
+  createLspSymbolsExecutor,
+  type LspSymbolsDeps,
+} from './lsp/lsp_symbols';
 
 // === 工具执行器工厂 ===
 import {
@@ -107,20 +172,14 @@ import {
   createDesktopScreenshotExecutor,
   type DesktopScreenshotDeps,
 } from './desktop/desktop_screenshot';
+import { createFileDedupExecutor } from './file/file_dedup';
+import { createFileGrepExecutor, type FileGrepDeps } from './file/file_grep';
 import { createFileListExecutor, type FileListDeps } from './file/file_list';
-import {
-  createFileReadExecutor,
-  type FileReadDeps,
-} from './file/file_read';
+import { createFileReadExecutor, type FileReadDeps } from './file/file_read';
 import {
   createFileSearchExecutor,
   type FileSearchDeps,
 } from './file/file_search';
-import {
-  createFileGrepExecutor,
-  type FileGrepDeps,
-} from './file/file_grep';
-import { createFileDedupExecutor } from './file/file_dedup';
 import {
   createGetActiveFileExecutor,
   type GetActiveFileDeps,
@@ -153,6 +212,11 @@ import {
 } from './system/rollback_changes';
 
 // === 日常管理工具执行器工厂 ===
+import {
+  createBatchTaskExecutor,
+  type BatchTaskDeps,
+} from './daily/batch_task';
+import { createCalendarExecutor, type CalendarDeps } from './daily/calendar';
 import { createNoteTakeExecutor, type NoteTakeDeps } from './daily/note_take';
 import {
   createReminderSetExecutor,
@@ -163,6 +227,14 @@ import {
   type SystemStatusDeps,
 } from './daily/system_status';
 import {
+  createTaskAnalyticsExecutor,
+  type TaskAnalyticsDeps,
+} from './daily/task_analytics';
+import {
+  createTaskDependencyExecutor,
+  type TaskDependencyDeps,
+} from './daily/task_dependency';
+import {
   createTaskManageExecutor,
   type TaskManageDeps,
 } from './daily/task_manage';
@@ -170,57 +242,38 @@ import {
   createTaskPriorityExecutor,
   type TaskPriorityDeps,
 } from './daily/task_priority';
-import {
-  createTaskDependencyExecutor,
-  type TaskDependencyDeps,
-} from './daily/task_dependency';
-import {
-  createBatchTaskExecutor,
-  type BatchTaskDeps,
-} from './daily/batch_task';
-import {
-  createTaskAnalyticsExecutor,
-  type TaskAnalyticsDeps,
-} from './daily/task_analytics';
-import { createCalendarExecutor, type CalendarDeps } from './daily/calendar';
 
 // === 网络工具执行器工厂 ===
-import {
-  createWebSearchExecutor,
-  type WebSearchDeps,
-} from './network/web_search';
-import {
-  createSkillCreateExecutor,
-  type SkillCreateDeps,
-} from './network/skill_create';
-import {
-  createWebFetchExecutor,
-  type WebFetchDeps,
-} from './network/web_fetch';
-import {
-  createImageGenerateExecutor,
-  type ImageGenerateDeps,
-} from './network/image_generate';
-import {
-  createTTSSpeakExecutor,
-  type TTSSpeakDeps,
-} from './network/tts_speak';
 import {
   createChartGenerateExecutor,
   type ChartGenerateDeps,
 } from './network/chart_generate';
 import {
+  createImageGenerateExecutor,
+  type ImageGenerateDeps,
+} from './network/image_generate';
+import {
   createMessagePushExecutor,
   type MessagePushDeps,
 } from './network/message_push';
 import {
-  createShellExecExecutor,
-  type ShellExecDeps,
-} from './system/shell_exec';
+  createSkillCreateExecutor,
+  type SkillCreateDeps,
+} from './network/skill_create';
+import { createTTSSpeakExecutor, type TTSSpeakDeps } from './network/tts_speak';
+import { createWebFetchExecutor, type WebFetchDeps } from './network/web_fetch';
+import {
+  createWebSearchExecutor,
+  type WebSearchDeps,
+} from './network/web_search';
 import {
   createContextManageExecutor,
   type ContextManageDeps,
 } from './system/context_manage';
+import {
+  createShellExecExecutor,
+  type ShellExecDeps,
+} from './system/shell_exec';
 
 /** 所有工具依赖的聚合接口 */
 export interface HarnessToolDeps
@@ -258,10 +311,20 @@ export interface HarnessToolDeps
     ImageGenerateDeps,
     TTSSpeakDeps,
     ShellExecDeps,
+    ExecuteCodeDeps,
     ContextManageDeps,
     VoiceInteractDeps,
     ChartGenerateDeps,
-    MessagePushDeps {}
+    MessagePushDeps,
+    LspDiagnosticsDeps,
+    LspCompletionDeps,
+    LspHoverDeps,
+    LspDefinitionDeps,
+    LspReferencesDeps,
+    LspSymbolsDeps {
+  // 允许运行时动态挂载额外依赖（如 messageProcessor、i18nManager）
+  [key: string]: unknown;
+}
 
 /** 工具注册结果 */
 export interface ToolRegistrationResult {
@@ -318,8 +381,14 @@ export function registerHarnessTools(
 
   // 代码审查工具
   const codeReviewDeps: CodeReviewDeps = { llm: deps.llm };
-  toolRegistry.register(CODE_REVIEW_DEF, createCodeReviewExecutor(codeReviewDeps));
-  toolRegistry.register(CODE_REVIEW_PROJECT_DEF, createCodeReviewProjectExecutor(codeReviewDeps));
+  toolRegistry.register(
+    CODE_REVIEW_DEF,
+    createCodeReviewExecutor(codeReviewDeps)
+  );
+  toolRegistry.register(
+    CODE_REVIEW_PROJECT_DEF,
+    createCodeReviewProjectExecutor(codeReviewDeps)
+  );
   toolRegistry.register(CODE_FIX_DEF, createCodeFixExecutor(deps));
 
   // 日常管理工具 (9)
@@ -335,9 +404,17 @@ export function registerHarnessTools(
   // 晨报工具
   const morningBriefDeps: MorningBriefDeps = {
     llm: deps.llm,
-    searchExecutor: (params, ctx) => toolRegistry.execute('web_search', params, ctx || { permissions: new Set(), metadata: {} }),
+    searchExecutor: (params, ctx) =>
+      toolRegistry.execute(
+        'web_search',
+        params,
+        ctx || { permissions: new Set(), metadata: {} }
+      ),
   };
-  toolRegistry.register(MORNING_BRIEF_DEF, createMorningBriefExecutor(morningBriefDeps));
+  toolRegistry.register(
+    MORNING_BRIEF_DEF,
+    createMorningBriefExecutor(morningBriefDeps)
+  );
 
   // 自然语言调度工具
   toolRegistry.register(NATURAL_SCHEDULE_DEF, createNaturalScheduleExecutor());
@@ -350,16 +427,27 @@ export function registerHarnessTools(
     memoryRecall: deps.retrieveRelevant
       ? async (query, limit) => {
           const results = await deps.retrieveRelevant!({ query, limit });
-          return results.map((r: any) => ({
-            content: r.content,
-            type: r.type,
-            timestamp: r.timestamp,
-            relevanceScore: r.relevanceScore,
-          }));
+          return results.map((r) => {
+            const item = r as {
+              content: unknown;
+              type?: string;
+              timestamp?: Date;
+              relevanceScore?: number;
+            };
+            return {
+              content: item.content,
+              type: item.type,
+              timestamp: item.timestamp,
+              relevanceScore: item.relevanceScore,
+            };
+          });
         }
       : undefined,
   };
-  toolRegistry.register(KNOWLEDGE_QUERY_DEF, createKnowledgeQueryExecutor(knowledgeDeps));
+  toolRegistry.register(
+    KNOWLEDGE_QUERY_DEF,
+    createKnowledgeQueryExecutor(knowledgeDeps)
+  );
   toolRegistry.register(CALENDAR_DEF, createCalendarExecutor(deps));
   toolRegistry.register(REMINDER_SET_DEF, createReminderSetExecutor(deps));
   toolRegistry.register(NOTE_TAKE_DEF, createNoteTakeExecutor(deps));
@@ -388,10 +476,28 @@ export function registerHarnessTools(
     createRollbackChangesExecutor(deps)
   );
   toolRegistry.register(SHELL_EXEC_DEF, createShellExecExecutor(deps));
-  toolRegistry.register(SHELL_GENERATE_DEF, createShellGenerateExecutor({ llm: deps.llm }));
-  toolRegistry.register(DELEGATE_TASK_DEF, createDelegateTaskExecutor({ llm: deps.llm, toolRegistry }));
+  toolRegistry.register(EXECUTE_CODE_DEF, createExecuteCodeExecutor(deps));
+  toolRegistry.register(
+    SHELL_GENERATE_DEF,
+    createShellGenerateExecutor({ llm: deps.llm })
+  );
+  toolRegistry.register(
+    DELEGATE_TASK_DEF,
+    createDelegateTaskExecutor({ llm: deps.llm!, toolRegistry })
+  );
   toolRegistry.register(CONTEXT_MANAGE_DEF, createContextManageExecutor(deps));
   toolRegistry.register(VOICE_INTERACT_DEF, createVoiceInteractExecutor(deps));
+
+  // LSP 工具 (5) — Phase 2 集成
+  toolRegistry.register(
+    LSP_DIAGNOSTICS_DEF,
+    createLspDiagnosticsExecutor(deps)
+  );
+  toolRegistry.register(LSP_COMPLETION_DEF, createLspCompletionExecutor(deps));
+  toolRegistry.register(LSP_HOVER_DEF, createLspHoverExecutor(deps));
+  toolRegistry.register(LSP_DEFINITION_DEF, createLspDefinitionExecutor(deps));
+  toolRegistry.register(LSP_REFERENCES_DEF, createLspReferencesExecutor(deps));
+  toolRegistry.register(LSP_SYMBOLS_DEF, createLspSymbolsExecutor(deps));
 
   Logger.info(
     `🔧 Harness 工具注册完成: ${toolRegistry.size} 个工具`,

@@ -35,7 +35,11 @@ export const SHELL_GENERATE_DEF: ToolDefinition = {
 
 export interface ShellGenerateDeps {
   llm?: {
-    chat(prompt: string, history?: unknown[], systemPrompt?: string): Promise<string>;
+    chat(
+      prompt: string,
+      history?: unknown[],
+      systemPrompt?: string
+    ): Promise<string>;
   };
 }
 
@@ -57,10 +61,14 @@ function detectOS(): string {
 
 function getOSName(os: string): string {
   switch (os) {
-    case 'win32': return 'Windows (PowerShell)';
-    case 'darwin': return 'macOS (zsh/bash)';
-    case 'linux': return 'Linux (bash)';
-    default: return os;
+    case 'win32':
+      return 'Windows (PowerShell)';
+    case 'darwin':
+      return 'macOS (zsh/bash)';
+    case 'linux':
+      return 'Linux (bash)';
+    default:
+      return os;
   }
 }
 
@@ -151,7 +159,8 @@ export function createShellGenerateExecutor(deps: ShellGenerateDeps = {}) {
 
       const { command, explanation, risk_level } = parsed;
       const lowRisk = isLowRisk(command);
-      const needsConfirm = !lowRisk && (risk_level === 'high' || risk_level === 'medium');
+      const needsConfirm =
+        !lowRisk && (risk_level === 'high' || risk_level === 'medium');
 
       const icon = { low: '🟢', medium: '🟡', high: '🔴' }[risk_level] || '⚪';
 
@@ -162,10 +171,15 @@ export function createShellGenerateExecutor(deps: ShellGenerateDeps = {}) {
         ``,
         `${icon} 风险: ${risk_level}`,
         `📖 ${explanation}`,
-        needsConfirm ? `\n⚠️ 此命令需要确认后执行。使用 shell_exec 执行: ${command}` : '',
+        needsConfirm
+          ? `\n⚠️ 此命令需要确认后执行。使用 shell_exec 执行: ${command}`
+          : '',
       ].join('\n');
 
-      Logger.info(`💻 shell_generate: "${intent}" → "${command}"`, 'ShellGenerate');
+      Logger.info(
+        `💻 shell_generate: "${intent}" → "${command}"`,
+        'ShellGenerate'
+      );
 
       return {
         success: true,

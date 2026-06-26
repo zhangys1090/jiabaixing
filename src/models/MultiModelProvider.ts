@@ -1,18 +1,18 @@
 /**
  * MultiModelProvider — 多模型 LLM 提供者
- * 
+ *
  * 替代旧的 LLMProvider，从 ProviderManager 读取配置
  * 支持：
  * - 多 provider 注册
  * - 自动降级 (第一个失败→第二个→...)
  * - 任务复杂度路由 (简单→便宜模型, 复杂→强模型)
- * 
+ *
  * 兼容原 LLMProvider 的 chat(), chatWithTools(), generate() 接口
  */
 
 import { Logger } from '../utils/Logger';
 import { OpenAICompatibleModel } from './OpenAICompatibleModel';
-import { Model, ModelInput, ModelOutput } from './ModelInterface';
+import { ModelInput } from './ModelInterface';
 import { getProviderManager, ProviderConfig } from './ProviderManager';
 import { LLMResponseCache } from './LLMResponseCache';
 import { RequestQueue } from './RequestQueue';
@@ -31,10 +31,16 @@ export class MultiModelProvider {
   private localUnavailable: boolean = false;
 
   static readonly CONNECTION_ERRORS = [
-    'econnrefused', 'econnreset', 'enetunreach',
-    'connection refused', 'connect econnrefused',
-    'network error', 'network timeout', 'fetch failed',
-    'abort', '超时',
+    'econnrefused',
+    'econnreset',
+    'enetunreach',
+    'connection refused',
+    'connect econnrefused',
+    'network error',
+    'network timeout',
+    'fetch failed',
+    'abort',
+    '超时',
   ];
 
   constructor() {
@@ -49,7 +55,10 @@ export class MultiModelProvider {
     const providers = pm.getAll();
 
     if (providers.length === 0) {
-      Logger.warn('⚠️ 未配置任何 Provider，尝试从 .env 导入', 'MultiModelProvider');
+      Logger.warn(
+        '⚠️ 未配置任何 Provider，尝试从 .env 导入',
+        'MultiModelProvider'
+      );
       pm.importFromEnv();
     }
 
@@ -70,7 +79,11 @@ export class MultiModelProvider {
     }
 
     if (this.instances.size === 0) {
-      Logger.error('❌ 没有任何模型实例可用', new Error('No models'), 'MultiModelProvider');
+      Logger.error(
+        '❌ 没有任何模型实例可用',
+        new Error('No models'),
+        'MultiModelProvider'
+      );
     } else {
       this.serviceAvailable = true;
     }
@@ -85,15 +98,23 @@ export class MultiModelProvider {
       maxTokens: 8192,
       temperature: 0.7,
       topP: 0.9,
-      thinkingMode: ((config.extra?.thinkingMode as string) || 'disabled') as 'enabled' | 'disabled',
-      reasoningEffort: (config.extra?.reasoningEffort as 'high' | 'max') || undefined,
+      thinkingMode: ((config.extra?.thinkingMode as string) || 'disabled') as
+        | 'enabled'
+        | 'disabled',
+      reasoningEffort:
+        (config.extra?.reasoningEffort as 'high' | 'max') || undefined,
     });
   }
 
   /** 获取所有可用模型名称列表 */
-  getAvailableModels(): { name: string; displayName: string; model: string; healthy?: boolean }[] {
+  getAvailableModels(): {
+    name: string;
+    displayName: string;
+    model: string;
+    healthy?: boolean;
+  }[] {
     const pm = getProviderManager();
-    return pm.getAll().map(p => ({
+    return pm.getAll().map((p) => ({
       name: p.name,
       displayName: p.displayName,
       model: p.model,
@@ -102,7 +123,9 @@ export class MultiModelProvider {
   }
 
   /** 根据 ProviderManager 的路由规则获取模型列表（按优先级排序） */
-  private getModelsForInput(input: string): { name: string; model: OpenAICompatibleModel }[] {
+  private getModelsForInput(
+    input: string
+  ): { name: string; model: OpenAICompatibleModel }[] {
     const pm = getProviderManager();
     const providers = pm.getProvidersForInput(input);
 
@@ -142,17 +165,24 @@ export class MultiModelProvider {
         const pm = getProviderManager();
         pm.updateHealth(name, true);
       } catch (e) {
-        Logger.warn(`⚠️ ${name} 初始化失败: ${(e as Error).message}`, 'MultiModelProvider');
+        Logger.warn(
+          `⚠️ ${name} 初始化失败: ${(e as Error).message}`,
+          'MultiModelProvider'
+        );
         getProviderManager().updateHealth(name, false);
       }
     }
   }
 
-  async healthCheck(): Promise<{ available: boolean; message: string; models: { name: string; available: boolean }[] }> {
+  async healthCheck(): Promise<{
+    available: boolean;
+    message: string;
+    models: { name: string; available: boolean }[];
+  }> {
     const results: { name: string; available: boolean }[] = [];
     let anyAvailable = false;
 
-    for (const [name, model] of this.instances) {
+    for (const [name] of this.instances) {
       try {
         const pm = getProviderManager();
         const config = pm.get(name);
@@ -177,7 +207,7 @@ export class MultiModelProvider {
     return {
       available: anyAvailable,
       message: anyAvailable
-        ? `${results.filter(r => r.available).length}/${results.length} 个模型可用`
+        ? `${results.filter((r) => r.available).length}/${results.length} 个模型可用`
         : '没有可用的模型',
       models: results,
     };
@@ -187,7 +217,7 @@ export class MultiModelProvider {
   private async executeWithFallback<T>(
     operation: (model: OpenAICompatibleModel, name: string) => Promise<T>,
     input: string,
-    operationName: string,
+    operationName: string
   ): Promise<T> {
     if (this.localUnavailable) {
       throw new Error('所有模型已标记不可用');
@@ -209,7 +239,9 @@ export class MultiModelProvider {
         } catch (error) {
           lastError = error as Error;
           const errMsg = lastError.message.toLowerCase();
-          const isConnErr = MultiModelProvider.CONNECTION_ERRORS.some(e => errMsg.includes(e));
+          const isConnErr = MultiModelProvider.CONNECTION_ERRORS.some((e) =>
+            errMsg.includes(e)
+          );
 
           if (!isConnErr && attempt < this.maxRetries) {
             const delay = this.baseRetryInterval * Math.pow(2, attempt);
@@ -217,18 +249,24 @@ export class MultiModelProvider {
               `${operationName} ${name} 第${attempt + 1}次失败，${delay}ms后重试: ${lastError.message}`,
               'MultiModelProvider'
             );
-            await new Promise(r => setTimeout(r, delay));
+            await new Promise((r) => setTimeout(r, delay));
             continue;
           }
 
           if (isConnErr) {
-            Logger.warn(`${operationName} ${name} 连接错误，切换到下一个模型: ${lastError.message}`, 'MultiModelProvider');
+            Logger.warn(
+              `${operationName} ${name} 连接错误，切换到下一个模型: ${lastError.message}`,
+              'MultiModelProvider'
+            );
             getProviderManager().updateHealth(name, false);
             break; // 跳出重试循环，尝试下一个模型
           }
 
           // 非连接错误且重试耗尽
-          Logger.warn(`${operationName} ${name} 重试耗尽，切换到下一个模型`, 'MultiModelProvider');
+          Logger.warn(
+            `${operationName} ${name} 重试耗尽，切换到下一个模型`,
+            'MultiModelProvider'
+          );
         }
       }
     }
@@ -245,19 +283,24 @@ export class MultiModelProvider {
     message: string,
     history: Array<{ role: string; content: string }> = [],
     systemPromptOverride?: string,
-    input?: string,
+    input?: string
   ): Promise<string> {
     const defaultPrompt = getPromptTemplate('chat');
-    const systemPrompt = injectPreferences(systemPromptOverride || defaultPrompt);
+    const systemPrompt = injectPreferences(
+      systemPromptOverride || defaultPrompt
+    );
 
     const compressedHistory = PromptOptimizer.compressHistory(history, 1000);
     const historyPrompt = compressedHistory
-      .map(h => `${h.role}: ${h.content}`)
+      .map((h) => `${h.role}: ${h.content}`)
       .join('\n');
     const humanPrompt = `${historyPrompt}\n\n用户: ${message}`;
     const optimizedPrompt = PromptOptimizer.optimizePrompt(humanPrompt, 2000);
 
-    const cacheKey = this.responseCache.generateKey(optimizedPrompt, systemPrompt);
+    const cacheKey = this.responseCache.generateKey(
+      optimizedPrompt,
+      systemPrompt
+    );
     const cached = this.responseCache.get(cacheKey);
     if (cached) return cached;
 
@@ -276,7 +319,7 @@ export class MultiModelProvider {
         return response.text;
       },
       routeInput,
-      'chat',
+      'chat'
     );
 
     this.responseCache.set(cacheKey, result);
@@ -298,7 +341,7 @@ export class MultiModelProvider {
     tools: Array<Record<string, unknown>>,
     maxTokens: number = 4096,
     toolChoice: 'none' | 'auto' | 'required' = 'auto',
-    input?: string,
+    input?: string
   ): Promise<{
     content: string;
     toolCalls?: Array<{
@@ -320,9 +363,15 @@ export class MultiModelProvider {
           toolChoice,
         } as ModelInput);
 
-        const inputEst = sanitizedMessages.reduce((s, m) => s + ((m.content as string)?.length || 0), 0);
+        const inputEst = sanitizedMessages.reduce(
+          (s, m) => s + ((m.content as string)?.length || 0),
+          0
+        );
         const outputEst = ((response.text as string)?.length || 0) * 2;
-        perf.recordTokenUsage(Math.round(inputEst * 1.3), Math.round(outputEst * 1.3));
+        perf.recordTokenUsage(
+          Math.round(inputEst * 1.3),
+          Math.round(outputEst * 1.3)
+        );
 
         return {
           content: response.text || '',
@@ -332,7 +381,7 @@ export class MultiModelProvider {
         };
       },
       routeInput,
-      'chatWithTools',
+      'chatWithTools'
     );
   }
 
@@ -340,14 +389,16 @@ export class MultiModelProvider {
     message: string,
     onChunk: (chunk: string) => void,
     history: Array<{ role: string; content: string }> = [],
-    systemPromptOverride?: string,
+    systemPromptOverride?: string
   ): Promise<string> {
     const defaultPrompt = getPromptTemplate('chat');
-    const systemPrompt = injectPreferences(systemPromptOverride || defaultPrompt);
+    const systemPrompt = injectPreferences(
+      systemPromptOverride || defaultPrompt
+    );
 
     const compressedHistory = PromptOptimizer.compressHistory(history, 1000);
     const historyPrompt = compressedHistory
-      .map(h => `${h.role}: ${h.content}`)
+      .map((h) => `${h.role}: ${h.content}`)
       .join('\n');
     const humanPrompt = `${historyPrompt}\n\n用户: ${message}`;
     const optimizedPrompt = PromptOptimizer.optimizePrompt(humanPrompt, 2000);
@@ -374,20 +425,20 @@ export class MultiModelProvider {
   async multimodalChat(
     message: string,
     images?: string[],
-    history: Array<{ role: string; content: string }> = [],
+    history: Array<{ role: string; content: string }> = []
   ): Promise<string> {
     const systemPrompt = injectPreferences(getPromptTemplate('multimodalChat'));
 
     const compressedHistory = PromptOptimizer.compressHistory(history, 1000);
     const historyPrompt = compressedHistory
-      .map(h => `${h.role}: ${h.content}`)
+      .map((h) => `${h.role}: ${h.content}`)
       .join('\n');
     const humanPrompt = `${historyPrompt}\n\n用户: ${message}`;
     const optimizedPrompt = PromptOptimizer.optimizePrompt(humanPrompt, 2000);
 
     const cacheKey = this.responseCache.generateKey(
       optimizedPrompt + (images?.length || 0).toString(),
-      systemPrompt,
+      systemPrompt
     );
     const cached = this.responseCache.get(cacheKey);
     if (cached) return cached;
@@ -449,7 +500,11 @@ export class MultiModelProvider {
       if (fn) {
         if (typeof fn.arguments === 'string') args = fn.arguments;
         else if (fn.arguments !== undefined && fn.arguments !== null) {
-          try { args = JSON.stringify(fn.arguments); } catch { args = '{}'; }
+          try {
+            args = JSON.stringify(fn.arguments);
+          } catch {
+            args = '{}';
+          }
         }
       }
       return {

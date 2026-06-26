@@ -22,6 +22,8 @@ export interface HarnessConfig {
   useHarnessPersistence: boolean;
   useIndependentEvaluator: boolean;
   useTrajectoryPersistence: boolean;
+  /** P0-3: Agent 类型（用于选择默认工具集，如 'coding'/'desktop'/'daily'） */
+  agentType?: string;
 }
 
 /** 聊天消息 */
@@ -130,10 +132,102 @@ export interface PlanStep {
   toolName?: string;
   toolParams?: Record<string, unknown>;
   expectedOutput?: string;
+  /** P2: 输入绑定 — 从上游步骤输出解析参数，格式 { paramName: '$stepId.outputPath' } */
+  inputBindings?: Record<string, string>;
+  /** P2: 输出模式 — 声明步骤输出的字段类型，用于数据流验证 */
+  outputSchema?: Record<string, string>;
+  /** P2: 并行组 — 同组的步骤可并行执行 */
+  parallelGroup?: string;
   retryCount: number;
   maxRetries: number;
   /** 转换为UnifiedTaskNode的便捷方法 */
   toUnifiedTaskNode(): UnifiedTaskNode;
+}
+
+/** P2: 步骤输出 — 封装步骤执行结果，支持中间结果传递 */
+export interface StepOutput {
+  stepId: string;
+  results?: unknown;
+  /** P2: 结构化数据 — 供下游步骤通过 inputBindings 引用 */
+  data?: Record<string, unknown>;
+  /** P2: 人类可读摘要 */
+  summary?: string;
+  /** P2: 输出类型 — tool_result=工具结果，llm_response=LLM响应 */
+  type?: 'tool_result' | 'llm_response' | 'final';
+  timestamp?: number;
+  duration?: number;
+  success?: boolean;
+  error?: string;
+}
+
+/** P2: 数据流通道 — 描述步骤间的数据传递关系 */
+export interface DataFlowChannel {
+  sourceStepId: string;
+  targetStepId: string;
+  sourcePath?: string;
+  targetPath?: string;
+  dataType?: string;
+  /** P2: 字段映射 — 源字段到目标字段的映射关系 */
+  mapping?: Record<string, string>;
+}
+
+/** P2: 步骤状态 — 跟踪步骤执行过程中的状态信息 */
+export interface StepStateInfo {
+  stepId: string;
+  status: StepState;
+  startedAt?: number;
+  completedAt?: number;
+  retryCount: number;
+  lastError?: string;
+  metadata: Record<string, unknown>;
+}
+
+/** E3-3: 步骤级状态机枚举 — 9 个状态 */
+export enum StepState {
+  PENDING = 'pending',
+  READY = 'ready',
+  RUNNING = 'running',
+  WAITING_APPROVAL = 'waiting_approval',
+  COMPLETED = 'completed',
+  FAILED = 'failed',
+  RETRYING = 'retrying',
+  BLOCKED = 'blocked',
+  SKIPPED = 'skipped',
+}
+
+/** E3-3: 步骤状态合法转换表 */
+export const STEP_STATE_TRANSITIONS: Record<StepState, StepState[]> = {
+  [StepState.PENDING]: [StepState.READY, StepState.BLOCKED, StepState.SKIPPED],
+  [StepState.READY]: [
+    StepState.RUNNING,
+    StepState.WAITING_APPROVAL,
+    StepState.SKIPPED,
+  ],
+  [StepState.RUNNING]: [
+    StepState.COMPLETED,
+    StepState.FAILED,
+    StepState.RETRYING,
+    StepState.WAITING_APPROVAL,
+  ],
+  [StepState.WAITING_APPROVAL]: [StepState.RUNNING, StepState.SKIPPED],
+  [StepState.COMPLETED]: [StepState.PENDING],
+  [StepState.FAILED]: [StepState.RETRYING, StepState.SKIPPED],
+  [StepState.RETRYING]: [
+    StepState.RUNNING,
+    StepState.FAILED,
+    StepState.COMPLETED,
+  ],
+  [StepState.BLOCKED]: [StepState.READY, StepState.SKIPPED],
+  [StepState.SKIPPED]: [StepState.PENDING],
+};
+
+/** E3-3: 步骤状态转换记录 */
+export interface StepStateTransition {
+  stepId: string;
+  fromState: StepState;
+  toState: StepState;
+  reason: string;
+  timestamp: number;
 }
 
 /** 循环状态 */
@@ -163,9 +257,25 @@ export interface ExecutionPlan {
   toolCallMode: 'required' | 'auto' | 'none';
   /** Planner 推荐的工具名列表，Executor 据此筛选工具 */
   recommendedTools: string[];
+  /** P2: 执行模式 — dag=DAG并行执行，sequential=顺序执行 */
+  executionMode?: 'dag' | 'sequential';
+  /** P2: 数据流通道 — 描述步骤间的数据传递关系 */
+  dataFlowChannels?: DataFlowChannel[];
+  /** P3: 规划层级 — 标识计划的复杂度等级（none/simple/direct/complex/research） */
+  planTier?: 'none' | 'simple' | 'direct' | 'complex' | 'research';
+  /** P3: Tree of Thoughts 元数据 — 候选评估、推理链等 */
+  totMeta?: {
+    candidatesCount?: number;
+    candidateCount?: number;
+    selectedRank?: number;
+    selectedStrategy?: string;
+    evaluations?: Array<{
+      candidateIndex: number;
+      feasibilityScore: number;
+      reasoning?: string;
+    }>;
+  };
 }
-
-
 
 /** 预算分配 */
 export interface BudgetAllocation {
@@ -198,6 +308,10 @@ export interface StepResult {
   toolName?: string;
   error?: string;
   metadata?: Record<string, unknown>;
+  /** P2: 结构化数据 — 工具执行的结构化结果，供下游步骤引用 */
+  structuredData?: Record<string, unknown>;
+  /** P2: 输出摘要 — 人类可读的执行结果摘要 */
+  outputSummary?: string;
 }
 
 /** 详细轨迹步骤 */
@@ -246,12 +360,130 @@ export interface LoopTrace {
   budgetState: BudgetState;
 }
 
+/** P3-4: 跨步骤状态条目 — 封装状态值及版本信息，支持追溯与回滚 */
+export interface StateEntry {
+  /** 状态键名 */
+  key: string;
+  /** 状态值 */
+  value: unknown;
+  /** 写入该状态的步骤 ID */
+  writtenBy: string;
+  /** 写入时间戳 */
+  timestamp: number;
+  /** 版本号，每次更新递增 */
+  version: number;
+}
+
+/** P3-1: 计划验证错误类型 */
+export type PlanValidationErrorType =
+  | 'tool_unavailable'
+  | 'dependency_missing'
+  | 'circular_dependency'
+  | 'budget_insufficient'
+  | 'invalid_params';
+
+/** P3-1: 计划验证警告类型 */
+export type PlanValidationWarningType =
+  | 'no_fallback'
+  | 'parallel_conflict'
+  | 'low_confidence'
+  | 'redundant_step';
+
+/** P3-1: 计划验证错误 */
+export interface PlanValidationError {
+  stepId: string;
+  type: PlanValidationErrorType;
+  message: string;
+}
+
+/** P3-1: 计划验证警告 */
+export interface PlanValidationWarning {
+  stepId: string;
+  type: PlanValidationWarningType;
+  message: string;
+}
+
+/** P3-1: 计划验证结果 */
+export interface PlanValidationResult {
+  valid: boolean;
+  errors: PlanValidationError[];
+  warnings: PlanValidationWarning[];
+  estimatedSuccessRate: number;
+}
+
+/** P3-2: 步骤进度 */
+export interface StepProgress {
+  stepId: string;
+  description: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  progress: number;
+  duration: number;
+}
+
+/** P3-2: 预算消耗 */
+export interface BudgetConsumption {
+  rounds: number;
+  tokens: number;
+  toolCalls: number;
+  time: number;
+}
+
+/** P3-2: 执行进度 */
+export interface ExecutionProgress {
+  traceId: string;
+  overallProgress: number;
+  currentPhase: string;
+  stepProgress: StepProgress[];
+  estimatedTimeRemaining: number;
+  budgetConsumption: BudgetConsumption;
+  bottlenecks: string[];
+}
+
+/** P3-3: 根因分析 */
+export interface RootCauseAnalysis {
+  failureType:
+    | 'tool_unavailable'
+    | 'timeout'
+    | 'budget_exceeded'
+    | 'context_insufficient'
+    | 'plan_incorrect'
+    | 'tool_error';
+  impactScope: 'single_step' | 'downstream' | 'global';
+  affectedSteps: string[];
+  rootCause: string;
+  fixSuggestions: string[];
+}
+
+/** P3-3: 重规划修复动作 */
+export interface ReplanFixAction {
+  stepId: string;
+  action:
+    | 'replace_tool'
+    | 'retry_with_different_params'
+    | 'add_context'
+    | 'remove_step';
+  details: Record<string, unknown>;
+}
+
+/** P3-3: 重规划策略 */
+export interface ReplanStrategy {
+  type: 'local_fix' | 'partial_replan' | 'full_replan' | 'fallback';
+  stepsToReplan: string[];
+  stepsToKeep: string[];
+  fixActions: ReplanFixAction[];
+}
+
 /** 循环上下文 — 所有状态外部化 */
 export interface LoopContext {
   messages: ChatMessage[];
   plan: ExecutionPlan | null;
   currentStepIndex: number;
   stepResults: Map<string, StepResult>;
+  stepOutputs: Map<string, StepOutput>;
+  dataFlowChannels: DataFlowChannel[];
+  crossStepState: Map<string, StateEntry>;
+  stepStates: Map<string, StepStateInfo>;
+  stepStateHistory: StepStateInfo[];
   budget: BudgetState;
   trace: LoopTrace;
   metadata: Record<string, unknown>;
@@ -416,6 +648,22 @@ export interface TokenAllocation {
 
 // ============ Layer 5: Verification（验证层）============
 
+/** 输出 Guardrail 检查结果 */
+export interface GuardrailResult {
+  passed: boolean;
+  reason?: string;
+  triggeredBy?: string;
+  sanitizedOutput?: string;
+  riskLevel?: 'none' | 'low' | 'medium' | 'high' | 'critical';
+}
+
+/** 输出 Guardrail 定义 */
+export interface OutputGuardrail {
+  name: string;
+  description: string;
+  check: (output: string) => GuardrailResult;
+}
+
 /** 验证结果 */
 export interface ValidationResult {
   valid: boolean;
@@ -423,6 +671,8 @@ export interface ValidationResult {
   warnings: string[];
   errors: string[];
   autoFixed: boolean;
+  /** P0: 安全验证失败阻断标记 — 为 true 时应中止当前步骤 */
+  safetyBlocked?: boolean;
 }
 
 /** 安全检查结果 */
@@ -682,7 +932,10 @@ export function unifiedTaskNodeToDagTaskNode(
   node: UnifiedTaskNode
 ): import('../core/DAGTask').TaskNode {
   const { TaskStatus, TaskPriority, TaskNode } = require('../core/DAGTask');
-  const statusMap: Record<UnifiedTaskStatus, any> = {
+  const statusMap: Record<
+    UnifiedTaskStatus,
+    import('../core/DAGTask').TaskStatus
+  > = {
     [UnifiedTaskStatus.PENDING]: TaskStatus.PENDING,
     [UnifiedTaskStatus.RUNNING]: TaskStatus.RUNNING,
     [UnifiedTaskStatus.SUCCESS]: TaskStatus.SUCCESS,
@@ -691,7 +944,10 @@ export function unifiedTaskNodeToDagTaskNode(
     [UnifiedTaskStatus.RETRYING]: TaskStatus.RETRYING,
     [UnifiedTaskStatus.CANCELLED]: TaskStatus.FAILED,
   };
-  const priorityMap: Record<UnifiedTaskPriority, any> = {
+  const priorityMap: Record<
+    UnifiedTaskPriority,
+    import('../core/DAGTask').TaskPriority
+  > = {
     [UnifiedTaskPriority.LOW]: TaskPriority.LOW,
     [UnifiedTaskPriority.MEDIUM]: TaskPriority.MEDIUM,
     [UnifiedTaskPriority.HIGH]: TaskPriority.HIGH,

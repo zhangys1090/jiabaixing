@@ -12,7 +12,10 @@ import { Logger } from '../../utils/Logger';
 /**
  * 技能执行公共处理逻辑
  */
-async function handleSkillExecute(req: express.Request, res: express.Response): Promise<void> {
+async function handleSkillExecute(
+  req: express.Request,
+  res: express.Response
+): Promise<void> {
   try {
     const { skillName, params } = req.body as {
       skillName?: string;
@@ -27,13 +30,17 @@ async function handleSkillExecute(req: express.Request, res: express.Response): 
     const skill = registry.getSkill(skillName);
 
     if (!skill) {
-      res.status(404).json({ success: false, error: `技能不存在: ${skillName}` });
+      res
+        .status(404)
+        .json({ success: false, error: `技能不存在: ${skillName}` });
       return;
     }
 
     const validation = await skill.validate(params || {});
     if (!validation.valid) {
-      res.status(400).json({ success: false, error: validation.errors.join(', ') });
+      res
+        .status(400)
+        .json({ success: false, error: validation.errors.join(', ') });
       return;
     }
 
@@ -74,7 +81,11 @@ function handleSkillList(_req: express.Request, res: express.Response): void {
 // 兼容 server/index.ts 的 Router 导出
 export const skillRoutes = express.Router();
 
-skillRoutes.post('/execute', express.json({ limit: '10mb' }), handleSkillExecute);
+skillRoutes.post(
+  '/execute',
+  express.json({ limit: '10mb' }),
+  handleSkillExecute
+);
 skillRoutes.get('/list', handleSkillList);
 
 // main.ts 使用的注册函数
@@ -82,6 +93,10 @@ export function registerSkillRoutes(
   app: express.Application,
   _core: JiabaixingCore | null
 ): void {
-  app.post('/api/skills/execute', express.json({ limit: '10mb' }), handleSkillExecute);
+  app.post(
+    '/api/skills/execute',
+    express.json({ limit: '10mb' }),
+    handleSkillExecute
+  );
   app.get('/api/skills/list', handleSkillList);
 }

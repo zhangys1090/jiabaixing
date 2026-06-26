@@ -10,7 +10,10 @@ import {
   PlatformDisconnectResponse,
   SendMessageResponse,
 } from '../../shared/contracts';
-import { IntegrationManager, WebhookEndpoint } from '../../integration/IntegrationManager';
+import {
+  IntegrationManager,
+  WebhookEndpoint,
+} from '../../integration/IntegrationManager';
 import { GatewayBridge } from '../../integration/GatewayBridge';
 
 const router = express.Router();
@@ -58,10 +61,9 @@ router.get('/wechat/qrcode', async (_req: Request, res: Response) => {
 
 router.get('/platforms', async (_req: Request, res: Response) => {
   try {
-    const gateway = getGateway();
-    const platforms = isBridge(gateway)
-      ? gateway.getPlatforms()
-      : gateway.getPlatforms();
+    // 状态查询直接走 IntegrationManager，不走 GatewayBridge（sendSyncRequest 会阻塞事件循环）
+    const im = IntegrationManager.getInstance();
+    const platforms = im.getPlatforms();
 
     const response: ApiResponse<IntegrationStatusResponse> = {
       success: true,
@@ -81,10 +83,9 @@ router.get('/platforms', async (_req: Request, res: Response) => {
 router.get('/:platform/status', async (req: Request, res: Response) => {
   try {
     const platform = req.params.platform as IntegrationPlatform;
-    const gateway = getGateway();
-    const status = isBridge(gateway)
-      ? gateway.getPlatformStatus(platform)
-      : gateway.getPlatformStatus(platform);
+    // 状态查询直接走 IntegrationManager
+    const im = IntegrationManager.getInstance();
+    const status = im.getPlatformStatus(platform);
 
     res.json({
       success: true,
@@ -104,25 +105,33 @@ router.post('/:platform/connect', async (req: Request, res: Response) => {
     const platform = req.params.platform as IntegrationPlatform;
     const requestBody = req.body as ConnectRequest;
 
+    // 连接操作走 GatewayBridge (async sendRequest 正常工作)
     const gateway = getGateway();
-    const success = isBridge(gateway)
+    const result = isBridge(gateway)
       ? await gateway.connectPlatform(platform, requestBody.config)
       : await gateway.connectPlatform(platform, requestBody.config);
 
+    // result 在 GatewayBridge 模式下是 IPC data 对象，在 IntegrationManager 模式下是 boolean
+    const connected =
+      result === true ||
+      (typeof result === 'object' &&
+        result !== null &&
+        (result as any).status === 'connected');
+
     const response: ApiResponse<PlatformConnectResponse> = {
-      success,
+      success: connected,
       data: {
-        success,
+        success: connected,
         platform,
-        status: success ? 'connected' : 'failed',
+        status: connected ? 'connected' : 'failed',
       },
     };
 
-    if (!success) {
+    if (!connected) {
       response.error = '连接失败';
     }
 
-    res.status(success ? 200 : 400).json(response);
+    res.status(connected ? 200 : 400).json(response);
   } catch (error) {
     Logger.error('连接平台失败', error as Error, 'IntegrationRoutes');
     res.status(500).json({
@@ -165,11 +174,9 @@ router.post('/:platform/disconnect', async (req: Request, res: Response) => {
 router.post('/:platform/webhook', async (req: Request, res: Response) => {
   try {
     const platform = req.params.platform as IntegrationPlatform;
-    const gateway = getGateway();
-
-    const result = isBridge(gateway)
-      ? await gateway.handleWebhook(platform, req.body)
-      : await gateway.handleWebhook(platform, req.body);
+    // webhook 直接走主进程 IntegrationManager（有 core 才能处理消息并回复）
+    const im = IntegrationManager.getInstance();
+    const result = await im.handleWebhook(platform, req.body);
 
     if (result.success) {
       res.status(200).json(result.response || { success: true });
@@ -258,7 +265,12 @@ router.post('/webhooks', async (req: Request, res: Response) => {
   try {
     const endpoint = req.body as WebhookEndpoint;
 
-    if (!endpoint.id || !endpoint.name || !endpoint.url || !Array.isArray(endpoint.events)) {
+    if (
+      !endpoint.id ||
+      !endpoint.name ||
+      !endpoint.url ||
+      !Array.isArray(endpoint.events)
+    ) {
       res.status(400).json({
         success: false,
         error: '缺少必填字段: id, name, url, events',

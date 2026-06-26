@@ -42,7 +42,81 @@ export interface SemanticEmbeddingModel {
 
 /** 基于LLM的嵌入模型实现 */
 export class LLMEmbeddingModel implements SemanticEmbeddingModel {
+  private apiKey?: string;
+  private baseURL?: string;
+  private model: string;
+  private cache: Map<string, number[]> = new Map();
+  private fallbackToHash: boolean = false;
+
+  constructor(config?: { apiKey?: string; baseURL?: string; model?: string }) {
+    this.apiKey =
+      config?.apiKey || process.env.OPENAI_API_KEY || process.env.LLM_API_KEY;
+    this.baseURL =
+      config?.baseURL ||
+      process.env.OPENAI_BASE_URL ||
+      process.env.LLM_BASE_URL;
+    this.model =
+      config?.model || process.env.EMBEDDING_MODEL || 'text-embedding-3-small';
+  }
+
   async embed(text: string): Promise<number[]> {
+    // 1. 检查缓存
+    const cached = this.cache.get(text);
+    if (cached) return cached;
+
+    // 2. 如果没有 API Key 或已降级，使用 hash-based fallback
+    if (!this.apiKey || this.fallbackToHash) {
+      return this.hashBasedEmbed(text);
+    }
+
+    // 3. 调用真正的 embedding API
+    try {
+      const url = `${this.baseURL || 'https://api.openai.com/v1'}/embeddings`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: this.model,
+          input: text.substring(0, 8000), // API 限制
+        }),
+        signal: AbortSignal.timeout(10000),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Embedding API 返回 ${response.status}`);
+      }
+
+      const data = (await response.json()) as {
+        data: Array<{ embedding: number[] }>;
+      };
+      const vector = data.data[0].embedding;
+
+      // 缓存（限制缓存大小）
+      if (this.cache.size > 500) {
+        const firstKey = this.cache.keys().next().value;
+        if (firstKey) this.cache.delete(firstKey);
+      }
+      this.cache.set(text, vector);
+
+      return vector;
+    } catch (err) {
+      Logger.warn(
+        `Embedding API 调用失败，降级到 hash-based 向量: ${(err as Error).message}`,
+        'LLMEmbeddingModel'
+      );
+      this.fallbackToHash = true;
+      return this.hashBasedEmbed(text);
+    }
+  }
+
+  /**
+   * Hash-based 向量（降级方案）
+   * 当 embedding API 不可用时使用，仅支持关键词级匹配，无语义理解
+   */
+  private hashBasedEmbed(text: string): number[] {
     const tokens = ChineseTokenizer.tokenize(text);
     const vectorDim = 256;
     const vector = new Array(vectorDim).fill(0);
@@ -171,9 +245,9 @@ export class MemoryRetriever {
       emotion,
       Math.ceil(topK * 0.3)
     );
-    
+
     // 并行执行：关键词、向量、FTS5
-    const [keywordResults, vectorResults, fts5Results] = await Promise.all([
+    const [keywordResults, vectorResults] = await Promise.all([
       this.keywordRetrieval(
         query,
         scene,
@@ -188,8 +262,8 @@ export class MemoryRetriever {
         shortTermMemory,
         longTermMemory
       ),
-      this.fts5Retrieval(query, scene, Math.ceil(topK * 0.8)),
     ]);
+    const fts5Results = this.fts5Retrieval(query, scene, Math.ceil(topK * 0.8));
 
     // 3. 应用RRF融合算法（三路融合）
     const mergedResults = this.applyTripleRRFAlgorithm(
@@ -296,8 +370,8 @@ export class MemoryRetriever {
     const queryTokens = ChineseTokenizer.tokenize(query);
     const expandedTokens = this.expandQueryTokens(queryTokens);
 
-    const stm = shortTermMemory || this.shortTermMemoryHack;
-    const ltm = longTermMemory || this.longTermMemoryHack;
+    const stm = shortTermMemory || this.shortTermMemoryRef;
+    const ltm = longTermMemory || this.longTermMemoryRef;
 
     const stmMemories = stm
       ? 'retrieve' in stm
@@ -372,7 +446,14 @@ export class MemoryRetriever {
     const synonyms: Record<string, string[]> = {
       error: ['exception', 'fail', 'bug', '错误', '异常', '失败'],
       bug: ['issue', 'problem', 'defect', '问题', '缺陷', '漏洞'],
-      feature: ['function', 'capability', 'enhancement', '功能', '特性', '能力'],
+      feature: [
+        'function',
+        'capability',
+        'enhancement',
+        '功能',
+        '特性',
+        '能力',
+      ],
       query: ['search', 'find', 'lookup', '查询', '搜索', '查找'],
       task: ['todo', 'job', 'item', '任务', '待办', '工作'],
       code: ['source', 'program', 'script', '代码', '源码', '脚本'],
@@ -380,7 +461,14 @@ export class MemoryRetriever {
       data: ['information', 'content', 'record', '数据', '信息', '内容'],
       optimize: ['improve', 'enhance', 'refactor', '优化', '改进', '重构'],
       deploy: ['release', 'publish', 'ship', '部署', '发布', '上线'],
-      config: ['configuration', 'setting', 'preference', '配置', '设置', '偏好'],
+      config: [
+        'configuration',
+        'setting',
+        'preference',
+        '配置',
+        '设置',
+        '偏好',
+      ],
       fix: ['repair', 'patch', 'resolve', '修复', '修补', '解决'],
       create: ['add', 'new', 'generate', '创建', '新建', '添加'],
       delete: ['remove', 'drop', 'destroy', '删除', '移除', '清除'],
@@ -428,8 +516,8 @@ export class MemoryRetriever {
       indexResults = indexResults.slice(0, topK);
     }
 
-    const stm = shortTermMemory || this.shortTermMemoryHack;
-    const ltm = longTermMemory || this.longTermMemoryHack;
+    const stm = shortTermMemory || this.shortTermMemoryRef;
+    const ltm = longTermMemory || this.longTermMemoryRef;
 
     const stmMemories = stm
       ? 'retrieve' in stm
@@ -541,8 +629,8 @@ export class MemoryRetriever {
     // 热缓存更新
     const allMemories = [
       ...this.getInstantMemory(),
-      ...(this.shortTermMemoryHack?.getAll() || []),
-      ...(this.longTermMemoryHack?.getAll() || []),
+      ...(this.shortTermMemoryRef?.getAll() || []),
+      ...(this.longTermMemoryRef?.getAll() || []),
     ];
 
     const memory = allMemories.find((m) => m.id === memoryId);
@@ -559,14 +647,15 @@ export class MemoryRetriever {
     }
   }
 
-  /** hack引用，由MemoryEngine设置 */
-  private shortTermMemoryHack: MemoryStoreWithGetAll | null = null;
-  private longTermMemoryHack: MemoryStoreWithGetAll | null = null;
+  /** 短期记忆引用，由MemoryEngine注入（用于回退和访问统计） */
+  private shortTermMemoryRef: MemoryStoreWithGetAll | null = null;
+  /** 长期记忆引用，由MemoryEngine注入（用于回退和访问统计） */
+  private longTermMemoryRef: MemoryStoreWithGetAll | null = null;
 
   /** 设置短期/长期记忆引用（用于访问统计中的热缓存更新） */
   setMemoryRefs(stm: ShortTermMemory, ltm: LongTermMemory): void {
-    this.shortTermMemoryHack = stm;
-    this.longTermMemoryHack = ltm;
+    this.shortTermMemoryRef = stm;
+    this.longTermMemoryRef = ltm;
   }
 
   // ==================== RRF融合算法 ====================
@@ -648,7 +737,7 @@ export class MemoryRetriever {
         relevanceScore: 1 - (record.rank || 0) / 1000, // FTS5 rank是越小越好
         keywordScore: 1 - (record.rank || 0) / 1000,
       }));
-    } catch (error) {
+    } catch {
       Logger.debug('FTS5检索失败，回退到关键词', 'MemoryRetriever');
       return [];
     }
@@ -660,14 +749,18 @@ export class MemoryRetriever {
    */
   private buildFTS5Query(query: string): string {
     const tokens = query.split(/\s+/).filter((t) => t);
-    
+
     if (tokens.length === 0) return '*';
-    
+
     // 对于中文，添加前缀匹配
     return tokens
       .map((token) => {
         // 保留FTS5语法字符
-        if (token.includes('OR') || token.includes('AND') || token.includes('"')) {
+        if (
+          token.includes('OR') ||
+          token.includes('AND') ||
+          token.includes('"')
+        ) {
           return token;
         }
         // 添加前缀匹配
@@ -698,9 +791,7 @@ export class MemoryRetriever {
     );
 
     const fts5Ranks = new Map<string, number>();
-    fts5Results.forEach((memory, index) =>
-      fts5Ranks.set(memory.id, index + 1)
-    );
+    fts5Results.forEach((memory, index) => fts5Ranks.set(memory.id, index + 1));
 
     const allMemoryIds = new Set([
       ...keywordResults.map((m) => m.id),

@@ -12,7 +12,7 @@ import {
   type EvaluationInput,
   type IndependentEvaluationResult,
 } from '../evaluation/IndependentEvaluationService';
-import type { UserInput, LoopContext, LoopTrace, ChatMessage } from '../types';
+import type { ChatMessage, LoopContext, LoopTrace, UserInput } from '../types';
 import type { EvaluatorOutput } from './LoopController';
 
 /** 完整评估结果（向后兼容） */
@@ -51,6 +51,27 @@ export interface EvaluatorDeps {
   };
   /** 是否启用 LLM 深度评估 */
   enableLLMEvaluation?: boolean;
+  /** 轨迹数据库 — 用于检索历史相似任务的评分（经验迁移） */
+  trajectoryDatabase?: {
+    querySimilarTasks(
+      query: string,
+      options?: {
+        includeFailed?: boolean;
+        maxResults?: number;
+        minQualityScore?: number;
+      }
+    ): Array<{
+      execution: {
+        id?: string;
+        input?: string;
+        status?: string;
+        quality_overall?: number;
+      };
+      toolInvocations?: unknown[];
+      similarity?: number;
+      relevanceScore?: number;
+    }>;
+  };
 }
 
 export class Evaluator {
@@ -63,7 +84,9 @@ export class Evaluator {
     this.deps = deps;
     this.independentEvaluationService = new IndependentEvaluationService({
       llm: deps.llm,
-      enableLLMEvaluation: deps.enableLLMEvaluation ?? false,
+      // P0 修复：LLM 评估默认启用，提供更准确的质量评估
+      // 原: enableLLMEvaluation: deps.enableLLMEvaluation ?? false
+      enableLLMEvaluation: deps.enableLLMEvaluation ?? true,
     });
   }
 
@@ -138,13 +161,45 @@ export class Evaluator {
       }
     }
 
+    // P3: 经验迁移 — 检索历史相似任务的评分，影响评估建议
+    let historicalBoost = 0;
+    if (this.deps.trajectoryDatabase) {
+      try {
+        const similar = this.deps.trajectoryDatabase.querySimilarTasks(
+          input.text,
+          { maxResults: 3 }
+        );
+        if (similar.length > 0) {
+          const avgQuality =
+            similar.reduce(
+              (sum, s) => sum + (s.execution.quality_overall || 0),
+              0
+            ) / similar.length;
+          historicalBoost = avgQuality * 0.2; // 历史高分 → 提升信心
+          // 历史高分任务倾向 continue（不 abort）
+          if (avgQuality >= 0.85) {
+            return {
+              goalProgress: Math.min(1, 0.7 + historicalBoost),
+              suggestedAction: 'continue',
+              reason: `历史相似任务评分 ${avgQuality.toFixed(2)}，倾向继续执行`,
+            };
+          }
+        }
+      } catch {
+        // 检索失败不影响主流程
+      }
+    }
+
     const fullEval = await this.evaluateFull(
       input.text,
       context.messages,
       context.trace
     );
     return {
-      goalProgress: fullEval.overall.goalProgress,
+      goalProgress: Math.min(
+        1,
+        fullEval.overall.goalProgress + historicalBoost
+      ),
       suggestedAction: fullEval.overall.suggestedAction,
       reason: fullEval.overall.summary,
     };

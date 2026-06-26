@@ -12,20 +12,20 @@ import { Logger } from '../utils/Logger';
 
 export interface DecisionState {
   // 当前状态特征
-  screenComplexity: number;  // 屏幕复杂度 (0-1)
-  elementCount: number;      // 可点击元素数量
-  activeWindows: number;    // 活动窗口数量
+  screenComplexity: number; // 屏幕复杂度 (0-1)
+  elementCount: number; // 可点击元素数量
+  activeWindows: number; // 活动窗口数量
   lastAction: string | null; // 上一个动作
   consecutiveFailures: number; // 连续失败次数
-  taskProgress: number;     // 任务进度 (0-1)
+  taskProgress: number; // 任务进度 (0-1)
 }
 
 export interface DecisionAction {
-  actionType: string;      // 动作类型
-  confidence: number;       // 置信度 (0-1)
+  actionType: string; // 动作类型
+  confidence: number; // 置信度 (0-1)
   estimatedDuration: number; // 预估耗时 (ms)
   riskLevel: 'low' | 'medium' | 'high'; // 风险等级
-  reasoning: string;       // 决策理由
+  reasoning: string; // 决策理由
 }
 
 export interface DecisionExperience {
@@ -39,9 +39,9 @@ export interface DecisionExperience {
 
 export interface DecisionPolicy {
   explorationRate: number; // 探索率 (epsilon-greedy)
-  learningRate: number;    // 学习率 (alpha)
-  discountFactor: number;  // 折扣因子 (gamma)
-  decayRate: number;       // 探索率衰减
+  learningRate: number; // 学习率 (alpha)
+  discountFactor: number; // 折扣因子 (gamma)
+  decayRate: number; // 探索率衰减
 }
 
 const DEFAULT_POLICY: DecisionPolicy = {
@@ -55,7 +55,10 @@ export class DesktopDecisionEngine {
   private policy: DecisionPolicy;
   private qTable: Map<string, Map<string, number>>; // Q表: stateKey -> action -> value
   private experiences: DecisionExperience[];
-  private actionStats: Map<string, { attempts: number; successes: number; avgReward: number }>;
+  private actionStats: Map<
+    string,
+    { attempts: number; successes: number; avgReward: number }
+  >;
   private experienceBuffer: DecisionExperience[];
   private maxBufferSize: number = 1000;
 
@@ -65,7 +68,7 @@ export class DesktopDecisionEngine {
     this.experiences = [];
     this.actionStats = new Map();
     this.experienceBuffer = [];
-    
+
     Logger.info('🧠 DesktopDecisionEngine 初始化', 'DesktopDecisionEngine');
   }
 
@@ -99,22 +102,29 @@ export class DesktopDecisionEngine {
     const windowBucket = Math.min(state.activeWindows, 5);
     const failBucket = Math.min(state.consecutiveFailures, 3);
     const progressBucket = Math.floor(state.taskProgress * 5);
-    
+
     return `c${complexityBucket}_e${elementBucket}_w${windowBucket}_f${failBucket}_p${progressBucket}`;
   }
 
   /**
    * 选择动作 (epsilon-greedy 策略)
    */
-  selectAction(state: DecisionState, availableActions: string[]): DecisionAction {
+  selectAction(
+    state: DecisionState,
+    availableActions: string[]
+  ): DecisionAction {
     const stateKey = this.encodeState(state);
-    
+
     // epsilon-greedy: 探索 vs 利用
     if (Math.random() < this.policy.explorationRate) {
       // 探索：随机选择动作
-      const randomAction = availableActions[Math.floor(Math.random() * availableActions.length)];
-      Logger.debug(`🎲 探索模式: 选择 ${randomAction}`, 'DesktopDecisionEngine');
-      
+      const randomAction =
+        availableActions[Math.floor(Math.random() * availableActions.length)];
+      Logger.debug(
+        `🎲 探索模式: 选择 ${randomAction}`,
+        'DesktopDecisionEngine'
+      );
+
       return {
         actionType: randomAction,
         confidence: this.policy.explorationRate,
@@ -126,7 +136,7 @@ export class DesktopDecisionEngine {
 
     // 利用：选择 Q值最大的动作
     const actionValues = this.getActionValues(stateKey, availableActions);
-    
+
     if (actionValues.length === 0) {
       const fallbackAction = availableActions[0] || 'wait';
       return {
@@ -162,7 +172,10 @@ export class DesktopDecisionEngine {
   /**
    * 获取各动作的 Q值
    */
-  private getActionValues(stateKey: string, availableActions: string[]): Array<{ action: string; value: number }> {
+  private getActionValues(
+    stateKey: string,
+    availableActions: string[]
+  ): Array<{ action: string; value: number }> {
     const stateQValues = this.qTable.get(stateKey) || new Map();
     const result: Array<{ action: string; value: number }> = [];
 
@@ -181,7 +194,7 @@ export class DesktopDecisionEngine {
   private getStatBonus(action: string): number {
     const stats = this.actionStats.get(action);
     if (!stats || stats.attempts === 0) return 0;
-    
+
     const successRate = stats.successes / stats.attempts;
     return successRate * 0.5 + stats.avgReward * 0.3;
   }
@@ -192,7 +205,7 @@ export class DesktopDecisionEngine {
   private assessRisk(action: string): 'low' | 'medium' | 'high' {
     const highRiskActions = ['drag', 'rightClick', 'openApp'];
     const mediumRiskActions = ['type', 'keyCombo', 'closeWindow'];
-    
+
     if (highRiskActions.includes(action)) return 'high';
     if (mediumRiskActions.includes(action)) return 'medium';
     return 'low';
@@ -226,21 +239,25 @@ export class DesktopDecisionEngine {
   /**
    * 生成决策理由
    */
-  private generateReasoning(state: DecisionState, action: string, confidence: number): string {
+  private generateReasoning(
+    state: DecisionState,
+    action: string,
+    confidence: number
+  ): string {
     const reasons: string[] = [];
-    
+
     if (state.consecutiveFailures > 0) {
       reasons.push(`避免连续失败（${state.consecutiveFailures}次）`);
     }
-    
+
     if (state.screenComplexity > 0.7) {
       reasons.push('屏幕复杂度高，需谨慎');
     }
-    
+
     if (confidence > 0.8) {
       reasons.push('历史成功率高');
     }
-    
+
     return reasons.length > 0 ? reasons.join('；') : '基于历史经验选择';
   }
 
@@ -272,7 +289,7 @@ export class DesktopDecisionEngine {
     // 保存经验
     this.experiences.push(experience);
     this.experienceBuffer.push(experience);
-    
+
     if (this.experienceBuffer.length > this.maxBufferSize) {
       this.experienceBuffer.shift();
     }
@@ -378,11 +395,17 @@ export class DesktopDecisionEngine {
   getDecisionStats(): {
     totalExperiences: number;
     uniqueStates: number;
-    actionStats: Record<string, { successRate: number; avgReward: number; attempts: number }>;
+    actionStats: Record<
+      string,
+      { successRate: number; avgReward: number; attempts: number }
+    >;
     currentExplorationRate: number;
   } {
-    const formattedStats: Record<string, { successRate: number; avgReward: number; attempts: number }> = {};
-    
+    const formattedStats: Record<
+      string,
+      { successRate: number; avgReward: number; attempts: number }
+    > = {};
+
     for (const [action, stats] of this.actionStats.entries()) {
       formattedStats[action] = {
         successRate: stats.attempts > 0 ? stats.successes / stats.attempts : 0,
@@ -428,7 +451,10 @@ export class DesktopDecisionEngine {
     try {
       const importData = JSON.parse(jsonString);
       for (const [stateKey, actions] of Object.entries(importData)) {
-        this.qTable.set(stateKey, new Map(Object.entries(actions as Record<string, number>)));
+        this.qTable.set(
+          stateKey,
+          new Map(Object.entries(actions as Record<string, number>))
+        );
       }
       Logger.info('🧠 Q表已加载', 'DesktopDecisionEngine');
     } catch (e) {

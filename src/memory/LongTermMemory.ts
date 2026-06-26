@@ -214,8 +214,8 @@ export class LongTermMemory extends BaseMemoryStore {
     return allRecords
       .filter((r) => {
         const matchesQuery = !query || r.content.includes(query);
-        const matchesReqs = requirements.every(
-          (req) => r.content.includes(req)
+        const matchesReqs = requirements.every((req) =>
+          r.content.includes(req)
         );
         return matchesQuery && matchesReqs;
       })
@@ -303,7 +303,6 @@ export class LongTermMemory extends BaseMemoryStore {
 
   private async performMemoryCleanup(): Promise<void> {
     await this.executeTransaction('performMemoryCleanup', async () => {
-      const cutoff = Date.now() - 365 * 24 * 60 * 60 * 1000;
       Logger.info('🧹 长期记忆：已清理超过一年的旧记录', 'LongTermMemory');
     }).catch((error) => {
       Logger.error(

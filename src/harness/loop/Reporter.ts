@@ -98,9 +98,14 @@ export class Reporter {
 
     // usefulness: 基于响应内容质量 — 是否包含有用信息而非错误/空回复
     const responseText = this.extractResponse(context.messages);
-    const hasError = /抱歉|无法|失败|错误|sorry|error|failed/i.test(responseText.substring(0, 100));
+    const hasError = /抱歉|无法|失败|错误|sorry|error|failed/i.test(
+      responseText.substring(0, 100)
+    );
     const isEmpty = responseText.length < 10;
-    const hasActionableContent = /已|完成|找到|创建|修改|删除|更新|成功|可以|建议|推荐/i.test(responseText.substring(0, 200));
+    const hasActionableContent =
+      /已|完成|找到|创建|修改|删除|更新|成功|可以|建议|推荐/i.test(
+        responseText.substring(0, 200)
+      );
     let usefulness = overall * 0.8;
     if (hasError) usefulness -= 0.2;
     if (isEmpty) usefulness -= 0.3;
@@ -108,7 +113,9 @@ export class Reporter {
     usefulness = Math.max(0.1, Math.min(1.0, usefulness));
 
     // friendliness: 基于人格一致性 — 是否包含温暖/自然的表达
-    const hasGreeting = /~|😊|好的|没问题|当然|可以|嗯|哦|呢|吧/i.test(responseText.substring(0, 200));
+    const hasGreeting = /~|😊|好的|没问题|当然|可以|嗯|哦|呢|吧/i.test(
+      responseText.substring(0, 200)
+    );
     const isTerse = responseText.length < 15 && !hasGreeting;
     const hasPersonality = /主人|亲爱的|宝贝/i.test(responseText) === false; // 不用这些称呼 = 符合人格
     let friendliness = 0.7;
@@ -126,5 +133,4 @@ export class Reporter {
       details: `轮次=${budget.roundsUsed} 工具=${budget.toolCallsUsed} 时长=${duration}ms 步骤成功率=${(stepSuccessRate * 100).toFixed(0)}%`,
     };
   }
-
 }

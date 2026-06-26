@@ -5,16 +5,67 @@
  * 简单任务跳过规划，复杂任务分解为步骤
  */
 
-import { Logger } from '../../utils/Logger';
 import { TaskComplexityAnalyzer } from '../../core/TaskComplexityAnalyzer';
+import { Logger } from '../../utils/Logger';
 import {
-  UnifiedTaskStatus,
   UnifiedTaskPriority,
-  type UserInput,
-  type LoopContext,
+  UnifiedTaskStatus,
   type ExecutionPlan,
+  type LoopContext,
   type PlanStep,
+  type UserInput,
 } from '../types';
+
+/** toTaskNodes 输出格式 — 供 TaskDispatcher 使用的轻量节点 */
+export interface TaskNodeOutput {
+  id: string;
+  goal: string;
+  context: string;
+  dependencies: string[];
+  priority: number;
+  tools?: string[];
+  status: string;
+}
+
+/** 任务本质分析结果 */
+export interface TaskNatureAnalysis {
+  taskType: string;
+  essence: string;
+  keyConstraints: string[];
+  riskPoints: string[];
+  recommendedStrategy: string;
+  complexity: 'low' | 'medium' | 'high';
+}
+
+/** Tree of Thoughts 配置 */
+export interface TotConfig {
+  /** 启用 Tree of Thoughts 多候选规划（默认 true） */
+  enabled?: boolean;
+  /** 启用任务本质分析（动态 Prompt 推理） */
+  enableTaskNatureAnalysis?: boolean;
+}
+
+/** 候选计划评估结果 */
+export interface CandidateEvaluation {
+  plan: ExecutionPlan;
+  feasibilityScore: number;
+  reasoning: string;
+  risks: string[];
+}
+
+/** 外部候选评估器接口 — 支持注入自定义评估逻辑 */
+export interface PlanEvaluator {
+  evaluate(
+    candidates: Array<{
+      strategy: string;
+      reasoning: string;
+      steps: Array<{ id: string; description: string; toolName?: string }>;
+      dependencies: Record<string, string[]>;
+      estimatedRounds: number;
+    }>,
+    context: { task: string }
+  ): Promise<CandidateEvaluation[]>;
+}
 
 /** Planner 依赖 */
 export interface PlannerDeps {
@@ -35,6 +86,10 @@ export interface PlannerDeps {
   memoryInjector?: {
     autoRetrieveMemories(input: string, userId?: string): Promise<string[]>;
   };
+  /** Tree of Thoughts 配置 */
+  totConfig?: TotConfig;
+  /** 外部候选评估器 — 注入时使用外部评估逻辑，否则使用 LLM 评估 */
+  planEvaluator?: PlanEvaluator;
 }
 
 /** 简单任务关键词 — 直接执行不需要规划，但需要工具调用 */
@@ -82,12 +137,12 @@ const ACTION_SIMPLE_PATTERNS: Array<{ pattern: RegExp; tools: string[] }> = [
 
 /** 纯对话模式 — 不调用任何工具，直接LLM回复 */
 const CONVERSATION_ONLY_PATTERNS = [
-  /^(你好|hi|hello|嗨|早上好|晚上好|下午好|hey|yo)\s*$/i,  // 纯问候（不带其他内容）
+  /^(你好|hi|hello|嗨|早上好|晚上好|下午好|hey|yo)\s*$/i, // 纯问候（不带其他内容）
   /^(谢谢|感谢|thanks|thank you)\s*$/i,
   /^(再见|拜拜|bye|goodbye)\s*$/i,
-  /^(？|\?)+$/,  // 纯问号
-  /^(ping)$/,  // 单词ping是网络命令，但用户可能只是打招呼
-  /^.{1,4}$/,  // 超短输入（1-4字符）大概率是对话
+  /^(？|\?)+$/, // 纯问号
+  /^(ping)$/, // 单词ping是网络命令，但用户可能只是打招呼
+  /^.{1,4}$/, // 超短输入（1-4字符）大概率是对话
 ];
 
 const SIMPLE_TASK_PATTERNS = [
@@ -173,6 +228,16 @@ export class Planner {
   private replanCount = 0;
   private totalPlans = 0;
   private complexityAnalyzer: TaskComplexityAnalyzer;
+  /** 工具使用历史 — 记录成功/失败次数 */
+  private toolUsageHistory: Map<string, { success: number; failure: number }> =
+    new Map();
+  /** 简单任务结果历史 — key 为任务描述 */
+  private simpleTaskResults: Map<
+    string,
+    Array<{ success: boolean; duration: number }>
+  > = new Map();
+  /** 任务本质分析缓存 — 避免重复推理 */
+  private taskNatureCache: Map<string, TaskNatureAnalysis> = new Map();
 
   constructor(deps: PlannerDeps) {
     this.deps = deps;
@@ -229,6 +294,95 @@ export class Planner {
         );
       }
 
+      // 检测纯对话任务 — 分配最小预算
+      const isConversationOnly = CONVERSATION_ONLY_PATTERNS.some((p) =>
+        p.test(text)
+      );
+
+      // 检测复合简单任务 — 多个子操作
+      const composite = this.detectCompositeSimpleTask(text);
+      if (composite.isCompositeSimple && composite.subTasks) {
+        const subSteps = composite.subTasks.map((desc, idx) => ({
+          id: `simple-step-${idx + 1}`,
+          description: desc,
+          retryCount: 0,
+          maxRetries: 1,
+          toUnifiedTaskNode: () => ({
+            id: `simple-step-${idx + 1}`,
+            description: desc,
+            status: UnifiedTaskStatus.PENDING,
+            dependencies: [],
+            priority: UnifiedTaskPriority.MEDIUM,
+            maxRetries: 1,
+            currentRetry: 0,
+            timeout: 300,
+            retryDelay: 1,
+            metadata: {},
+            isEssential: true,
+          }),
+        }));
+
+        const deps = new Map<string, string[]>();
+        const hasSequential = /然后|接着|之后|最后/.test(text);
+        if (hasSequential) {
+          for (let i = 1; i < subSteps.length; i++) {
+            deps.set(subSteps[i].id, [subSteps[i - 1].id]);
+          }
+        }
+
+        return {
+          steps: subSteps,
+          dependencies: deps,
+          estimatedBudget: {
+            maxRounds: 4 + subSteps.length,
+            maxToolCalls: subSteps.length * 2,
+            maxTokens: 4000,
+            maxDurationMs: 60000,
+          },
+          simple: true,
+          planTier: 'simple',
+          toolCallMode: 'auto',
+          recommendedTools: [],
+        };
+      }
+
+      if (isConversationOnly) {
+        return {
+          steps: [
+            {
+              id: 'direct-execute',
+              description: text,
+              retryCount: 0,
+              maxRetries: 0,
+              toUnifiedTaskNode: () => ({
+                id: 'direct-execute',
+                description: text,
+                status: UnifiedTaskStatus.PENDING,
+                dependencies: [],
+                priority: UnifiedTaskPriority.MEDIUM,
+                maxRetries: 0,
+                currentRetry: 0,
+                timeout: 300,
+                retryDelay: 1,
+                metadata: {},
+                isEssential: true,
+              }),
+            },
+          ],
+          dependencies: new Map(),
+          estimatedBudget: {
+            maxRounds: 1,
+            maxToolCalls: 0,
+            maxTokens: 2000,
+            maxDurationMs: 15000,
+          },
+          simple: true,
+          planTier: 'none',
+          toolCallMode: 'none',
+          recommendedTools: [],
+        };
+      }
+
       return {
         steps: [
           {
@@ -263,6 +417,7 @@ export class Planner {
           maxDurationMs: 30000,
         },
         simple: true,
+        planTier: 'simple',
         toolCallMode: this.resolveToolCallMode(text),
         recommendedTools: this.resolveRecommendedTools(text),
       };
@@ -271,13 +426,17 @@ export class Planner {
     // 2. 快速判断：明显复杂任务
     if (this.isComplexTask(text)) {
       Logger.info(`📋 复杂任务: "${text.substring(0, 50)}"`, 'Planner');
-      return this.generatePlan(input, context);
+      const plan = await this.generatePlan(input, context);
+      plan.planTier = 'complex';
+      return plan;
     }
 
     // 2.5 研究类任务：自动规划搜索+分析+总结三步骤
     if (isResearch) {
       Logger.info(`📋 研究任务: "${text.substring(0, 50)}"`, 'Planner');
-      return this.generateResearchPlan(input, context);
+      const plan = this.generateResearchPlan(input, context);
+      plan.planTier = 'research';
+      return plan;
     }
 
     // 3. 中间地带：让 LLM 判断
@@ -315,6 +474,7 @@ export class Planner {
             maxDurationMs: 30000,
           },
           simple: true,
+          planTier: 'direct',
           toolCallMode: this.resolveToolCallMode(text),
           recommendedTools: this.resolveRecommendedTools(text),
         };
@@ -352,20 +512,26 @@ export class Planner {
           maxDurationMs: 45000,
         },
         simple: true,
+        planTier: 'direct',
         toolCallMode: this.resolveToolCallMode(text),
         recommendedTools: this.resolveRecommendedTools(text),
       };
     }
 
     // 4. 生成执行计划
-    return this.generatePlan(input, context);
+    const plan = await this.generatePlan(input, context);
+    plan.planTier = 'complex';
+    return plan;
   }
 
   /**
    * 判断是否为简单任务
    */
   private isSimpleTask(text: string): boolean {
-    return ALL_SIMPLE_PATTERNS.some((p) => p.test(text));
+    return (
+      ALL_SIMPLE_PATTERNS.some((p) => p.test(text)) ||
+      CONVERSATION_ONLY_PATTERNS.some((p) => p.test(text))
+    );
   }
 
   private isActionTask(text: string): boolean {
@@ -489,6 +655,50 @@ export class Planner {
   }
 
   /**
+   * 基于当前预算使用情况计算缩减系数
+   * 预算紧张时返回 < 1，预算充足时返回 1
+   */
+  private getBudgetConstraintMultiplier(context: LoopContext): number {
+    const budget = context.budget;
+    if (!budget) return 1;
+
+    let multiplier = 1;
+
+    // Token 预算紧张度
+    if (budget.tokenHardLimit && budget.tokenHardLimit > 0) {
+      const tokenUsage = budget.tokensUsed / budget.tokenHardLimit;
+      if (tokenUsage > 0.8) {
+        multiplier *= 0.5;
+      } else if (tokenUsage > 0.6) {
+        multiplier *= 0.75;
+      }
+    }
+
+    // 轮次预算紧张度
+    if (budget.hardRoundLimit && budget.hardRoundLimit > 0) {
+      const roundUsage = budget.roundsUsed / budget.hardRoundLimit;
+      if (roundUsage > 0.75) {
+        multiplier *= 0.6;
+      } else if (roundUsage > 0.5) {
+        multiplier *= 0.8;
+      }
+    }
+
+    // 时间预算紧张度
+    if (budget.maxDurationMs && budget.startTime) {
+      const elapsed = Date.now() - budget.startTime;
+      const timeUsage = elapsed / budget.maxDurationMs;
+      if (timeUsage > 0.8) {
+        multiplier *= 0.5;
+      } else if (timeUsage > 0.6) {
+        multiplier *= 0.75;
+      }
+    }
+
+    return multiplier;
+  }
+
+  /**
    * 获取重新规划率
    * @returns 重新规划率 (0-1)
    */
@@ -498,11 +708,145 @@ export class Planner {
   }
 
   /**
+   * 分析任务本质 — LLM 推理任务类型、约束、风险、策略
+   *
+   * 动态 Prompt 推理核心：先理解任务本质，再生成专属规划 Prompt
+   * 结果缓存避免重复推理
+   *
+   * @param task - 任务描述
+   * @returns 结构化任务分析
+   */
+  async analyzeTaskNature(task: string): Promise<TaskNatureAnalysis> {
+    const cacheKey = task.trim();
+    const cached = this.taskNatureCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    try {
+      const prompt = `你是任务分析引擎。请分析以下任务的本质，返回结构化分析。
+
+任务: "${task}"
+
+请用以下JSON格式输出（不要包含其他内容）：
+{
+  "taskType": "任务类型（如 code_refactoring, migration, research, bug_fix, feature_development 等）",
+  "essence": "任务本质（一句话描述核心目标）",
+  "keyConstraints": ["关键约束1", "关键约束2"],
+  "riskPoints": ["风险点1", "风险点2"],
+  "recommendedStrategy": "推荐策略",
+  "complexity": "low|medium|high"
+}`;
+
+      const response = await this.deps.llm.chat(prompt);
+      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        throw new Error('LLM 未返回有效 JSON');
+      }
+
+      const parsed = JSON.parse(jsonMatch[0]);
+      const analysis: TaskNatureAnalysis = {
+        taskType: parsed.taskType || 'unknown',
+        essence: parsed.essence || task,
+        keyConstraints: Array.isArray(parsed.keyConstraints)
+          ? parsed.keyConstraints
+          : [],
+        riskPoints: Array.isArray(parsed.riskPoints) ? parsed.riskPoints : [],
+        recommendedStrategy: parsed.recommendedStrategy || '',
+        complexity: parsed.complexity || 'medium',
+      };
+
+      this.taskNatureCache.set(cacheKey, analysis);
+      Logger.info(
+        `🧠 任务本质分析: type=${analysis.taskType}, complexity=${analysis.complexity}`,
+        'Planner'
+      );
+      return analysis;
+    } catch (err) {
+      Logger.warn(
+        `任务本质分析降级为规则化: ${(err as Error).message}`,
+        'Planner'
+      );
+      const fallback = this.ruleBasedTaskAnalysis(task);
+      this.taskNatureCache.set(cacheKey, fallback);
+      return fallback;
+    }
+  }
+
+  /**
+   * 规则化任务分析（LLM 不可用时的降级方案）
+   * @param task - 任务描述
+   * @returns 基于关键词匹配的任务分析
+   */
+  private ruleBasedTaskAnalysis(task: string): TaskNatureAnalysis {
+    let taskType = 'general';
+    let complexity: 'low' | 'medium' | 'high' = 'medium';
+
+    if (/重构|refactor/i.test(task)) {
+      taskType = 'code_refactoring';
+      complexity = 'high';
+    } else if (/迁移|migration|migrate/i.test(task)) {
+      taskType = 'migration';
+      complexity = 'high';
+    } else if (/研究|调研|research/i.test(task)) {
+      taskType = 'research';
+      complexity = 'medium';
+    } else if (/修复|bug|fix/i.test(task)) {
+      taskType = 'bug_fix';
+      complexity = 'medium';
+    } else if (/实现|开发|implement|feature/i.test(task)) {
+      taskType = 'feature_development';
+      complexity = 'medium';
+    }
+
+    return {
+      taskType,
+      essence: task,
+      keyConstraints: [],
+      riskPoints: [],
+      recommendedStrategy: '',
+      complexity,
+    };
+  }
+
+  /**
+   * 将执行计划转换为 TaskNode 列表 — 供 TaskDispatcher 使用
+   *
+   * 转换规则：
+   *   - 每个 PlanStep 转换为一个 TaskNode
+   *   - 依赖关系从 plan.dependencies 映射
+   *   - 优先级基于步骤顺序（越早优先级越高）
+   *   - 工具列表从 step.toolName 提取
+   *
+   * @param plan - 执行计划
+   * @returns TaskNode 列表
+   */
+  public toTaskNodes(plan: ExecutionPlan): TaskNodeOutput[] {
+    const steps = plan.steps || [];
+    const deps = plan.dependencies || new Map();
+
+    return steps.map((step, index) => {
+      const stepDeps = deps.get(step.id) || [];
+      const priority = Math.max(1, 10 - index);
+
+      return {
+        id: step.id,
+        goal: step.description,
+        context: `步骤 ${index + 1}: ${step.description}`,
+        dependencies: stepDeps,
+        priority,
+        tools: step.toolName ? [step.toolName] : undefined,
+        status: 'pending',
+      };
+    });
+  }
+
+  /**
    * 生成执行计划
    */
   private async generatePlan(
     input: UserInput,
-    _context: LoopContext
+    context: LoopContext
   ): Promise<ExecutionPlan> {
     try {
       // 先检索相关上下文
@@ -543,6 +887,19 @@ export class Planner {
         contextHint = `\n\n【相关上下文】以下是检索到的相关信息，请在规划时参考：\n${contextMemories.map((mem, i) => `${i + 1}. ${mem}`).join('\n')}`;
       }
 
+      // P3: Tree of Thoughts — 复杂任务生成多候选并择优
+      // totConfig.enabled 默认 true（未设置时启用），显式设为 false 时关闭
+      const totEnabled = this.deps.totConfig?.enabled !== false;
+      if (totEnabled) {
+        return this.generateTotPlan(input, contextHint, evolutionHint, context);
+      }
+
+      // P2-1: 动态 Prompt 推理 — 先分析任务本质，再生成候选执行计划
+      if (this.deps.totConfig?.enableTaskNatureAnalysis) {
+        await this.analyzeTaskNature(input.text);
+        return this.generateTotPlan(input, contextHint, evolutionHint, context);
+      }
+
       const prompt = `为以下任务生成执行计划。每个步骤应该是一个独立的操作。
 
 任务: "${input.text}"
@@ -579,33 +936,6 @@ ${evolutionHint}
       }
 
       const parsed = JSON.parse(jsonMatch[0]);
-      const steps: PlanStep[] = (parsed.steps || []).map(
-        (
-          s: { id?: string; description?: string; toolName?: string },
-          i: number
-        ) => ({
-          id: s.id || `step${i + 1}`,
-          description: s.description || '',
-          toolName: s.toolName,
-          retryCount: 0,
-          maxRetries: 1,
-          toUnifiedTaskNode: () => ({
-            id: s.id || `step${i + 1}`,
-            description: s.description || '',
-            toolName: s.toolName,
-            status: UnifiedTaskStatus.PENDING,
-            dependencies: [],
-            priority: UnifiedTaskPriority.MEDIUM,
-            maxRetries: 1,
-            currentRetry: 0,
-            timeout: 300,
-            retryDelay: 1,
-            metadata: {},
-            isEssential: true,
-          }),
-        })
-      );
-
       const deps: Map<string, string[]> = new Map();
       if (parsed.dependencies) {
         for (const [key, value] of Object.entries(parsed.dependencies)) {
@@ -613,7 +943,40 @@ ${evolutionHint}
         }
       }
 
-      const multiplier = this.getAdjustedBudgetMultiplier();
+      const steps: PlanStep[] = (parsed.steps || []).map(
+        (
+          s: { id?: string; description?: string; toolName?: string },
+          i: number
+        ) => {
+          const stepId = s.id || `step${i + 1}`;
+          const stepDeps = deps.get(stepId) || [];
+          return {
+            id: stepId,
+            description: s.description || '',
+            toolName: s.toolName,
+            retryCount: 0,
+            maxRetries: 1,
+            toUnifiedTaskNode: () => ({
+              id: stepId,
+              description: s.description || '',
+              toolName: s.toolName,
+              status: UnifiedTaskStatus.PENDING,
+              dependencies: stepDeps,
+              priority: UnifiedTaskPriority.MEDIUM,
+              maxRetries: 1,
+              currentRetry: 0,
+              timeout: 300,
+              retryDelay: 1,
+              metadata: {},
+              isEssential: true,
+            }),
+          };
+        }
+      );
+
+      const multiplier =
+        this.getAdjustedBudgetMultiplier() *
+        this.getBudgetConstraintMultiplier(context);
 
       const planReasoning = response.trim();
       const recommendedTools = steps
@@ -673,6 +1036,241 @@ ${evolutionHint}
         recommendedTools: this.resolveRecommendedTools(input.text),
       };
     }
+  }
+
+  /**
+   * Tree of Thoughts 规划 — 基于任务分析生成候选计划并评估
+   *
+   * 流程：
+   *   1. 任务本质分析（已由 analyzeTaskNature 完成）
+   *   2. 候选执行计划生成（注入任务分析结果）
+   *   3. 候选评估（多候选时）
+   *   4. 选择最优候选构建最终计划
+   */
+  private async generateTotPlan(
+    input: UserInput,
+    contextHint: string,
+    evolutionHint: string,
+    context: LoopContext
+  ): Promise<ExecutionPlan> {
+    // P2-1: 动态 Prompt 推理 — 先分析任务本质
+    let analysisSection = '';
+    if (this.deps.totConfig?.enableTaskNatureAnalysis) {
+      const analysis = await this.analyzeTaskNature(input.text);
+      analysisSection = `
+【任务本质】${analysis.essence}
+【任务类型】${analysis.taskType}
+【关键约束】${analysis.keyConstraints.join('、') || '无'}
+【风险点】${analysis.riskPoints.join('、') || '无'}
+【推荐策略】${analysis.recommendedStrategy || '无'}
+【复杂度】${analysis.complexity}`;
+    }
+
+    // 1. 生成候选执行计划（注入任务本质分析结果）
+    const candidatePrompt = `为以下复杂任务生成多个候选执行计划（至少2个）。
+
+任务: "${input.text}"
+${analysisSection}
+${contextHint}
+${evolutionHint}
+请用以下JSON格式输出（不要包含其他内容）：
+{
+  "candidates": [
+    {
+      "strategy": "策略名称",
+      "reasoning": "选择此策略的推理过程",
+      "steps": [{"id": "s1", "description": "步骤描述", "toolName": "工具名(可选)"}],
+      "dependencies": {"s2": ["s1"]},
+      "estimatedRounds": 3
+    }
+  ]
+}`;
+
+    const candidateResponse = await this.deps.llm.chat(candidatePrompt);
+    const candidateMatch = candidateResponse.match(/\{[\s\S]*\}/);
+    if (!candidateMatch) {
+      throw new Error('LLM 未返回有效候选计划 JSON');
+    }
+
+    const candidatesParsed = JSON.parse(candidateMatch[0]);
+    let candidates: Array<{
+      strategy: string;
+      reasoning: string;
+      steps: Array<{ id?: string; description?: string; toolName?: string }>;
+      dependencies: Record<string, string[]>;
+      estimatedRounds: number;
+    }> = candidatesParsed.candidates || [];
+
+    // 向后兼容：LLM 返回旧格式单计划时降级为单候选
+    if (candidates.length === 0 && candidatesParsed.steps) {
+      candidates = [
+        {
+          strategy: '默认方案',
+          reasoning: candidatesParsed.reasoning || '多步骤执行',
+          steps: candidatesParsed.steps,
+          dependencies: candidatesParsed.dependencies || {},
+          estimatedRounds: candidatesParsed.estimatedRounds || 4,
+        },
+      ];
+    }
+
+    if (candidates.length === 0) {
+      throw new Error('LLM 未返回候选计划');
+    }
+
+    // 2. 评估候选 — 优先使用外部评估器，否则使用 LLM 评估
+    let bestCandidateIndex = 0;
+    let evaluations: Array<{
+      candidateIndex: number;
+      feasibilityScore: number;
+      reasoning?: string;
+    }> = [];
+
+    if (this.deps.planEvaluator) {
+      const evalResults = await this.deps.planEvaluator.evaluate(
+        candidates.map((c, ci) => ({
+          strategy: c.strategy,
+          reasoning: c.reasoning,
+          steps: (c.steps || []).map((s, si) => ({
+            id: s.id || `step${ci + 1}-${si + 1}`,
+            description: s.description || '',
+            toolName: s.toolName,
+          })),
+          dependencies: c.dependencies,
+          estimatedRounds: c.estimatedRounds,
+        })),
+        { task: input.text }
+      );
+      evaluations = evalResults.map((e, i) => ({
+        candidateIndex: i,
+        feasibilityScore: e.feasibilityScore,
+        reasoning: e.reasoning,
+      }));
+    } else if (candidates.length > 1) {
+      try {
+        const evalPrompt = `请评估以下候选执行计划的可行性。
+
+任务: "${input.text}"
+
+候选计划:
+${candidates
+  .map((c, i) => `候选${i + 1}: ${c.strategy} - ${c.reasoning}`)
+  .join('\n')}
+
+请用以下JSON格式输出：
+{
+  "evaluations": [
+    {
+      "candidateIndex": 0,
+      "feasibilityScore": 0.8,
+      "reasoning": "评估理由",
+      "risks": ["风险1"]
+    }
+  ]
+}`;
+
+        const evalResponse = await this.deps.llm.chat(evalPrompt);
+        const evalMatch = evalResponse.match(/\{[\s\S]*\}/);
+        if (evalMatch) {
+          const evalParsed = JSON.parse(evalMatch[0]);
+          evaluations = evalParsed.evaluations || [];
+        }
+      } catch (err) {
+        Logger.warn(
+          `候选评估失败，使用首个候选: ${(err as Error).message}`,
+          'Planner'
+        );
+      }
+    }
+
+    // 选择最高分候选
+    if (evaluations.length > 0) {
+      let bestScore = -1;
+      for (const ev of evaluations) {
+        if (
+          ev.feasibilityScore > bestScore &&
+          ev.candidateIndex < candidates.length
+        ) {
+          bestScore = ev.feasibilityScore;
+          bestCandidateIndex = ev.candidateIndex;
+        }
+      }
+    }
+
+    const bestCandidate = candidates[bestCandidateIndex];
+
+    // 3. 从最优候选构建执行计划
+    const depsMap: Map<string, string[]> = new Map();
+    const rawDeps = bestCandidate.dependencies || {};
+    for (const [k, v] of Object.entries(rawDeps)) {
+      depsMap.set(k, v as string[]);
+    }
+
+    const steps: PlanStep[] = (bestCandidate.steps || []).map(
+      (
+        s: { id?: string; description?: string; toolName?: string },
+        i: number
+      ) => {
+        const stepId = s.id || `step${i + 1}`;
+        const stepDeps = depsMap.get(stepId) || [];
+        return {
+          id: stepId,
+          description: s.description || '',
+          toolName: s.toolName,
+          retryCount: 0,
+          maxRetries: 1,
+          toUnifiedTaskNode: () => ({
+            id: stepId,
+            description: s.description || '',
+            toolName: s.toolName,
+            status: UnifiedTaskStatus.PENDING,
+            dependencies: stepDeps,
+            priority: UnifiedTaskPriority.MEDIUM,
+            maxRetries: 1,
+            currentRetry: 0,
+            timeout: 300,
+            retryDelay: 1,
+            metadata: {},
+            isEssential: true,
+          }),
+        };
+      }
+    );
+
+    const multiplier =
+      this.getAdjustedBudgetMultiplier() *
+      this.getBudgetConstraintMultiplier(context);
+    const planReasoning = bestCandidate.reasoning || candidateResponse.trim();
+    const recommendedTools = steps
+      .map((s) => s.toolName)
+      .filter((t): t is string => !!t);
+
+    Logger.info(
+      `🌳 ToT 规划完成: ${steps.length} 步, 策略=${bestCandidate.strategy || '默认'}, 选中候选 #${bestCandidateIndex + 1}`,
+      'Planner'
+    );
+
+    return {
+      steps,
+      dependencies: depsMap,
+      estimatedBudget: {
+        maxRounds: Math.ceil((bestCandidate.estimatedRounds || 6) * multiplier),
+        maxToolCalls: Math.ceil(steps.length * 3 * multiplier),
+        maxTokens: Math.ceil(5000 * multiplier),
+        maxDurationMs: Math.ceil(60000 * multiplier),
+      },
+      fallbackStrategy: 'replan',
+      planReasoning,
+      toolCallMode: steps.length > 0 ? 'required' : 'auto',
+      recommendedTools,
+      totMeta: {
+        candidatesCount: candidates.length,
+        candidateCount: candidates.length,
+        selectedRank: bestCandidateIndex,
+        selectedStrategy: bestCandidate.strategy,
+        evaluations,
+      },
+    };
   }
 
   /**
@@ -810,5 +1408,96 @@ ${evolutionHint}
       toolCallMode: 'required',
       recommendedTools: ['web_search', 'web_fetch'],
     };
+  }
+
+  // ============ 🔶-1: 简单任务规划增强 ============
+
+  /**
+   * 记录工具使用历史，影响推荐权重
+   */
+  recordToolUsage(toolName: string, success: boolean): void {
+    if (!this.toolUsageHistory.has(toolName)) {
+      this.toolUsageHistory.set(toolName, { success: 0, failure: 0 });
+    }
+    const entry = this.toolUsageHistory.get(toolName)!;
+    if (success) entry.success++;
+    else entry.failure++;
+  }
+
+  /**
+   * 获取工具权重 — 基于历史成功率
+   */
+  getToolWeights(): Record<string, number> {
+    const weights: Record<string, number> = {};
+    for (const [toolName, entry] of this.toolUsageHistory) {
+      const total = entry.success + entry.failure;
+      if (total > 0) {
+        weights[toolName] = entry.success / total;
+      }
+    }
+    return weights;
+  }
+
+  /**
+   * 检测复合简单任务 — 由多个无依赖子操作组成
+   */
+  detectCompositeSimpleTask(text: string): {
+    isCompositeSimple: boolean;
+    subTasks?: string[];
+  } {
+    const parallelKeywords = ['同时', '并且', '以及', '各自', '分别'];
+    const sequentialKeywords = ['然后', '接着', '之后', '最后'];
+
+    const hasParallel = parallelKeywords.some((kw) => text.includes(kw));
+    const hasSequential = sequentialKeywords.some((kw) => text.includes(kw));
+
+    if (hasParallel || hasSequential) {
+      const separators = /[，,；;]|然后|接着|之后|最后|同时|并且|以及/;
+      const parts = text.split(separators).filter((p) => p.trim().length > 0);
+      if (parts.length >= 2) {
+        return {
+          isCompositeSimple: true,
+          subTasks: parts.map((p) => p.trim()),
+        };
+      }
+    }
+
+    return { isCompositeSimple: false };
+  }
+
+  /**
+   * 记录简单任务执行结果
+   */
+  recordSimpleTaskResult(
+    task: string,
+    success: boolean,
+    duration: number
+  ): void {
+    if (!this.simpleTaskResults.has(task)) {
+      this.simpleTaskResults.set(task, []);
+    }
+    this.simpleTaskResults.get(task)!.push({ success, duration });
+  }
+
+  /**
+   * 获取简单任务统计
+   */
+  getSimpleTaskStats(task: string): {
+    totalRuns: number;
+    successRate: number;
+    avgDuration: number;
+    needsOptimization: boolean;
+  } | null {
+    const results = this.simpleTaskResults.get(task);
+    if (!results || results.length === 0) return null;
+
+    const totalRuns = results.length;
+    const successCount = results.filter((r) => r.success).length;
+    const successRate = successCount / totalRuns;
+    const avgDuration =
+      results.reduce((sum, r) => sum + r.duration, 0) / totalRuns;
+    const needsOptimization = successRate < 0.7 && totalRuns >= 3;
+
+    return { totalRuns, successRate, avgDuration, needsOptimization };
   }
 }

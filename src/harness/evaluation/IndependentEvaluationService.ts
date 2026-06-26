@@ -215,21 +215,18 @@ export class IndependentEvaluationService {
     const { conversationHistory, currentOutput, executionTrace } = input;
 
     const lastOutput =
-      currentOutput ||
-      this.getLastAssistantContent(conversationHistory) ||
-      '';
+      currentOutput || this.getLastAssistantContent(conversationHistory) || '';
 
-    const hasToolResults = executionTrace?.toolResults &&
+    const hasToolResults =
+      executionTrace?.toolResults &&
       executionTrace.toolResults.length > 0 &&
-      executionTrace.toolResults.some(r => r.success);
-
-    const hasToolCalls = executionTrace?.totalToolCalls &&
-      executionTrace.totalToolCalls > 0;
+      executionTrace.toolResults.some((r) => r.success);
 
     const isAcknowledgmentOnly = this.isAcknowledgmentResponse(lastOutput);
 
     const hasFinalOutput = !!(
-      (this.hasFinalAssistantMessage(conversationHistory) && !isAcknowledgmentOnly) ||
+      (this.hasFinalAssistantMessage(conversationHistory) &&
+        !isAcknowledgmentOnly) ||
       (currentOutput && currentOutput.length > 0 && !isAcknowledgmentOnly) ||
       hasToolResults
     );
@@ -287,7 +284,7 @@ export class IndependentEvaluationService {
       /开始.+(执行|处理|操作)/,
     ];
 
-    return ackPatterns.some(pattern => pattern.test(output));
+    return ackPatterns.some((pattern) => pattern.test(output));
   }
 
   /**
@@ -427,7 +424,7 @@ export class IndependentEvaluationService {
         summary = '任务进行中，继续执行';
       }
     } else if (taskCompletion.completed && quality.overall >= 0.7) {
-      goalProgress = 0.7 + (taskCompletion.confidence * 0.3);
+      goalProgress = 0.7 + taskCompletion.confidence * 0.3;
       summary = '任务基本完成，质量良好';
     }
 

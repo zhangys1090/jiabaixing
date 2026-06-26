@@ -113,8 +113,7 @@ export class MultiModelLLMProvider {
     // --- 小米 MiMo（主模型，OpenAI 兼容接口）---
     const xiaomiApiKey = process.env.XIAOMI_API_KEY;
     const xiaomiBaseUrl =
-      process.env.XIAOMI_BASE_URL ||
-      'https://token-plan-cn.xiaomimimo.com/v1';
+      process.env.XIAOMI_BASE_URL || 'https://token-plan-cn.xiaomimimo.com/v1';
     const xiaomiModelName = process.env.XIAOMI_MODEL || 'mimo-v2.5-pro';
 
     if (xiaomiApiKey) {

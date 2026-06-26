@@ -5,7 +5,7 @@
 
 import { MCPServerManager } from '../../../mcp/MCPServerManager';
 import { ToolRegistry } from './ToolRegistry';
-import type { ToolDefinition, ToolResult, ToolContext } from '../../types';
+import type { ToolDefinition, ToolResult } from '../../types';
 import { Permission, ToolCategory } from '../../types';
 import { Logger } from '../../../utils/Logger';
 
@@ -60,7 +60,11 @@ export class MCPToolBridge {
           const toolNameCapture = tool.name;
 
           registry.register(definition, async (params) => {
-            return this.executeMCPTool(serverNameCapture, toolNameCapture, params);
+            return this.executeMCPTool(
+              serverNameCapture,
+              toolNameCapture,
+              params
+            );
           });
 
           this.bridgedTools.set(bridgedName, `${serverName}/${tool.name}`);
@@ -79,10 +83,7 @@ export class MCPToolBridge {
       }
     }
 
-    Logger.info(
-      `🌉 MCP工具桥接完成: ${syncedCount} 个新工具`,
-      'MCPToolBridge'
-    );
+    Logger.info(`🌉 MCP工具桥接完成: ${syncedCount} 个新工具`, 'MCPToolBridge');
     return syncedCount;
   }
 
@@ -97,9 +98,7 @@ export class MCPToolBridge {
       const result = await mcpManager.callTool(serverName, toolName, params);
 
       const outputStr =
-        typeof result === 'string'
-          ? result
-          : JSON.stringify(result);
+        typeof result === 'string' ? result : JSON.stringify(result);
 
       return {
         success: true,
@@ -124,15 +123,21 @@ export class MCPToolBridge {
     if (!inputSchema) return {};
 
     const properties =
-      inputSchema.properties as Record<string, Record<string, unknown>> || {};
+      (inputSchema.properties as Record<string, Record<string, unknown>>) || {};
     const result: Record<string, import('../../types').ToolParameterDef> = {};
 
-    const validTypes = ['string', 'number', 'boolean', 'object', 'array'] as const;
+    const validTypes = [
+      'string',
+      'number',
+      'boolean',
+      'object',
+      'array',
+    ] as const;
 
     for (const [name, schema] of Object.entries(properties)) {
       const rawType = (schema.type as string) || 'string';
-      const type = validTypes.includes(rawType as typeof validTypes[number])
-        ? rawType as typeof validTypes[number]
+      const type = validTypes.includes(rawType as (typeof validTypes)[number])
+        ? (rawType as (typeof validTypes)[number])
         : 'string';
       result[name] = {
         type,
@@ -143,9 +148,7 @@ export class MCPToolBridge {
     return result;
   }
 
-  private extractRequired(
-    inputSchema?: Record<string, unknown>
-  ): string[] {
+  private extractRequired(inputSchema?: Record<string, unknown>): string[] {
     if (!inputSchema) return [];
     return (inputSchema.required as string[]) || [];
   }
@@ -172,20 +175,23 @@ export class MCPToolBridge {
     if (serverName === 'browser') return 'medium';
     if (serverName === 'filesystem') return 'high';
     if (serverName === 'cron') return 'medium';
-    if (toolName.includes('delete') || toolName.includes('remove')) return 'high';
-    if (toolName.includes('write') || toolName.includes('create')) return 'medium';
+    if (toolName.includes('delete') || toolName.includes('remove'))
+      return 'high';
+    if (toolName.includes('write') || toolName.includes('create'))
+      return 'medium';
     return 'low';
   }
 
-  private inferPermissions(
-    serverName: string,
-    toolName: string
-  ): Permission[] {
+  private inferPermissions(serverName: string, toolName: string): Permission[] {
     switch (serverName) {
       case 'browser':
         return [Permission.NETWORK_ACCESS];
       case 'filesystem':
-        if (toolName.includes('write') || toolName.includes('create') || toolName.includes('delete')) {
+        if (
+          toolName.includes('write') ||
+          toolName.includes('create') ||
+          toolName.includes('delete')
+        ) {
           return [Permission.FILE_WRITE];
         }
         return [Permission.FILE_READ];
@@ -202,7 +208,7 @@ export class MCPToolBridge {
   }
 
   public startAutoSync(registry: ToolRegistry): void {
-    this.syncToRegistry(registry);
+    void this.syncToRegistry(registry);
     this.syncInterval = setInterval(
       () => this.syncToRegistry(registry),
       MCPToolBridge.SYNC_INTERVAL_MS

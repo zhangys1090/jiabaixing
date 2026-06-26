@@ -5,18 +5,18 @@
  * 替代 SkillRegistry 的基础设施工具注册功能
  */
 
-import { Logger } from '../../../utils/Logger';
 import { perf } from '../../../monitoring/PerformanceMonitor';
-import { ToolCategory } from '../../types';
+import { Logger } from '../../../utils/Logger';
 import type {
-  ToolDefinition,
-  ToolParameterDef,
-  ToolResult,
-  ToolContext,
   RegisteredTool,
   RiskLevel,
   StructuredToolOutput,
+  ToolContext,
+  ToolDefinition,
+  ToolParameterDef,
+  ToolResult,
 } from '../../types';
+import { ToolCategory } from '../../types';
 
 /** OpenAI Function Calling 工具格式 */
 interface OpenAIToolDef {
@@ -106,6 +106,13 @@ export class ToolRegistry {
    */
   getAll(): RegisteredTool[] {
     return Array.from(this.tools.values());
+  }
+
+  /**
+   * 获取所有已注册工具名称列表
+   */
+  getRegisteredToolNames(): string[] {
+    return Array.from(this.tools.keys());
   }
 
   /**
@@ -419,7 +426,7 @@ export class ToolRegistry {
     if (!contentStr) {
       result.structuredOutput = {
         type: result.success ? 'text' : 'error',
-        content: result.success ? '(无输出)' : (result.error || '未知错误'),
+        content: result.success ? '(无输出)' : result.error || '未知错误',
       };
       return;
     }
@@ -434,21 +441,26 @@ export class ToolRegistry {
 
     // 生成摘要（前5行 + 总行数）
     const summaryLines = lines.slice(0, 5);
-    const summary = summaryLines.join('\n') +
+    const summary =
+      summaryLines.join('\n') +
       (lines.length > 5 ? `\n... (共${lines.length}行)` : '');
 
     // 截断信息
-    const truncation = contentStr.length > 50000 ? {
-      truncated: true,
-      originalLength: contentStr.length,
-      truncatedLength: 50000,
-    } : undefined;
+    const truncation =
+      contentStr.length > 50000
+        ? {
+            truncated: true,
+            originalLength: contentStr.length,
+            truncatedLength: 50000,
+          }
+        : undefined;
 
     result.structuredOutput = {
       type: structuredType,
-      content: contentStr.length > 50000
-        ? contentStr.substring(0, 50000) + '\n... (内容已截断)'
-        : contentStr,
+      content:
+        contentStr.length > 50000
+          ? contentStr.substring(0, 50000) + '\n... (内容已截断)'
+          : contentStr,
       summary,
       anchoredLines,
       totalLines: lines.length,
@@ -582,7 +594,11 @@ export class ToolRegistry {
         { command: 'python', name: 'python', desc: 'Python 解释器' },
         { command: 'pip', name: 'pip', desc: 'Python 包管理器' },
         { command: 'docker', name: 'docker', desc: '容器运行时' },
-        { command: 'docker-compose', name: 'docker-compose', desc: 'Docker 编排工具' },
+        {
+          command: 'docker-compose',
+          name: 'docker-compose',
+          desc: 'Docker 编排工具',
+        },
         { command: 'curl', name: 'curl', desc: 'HTTP 请求工具' },
         { command: 'wget', name: 'wget', desc: '文件下载工具' },
         { command: 'grep', name: 'grep', desc: '文本搜索工具' },
@@ -651,11 +667,7 @@ export class ToolRegistry {
 
       return discovered;
     } catch (error) {
-      Logger.error(
-        '工具发现失败',
-        error as Error,
-        'ToolRegistry'
-      );
+      Logger.error('工具发现失败', error as Error, 'ToolRegistry');
       return [];
     }
   }
@@ -686,25 +698,39 @@ export class ToolRegistry {
 
       // 确定风险等级和类别
       const dangerousCommands = new Set([
-        'rm', 'dd', 'mkfs', 'shutdown', 'reboot',
-        'chmod', 'chown', 'sudo', 'su',
+        'rm',
+        'dd',
+        'mkfs',
+        'shutdown',
+        'reboot',
+        'chmod',
+        'chown',
+        'sudo',
+        'su',
       ]);
       const networkCommands = new Set([
-        'curl', 'wget', 'ssh', 'scp', 'rsync',
-        'nslookup', 'whois', 'ping', 'netstat',
+        'curl',
+        'wget',
+        'ssh',
+        'scp',
+        'rsync',
+        'nslookup',
+        'whois',
+        'ping',
+        'netstat',
       ]);
 
       const riskLevel: RiskLevel = dangerousCommands.has(candidate.command)
         ? 'critical'
         : networkCommands.has(candidate.command)
-        ? 'medium'
-        : 'low';
+          ? 'medium'
+          : 'low';
 
       const category = networkCommands.has(candidate.command)
         ? ToolCategory.NETWORK
         : candidate.command === 'git'
-        ? ToolCategory.CODE
-        : ToolCategory.SYSTEM;
+          ? ToolCategory.CODE
+          : ToolCategory.SYSTEM;
 
       return {
         name: candidate.name,
@@ -732,44 +758,122 @@ export class ToolRegistry {
     type: 'string' | 'number' | 'boolean';
   }> {
     const commonParams = [
-      { name: 'args', description: `${command} 命令参数`, required: true, type: 'string' as const },
+      {
+        name: 'args',
+        description: `${command} 命令参数`,
+        required: true,
+        type: 'string' as const,
+      },
     ];
 
-    const paramMap: Record<string, Array<{
-      name: string;
-      description: string;
-      required: boolean;
-      type: 'string' | 'number' | 'boolean';
-    }>> = {
+    const paramMap: Record<
+      string,
+      Array<{
+        name: string;
+        description: string;
+        required: boolean;
+        type: 'string' | 'number' | 'boolean';
+      }>
+    > = {
       git: [
-        { name: 'args', description: 'Git 命令参数', required: true, type: 'string' },
+        {
+          name: 'args',
+          description: 'Git 命令参数',
+          required: true,
+          type: 'string',
+        },
       ],
       npm: [
-        { name: 'args', description: 'NPM 命令参数', required: true, type: 'string' },
+        {
+          name: 'args',
+          description: 'NPM 命令参数',
+          required: true,
+          type: 'string',
+        },
       ],
       docker: [
-        { name: 'args', description: 'Docker 命令参数', required: true, type: 'string' },
+        {
+          name: 'args',
+          description: 'Docker 命令参数',
+          required: true,
+          type: 'string',
+        },
       ],
       curl: [
-        { name: 'url', description: '请求 URL', required: true, type: 'string' },
-        { name: 'method', description: 'HTTP 方法 (GET/POST/PUT/DELETE)', required: false, type: 'string' },
-        { name: 'data', description: '请求数据', required: false, type: 'string' },
+        {
+          name: 'url',
+          description: '请求 URL',
+          required: true,
+          type: 'string',
+        },
+        {
+          name: 'method',
+          description: 'HTTP 方法 (GET/POST/PUT/DELETE)',
+          required: false,
+          type: 'string',
+        },
+        {
+          name: 'data',
+          description: '请求数据',
+          required: false,
+          type: 'string',
+        },
       ],
       grep: [
-        { name: 'pattern', description: '搜索模式', required: true, type: 'string' },
-        { name: 'path', description: '搜索路径', required: false, type: 'string' },
+        {
+          name: 'pattern',
+          description: '搜索模式',
+          required: true,
+          type: 'string',
+        },
+        {
+          name: 'path',
+          description: '搜索路径',
+          required: false,
+          type: 'string',
+        },
       ],
       find: [
-        { name: 'path', description: '搜索路径', required: false, type: 'string' },
-        { name: 'name', description: '文件名模式', required: false, type: 'string' },
+        {
+          name: 'path',
+          description: '搜索路径',
+          required: false,
+          type: 'string',
+        },
+        {
+          name: 'name',
+          description: '文件名模式',
+          required: false,
+          type: 'string',
+        },
       ],
       python: [
-        { name: 'script', description: 'Python 脚本路径', required: true, type: 'string' },
-        { name: 'args', description: '脚本参数', required: false, type: 'string' },
+        {
+          name: 'script',
+          description: 'Python 脚本路径',
+          required: true,
+          type: 'string',
+        },
+        {
+          name: 'args',
+          description: '脚本参数',
+          required: false,
+          type: 'string',
+        },
       ],
       node: [
-        { name: 'script', description: 'JS 脚本路径', required: true, type: 'string' },
-        { name: 'args', description: '脚本参数', required: false, type: 'string' },
+        {
+          name: 'script',
+          description: 'JS 脚本路径',
+          required: true,
+          type: 'string',
+        },
+        {
+          name: 'args',
+          description: '脚本参数',
+          required: false,
+          type: 'string',
+        },
       ],
     };
 
@@ -784,7 +888,10 @@ export class ToolRegistry {
       git: ['git status', 'git log -10', 'git diff HEAD~1'],
       npm: ['npm list --depth=0', 'npm run build', 'npm install <package>'],
       docker: ['docker ps', 'docker images', 'docker run -d <image>'],
-      curl: ['curl https://example.com', 'curl -X POST https://api.example.com/data'],
+      curl: [
+        'curl https://example.com',
+        'curl -X POST https://api.example.com/data',
+      ],
       grep: ['grep "pattern" file.txt', 'grep -r "pattern" ./src'],
       find: ['find . -name "*.ts"', 'find . -type f -mtime -7'],
       python: ['python script.py', 'python -m pip list'],
@@ -816,7 +923,8 @@ export class ToolRegistry {
 
       const toolDef: ToolDefinition = {
         name: tool.name,
-        description: `[系统CLI] ${tool.description}` +
+        description:
+          `[系统CLI] ${tool.description}` +
           (tool.version ? ` (v${tool.version})` : '') +
           `\n\n通过 shell_exec 调用 ${tool.command} 命令。\n` +
           `示例: ${tool.examples.slice(0, 2).join(' | ')}`,
@@ -836,33 +944,36 @@ export class ToolRegistry {
 
       const command = tool.command;
 
-      this.register(toolDef, async (_params: Record<string, unknown>, _context: ToolContext) => {
-        const args = _params.args || '';
+      this.register(
+        toolDef,
+        async (_params: Record<string, unknown>, _context: ToolContext) => {
+          const args = _params.args || '';
 
-        const { execSync } = await import('child_process');
-        try {
-          const output = execSync(`${command} ${String(args)}`, {
-            timeout: 30000,
-            encoding: 'utf-8',
-            maxBuffer: 1024 * 1024,
-          });
+          const { execSync } = await import('child_process');
+          try {
+            const output = execSync(`${command} ${String(args)}`, {
+              timeout: 30000,
+              encoding: 'utf-8',
+              maxBuffer: 1024 * 1024,
+            });
 
-          return {
-            success: true,
-            output: output.trim().substring(0, 10000),
-            duration: 0,
-            validated: true,
-          };
-        } catch (execError) {
-          return {
-            success: false,
-            output: null,
-            error: `${command} 执行失败: ${(execError as Error).message}`,
-            duration: 0,
-            validated: false,
-          };
+            return {
+              success: true,
+              output: output.trim().substring(0, 10000),
+              duration: 0,
+              validated: true,
+            };
+          } catch (execError) {
+            return {
+              success: false,
+              output: null,
+              error: `${command} 执行失败: ${(execError as Error).message}`,
+              duration: 0,
+              validated: false,
+            };
+          }
         }
-      });
+      );
 
       registeredCount++;
     }

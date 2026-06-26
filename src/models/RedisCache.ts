@@ -3,8 +3,23 @@
  * 支持分布式缓存，可选回退到内存缓存
  */
 
-import { ICache, CacheOptions, CacheEntry, CacheStats } from './CacheInterface';
 import { Logger } from '../utils/Logger';
+import { ICache, type CacheStats } from './ICache';
+
+/** 缓存选项（兼容旧调用方） */
+export interface CacheOptions {
+  ttl?: number;
+  maxSize?: number;
+  namespace?: string;
+}
+
+/** 缓存条目（内部使用） */
+interface CacheEntry<T> {
+  value: T;
+  createdAt: number;
+  expiresAt: number;
+  hits: number;
+}
 
 export interface AdaptiveTTLConfig {
   enabled: boolean;
@@ -188,14 +203,17 @@ export class RedisCache<T = Record<string, unknown>> implements ICache<T> {
   /**
    * 同步获取（内存优先）
    */
-  get(key: string): T | null {
-    return this.getFromMemory(key);
+  get(key: string): T | undefined {
+    return this.getFromMemory(key) ?? undefined;
   }
 
   /**
    * 同步设置（内存优先）
+   * 兼容两种调用: set(key, value, ttlMs?: number) 和 set(key, value, options?: CacheOptions)
    */
-  set(key: string, value: T, options?: CacheOptions): void {
+  set(key: string, value: T, optionsOrTtl?: number | CacheOptions): void {
+    const options: CacheOptions | undefined =
+      typeof optionsOrTtl === 'number' ? { ttl: optionsOrTtl } : optionsOrTtl;
     this.setToMemory(key, value, options);
   }
 
@@ -249,8 +267,8 @@ export class RedisCache<T = Record<string, unknown>> implements ICache<T> {
   /**
    * 删除缓存
    */
-  delete(key: string): void {
-    this.memoryFallback.delete(key);
+  delete(key: string): boolean {
+    return this.memoryFallback.delete(key);
   }
 
   /**
@@ -274,8 +292,10 @@ export class RedisCache<T = Record<string, unknown>> implements ICache<T> {
   /**
    * 清空缓存
    */
-  clear(): void {
+  clear(): number {
+    const count = this.memoryFallback.size;
     this.memoryFallback.clear();
+    return count;
   }
 
   /**
@@ -313,7 +333,7 @@ export class RedisCache<T = Record<string, unknown>> implements ICache<T> {
       misses: this.misses,
       hitRate: total > 0 ? this.hits / total : 0,
       size: this.memoryFallback.size,
-      maxSize: this.maxSize,
+      extras: { maxSize: this.maxSize, type: 'redis' },
     };
   }
 

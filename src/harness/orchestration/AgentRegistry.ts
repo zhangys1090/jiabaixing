@@ -60,6 +60,51 @@ const DEFAULT_HEALTH: AgentHealth = {
   totalExecutions: 0,
 };
 
+/** 共享知识条目 */
+export interface SharedKnowledgeEntry {
+  id: string;
+  publisherId: string;
+  type: string;
+  title: string;
+  content: string;
+  tags: string[];
+  applicableScenes: string[];
+  qualityScore: number;
+  referenceCount: number;
+  createdAt: number;
+}
+
+/** 知识订阅 */
+interface KnowledgeSubscription {
+  id: string;
+  subscriberId: string;
+  type: string;
+  onNewKnowledge: (entry: SharedKnowledgeEntry) => void;
+}
+
+/** 竞标书 */
+export interface Bid {
+  id: string;
+  agentId: string;
+  taskId: string;
+  estimatedTime: number;
+  confidence: number;
+  justification: string;
+  resourceRequirements: string[];
+  timestamp: number;
+}
+
+/** 协商消息 */
+export interface NegotiationMessage {
+  id: string;
+  fromAgentId: string;
+  toAgentId: string;
+  type: string;
+  payload: Record<string, unknown>;
+  sessionId: string;
+  timestamp: number;
+}
+
 export class AgentRegistry {
   private agents: Map<string, AgentRegistration> = new Map();
   private healthMap: Map<string, AgentHealth> = new Map();
@@ -325,5 +370,472 @@ export class AgentRegistry {
    */
   getErrorAgents(): AgentRegistration[] {
     return this.listAgents('error');
+  }
+
+  // ============ 知识共享系统 ============
+
+  private knowledgeEntries: Map<string, SharedKnowledgeEntry> = new Map();
+  private knowledgeSubscriptions: Map<string, KnowledgeSubscription> =
+    new Map();
+
+  publishKnowledge(input: {
+    publisherId: string;
+    type: string;
+    title: string;
+    content: string;
+    tags: string[];
+    applicableScenes: string[];
+    qualityScore: number;
+  }): SharedKnowledgeEntry {
+    const id = `know_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const entry: SharedKnowledgeEntry = {
+      id,
+      publisherId: input.publisherId,
+      type: input.type,
+      title: input.title,
+      content: input.content,
+      tags: input.tags,
+      applicableScenes: input.applicableScenes,
+      qualityScore: input.qualityScore,
+      referenceCount: 0,
+      createdAt: Date.now(),
+    };
+    this.knowledgeEntries.set(id, entry);
+
+    for (const [, sub] of this.knowledgeSubscriptions) {
+      if (sub.type === input.type) {
+        try {
+          sub.onNewKnowledge(entry);
+        } catch {
+          // 忽略回调错误
+        }
+      }
+    }
+
+    return entry;
+  }
+
+  queryKnowledge(filter: {
+    type?: string;
+    scene?: string;
+    minQualityScore?: number;
+    keywords?: string[];
+    maxResults?: number;
+  }): SharedKnowledgeEntry[] {
+    let results = Array.from(this.knowledgeEntries.values());
+
+    if (filter.type) {
+      results = results.filter((e) => e.type === filter.type);
+    }
+    if (filter.scene) {
+      results = results.filter((e) =>
+        e.applicableScenes.includes(filter.scene!)
+      );
+    }
+    if (filter.minQualityScore !== undefined) {
+      results = results.filter(
+        (e) => e.qualityScore >= filter.minQualityScore!
+      );
+    }
+    if (filter.keywords && filter.keywords.length > 0) {
+      results = results.filter((e) =>
+        filter.keywords!.some(
+          (kw) =>
+            e.title.includes(kw) ||
+            e.content.includes(kw) ||
+            e.tags.some((t) => t.includes(kw))
+        )
+      );
+    }
+    if (filter.maxResults !== undefined) {
+      results = results.slice(0, filter.maxResults);
+    }
+
+    return results;
+  }
+
+  referenceKnowledge(id: string): void {
+    const entry = this.knowledgeEntries.get(id);
+    if (entry) {
+      entry.referenceCount++;
+    }
+  }
+
+  subscribeToKnowledge(input: {
+    subscriberId: string;
+    type: string;
+    onNewKnowledge: (entry: SharedKnowledgeEntry) => void;
+  }): string {
+    const subId = `sub_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    this.knowledgeSubscriptions.set(subId, {
+      id: subId,
+      subscriberId: input.subscriberId,
+      type: input.type,
+      onNewKnowledge: input.onNewKnowledge,
+    });
+    return subId;
+  }
+
+  unsubscribeFromKnowledge(subId: string): void {
+    this.knowledgeSubscriptions.delete(subId);
+  }
+
+  getKnowledgeStats(): {
+    totalEntries: number;
+    entriesByType: Record<string, number>;
+    topContributors: Array<{ agentId: string; count: number }>;
+    avgQualityScore: number;
+  } {
+    const entries = Array.from(this.knowledgeEntries.values());
+    const entriesByType: Record<string, number> = {};
+    const contributorMap: Record<string, number> = {};
+    let totalQuality = 0;
+
+    for (const entry of entries) {
+      entriesByType[entry.type] = (entriesByType[entry.type] || 0) + 1;
+      contributorMap[entry.publisherId] =
+        (contributorMap[entry.publisherId] || 0) + 1;
+      totalQuality += entry.qualityScore;
+    }
+
+    const topContributors = Object.entries(contributorMap)
+      .map(([agentId, count]) => ({ agentId, count }))
+      .sort((a, b) => b.count - a.count);
+
+    return {
+      totalEntries: entries.length,
+      entriesByType,
+      topContributors,
+      avgQualityScore: entries.length > 0 ? totalQuality / entries.length : 0,
+    };
+  }
+
+  // ============ 结构化通信系统 ============
+
+  private messageHandlers: Map<
+    string,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (msg: any) => Promise<any> | any
+  > = new Map();
+
+  registerMessageHandler(
+    agentId: string,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    handler: (msg: any) => Promise<any> | any
+  ): void {
+    this.messageHandlers.set(agentId, handler);
+  }
+
+  broadcastMessage(
+    fromAgentId: string,
+    message: { type: string; payload: Record<string, unknown> }
+  ): string[] {
+    const delivered: string[] = [];
+    for (const [agentId, registration] of this.agents) {
+      if (
+        agentId !== fromAgentId &&
+        registration.status === 'idle' &&
+        this.messageHandlers.has(agentId)
+      ) {
+        try {
+          this.messageHandlers.get(agentId)!(message);
+          delivered.push(agentId);
+        } catch {
+          // 忽略发送失败
+        }
+      }
+    }
+    return delivered;
+  }
+
+  async negotiateBetweenAgents(
+    fromAgentId: string,
+    toAgentId: string,
+    topic: string
+  ): Promise<{ agreed: boolean; terms: Record<string, unknown> }> {
+    const handler = this.messageHandlers.get(toAgentId);
+    if (!handler) {
+      return { agreed: false, terms: {} };
+    }
+
+    try {
+      const response = await handler({
+        type: 'query',
+        payload: { requestedInfo: topic },
+        sessionId: `neg_${Date.now()}`,
+      });
+
+      if (response && typeof response === 'object') {
+        const resp = response as Record<string, unknown>;
+        return {
+          agreed: true,
+          terms: (resp.payload as Record<string, unknown>) || {},
+        };
+      }
+    } catch {
+      // 协商失败
+    }
+
+    return { agreed: false, terms: {} };
+  }
+
+  // ============ 协商协议系统 ============
+
+  private negotiationSessions: Map<
+    string,
+    {
+      id: string;
+      initiatorId: string;
+      participants: string[];
+      topic: string;
+      payload: Record<string, unknown>;
+      status: 'open' | 'completed' | 'failed';
+      result?: { agreedAgentId: string };
+    }
+  > = new Map();
+
+  startNegotiation(
+    initiatorId: string,
+    participants: string[],
+    topic: string,
+    payload: Record<string, unknown>
+  ): {
+    id: string;
+    initiatorId: string;
+    participants: string[];
+    topic: string;
+    status: string;
+    messages: Array<{
+      type: string;
+      fromAgentId: string;
+      payload: Record<string, unknown>;
+    }>;
+  } {
+    const id = `neg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const session = {
+      id,
+      initiatorId,
+      participants,
+      topic,
+      payload,
+      status: 'open' as const,
+    };
+    this.negotiationSessions.set(id, session);
+    return {
+      id,
+      initiatorId,
+      participants,
+      topic,
+      status: 'active',
+      messages: [
+        {
+          type: 'task_proposal',
+          fromAgentId: initiatorId,
+          payload,
+        },
+      ],
+    };
+  }
+
+  sendNegotiationMessage(message: NegotiationMessage): {
+    id: string;
+    status: string;
+    result?: { agreedAgentId: string };
+  } | null {
+    const session = this.negotiationSessions.get(message.sessionId);
+    if (!session) return null;
+
+    if (message.type === 'acceptance') {
+      session.status = 'completed';
+      session.result = { agreedAgentId: message.fromAgentId };
+      return { id: session.id, status: 'completed', result: session.result };
+    }
+
+    if (message.type === 'rejection') {
+      session.status = 'failed';
+      return { id: session.id, status: 'failed' };
+    }
+
+    return { id: session.id, status: session.status };
+  }
+
+  getNegotiationSession(sessionId: string): {
+    id: string;
+    initiatorId: string;
+    participants: string[];
+    topic: string;
+    status: string;
+    result?: { agreedAgentId: string };
+  } | null {
+    const session = this.negotiationSessions.get(sessionId);
+    if (!session) return null;
+    return {
+      id: session.id,
+      initiatorId: session.initiatorId,
+      participants: session.participants,
+      topic: session.topic,
+      status: session.status,
+      result: session.result,
+    };
+  }
+
+  getActiveNegotiations(agentId: string): Array<{
+    id: string;
+    participants: string[];
+    topic: string;
+    status: string;
+  }> {
+    const result: Array<{
+      id: string;
+      participants: string[];
+      topic: string;
+      status: string;
+    }> = [];
+    for (const session of this.negotiationSessions.values()) {
+      if (
+        session.status === 'open' &&
+        (session.participants.includes(agentId) ||
+          session.initiatorId === agentId)
+      ) {
+        result.push({
+          id: session.id,
+          participants: session.participants,
+          topic: session.topic,
+          status: session.status,
+        });
+      }
+    }
+    return result;
+  }
+
+  getMessageHandler(
+    agentId: string
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ): ((msg: any) => Promise<any> | any) | undefined {
+    return this.messageHandlers.get(agentId);
+  }
+
+  // ============ 竞价系统 ============
+
+  private bidHandlers: Map<string, (task: { id: string }) => Bid> = new Map();
+  private biddingSessions: Map<
+    string,
+    {
+      id: string;
+      taskId: string;
+      description: string;
+      requiredTools: string[];
+      status: string;
+      bids: Bid[];
+    }
+  > = new Map();
+
+  registerBidHandler(
+    agentId: string,
+    handler: (task: { id: string }) => Bid
+  ): void {
+    this.bidHandlers.set(agentId, handler);
+  }
+
+  publishBidding(
+    taskId: string,
+    description: string,
+    requiredTools: string[]
+  ): {
+    id: string;
+    taskId: string;
+    description: string;
+    requiredTools: string[];
+    status: string;
+    bids: Bid[];
+  } {
+    const id = `bid_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const session: {
+      id: string;
+      taskId: string;
+      description: string;
+      requiredTools: string[];
+      status: string;
+      bids: Bid[];
+    } = {
+      id,
+      taskId,
+      description,
+      requiredTools,
+      status: 'open',
+      bids: [],
+    };
+
+    for (const [agentId, handler] of this.bidHandlers) {
+      const registration = this.agents.get(agentId);
+      if (!registration) continue;
+
+      const hasRequiredTools = requiredTools.every((tool) =>
+        registration.capabilities.some((cap) =>
+          cap.tools.some((t) => t === tool)
+        )
+      );
+      if (!hasRequiredTools && requiredTools.length > 0) continue;
+
+      try {
+        const bid = handler({ id: taskId });
+        session.bids.push(bid);
+      } catch {
+        // 忽略投标失败
+      }
+    }
+
+    this.biddingSessions.set(id, session);
+    return session;
+  }
+
+  evaluateBids(
+    sessionId: string,
+    strategy: string = 'balanced'
+  ): { winnerId: string; bid: Bid } | null {
+    const session = this.biddingSessions.get(sessionId);
+    if (!session || session.bids.length === 0) return null;
+
+    let winner: Bid | null = null;
+
+    switch (strategy) {
+      case 'fastest':
+        winner = session.bids.reduce((best, bid) =>
+          bid.estimatedTime < best.estimatedTime ? bid : best
+        );
+        break;
+      case 'most_confident':
+        winner = session.bids.reduce((best, bid) =>
+          bid.confidence > best.confidence ? bid : best
+        );
+        break;
+      case 'balanced':
+      default:
+        winner = session.bids.reduce((best, bid) => {
+          const bestScore =
+            best.confidence * 0.6 + (1 / Math.max(best.estimatedTime, 1)) * 0.4;
+          const bidScore =
+            bid.confidence * 0.6 + (1 / Math.max(bid.estimatedTime, 1)) * 0.4;
+          return bidScore > bestScore ? bid : best;
+        });
+        break;
+    }
+
+    if (winner) {
+      session.status = 'awarded';
+      return { winnerId: winner.agentId, bid: winner };
+    }
+
+    return null;
+  }
+
+  submitBid(bid: Bid): boolean {
+    for (const session of this.biddingSessions.values()) {
+      if (session.taskId === bid.taskId && session.status === 'open') {
+        session.bids.push(bid);
+        return true;
+      }
+    }
+    return false;
   }
 }

@@ -16,9 +16,9 @@ export type {
 } from './DataSovereigntyPipeline';
 
 // ── 导入内部依赖 ──
+import { Logger } from '../utils/Logger';
 import { AuditLogger } from './AuditLogger';
 import { DataSovereigntyPipeline } from './DataSovereigntyPipeline';
-import { Logger } from '../utils/Logger';
 import type { SecurityEvent, SecurityEventType } from './types';
 
 export interface AuditServiceConfig {
@@ -74,6 +74,26 @@ export class AuditService {
       AuditService.instance = new AuditService(config);
     }
     return AuditService.instance;
+  }
+
+  /** 重置单例（仅供测试使用） */
+  static resetInstance(): void {
+    if (AuditService.instance) {
+      AuditService.instance.events = [];
+      AuditService.instance.eventListeners.clear();
+      AuditService.instance.initialized = false;
+      const logger = AuditService.instance.auditLogger as AuditLogger & {
+        clearLogs?: () => void;
+        clearAllLogs?: () => void;
+      };
+      if (typeof logger.clearLogs === 'function') {
+        logger.clearLogs();
+      } else if (typeof logger.clearAllLogs === 'function') {
+        logger.clearAllLogs();
+      }
+      AuditService.instance.shutdown().catch(() => {});
+    }
+    AuditService.instance = null;
   }
 
   getAuditLogger(): AuditLogger {
@@ -176,7 +196,9 @@ export class AuditService {
       filtered = filtered.filter((event) => event.type === options.type);
     }
     if (options?.severity) {
-      filtered = filtered.filter((event) => event.severity === options.severity);
+      filtered = filtered.filter(
+        (event) => event.severity === options.severity
+      );
     }
     if (options?.userId) {
       filtered = filtered.filter((event) => event.userId === options.userId);
@@ -262,8 +284,9 @@ export class AuditService {
       .slice(0, 10);
 
     const unacknowledgedEvents = this.getUnacknowledgedEventCount();
-    const unresolvedLogs = recentLogs.filter((l) => l.result !== 'success')
-      .length;
+    const unresolvedLogs = recentLogs.filter(
+      (l) => l.result !== 'success'
+    ).length;
 
     return {
       totalLogs: recentLogs.length,
@@ -321,7 +344,11 @@ export class AuditService {
         try {
           callback(event);
         } catch (error) {
-          Logger.error('安全事件监听器回调失败', error as Error, 'AuditService');
+          Logger.error(
+            '安全事件监听器回调失败',
+            error as Error,
+            'AuditService'
+          );
         }
       });
     }

@@ -77,6 +77,16 @@ export interface IncrementalEditDeps {
     entry: FileChangeHistoryEntry
   ) => Promise<void>;
   validateCodeSyntax: (code: string, ext: string) => string[];
+  /** 检查点服务（写入前自动创建快照） */
+  checkpointService?: {
+    createCheckpoint(label: string): Promise<unknown>;
+    listCheckpoints(): Array<{
+      id: string;
+      label: string;
+      timestamp: number;
+    }>;
+    rollback(labelOrId: string): Promise<boolean>;
+  };
 }
 
 /** 创建 incremental_edit 执行器 */
@@ -237,6 +247,21 @@ export function createIncrementalEditExecutor(deps: IncrementalEditDeps) {
           .map((e) => e.description)
           .join(', '),
       });
+
+      // 写入前创建检查点（失败不阻断主流程）
+      if (deps.checkpointService) {
+        try {
+          const fileName = path.basename(filePath);
+          await deps.checkpointService.createCheckpoint(
+            `incremental_edit:${fileName}`
+          );
+        } catch (cpErr) {
+          Logger.warn(
+            `检查点创建失败: ${(cpErr as Error).message}`,
+            'IncrementalEdit'
+          );
+        }
+      }
 
       const dir = path.dirname(filePath);
       if (!fs.existsSync(dir)) {

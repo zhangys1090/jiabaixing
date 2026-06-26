@@ -1,4 +1,4 @@
-import { createDatabase, nativeAvailable } from '../shared/DatabaseShim';
+import { createDatabase } from '../shared/DatabaseShim';
 import * as fs from 'fs';
 import * as path from 'path';
 import { Logger } from '../utils/Logger';
@@ -80,9 +80,15 @@ export class MemoryDatabase {
       const dbFilePath = path.join(storageDir, 'jiabaixing_memory.db');
       this.db = createDatabase(dbFilePath) as any;
       if (this.db) {
-        try { this.db.pragma(`journal_mode = ${this.config.journalMode}`); } catch {}
-        try { this.db.pragma(`synchronous = ${this.config.synchronous}`); } catch {}
-        try { this.db.pragma(`cache_size = ${this.config.cacheSize}`); } catch {}
+        try {
+          this.db.pragma(`journal_mode = ${this.config.journalMode}`);
+        } catch {}
+        try {
+          this.db.pragma(`synchronous = ${this.config.synchronous}`);
+        } catch {}
+        try {
+          this.db.pragma(`cache_size = ${this.config.cacheSize}`);
+        } catch {}
 
         this.createTables();
         Logger.info('MemoryDatabase: 初始化完成', 'MemoryDatabase');
@@ -153,9 +159,13 @@ export class MemoryDatabase {
   private backfillFTS(): void {
     if (!this.db) return;
     try {
-      const count = this.db.prepare('SELECT COUNT(*) as cnt FROM memories_fts').get() as { cnt: number };
+      const count = this.db
+        .prepare('SELECT COUNT(*) as cnt FROM memories_fts')
+        .get() as { cnt: number };
       if (count.cnt === 0) {
-        this.db.exec('INSERT INTO memories_fts(rowid, content) SELECT id, content FROM memories');
+        this.db.exec(
+          'INSERT INTO memories_fts(rowid, content) SELECT id, content FROM memories'
+        );
         Logger.info('MemoryDatabase: FTS5索引已回填', 'MemoryDatabase');
       }
     } catch {
@@ -295,7 +305,10 @@ export class MemoryDatabase {
    * @param limit 返回数量限制
    * @returns 搜索结果，包含BM25评分
    */
-  public searchByFTS5(query: string, limit: number = 20): Array<MemoryRecord & { rank: number }> {
+  public searchByFTS5(
+    query: string,
+    limit: number = 20
+  ): Array<MemoryRecord & { rank: number }> {
     if (!this.db) {
       throw new Error('数据库未初始化');
     }

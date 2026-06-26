@@ -6,9 +6,9 @@
 import * as WebSocket from 'ws';
 
 import { JiabaixingCore } from '../core/JiabaixingCore';
-import { EventBus } from '../shared/EventBus';
-import type { EventName } from '../shared/EventBus';
 import { IntegrationManager } from '../integration/IntegrationManager';
+import type { EventName } from '../shared/EventBus';
+import { EventBus } from '../shared/EventBus';
 import { Logger } from '../utils/Logger';
 
 type WSServer = WebSocket.Server;
@@ -28,7 +28,7 @@ export function setupEventBus(
     });
   };
 
-  const integrationManager = IntegrationManager.getInstance();
+  const integrationManager = IntegrationManager.getInstance(true);
 
   /**
    * 广播事件到 WebSocket 并推送到 Webhook

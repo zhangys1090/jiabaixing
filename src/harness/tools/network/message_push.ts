@@ -39,7 +39,8 @@ export const MESSAGE_PUSH_DEF: ToolDefinition = {
     },
     send_key: {
       type: 'string',
-      description: 'ServerChan SendKey（可选，默认从 SERVERCHAN_SENDKEY 环境变量读取）',
+      description:
+        'ServerChan SendKey（可选，默认从 SERVERCHAN_SENDKEY 环境变量读取）',
     },
     message_type: {
       type: 'string',
@@ -64,7 +65,11 @@ export interface MessagePushDeps {
   // 使用 Node.js 内置 fetch，测试时 mock global.fetch
 }
 
-function ok(output: string, duration: number, metadata?: Record<string, unknown>): ToolResult {
+function ok(
+  output: string,
+  duration: number,
+  metadata?: Record<string, unknown>
+): ToolResult {
   return { success: true, output, duration, validated: false, metadata };
 }
 
@@ -82,7 +87,9 @@ async function pushToServerChan(
 ): Promise<string> {
   const key = sendKey || process.env.SERVERCHAN_SENDKEY;
   if (!key) {
-    throw new Error('ServerChan SendKey 未配置（请设置 SERVERCHAN_SENDKEY 环境变量或传入 send_key 参数）');
+    throw new Error(
+      'ServerChan SendKey 未配置（请设置 SERVERCHAN_SENDKEY 环境变量或传入 send_key 参数）'
+    );
   }
 
   const encodedTitle = encodeURIComponent(title);
@@ -95,7 +102,9 @@ async function pushToServerChan(
 
   if (!resp.ok) {
     const body = await resp.text().catch(() => '');
-    throw new Error(`ServerChan HTTP ${resp.status}: ${body.substring(0, 100)}`);
+    throw new Error(
+      `ServerChan HTTP ${resp.status}: ${body.substring(0, 100)}`
+    );
   }
 
   return `ServerChan 推送成功: ${title}`;
@@ -184,13 +193,15 @@ async function pushToWecom(
 
   if (!resp.ok) {
     const respBody = await resp.text().catch(() => '');
-    throw new Error(`企业微信 HTTP ${resp.status}: ${respBody.substring(0, 100)}`);
+    throw new Error(
+      `企业微信 HTTP ${resp.status}: ${respBody.substring(0, 100)}`
+    );
   }
 
   return `企业微信推送成功: ${title}`;
 }
 
-export function createMessagePushExecutor(deps: MessagePushDeps = {}) {
+export function createMessagePushExecutor(_deps: MessagePushDeps = {}) {
   return async (
     params: Record<string, unknown>,
     _context?: ToolContext
@@ -206,7 +217,10 @@ export function createMessagePushExecutor(deps: MessagePushDeps = {}) {
 
     // 参数校验
     if (!['serverchan', 'dingtalk', 'wecom'].includes(channel)) {
-      return fail(`不支持的推送渠道: ${channel}（支持: serverchan, dingtalk, wecom）`, Date.now() - startTime);
+      return fail(
+        `不支持的推送渠道: ${channel}（支持: serverchan, dingtalk, wecom）`,
+        Date.now() - startTime
+      );
     }
 
     if (!title) {
@@ -218,7 +232,10 @@ export function createMessagePushExecutor(deps: MessagePushDeps = {}) {
     }
 
     if (!['markdown', 'text'].includes(messageType)) {
-      return fail(`不支持的消息类型: ${messageType}（支持: markdown, text）`, Date.now() - startTime);
+      return fail(
+        `不支持的消息类型: ${messageType}（支持: markdown, text）`,
+        Date.now() - startTime
+      );
     }
 
     try {
@@ -229,7 +246,13 @@ export function createMessagePushExecutor(deps: MessagePushDeps = {}) {
           result = await pushToServerChan(title, content, sendKey);
           break;
         case 'dingtalk':
-          result = await pushToDingTalk(title, content, webhookUrl, messageType, atMobiles);
+          result = await pushToDingTalk(
+            title,
+            content,
+            webhookUrl,
+            messageType,
+            atMobiles
+          );
           break;
         case 'wecom':
           result = await pushToWecom(title, content, webhookUrl, messageType);
@@ -242,7 +265,10 @@ export function createMessagePushExecutor(deps: MessagePushDeps = {}) {
       return ok(result, Date.now() - startTime, { channel, title });
     } catch (error) {
       const errMsg = (error as Error).message;
-      Logger.error(`消息推送失败 [${channel}]: ${errMsg}`, 'MessagePush' as any);
+      Logger.error(
+        `消息推送失败 [${channel}]: ${errMsg}`,
+        'MessagePush' as any
+      );
       return fail(`推送失败: ${errMsg}`, Date.now() - startTime);
     }
   };

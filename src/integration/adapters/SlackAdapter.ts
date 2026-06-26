@@ -1,10 +1,10 @@
-import { BaseIntegrationAdapter } from './BaseIntegrationAdapter';
 import {
+  IncomingMessageEvent,
   PlatformConfig,
   SendMessageResponse,
-  IncomingMessageEvent,
 } from '../../shared/contracts';
 import { Logger } from '../../utils/Logger';
+import { BaseIntegrationAdapter } from './BaseIntegrationAdapter';
 
 /** Slack 事件回调的 payload 结构 */
 interface SlackEventPayload {
@@ -58,8 +58,7 @@ export class SlackAdapter extends BaseIntegrationAdapter {
       this.config = config;
       this.updateStatus('connecting');
 
-      this.webhookUrl =
-        process.env.SLACK_WEBHOOK_URL || config.webhookUrl;
+      this.webhookUrl = process.env.SLACK_WEBHOOK_URL || config.webhookUrl;
       this.botToken = process.env.SLACK_BOT_TOKEN || config.appId;
 
       if (!this.webhookUrl) {
@@ -77,7 +76,10 @@ export class SlackAdapter extends BaseIntegrationAdapter {
 
       // Slack Webhook 对空消息返回 "missing_text_or_fallback_or_attachments" 是正常的
       const responseText = await testResponse.text();
-      if (responseText === 'missing_text_or_fallback_or_attachments' || testResponse.ok) {
+      if (
+        responseText === 'missing_text_or_fallback_or_attachments' ||
+        testResponse.ok
+      ) {
         Logger.info('Slack Webhook 已验证', 'SlackAdapter');
       } else {
         throw new Error(`Slack Webhook URL 无效: ${responseText}`);
@@ -178,7 +180,7 @@ export class SlackAdapter extends BaseIntegrationAdapter {
    */
   async handleWebhook(
     payload: Record<string, unknown>
-  ): Promise<{ success: boolean; response?: unknown }> {
+  ): Promise<{ success: boolean; response?: unknown; error?: string }> {
     try {
       const eventPayload = payload as unknown as SlackEventPayload;
 
@@ -218,11 +220,7 @@ export class SlackAdapter extends BaseIntegrationAdapter {
 
       return { success: true };
     } catch (error) {
-      Logger.error(
-        '处理 Slack Webhook 失败',
-        error as Error,
-        'SlackAdapter'
-      );
+      Logger.error('处理 Slack Webhook 失败', error as Error, 'SlackAdapter');
       return { success: false };
     }
   }

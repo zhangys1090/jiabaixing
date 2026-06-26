@@ -99,9 +99,9 @@ export class UserProfileSystem {
   getEnhancedConfidenceScore(userId: string): number {
     const profile = this.profiles.get(userId);
     const dialecticalConfidence = this.trendAnalyzer.getConfidenceScore(userId);
-    
+
     if (!profile) return 0.5;
-    
+
     return (profile.metadata.confidenceScore + dialecticalConfidence) / 2;
   }
 

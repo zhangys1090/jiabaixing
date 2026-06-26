@@ -1,17 +1,17 @@
 import { ChildProcess, fork } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
-import { Logger } from '../utils/Logger';
 import { EventBus } from '../shared/EventBus';
 import type {
+  IncomingMessageEvent,
   IntegrationPlatform,
-  PlatformConfig,
   IntegrationPlatformInfo,
   IntegrationStatus,
+  PlatformConfig,
   SendMessageRequest,
   SendMessageResponse,
-  IncomingMessageEvent,
 } from '../shared/contracts';
+import { Logger } from '../utils/Logger';
 
 interface PendingRequest {
   resolve: (value: unknown) => void;
@@ -347,16 +347,6 @@ export class GatewayBridge {
           Logger.error('处理网关消息失败', err, 'GatewayBridge');
         });
       }
-
-      EventBus.emit('integration_message', {
-        platform: payload.platform,
-        type: payload.type,
-        content: payload.content,
-        from: payload.from,
-        fromName: payload.fromName,
-        timestamp: payload.timestamp || new Date().toISOString(),
-        rawData: payload.rawData,
-      });
       return;
     }
 

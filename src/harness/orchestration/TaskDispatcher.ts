@@ -66,11 +66,96 @@ const DEFAULT_DISPATCHER_CONFIG: Required<TaskDispatcherConfig> = {
   maxConcurrentPerLayer: 5,
 };
 
+/**
+ * 轻量级任务间消息总线
+ * 允许并行执行的子任务之间共享中间结果
+ */
+export class TaskMessageBus {
+  private messages = new Map<string, unknown[]>();
+  private waiters = new Map<string, Array<(value: unknown) => void>>();
+
+  /**
+   * 发布消息到指定频道
+   * @param channel - 频道名称（通常用 taskId）
+   * @param data - 消息数据
+   */
+  publish(channel: string, data: unknown): void {
+    if (!this.messages.has(channel)) {
+      this.messages.set(channel, []);
+    }
+    this.messages.get(channel)!.push(data);
+
+    const waiters = this.waiters.get(channel);
+    if (waiters) {
+      const waiter = waiters.shift();
+      if (waiter) {
+        waiter(data);
+        if (waiters.length === 0) {
+          this.waiters.delete(channel);
+        }
+      }
+    }
+  }
+
+  /**
+   * 订阅频道消息（立即返回已有消息）
+   * @param channel - 频道名称
+   * @returns 该频道的所有已有消息
+   */
+  subscribe(channel: string): unknown[] {
+    return this.messages.get(channel) || [];
+  }
+
+  /**
+   * 等待频道消息（Promise 版本，带超时）
+   * @param channel - 频道名称
+   * @param timeoutMs - 超时时间（默认 5000ms）
+   * @returns 消息数据，超时返回 null
+   */
+  waitForMessage(
+    channel: string,
+    timeoutMs: number = 5000
+  ): Promise<unknown | null> {
+    const existing = this.messages.get(channel);
+    if (existing && existing.length > 0) {
+      return Promise.resolve(existing.shift());
+    }
+
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        const waiters = this.waiters.get(channel);
+        if (waiters) {
+          const idx = waiters.indexOf(resolve as (value: unknown) => void);
+          if (idx >= 0) waiters.splice(idx, 1);
+        }
+        resolve(null);
+      }, timeoutMs);
+
+      if (!this.waiters.has(channel)) {
+        this.waiters.set(channel, []);
+      }
+      this.waiters.get(channel)!.push((value: unknown) => {
+        clearTimeout(timer);
+        resolve(value);
+      });
+    });
+  }
+
+  /**
+   * 清理所有消息和等待者
+   */
+  clear(): void {
+    this.messages.clear();
+    this.waiters.clear();
+  }
+}
+
 export class TaskDispatcher {
   private registry: AgentRegistry;
   private executor: TaskExecutor | null;
   private config: Required<TaskDispatcherConfig>;
   private activeControllers: Map<string, AbortController> = new Map();
+  private messageBus: TaskMessageBus = new TaskMessageBus();
 
   constructor(
     registry: AgentRegistry,
@@ -96,6 +181,9 @@ export class TaskDispatcher {
     const results = new Map<string, unknown>();
     const taskMap = new Map<string, TaskNode>();
 
+    // 创建新的消息总线实例（每次 dispatch 独立）
+    this.messageBus = new TaskMessageBus();
+
     for (const task of tasks) {
       taskMap.set(task.id, { ...task, status: 'pending' });
     }
@@ -114,36 +202,39 @@ export class TaskDispatcher {
         'TaskDispatcher'
       );
 
-      const layerTasks = layer.tasks.slice(0, runConfig.maxConcurrentPerLayer);
-      if (layer.tasks.length > runConfig.maxConcurrentPerLayer) {
-        Logger.warn(
-          `⚠️ 层任务数 ${layer.tasks.length} 超过并发限制 ${runConfig.maxConcurrentPerLayer}，截断执行`,
-          'TaskDispatcher'
-        );
-      }
-
-      const layerPromises = layerTasks.map((task) =>
-        this.executeTaskWithRetry(taskMap.get(task.id)!, results, runConfig)
-      );
-
-      const layerResults = await Promise.allSettled(layerPromises);
-
-      for (let i = 0; i < layerResults.length; i++) {
-        const task = layerTasks[i];
-        const settled = layerResults[i];
-        const node = taskMap.get(task.id)!;
-
-        if (settled.status === 'fulfilled') {
-          results.set(task.id, settled.value);
-        } else {
-          node.status = 'failed';
-          node.error = settled.reason?.message || String(settled.reason);
-          results.set(task.id, { error: node.error });
-          Logger.error(
-            `❌ 任务执行失败: ${task.id} (${task.goal})`,
-            settled.reason as Error,
+      const batchSize = runConfig.maxConcurrentPerLayer;
+      for (let offset = 0; offset < layer.tasks.length; offset += batchSize) {
+        const batch = layer.tasks.slice(offset, offset + batchSize);
+        if (offset > 0) {
+          Logger.debug(
+            `  批次 ${Math.floor(offset / batchSize) + 1}: ${batch.length} 个任务`,
             'TaskDispatcher'
           );
+        }
+
+        const batchPromises = batch.map((task) =>
+          this.executeTaskWithRetry(taskMap.get(task.id)!, results, runConfig)
+        );
+
+        const batchResults = await Promise.allSettled(batchPromises);
+
+        for (let i = 0; i < batchResults.length; i++) {
+          const task = batch[i];
+          const settled = batchResults[i];
+          const node = taskMap.get(task.id)!;
+
+          if (settled.status === 'fulfilled') {
+            results.set(task.id, settled.value);
+          } else {
+            node.status = 'failed';
+            node.error = settled.reason?.message || String(settled.reason);
+            results.set(task.id, { error: node.error });
+            Logger.error(
+              `❌ 任务执行失败: ${task.id} (${task.goal})`,
+              settled.reason as Error,
+              'TaskDispatcher'
+            );
+          }
         }
       }
     }
@@ -163,6 +254,9 @@ export class TaskDispatcher {
       'TaskDispatcher'
     );
 
+    // 清理消息总线
+    this.messageBus.clear();
+
     return results;
   }
 
@@ -177,6 +271,14 @@ export class TaskDispatcher {
       this.activeControllers.delete(taskId);
       Logger.info(`🚫 任务已取消: ${taskId}`, 'TaskDispatcher');
     }
+  }
+
+  /**
+   * 获取当前消息总线实例
+   * @returns TaskMessageBus 实例
+   */
+  getMessageBus(): TaskMessageBus {
+    return this.messageBus;
   }
 
   /**

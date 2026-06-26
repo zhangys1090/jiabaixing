@@ -24,7 +24,11 @@ export class SystemInput {
   private commandId: number = 0;
   private pendingCommands: Map<
     number,
-    { resolve: (value: string) => void; reject: (reason: Error) => void; timer: NodeJS.Timeout }
+    {
+      resolve: (value: string) => void;
+      reject: (reason: Error) => void;
+      timer: NodeJS.Timeout;
+    }
   > = new Map();
   private outputBuffer: string = '';
   private usePersistentSession: boolean = true;
@@ -56,15 +60,14 @@ export class SystemInput {
 
   private async startPersistentSession(): Promise<void> {
     return new Promise((resolve, reject) => {
-      this.psProcess = spawn('powershell', [
-        '-NoProfile',
-        '-NonInteractive',
-        '-Command',
-        '-',
-      ], {
-        stdio: ['pipe', 'pipe', 'pipe'],
-        windowsHide: true,
-      });
+      this.psProcess = spawn(
+        'powershell',
+        ['-NoProfile', '-NonInteractive', '-Command', '-'],
+        {
+          stdio: ['pipe', 'pipe', 'pipe'],
+          windowsHide: true,
+        }
+      );
 
       let initBuffer = '';
       const initTimeout = setTimeout(() => {
@@ -115,16 +118,16 @@ export class SystemInput {
         }
       });
 
-      this.psProcess.stdin!.write(
-        "Write-Output '__INIT_OK__'\n"
-      );
+      this.psProcess.stdin!.write("Write-Output '__INIT_OK__'\n");
     });
   }
 
   private handleOutput(chunk: string): void {
     this.outputBuffer += chunk;
     if (this.outputBuffer.length > SystemInput.MAX_OUTPUT_BUFFER) {
-      this.outputBuffer = this.outputBuffer.substring(this.outputBuffer.length - SystemInput.MAX_OUTPUT_BUFFER / 2);
+      this.outputBuffer = this.outputBuffer.substring(
+        this.outputBuffer.length - SystemInput.MAX_OUTPUT_BUFFER / 2
+      );
       Logger.warn('⚠️ PowerShell输出缓冲区接近上限，已截断', 'SystemInput');
     }
     const markerRegex = /__CMD_END_(\d+)__/g;
@@ -144,14 +147,20 @@ export class SystemInput {
     }
   }
 
-  private async executePs(psScript: string, timeoutMs: number = 5000): Promise<string> {
+  private async executePs(
+    psScript: string,
+    timeoutMs: number = 5000
+  ): Promise<string> {
     if (this.usePersistentSession && this.psProcess && !this.psProcess.killed) {
       return this.executeViaSession(psScript, timeoutMs);
     }
     return this.executeViaExecSyncAsync(psScript, timeoutMs);
   }
 
-  private executeViaSession(psScript: string, timeoutMs: number): Promise<string> {
+  private executeViaSession(
+    psScript: string,
+    timeoutMs: number
+  ): Promise<string> {
     return new Promise((resolve, reject) => {
       const id = ++this.commandId;
       const timer = setTimeout(() => {
@@ -166,9 +175,13 @@ export class SystemInput {
     });
   }
 
-  private executeViaExecSyncAsync(psScript: string, timeoutMs: number): Promise<string> {
+  private executeViaExecSyncAsync(
+    psScript: string,
+    timeoutMs: number
+  ): Promise<string> {
     return new Promise((resolve, reject) => {
-      const { exec } = require('child_process') as typeof import('child_process');
+      const { exec } =
+        require('child_process') as typeof import('child_process');
       exec(
         `powershell -NoProfile -Command "${psScript.replace(/"/g, '\\"')}"`,
         { encoding: 'utf-8', timeout: timeoutMs, windowsHide: true },

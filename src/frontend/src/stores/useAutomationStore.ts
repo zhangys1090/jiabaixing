@@ -1,5 +1,5 @@
+import type { AutomationPattern, AutomationTask, AutomationTrigger } from '@shared/contracts';
 import { create } from 'zustand';
-import type { AutomationTask, AutomationTrigger, AutomationPattern } from '@shared/contracts';
 import { apiService } from '../api/apiService';
 
 interface AutomationState {
@@ -76,7 +76,7 @@ export const useAutomationStore = create<AutomationState>((set, get) => ({
     const result = await apiService.getAutomationTriggers();
     if (result.success && result.data) {
       set({
-        triggers: (result.data as { triggers: AutomationTrigger[] }).triggers || [],
+        triggers: result.data.triggers || [],
       });
     }
   },

@@ -70,11 +70,19 @@ export interface ChartGenerateDeps {
   };
 }
 
-function ok(output: string, duration: number, metadata?: Record<string, unknown>): ToolResult {
+function ok(
+  output: string,
+  duration: number,
+  metadata?: Record<string, unknown>
+): ToolResult {
   return { success: true, output, duration, validated: false, metadata };
 }
 
-function fail(error: string, duration: number, output: string = ''): ToolResult {
+function fail(
+  error: string,
+  duration: number,
+  output: string = ''
+): ToolResult {
   return { success: false, output, error, duration, validated: false };
 }
 
@@ -86,8 +94,16 @@ function buildChartConfig(
   datasets: Array<{ label: string; data: number[]; color?: string }>
 ): Record<string, unknown> {
   const colors = [
-    '#36a2eb', '#ff6384', '#4bc0c0', '#ff9f40', '#9966ff',
-    '#ffcd56', '#c9cbcf', '#7bc043', '#f37735', '#ee4037',
+    '#36a2eb',
+    '#ff6384',
+    '#4bc0c0',
+    '#ff9f40',
+    '#9966ff',
+    '#ffcd56',
+    '#c9cbcf',
+    '#7bc043',
+    '#f37735',
+    '#ee4037',
   ];
 
   const chartDatasets = datasets.map((ds, idx) => {
@@ -141,9 +157,8 @@ async function generateChartUrl(
   height: number,
   httpClient?: ChartGenerateDeps['httpClient']
 ): Promise<string> {
-
   if (httpClient) {
-    // Use injected httpClient.get (the existing project pattern). 
+    // Use injected httpClient.get (the existing project pattern).
     // QuickChart supports GET with 'c' param for chart config.
     const chartJson = JSON.stringify(chartConfig);
     const encoded = encodeURIComponent(chartJson);
@@ -188,7 +203,11 @@ export function createChartGenerateExecutor(deps: ChartGenerateDeps = {}) {
     const chartType = (params.chart_type as string) || 'bar';
     const title = params.title as string;
     const labels = params.labels as string[];
-    const datasets = params.datasets as Array<{ label: string; data: number[]; color?: string }>;
+    const datasets = params.datasets as Array<{
+      label: string;
+      data: number[];
+      color?: string;
+    }>;
     const outputFormat = (params.output_format as string) || 'markdown';
     const width = (params.width as number) || 600;
     const height = (params.height as number) || 400;
@@ -212,17 +231,28 @@ export function createChartGenerateExecutor(deps: ChartGenerateDeps = {}) {
           return fail('每个数据集必须有 label', Date.now() - startTime);
         }
         if (!ds.data || !Array.isArray(ds.data) || ds.data.length === 0) {
-          return fail(`数据集"${ds.label}"的数据不能为空`, Date.now() - startTime);
+          return fail(
+            `数据集"${ds.label}"的数据不能为空`,
+            Date.now() - startTime
+          );
         }
       }
 
       const validChartTypes = ['bar', 'line', 'pie', 'doughnut', 'radar'];
       if (!validChartTypes.includes(chartType)) {
-        return fail(`不支持的图表类型: "${chartType}"，支持: ${validChartTypes.join(', ')}`, Date.now() - startTime);
+        return fail(
+          `不支持的图表类型: "${chartType}"，支持: ${validChartTypes.join(', ')}`,
+          Date.now() - startTime
+        );
       }
 
       const chartConfig = buildChartConfig(chartType, title, labels, datasets);
-      const chartUrl = await generateChartUrl(chartConfig, width, height, deps.httpClient);
+      const chartUrl = await generateChartUrl(
+        chartConfig,
+        width,
+        height,
+        deps.httpClient
+      );
 
       let output: string;
       let metadata: Record<string, unknown> = {
@@ -257,7 +287,10 @@ export function createChartGenerateExecutor(deps: ChartGenerateDeps = {}) {
       return ok(output, Date.now() - startTime, metadata);
     } catch (error) {
       Logger.error('❌ chart_generate 失败', error as Error, 'ChartGenerate');
-      return fail(`图表生成失败: ${(error as Error).message}`, Date.now() - startTime);
+      return fail(
+        `图表生成失败: ${(error as Error).message}`,
+        Date.now() - startTime
+      );
     }
   };
 }

@@ -1,7 +1,29 @@
 /**
- * Harness Layer 3: Context - Token 预算分配器
+ * TokenBudgetAllocator - 上下文系统辅助组件（已废弃）
  *
- * 按优先级和比例分配 Token 预算
+ * 【架构定位】
+ * 上下文系统辅助组件，负责 Token 预算分配
+ *
+ * 【核心职责】
+ * - 按优先级和比例分配 Token 预算
+ * - 估算文本的 Token 数（区分中英文）
+ * - 按预算截断文本
+ *
+ * 【在整体架构中的位置】
+ * ContextManager → TokenBudgetAllocator（本文件）→ 各组件 Token 分配
+ *
+ * @deprecated 已迁移到 Python agent/core/context_pipeline.py。
+ *
+ * 废弃状态说明：
+ * - 废弃版本：V5.0
+ * - 迁移日期：2026-06-22
+ * - 预计移除版本：V6.0（约 2026-09）
+ * - 替代方案：Python 端 context_pipeline 中的预算分配
+ * - 回退方式：设置 AGENT_BACKEND=local 可继续使用 TS 本地实现（不推荐）
+ * - 维护状态：仅安全修复，不再新增功能
+ *
+ * 注意：当 AGENT_BACKEND=python（默认）时，此文件不会被使用。
+ *       仅当显式设置 AGENT_BACKEND=local 时才会使用此 TS 实现。
  */
 
 import type { TokenAllocation } from '../types';
@@ -59,14 +81,12 @@ export class TokenBudgetAllocator {
     if (!text || text.length === 0) return 0;
 
     // 中文字符范围 (包括中文标点和CJK统一汉字)
-    const chineseRegex = /[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef\u3400-\u4dbf]/g;
-    // 英文字母、数字、基本标点
-    const englishRegex = /[a-zA-Z0-9\s.,!?;:'"()\-—–_+=*\/\\{}[\]@#$%^&~`<>|]/g;
+    const chineseRegex =
+      /[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef\u3400-\u4dbf]/g;
 
     const chineseMatches = text.match(chineseRegex) || [];
-    const englishMatches = text.match(englishRegex) || [];
 
-    // 去除重叠计数（简单起见，从总长度中减去中文字符数，因为它们不包含在englishMatches中）
+    // 计算中文字符数
     const chineseCount = chineseMatches.length;
     // 英文部分长度（不包括已经被计入中文的字符）
     const englishPart = text.replace(chineseRegex, '');

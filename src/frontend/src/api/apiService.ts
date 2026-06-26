@@ -4,11 +4,25 @@
  * 所有端点引用共享契约层 contracts.ts，禁止硬编码
  */
 
+import type {
+  AutomationTrigger,
+  BatchResultItem,
+  BatchRunRequest,
+  IdeChatRequest,
+  IdeChatResponse,
+  IdeSession,
+  ToolExecuteRequest,
+  ToolExecuteResponse,
+  ToolInfo,
+  TrajectoryStatsResponse,
+} from '@shared/contracts';
 import {
   API_ENDPOINTS,
   ApiResponse,
   EvolutionCycleStatus,
   HealthResponse,
+  IntegrationPlatform,
+  IntegrationStatusResponse,
   MemoryProfileResponse,
   MemorySearchResponse,
   MemoryStatsResponse,
@@ -16,17 +30,15 @@ import {
   ModelInfo,
   ModelStatus,
   PerformanceSnapshotResponse,
+  PlatformConfig,
+  PlatformConnectResponse,
+  PlatformDisconnectResponse,
   SecurityValidateResponse,
+  SendMessageRequest,
+  SendMessageResponse,
   SkillExecuteResponse,
   SkillListResponse,
   SystemResourcesResponse,
-  IntegrationPlatform,
-  PlatformConfig,
-  IntegrationStatusResponse,
-  PlatformConnectResponse,
-  PlatformDisconnectResponse,
-  SendMessageResponse,
-  SendMessageRequest,
 } from '@shared/contracts';
 
 type RequestInit = Parameters<typeof fetch>[1];
@@ -171,6 +183,27 @@ class ApiService {
   async delete<T>(endpoint: string): Promise<ApiResponse<T>> {
     return this.request<T>(endpoint, { method: 'DELETE' });
   }
+}
+
+/** 自动化任务信息 */
+export interface AutomationTaskInfo {
+  id: string;
+  name: string;
+  schedule: string;
+  enabled: boolean;
+  executionCount: number;
+  successCount: number;
+  lastRunAt?: string;
+  nextRunAt?: string;
+}
+
+/** 主动触发器信息 */
+export interface AutomationTriggerInfo {
+  type: string;
+  reason: string;
+  priority: number;
+  suggestedAction?: string;
+  timestamp: number;
 }
 
 export class JiabaixingApiService extends ApiService {
@@ -424,16 +457,16 @@ export class JiabaixingApiService extends ApiService {
     return this.get(API_ENDPOINTS.SYSTEM_CONFIG);
   }
 
-  async getAutomationTasks(): Promise<ApiResponse<{ tasks: unknown[] }>> {
-    return this.get<{ tasks: unknown[] }>(API_ENDPOINTS.AUTOMATION_TASKS);
+  async getAutomationTasks(): Promise<ApiResponse<{ tasks: AutomationTaskInfo[] }>> {
+    return this.get<{ tasks: AutomationTaskInfo[] }>(API_ENDPOINTS.AUTOMATION_TASKS);
   }
 
   async createAutomationTask(task: unknown): Promise<ApiResponse<unknown>> {
     return this.post(API_ENDPOINTS.AUTOMATION_TASKS, task);
   }
 
-  async getAutomationTriggers(): Promise<ApiResponse<{ triggers: unknown[] }>> {
-    return this.get<{ triggers: unknown[] }>(API_ENDPOINTS.AUTOMATION_TRIGGERS);
+  async getAutomationTriggers(): Promise<ApiResponse<{ triggers: AutomationTrigger[] }>> {
+    return this.get<{ triggers: AutomationTrigger[] }>(API_ENDPOINTS.AUTOMATION_TRIGGERS);
   }
 
   async getAutomationPatterns(): Promise<ApiResponse<{ patterns: unknown[] }>> {
@@ -748,12 +781,104 @@ export class JiabaixingApiService extends ApiService {
   async getHarnessStatus(): Promise<ApiResponse<unknown>> {
     return this.get(API_ENDPOINTS.HARNESS_STATUS);
   }
+
+  // ===== Hermes P2: 批处理 / IDE / 轨迹导出 =====
+
+  /**
+   * 批量并行运行多个 prompt（Hermes Task 8）
+   */
+  async runBatch(request: BatchRunRequest): Promise<ApiResponse<{ format: string; data: BatchResultItem[] | string }>> {
+    return this.post<{ format: string; data: BatchResultItem[] | string }>(API_ENDPOINTS.BATCH_RUN, request);
+  }
+
+  /**
+   * IDE 聊天（Hermes Task 18，ACP 协议）
+   */
+  async chatWithIde(request: IdeChatRequest): Promise<ApiResponse<IdeChatResponse>> {
+    return this.post<IdeChatResponse>(API_ENDPOINTS.IDE_CHAT, request);
+  }
+
+  /**
+   * 获取活跃 IDE 会话列表（Hermes Task 18）
+   */
+  async getIdeSessions(): Promise<ApiResponse<IdeSession[]>> {
+    return this.get<IdeSession[]>(API_ENDPOINTS.IDE_SESSIONS);
+  }
+
+  /**
+   * 导出累积的 RL 训练轨迹（Hermes Task 19）
+   */
+  async exportTrajectories(format?: 'sharegpt' | 'jsonl' | 'openai_finetune'): Promise<ApiResponse<unknown>> {
+    return this.post<unknown>(API_ENDPOINTS.TRAJECTORY_EXPORT, { format });
+  }
+
+  /**
+   * 获取 RL 训练轨迹统计信息（Hermes Task 19）
+   */
+  async getTrajectoryStats(): Promise<ApiResponse<TrajectoryStatsResponse>> {
+    return this.get<TrajectoryStatsResponse>(API_ENDPOINTS.TRAJECTORY_STATS);
+  }
+
+  // ===== Hermes P2: 工具执行（image_generate / tts_speak / web_fetch） =====
+
+  /**
+   * 执行任意已注册的 Harness 工具
+   */
+  async executeTool(request: ToolExecuteRequest): Promise<ApiResponse<ToolExecuteResponse>> {
+    return this.post<ToolExecuteResponse>(API_ENDPOINTS.TOOL_EXECUTE, request);
+  }
+
+  /**
+   * 图像生成（image_generate 工具）
+   */
+  async generateImage(prompt: string, size?: string, style?: string): Promise<ApiResponse<ToolExecuteResponse>> {
+    return this.executeTool({
+      toolName: 'image_generate',
+      params: { prompt, size, style },
+    });
+  }
+
+  /**
+   * 文本转语音（tts_speak 工具）
+   */
+  async speakTts(text: string, voice?: string, speed?: number): Promise<ApiResponse<ToolExecuteResponse>> {
+    return this.executeTool({
+      toolName: 'tts_speak',
+      params: { text, voice, speed },
+    });
+  }
+
+  /**
+   * 网页抓取（web_fetch 工具，作为 browser 功能）
+   */
+  async fetchWebPage(url: string, format?: string): Promise<ApiResponse<ToolExecuteResponse>> {
+    return this.executeTool({
+      toolName: 'web_fetch',
+      params: { url, format },
+    });
+  }
+
+  /**
+   * 列出所有已注册工具
+   */
+  async listTools(): Promise<ApiResponse<{ tools: ToolInfo[]; count: number }>> {
+    return this.get<{ tools: ToolInfo[]; count: number }>(API_ENDPOINTS.TOOL_LIST);
+  }
 }
 
 const apiBaseUrl =
   process.env.NODE_ENV === 'development'
     ? 'http://localhost:3111'
     : process.env.REACT_APP_API_BASE_URL || 'http://localhost:3111';
+
+export function getApiBaseUrl(): string {
+  return apiBaseUrl;
+}
+
+export function getWsBaseUrl(): string {
+  const httpUrl = getApiBaseUrl();
+  return httpUrl.replace(/^http/, 'ws');
+}
 
 export const apiService = new JiabaixingApiService(apiBaseUrl);
 

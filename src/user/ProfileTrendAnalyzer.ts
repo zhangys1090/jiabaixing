@@ -300,19 +300,30 @@ export class ProfileTrendAnalyzer {
     this.updateBeliefStates(userId, behavior);
   }
 
-  private detectContradictions(userId: string, newBehavior: UserBehavior): void {
+  private detectContradictions(
+    userId: string,
+    newBehavior: UserBehavior
+  ): void {
     const recentBehaviors = this.getRecentBehaviors(userId, 50);
 
-    const preferenceContradictions = this.checkPreferenceContradictions(newBehavior, recentBehaviors);
-    const behaviorContradictions = this.checkBehaviorContradictions(newBehavior, recentBehaviors);
+    const preferenceContradictions = this.checkPreferenceContradictions(
+      newBehavior,
+      recentBehaviors
+    );
+    const behaviorContradictions = this.checkBehaviorContradictions(
+      newBehavior,
+      recentBehaviors
+    );
 
-    [...preferenceContradictions, ...behaviorContradictions].forEach((contradiction) => {
-      this.contradictions.set(contradiction.id, contradiction);
-      Logger.warn(
-        `检测到用户矛盾 (${contradiction.severity}): ${contradiction.description}`,
-        'ProfileTrendAnalyzer'
-      );
-    });
+    [...preferenceContradictions, ...behaviorContradictions].forEach(
+      (contradiction) => {
+        this.contradictions.set(contradiction.id, contradiction);
+        Logger.warn(
+          `检测到用户矛盾 (${contradiction.severity}): ${contradiction.description}`,
+          'ProfileTrendAnalyzer'
+        );
+      }
+    );
   }
 
   private checkPreferenceContradictions(
@@ -331,7 +342,10 @@ export class ProfileTrendAnalyzer {
         contradictions.push({
           id: `pref_${Date.now()}_${Math.random()}`,
           type: 'preference',
-          severity: this.calculateContradictionSeverity(newBehavior, oldBehavior),
+          severity: this.calculateContradictionSeverity(
+            newBehavior,
+            oldBehavior
+          ),
           description: `偏好冲突: "${oldBehavior.content}" vs "${newBehavior.content}"`,
           evidence: [oldBehavior, newBehavior],
           timestamp: new Date(),
@@ -351,7 +365,9 @@ export class ProfileTrendAnalyzer {
 
     recentActions.forEach((oldBehavior) => {
       if (oldBehavior.action !== newBehavior.action) return;
-      const timeDiff = Math.abs(newBehavior.timestamp.getTime() - oldBehavior.timestamp.getTime());
+      const timeDiff = Math.abs(
+        newBehavior.timestamp.getTime() - oldBehavior.timestamp.getTime()
+      );
       if (timeDiff < 3600000) return;
 
       const satisfactionA = newBehavior.metadata.satisfaction || 3;
@@ -371,7 +387,10 @@ export class ProfileTrendAnalyzer {
     return contradictions;
   }
 
-  private calculateContradictionSeverity(a: UserBehavior, b: UserBehavior): 'low' | 'medium' | 'high' {
+  private calculateContradictionSeverity(
+    a: UserBehavior,
+    b: UserBehavior
+  ): 'low' | 'medium' | 'high' {
     const timeDiff = Math.abs(a.timestamp.getTime() - b.timestamp.getTime());
     const satisfactionA = a.metadata.satisfaction || 3;
     const satisfactionB = b.metadata.satisfaction || 3;
@@ -387,9 +406,14 @@ export class ProfileTrendAnalyzer {
     const currentBeliefs = this.beliefStates.get(userId) || [];
 
     beliefs.forEach((beliefContent) => {
-      const existingBelief = currentBeliefs.find((b) => b.content === beliefContent);
+      const existingBelief = currentBeliefs.find(
+        (b) => b.content === beliefContent
+      );
       if (existingBelief) {
-        existingBelief.confidence = Math.min(1, existingBelief.confidence + 0.1);
+        existingBelief.confidence = Math.min(
+          1,
+          existingBelief.confidence + 0.1
+        );
         existingBelief.evidenceCount += 1;
         existingBelief.lastUpdated = new Date();
         existingBelief.supportingBehaviors.push(behavior.action);
@@ -414,8 +438,10 @@ export class ProfileTrendAnalyzer {
       beliefs.push(`prefers_${behavior.action}`);
     }
     if (behavior.metadata.satisfaction !== undefined) {
-      if (behavior.metadata.satisfaction > 3) beliefs.push(`liked_${behavior.action}`);
-      else if (behavior.metadata.satisfaction < 3) beliefs.push(`disliked_${behavior.action}`);
+      if (behavior.metadata.satisfaction > 3)
+        beliefs.push(`liked_${behavior.action}`);
+      else if (behavior.metadata.satisfaction < 3)
+        beliefs.push(`disliked_${behavior.action}`);
     }
     return beliefs;
   }
@@ -446,7 +472,10 @@ export class ProfileTrendAnalyzer {
         resolvedBy,
         resolvedAt: new Date(),
       };
-      Logger.info(`矛盾已解决: ${contradiction.description}`, 'ProfileTrendAnalyzer');
+      Logger.info(
+        `矛盾已解决: ${contradiction.description}`,
+        'ProfileTrendAnalyzer'
+      );
     }
   }
 
@@ -457,11 +486,14 @@ export class ProfileTrendAnalyzer {
   } {
     const activeContradictions = this.getActiveContradictions(userId);
     const beliefs = this.beliefStates.get(userId) || [];
-    const sortedBeliefs = beliefs.sort((a, b) => b.confidence - a.confidence).slice(0, 10);
+    const sortedBeliefs = beliefs
+      .sort((a, b) => b.confidence - a.confidence)
+      .slice(0, 10);
 
-    const synthesis = activeContradictions.length > 0
-      ? `检测到 ${activeContradictions.length} 个潜在矛盾，正在进行辩证式综合。`
-      : '用户画像一致性良好，未检测到显著矛盾。';
+    const synthesis =
+      activeContradictions.length > 0
+        ? `检测到 ${activeContradictions.length} 个潜在矛盾，正在进行辩证式综合。`
+        : '用户画像一致性良好，未检测到显著矛盾。';
 
     return { activeContradictions, beliefEvolution: sortedBeliefs, synthesis };
   }
@@ -472,7 +504,8 @@ export class ProfileTrendAnalyzer {
 
     if (beliefs.length === 0) return 0.5;
 
-    const avgConfidence = beliefs.reduce((sum, b) => sum + b.confidence, 0) / beliefs.length;
+    const avgConfidence =
+      beliefs.reduce((sum, b) => sum + b.confidence, 0) / beliefs.length;
     const contradictionPenalty = activeContradictions.length * 0.05;
 
     return Math.max(0, Math.min(1, avgConfidence - contradictionPenalty));

@@ -1,18 +1,29 @@
-import { AgentHarness } from '../../harness';
-import type { HarnessDeps } from '../../harness/AgentHarness';
-import type { HarnessToolDeps } from '../../harness/tools/registerHarnessTools';
-import { SkillRegistry } from '../../skills/SkillRegistry';
-import { isDuplicateContent } from '../../harness/tools/memory/memory_store';
-import { UserProfile } from '../../memory/UserProfile';
-import { MemoryEngine, type MemoryItem } from '../../memory/MemoryEngine';
-import { SceneRecognizer } from '../../multimodal/SceneRecognizer';
-import type { JiabaixingCore } from '../../core/JiabaixingCore';
-import { Logger } from '../../utils/Logger';
-import { MCPToolBridge } from '../../harness/tools/registry/MCPToolBridge';
-import { AutonomousTrigger } from '../../harness/loop/AutonomousTrigger';
-import { SpeechSynthesizer } from '../../interaction/SpeechSynthesizer';
 import fs from 'fs';
 import path from 'path';
+import type { JiabaixingCore } from '../../core/JiabaixingCore';
+import { LLMCapabilityDetector } from '../../evolution/LLMCapabilityDetector';
+import { AgentHarness } from '../../harness';
+import type { HarnessDeps } from '../../harness/AgentHarness';
+import { ContextReferenceResolver } from '../../harness/context/ContextReferenceResolver';
+import { EvaluationPipeline } from '../../harness/evaluation/EvaluationPipeline';
+import { IndependentEvaluationService } from '../../harness/evaluation/IndependentEvaluationService';
+import { QualityScorer } from '../../harness/evaluation/QualityScorer';
+import { StepEvaluator } from '../../harness/evaluation/StepEvaluator';
+import { AutonomousTrigger } from '../../harness/loop/AutonomousTrigger';
+import { CausalModeler } from '../../harness/loop/CausalModeler';
+import { TrajectoryFlywheel } from '../../harness/persistence/TrajectoryFlywheel';
+import { BackendFactory } from '../../harness/sandbox/backends/BackendFactory';
+import type { ITerminalBackend } from '../../harness/sandbox/backends/ITerminalBackend';
+import { isDuplicateContent } from '../../harness/tools/memory/memory_store';
+import type { HarnessToolDeps } from '../../harness/tools/registerHarnessTools';
+import { MCPToolBridge } from '../../harness/tools/registry/MCPToolBridge';
+import { OutputGuardrailEngine } from '../../harness/verification/OutputGuardrailEngine';
+import { SpeechSynthesizer } from '../../interaction/SpeechSynthesizer';
+import { MemoryEngine, type MemoryItem } from '../../memory/MemoryEngine';
+import { UserProfile } from '../../memory/UserProfile';
+import { SceneRecognizer } from '../../multimodal/SceneRecognizer';
+import { SkillRegistry } from '../../skills/SkillRegistry';
+import { Logger } from '../../utils/Logger';
 
 export interface HarnessInitResult {
   harness: import('../../harness/AgentHarness').AgentHarness | null;
@@ -39,6 +50,23 @@ export async function initHarness(
     } catch (err) {
       Logger.warn(
         `⚠️ SpeechSynthesizer 初始化失败: ${(err as Error).message}，TTS 工具将使用模拟模式`,
+        'Bootstrap'
+      );
+    }
+
+    // 多环境终端后端初始化（local/docker/ssh，配置驱动）
+    let terminalBackend: ITerminalBackend | null = null;
+    try {
+      const backendConfig = BackendFactory.parseFromEnv();
+      terminalBackend = await BackendFactory.getBackend(backendConfig);
+      const info = terminalBackend.getInfo();
+      Logger.info(
+        `🖥️ 终端后端已就绪: ${info.name} (隔离: ${info.isolation})`,
+        'Bootstrap'
+      );
+    } catch (err) {
+      Logger.warn(
+        `⚠️ 终端后端初始化失败，降级为 local: ${(err as Error).message}`,
         'Bootstrap'
       );
     }
@@ -509,14 +537,6 @@ export async function initHarness(
             '极其',
           ];
           const negations = ['不', '没', '别', '不要', '不是', '没有'];
-          let words: string[] = [];
-          try {
-            words = text
-              .split(/[\s,，。！？、；：""''（）()！？\n]+/)
-              .filter(Boolean);
-          } catch {
-            words = [text];
-          }
 
           let score = 0;
           let matchedNeg = 0;
@@ -1075,6 +1095,21 @@ export async function initHarness(
           },
         },
         speechSynthesizer: speechSynthesizer || undefined,
+        terminalBackend: terminalBackend || undefined,
+        // Phase 2: LSP 工具依赖注入
+        getDiagnosticsForFile: undefined,
+        filterDiagnostics: undefined,
+        formatDiagnostics: undefined,
+        getCompletions: undefined,
+        formatCompletions: undefined,
+        getHover: undefined,
+        formatHover: undefined,
+        getDefinition: undefined,
+        formatDefinition: undefined,
+        getReferences: undefined,
+        formatReferences: undefined,
+        getDocumentSymbols: undefined,
+        formatSymbols: undefined,
       } satisfies HarnessToolDeps,
     };
 
@@ -1101,8 +1136,179 @@ export async function initHarness(
       },
     };
 
+    // ─── Hermes 集成: 注入6个关键组件到主循环链路 ───
+
+    // P1: EvaluationPipeline — 多阶段评估流水线
+    const evaluationPipeline = new EvaluationPipeline();
+    evaluationPipeline.addStage('step_evaluation', new StepEvaluator(), 0.2);
+    evaluationPipeline.addStage(
+      'independent_evaluation',
+      new IndependentEvaluationService({
+        llm: harnessDeps.llm
+          ? {
+              chat: async (prompt: string, systemPrompt?: string) =>
+                harnessDeps.llm.chat(prompt, systemPrompt),
+            }
+          : undefined,
+        enableLLMEvaluation: !!harnessDeps.llm,
+      }),
+      0.35
+    );
+    evaluationPipeline.addStage('quality_scoring', new QualityScorer(), 0.45);
+    harnessDeps.evaluationPipeline =
+      evaluationPipeline as unknown as import('../../harness/loop/LoopController').LoopControllerDeps['evaluationPipeline'];
+    Logger.info('  📊 EvaluationPipeline: 已注入 LoopController', 'Bootstrap');
+
+    // P2: ContextReferenceResolver — @引用解析器
+    const contextReferenceResolver = new ContextReferenceResolver({
+      projectRoot: process.cwd(),
+    });
+    harnessDeps.contextReferenceResolver = contextReferenceResolver;
+    Logger.info(
+      '  📎 ContextReferenceResolver: 已注入 ContextManager',
+      'Bootstrap'
+    );
+
+    // P2: OutputGuardrailEngine — 输出安全护栏
+    const outputGuardrails = new OutputGuardrailEngine();
+    harnessDeps.outputGuardrails = outputGuardrails;
+    Logger.info('  🛡️ OutputGuardrailEngine: 已注入 AgentHarness', 'Bootstrap');
+
+    // P2: CausalModeler — 因果建模器（注入 LoopController 供规划阶段使用）
+    const causalModeler = new CausalModeler(
+      harnessDeps.llm
+        ? {
+            chat: async (prompt: string, systemPrompt?: string) =>
+              harnessDeps.llm.chat(prompt, systemPrompt),
+          }
+        : null
+    );
+    harnessDeps.causalModeler = causalModeler;
+    Logger.info(
+      '  🔗 CausalModeler: 已注入 LoopController 规划阶段',
+      'Bootstrap'
+    );
+
+    // P3: TrajectoryFlywheel — 轨迹飞轮引擎（需要 TrajectoryDatabase，在 initialize 后注入）
+    Logger.info('  🔄 TrajectoryFlywheel: 将在 initialize 后注入', 'Bootstrap');
+
+    // P3: LLMCapabilityDetector — LLM能力探测器
+    const capabilityDetector = new LLMCapabilityDetector();
+    if (harnessDeps.llm) {
+      capabilityDetector.setLLMProvider({
+        chat: async (
+          message: string,
+          history?: Array<{ role: string; content: string }>,
+          systemPromptOverride?: string
+        ) => {
+          if (systemPromptOverride) {
+            return harnessDeps.llm.chat(message, systemPromptOverride);
+          }
+          return harnessDeps.llm.chat(message);
+        },
+      });
+      Logger.info(
+        '  🔍 LLMCapabilityDetector: 已连接 LLMProvider',
+        'Bootstrap'
+      );
+    }
+
+    // P3: CronJobScheduler — 定时任务调度器（由 AgentHarness.initialize 统一管理）
+    // 注意：不再在此处单独启动，由 Harness Phase 3 初始化统一管理生命周期
+
     harness.setDeps(harnessDeps);
     await harness.initialize();
+
+    // Phase 2: LSP 提供器动态注入 — initialize 后 LSP 实例才可用
+    const lspDiagnostics = harness.getLspDiagnosticsProvider();
+    const lspCompletion = harness.getLspCompletionProvider();
+    if (lspDiagnostics && harnessDeps.toolDeps) {
+      (harnessDeps.toolDeps as Record<string, unknown>).getDiagnosticsForFile =
+        lspDiagnostics.getDiagnosticsForFile.bind(lspDiagnostics);
+      (harnessDeps.toolDeps as Record<string, unknown>).filterDiagnostics =
+        lspDiagnostics.filterDiagnostics.bind(lspDiagnostics);
+      (harnessDeps.toolDeps as Record<string, unknown>).formatDiagnostics =
+        lspDiagnostics.formatDiagnostics.bind(lspDiagnostics);
+    }
+    if (lspCompletion && harnessDeps.toolDeps) {
+      (harnessDeps.toolDeps as Record<string, unknown>).getCompletions =
+        lspCompletion.getCompletions.bind(lspCompletion);
+      (harnessDeps.toolDeps as Record<string, unknown>).formatCompletions =
+        lspCompletion.formatCompletions.bind(lspCompletion);
+      (harnessDeps.toolDeps as Record<string, unknown>).getHover =
+        lspCompletion.getHover.bind(lspCompletion);
+      (harnessDeps.toolDeps as Record<string, unknown>).formatHover =
+        lspCompletion.formatHover.bind(lspCompletion);
+      (harnessDeps.toolDeps as Record<string, unknown>).getDefinition =
+        lspCompletion.getDefinition.bind(lspCompletion);
+      (harnessDeps.toolDeps as Record<string, unknown>).formatDefinition =
+        lspCompletion.formatDefinition.bind(lspCompletion);
+      (harnessDeps.toolDeps as Record<string, unknown>).getReferences =
+        lspCompletion.getReferences.bind(lspCompletion);
+      (harnessDeps.toolDeps as Record<string, unknown>).formatReferences =
+        lspCompletion.formatReferences.bind(lspCompletion);
+      (harnessDeps.toolDeps as Record<string, unknown>).getDocumentSymbols =
+        lspCompletion.getDocumentSymbols.bind(lspCompletion);
+      (harnessDeps.toolDeps as Record<string, unknown>).formatSymbols =
+        lspCompletion.formatSymbols.bind(lspCompletion);
+    }
+    if (lspDiagnostics || lspCompletion) {
+      Logger.info('  🌐 LSP 工具依赖: 已动态注入到 toolDeps', 'Bootstrap');
+    }
+
+    // Phase 2: 设置 LSP 工作区根 URI
+    const projectRoot = path.resolve(process.cwd());
+    harnessDeps.workspaceRootUri = `file:///${projectRoot.replace(/\\/g, '/')}`;
+
+    // Phase 3: 会话存储 + Skill注册中心 动态注入
+    const sessionStore = harness.getSessionStore();
+    const skillRegistry = harness.getSkillRegistry();
+    if (sessionStore && harnessDeps.toolDeps) {
+      (harnessDeps.toolDeps as Record<string, unknown>).sessionStore =
+        sessionStore;
+      Logger.info('  🗄️ 会话存储: 已注入到 toolDeps', 'Bootstrap');
+    }
+    if (skillRegistry && harnessDeps.toolDeps) {
+      (harnessDeps.toolDeps as Record<string, unknown>).skillRegistry =
+        skillRegistry;
+      Logger.info('  🔧 Skill注册中心: 已注入到 toolDeps', 'Bootstrap');
+    }
+
+    // Phase 4: ACP活动追踪器 + 消息处理层 + i18n 动态注入
+    const acpTracker = harness.getACPTracker();
+    const messageProcessor = harness.getMessageProcessor();
+    const i18nManager = harness.getI18nManager();
+    if (acpTracker && harnessDeps.toolDeps) {
+      (harnessDeps.toolDeps as Record<string, unknown>).acpTracker = acpTracker;
+      Logger.info('  📡 ACP活动追踪器: 已注入到 toolDeps', 'Bootstrap');
+    }
+    if (messageProcessor && harnessDeps.toolDeps) {
+      (harnessDeps.toolDeps as Record<string, unknown>).messageProcessor =
+        messageProcessor;
+      Logger.info('  📨 消息处理层: 已注入到 toolDeps', 'Bootstrap');
+    }
+    if (i18nManager && harnessDeps.toolDeps) {
+      (harnessDeps.toolDeps as Record<string, unknown>).i18nManager =
+        i18nManager;
+      Logger.info('  🌐 i18n管理器: 已注入到 toolDeps', 'Bootstrap');
+    }
+
+    // P3: TrajectoryFlywheel — 在 initialize 后注入（需要 TrajectoryDatabase）
+    const trajectoryDB = harness.getTrajectoryDatabase();
+    if (trajectoryDB) {
+      const trajectoryFlywheel = new TrajectoryFlywheel(trajectoryDB);
+      harnessDeps.trajectoryFlywheel = trajectoryFlywheel;
+      harness.injectTrajectoryFlywheel(trajectoryFlywheel);
+      Logger.info(
+        '  🔄 TrajectoryFlywheel: 已注入 LoopController 进化闭环',
+        'Bootstrap'
+      );
+    } else {
+      Logger.warn(
+        '  ⚠️ TrajectoryFlywheel: TrajectoryDatabase 不可用，跳过注入',
+        'Bootstrap'
+      );
+    }
 
     core.setHarness(harness);
 

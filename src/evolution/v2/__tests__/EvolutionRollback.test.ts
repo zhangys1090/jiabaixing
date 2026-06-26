@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { EvolutionRollback } from '../EvolutionRollback';
-import { EvolutionAction, EvolutionType } from '../types';
+import { EvolutionAction } from '../types';
 
 describe('EvolutionRollback', () => {
   let tempDir: string;
@@ -17,7 +17,9 @@ describe('EvolutionRollback', () => {
   afterEach(() => {
     try {
       fs.rmSync(tempDir, { recursive: true, force: true });
-    } catch (e) { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   });
 
   test('create checkpoint and rollback', async () => {
@@ -30,8 +32,8 @@ describe('EvolutionRollback', () => {
         target: { filePath: testFile },
         content: 'Modified content',
         originalContent: 'Original content',
-        description: 'Test modify'
-      }
+        description: 'Test modify',
+      },
     ];
 
     const checkpoint = rollback.createCheckpoint('test-plan', actions);

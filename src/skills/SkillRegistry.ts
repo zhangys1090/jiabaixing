@@ -3,14 +3,15 @@
  * 管理所有技能的注册、查找和执行
  */
 
+import { Logger } from '../utils/Logger';
 import {
   Skill,
-  SkillDefinition,
-  SkillSource,
   SkillContext,
+  SkillDefinition,
   SkillResult,
+  SkillSection,
+  SkillSource,
 } from './SkillInterface';
-import { Logger } from '../utils/Logger';
 
 /**
  * 技能导出数据格式（agentskills.io 兼容）
@@ -126,6 +127,11 @@ export class SkillRegistry {
       SkillRegistry.instance = new SkillRegistry();
     }
     return SkillRegistry.instance;
+  }
+
+  /** 重置单例（仅供测试使用） */
+  public static resetInstance(): void {
+    SkillRegistry.instance = null;
   }
 
   public static reset(): void {
@@ -308,7 +314,39 @@ export class SkillRegistry {
       return { success: false, error: `技能不存在: ${name}` };
     }
 
-    const validation = await skill.validate(params);
+    // ── 执行前置中间件链 ──
+    let actualParams = params;
+    try {
+      const { getSkillMiddleware } = require('./SkillMiddleware');
+      const middleware = getSkillMiddleware();
+      const beforeResult = await middleware.runBefore({
+        skillName: name,
+        params,
+        context,
+        traceId: context?.traceId,
+        userId: context?.userId,
+      });
+
+      if (!beforeResult.proceed) {
+        return (
+          beforeResult.result || {
+            success: false,
+            error: beforeResult.reason || '被中间件拦截',
+          }
+        );
+      }
+
+      if (beforeResult.params) {
+        actualParams = beforeResult.params;
+      }
+    } catch (err) {
+      Logger.warn(
+        `Skill 中间件执行失败，继续执行 Skill: ${(err as Error).message}`,
+        'SkillRegistry'
+      );
+    }
+
+    const validation = await skill.validate(actualParams);
     if (!validation.valid) {
       return {
         success: false,
@@ -316,16 +354,58 @@ export class SkillRegistry {
       };
     }
 
+    const startTime = Date.now();
     try {
       Logger.info(`🔧 执行技能: ${name}`, 'SkillRegistry');
-      const result = await skill.execute(params, context);
+      const result = await skill.execute(actualParams, context);
+      const duration = Date.now() - startTime;
       Logger.info(
         `✅ 技能执行完成: ${name}, 成功=${result.success}`,
         'SkillRegistry'
       );
+
+      // ── 执行后置中间件链 ──
+      try {
+        const { getSkillMiddleware } = require('./SkillMiddleware');
+        const middleware = getSkillMiddleware();
+        await middleware.runAfter({
+          skillName: name,
+          params: actualParams,
+          context,
+          result,
+          duration,
+          traceId: context?.traceId,
+          userId: context?.userId,
+        });
+      } catch (err) {
+        Logger.warn(
+          `Skill 后置中间件执行失败: ${(err as Error).message}`,
+          'SkillRegistry'
+        );
+      }
+
       return result;
     } catch (error) {
+      const duration = Date.now() - startTime;
       Logger.error(`❌ 技能执行失败: ${name}`, error as Error, 'SkillRegistry');
+
+      // 执行后置中间件（即使失败也执行）
+      try {
+        const { getSkillMiddleware } = require('./SkillMiddleware');
+        const middleware = getSkillMiddleware();
+        await middleware.runAfter({
+          skillName: name,
+          params: actualParams,
+          context,
+          result: { success: false, error: (error as Error).message },
+          duration,
+          traceId: context?.traceId,
+          userId: context?.userId,
+        });
+      } catch {
+        // ignore
+      }
+
       return {
         success: false,
         error: (error as Error).message,
@@ -348,6 +428,10 @@ export class SkillRegistry {
     if (skill) {
       this.skills.delete(name);
       this.cachedTools = null;
+      // 清理进化技能的轨迹签名，允许重新提取
+      if (skill.definition.source === 'evolution') {
+        this.extractTrajectories.clear();
+      }
       return true;
     }
     return false;
@@ -1036,5 +1120,222 @@ export class SkillRegistry {
       'SkillRegistry'
     );
     return true;
+  }
+
+  /**
+   * 轨迹数据（用于技能提取）
+   */
+  private extractTrajectories: Map<string, string> = new Map();
+
+  /**
+   * 从高质量轨迹中提取并注册技能
+   * @param trajectory - 轨迹数据
+   * @returns 技能名称，提取失败返回 null
+   */
+  async extractAndRegisterSkill(trajectory: {
+    input: string;
+    intent: string;
+    toolSequence: Array<{
+      toolName: string;
+      args: Record<string, unknown>;
+      success: boolean;
+      output?: string;
+    }>;
+    qualityScore: number;
+  }): Promise<string | null> {
+    const { input, intent, toolSequence, qualityScore } = trajectory;
+
+    // 质量阈值检查
+    if (qualityScore < 0.7) {
+      return null;
+    }
+
+    // 至少 2 个成功步骤
+    const successfulSteps = toolSequence.filter((s) => s.success);
+    if (successfulSteps.length < 2) {
+      return null;
+    }
+
+    // 不允许有失败步骤
+    if (toolSequence.some((s) => !s.success)) {
+      return null;
+    }
+
+    // 生成工具序列签名（包含意图），用于去重
+    const signature = `${intent}:${toolSequence.map((s) => s.toolName).join('->')}`;
+    if (this.extractTrajectories.has(signature)) {
+      return null;
+    }
+    this.extractTrajectories.set(signature, intent);
+
+    // 生成技能名称
+    const skillName = `auto_${intent}_${Date.now().toString(36)}`;
+
+    // 提取标签
+    const tags = new Set<string>();
+    for (const step of toolSequence) {
+      const parts = step.toolName.split('_');
+      tags.add(parts[parts.length - 1]);
+      if (step.toolName.includes('search')) tags.add('search');
+      if (step.toolName.includes('weather')) tags.add('weather');
+    }
+    // 从输入中提取关键词作为标签
+    if (input.includes('天气')) tags.add('weather');
+    if (input.includes('代码') || input.includes('code')) tags.add('code');
+    if (input.includes('文件') || input.includes('file')) tags.add('file');
+
+    // 泛化参数并生成执行步骤
+    const stepsContent = toolSequence
+      .map((step, idx) => {
+        const generalizedArgs = this.generalizeArgs(step.args);
+        return `${idx + 1}. 调用 ${step.toolName}(${JSON.stringify(generalizedArgs)})${step.output ? ` → ${step.output}` : ''}`;
+      })
+      .join('\n');
+
+    const sections: SkillSection[] = [
+      {
+        title: '执行步骤',
+        content: stepsContent,
+      },
+      {
+        title: '技能描述',
+        content: `从轨迹自动提取的技能，意图: ${intent}，输入: ${input}`,
+      },
+    ];
+
+    // 创建技能
+    const extractedSkill: Skill = {
+      definition: {
+        name: skillName,
+        description: `自动提取技能: ${intent}`,
+        category: 'auto_extracted',
+        parameters: [],
+        version: '1.0.0',
+        tags: Array.from(tags),
+        source: 'evolution',
+      },
+      sections,
+      async execute(
+        params: Record<string, unknown>,
+        context?: SkillContext
+      ): Promise<SkillResult> {
+        return {
+          success: true,
+          output: `自动提取技能 ${skillName} 执行完成`,
+          metadata: { source: 'auto_extracted', params, context },
+        };
+      },
+      async validate(): Promise<{ valid: boolean; errors: string[] }> {
+        return { valid: true, errors: [] };
+      },
+    };
+
+    this.register(extractedSkill);
+    Logger.info(
+      `🧬 自动提取技能: ${skillName} (意图: ${intent}, 质量: ${qualityScore})`,
+      'SkillRegistry'
+    );
+    return skillName;
+  }
+
+  /**
+   * 泛化参数值（将路径/URL 替换为占位符）
+   */
+  private generalizeArgs(
+    args: Record<string, unknown>
+  ): Record<string, unknown> {
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(args)) {
+      if (typeof value === 'string') {
+        // 路径泛化
+        if (key === 'path' || /^(\/|\\|\w:[\\/])/.test(value)) {
+          result[key] = '<path>';
+        }
+        // URL 泛化
+        else if (key === 'url' || /^https?:\/\//.test(value)) {
+          result[key] = '<url>';
+        } else {
+          result[key] = value;
+        }
+      } else {
+        result[key] = value;
+      }
+    }
+    return result;
+  }
+
+  /**
+   * 生成相关技能提示词
+   * @param query - 查询文本
+   * @returns 提示词字符串，无匹配时返回空字符串
+   */
+  findRelevantSkillsPrompt(query: string): string {
+    const matches = this.discoverSkills(query, 3);
+    if (matches.length === 0) {
+      return '';
+    }
+
+    const skillLines = matches
+      .map(
+        (m) =>
+          `- ${m.skill.definition.name}: ${m.skill.definition.description} (匹配度: ${(m.score * 100).toFixed(0)}%)`
+      )
+      .join('\n');
+
+    return `相关技能参考:\n${skillLines}`;
+  }
+
+  /** 渐进式披露：返回技能摘要列表 */
+  getSkillSummaries(): Array<{
+    name: string;
+    summary: string;
+    sectionCount: number;
+    charCount: number;
+  }> {
+    const result: Array<{
+      name: string;
+      summary: string;
+      sectionCount: number;
+      charCount: number;
+    }> = [];
+
+    for (const skill of this.skills.values()) {
+      const summary = skill.summary || skill.definition.description || '';
+      const sectionCount = skill.sections?.length || 0;
+      const charCount = summary.length;
+      result.push({
+        name: skill.definition.name,
+        summary,
+        sectionCount,
+        charCount,
+      });
+    }
+
+    return result;
+  }
+
+  /** 渐进式披露：按需展开技能的特定章节 */
+  expandSkillSection(
+    skillName: string,
+    sectionTitle: string
+  ): { title: string; content: string } | null {
+    const skill = this.skills.get(skillName);
+    if (!skill || !skill.sections) return null;
+
+    const section = skill.sections.find((s) => s.title === sectionTitle);
+    return section ? { title: section.title, content: section.content } : null;
+  }
+
+  /** 渐进式披露：生成 token 优化的上下文注入文本 */
+  generateSummaryContext(): string {
+    if (this.skills.size === 0) return '';
+
+    const lines: string[] = [];
+    for (const skill of this.skills.values()) {
+      const summary = skill.summary || skill.definition.description || '';
+      lines.push(`- ${skill.definition.name}: ${summary}`);
+    }
+
+    return lines.join('\n');
   }
 }

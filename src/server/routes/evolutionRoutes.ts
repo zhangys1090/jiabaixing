@@ -62,8 +62,11 @@ export function registerEvolutionRoutes(
             .json({ success: false, error: '进化引擎未启动' });
         }
         const reason = (req.body as { reason?: string }).reason || '手动触发';
-        const log = await evolutionEngine.triggerManualOptimization(reason);
-        res.json({ success: true, data: { id: log?.id ?? 'none', reason: log?.reason ?? '手动触发' } });
+        const log = evolutionEngine.triggerManualOptimization(reason);
+        res.json({
+          success: true,
+          data: { id: log?.id ?? 'none', reason: log?.reason ?? '手动触发' },
+        });
       } catch (error) {
         res
           .status(500)
@@ -134,7 +137,8 @@ export function registerEvolutionRoutes(
     express.json({ limit: '1mb' }),
     async (req, res) => {
       try {
-        const reason = (req.body as { reason?: string }).reason || '手动触发自愈';
+        const reason =
+          (req.body as { reason?: string }).reason || '手动触发自愈';
         const orchestrator = EvolutionOrchestrator.getInstance();
         void orchestrator.triggerOptimizationCycleWithVerification(reason);
         res.json({
@@ -155,7 +159,8 @@ export function registerEvolutionRoutes(
     express.json({ limit: '1mb' }),
     async (req, res) => {
       try {
-        const reason = (req.body as { reason?: string }).reason || '手动触发重构';
+        const reason =
+          (req.body as { reason?: string }).reason || '手动触发重构';
         const orchestrator = EvolutionOrchestrator.getInstance();
         void orchestrator.triggerOptimizationCycleWithVerification(reason);
         res.json({
@@ -176,7 +181,8 @@ export function registerEvolutionRoutes(
     express.json({ limit: '1mb' }),
     async (req, res) => {
       try {
-        const reason = (req.body as { reason?: string }).reason || '手动触发增强';
+        const reason =
+          (req.body as { reason?: string }).reason || '手动触发增强';
         const orchestrator = EvolutionOrchestrator.getInstance();
         void orchestrator.triggerOptimizationCycleWithVerification(reason);
         res.json({

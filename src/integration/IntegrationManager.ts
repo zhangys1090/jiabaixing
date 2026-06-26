@@ -1,25 +1,25 @@
+import * as crypto from 'crypto';
+import type { JiabaixingCore } from '../core/JiabaixingCore';
 import {
+  IncomingMessageEvent,
   IntegrationPlatform,
-  PlatformConfig,
   IntegrationPlatformInfo,
   IntegrationStatus,
+  PlatformConfig,
   SendMessageRequest,
   SendMessageResponse,
-  IncomingMessageEvent,
 } from '../shared/contracts';
-import * as crypto from 'crypto';
+import { EventBus } from '../shared/EventBus';
 import { Logger } from '../utils/Logger';
 import { BaseIntegrationAdapter } from './adapters/BaseIntegrationAdapter';
+import { DingTalkAdapter } from './adapters/DingTalkAdapter';
+import { DiscordAdapter } from './adapters/DiscordAdapter';
+import { FeishuAdapter } from './adapters/FeishuAdapter';
+import { QQAdapter } from './adapters/QQAdapter';
+import { SlackAdapter } from './adapters/SlackAdapter';
+import { TelegramAdapter } from './adapters/TelegramAdapter';
 import { WeChatAdapter } from './adapters/WeChatAdapter';
 import { WeChatQRAdapter } from './adapters/WeChatQRAdapter';
-import { FeishuAdapter } from './adapters/FeishuAdapter';
-import { DingTalkAdapter } from './adapters/DingTalkAdapter';
-import { QQAdapter } from './adapters/QQAdapter';
-import { TelegramAdapter } from './adapters/TelegramAdapter';
-import { DiscordAdapter } from './adapters/DiscordAdapter';
-import { SlackAdapter } from './adapters/SlackAdapter';
-import { EventBus } from '../shared/EventBus';
-import type { JiabaixingCore } from '../core/JiabaixingCore';
 
 /**
  * Webhook 端点配置
@@ -113,14 +113,20 @@ export class IntegrationManager {
     new Map();
   private webhookEndpoints: Map<string, WebhookEndpoint> = new Map();
   private static instance: IntegrationManager;
+  private static skipAutoConnect = false;
   private core: JiabaixingCore | null = null;
 
   private constructor() {
     this.initializeAdapters();
   }
 
-  static getInstance(): IntegrationManager {
+  /**
+   * 获取 IntegrationManager 单例
+   * @param skipAutoConnect - 是否跳过自动连接（主进程不需要自动连接平台，由 Gateway Worker 负责）
+   */
+  static getInstance(skipAutoConnect = false): IntegrationManager {
     if (!IntegrationManager.instance) {
+      IntegrationManager.skipAutoConnect = skipAutoConnect;
       IntegrationManager.instance = new IntegrationManager();
     }
     return IntegrationManager.instance;
@@ -153,10 +159,20 @@ export class IntegrationManager {
 
     Logger.info('集成管理器初始化完成', 'IntegrationManager');
 
+    if (IntegrationManager.skipAutoConnect) {
+      Logger.info(
+        '跳过平台自动连接 (skipAutoConnect=true)，由 Gateway Worker 负责',
+        'IntegrationManager'
+      );
+      return;
+    }
+
     // 如果环境变量配置了 QQ，自动连接
     void this.autoConnectQQ();
     // 如果环境变量配置了 Telegram，自动连接
     void this.autoConnectTelegram();
+    // 如果环境变量配置了飞书，自动连接
+    void this.autoConnectFeishu();
   }
 
   /**
@@ -213,10 +229,41 @@ export class IntegrationManager {
     if (success) {
       Logger.info('Telegram 机器人自动连接成功', 'IntegrationManager');
     } else {
-      Logger.warn(
-        'Telegram 机器人自动连接失败',
+      Logger.warn('Telegram 机器人自动连接失败', 'IntegrationManager');
+    }
+  }
+
+  /**
+   * 从环境变量自动连接飞书
+   */
+  private async autoConnectFeishu(): Promise<void> {
+    const appId = process.env.FEISHU_APP_ID || '';
+    const appSecret = process.env.FEISHU_APP_SECRET || '';
+
+    if (!appId || !appSecret) {
+      Logger.info(
+        '飞书自动连接未启用 (缺少 FEISHU_APP_ID 或 FEISHU_APP_SECRET)',
         'IntegrationManager'
       );
+      return;
+    }
+
+    Logger.info(
+      '检测到飞书环境变量配置，正在自动连接...',
+      'IntegrationManager'
+    );
+
+    // 等待 2 秒让系统完全就绪
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
+    const success = await this.connectPlatform('feishu', {
+      appId,
+      appSecret,
+    });
+    if (success) {
+      Logger.info('飞书自动连接成功', 'IntegrationManager');
+    } else {
+      Logger.warn('飞书自动连接失败，将在后台自动重试', 'IntegrationManager');
     }
   }
 
@@ -319,7 +366,7 @@ export class IntegrationManager {
   async handleWebhook(
     platform: IntegrationPlatform,
     payload: Record<string, unknown>
-  ): Promise<{ success: boolean; response?: unknown }> {
+  ): Promise<{ success: boolean; response?: unknown; error?: string }> {
     const adapter = this.adapters.get(platform);
     if (!adapter) {
       return { success: false };
@@ -561,8 +608,7 @@ export class IntegrationManager {
           'IntegrationManager'
         );
       } catch (error) {
-        const errorMsg =
-          error instanceof Error ? error.message : String(error);
+        const errorMsg = error instanceof Error ? error.message : String(error);
         Logger.warn(
           `Webhook 投递异常: ${endpoint.id} (${eventType}), 尝试 ${attempt + 1}/${maxRetries + 1}, 错误: ${errorMsg}`,
           'IntegrationManager'

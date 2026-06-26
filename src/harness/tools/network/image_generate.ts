@@ -15,7 +15,14 @@ export const IMAGE_GENERATE_DEF: ToolDefinition = {
     size: {
       type: 'string',
       description: '图像尺寸',
-      enum: ['square_hd', 'square', 'portrait_4_3', 'portrait_16_9', 'landscape_4_3', 'landscape_16_9'],
+      enum: [
+        'square_hd',
+        'square',
+        'portrait_4_3',
+        'portrait_16_9',
+        'landscape_4_3',
+        'landscape_16_9',
+      ],
       default: 'square',
     },
     style: {
@@ -32,15 +39,26 @@ export const IMAGE_GENERATE_DEF: ToolDefinition = {
 
 export interface ImageGenerateDeps {
   imageApiClient?: {
-    generate(prompt: string, size: string): Promise<{ url: string; base64?: string }>;
+    generate(
+      prompt: string,
+      size: string
+    ): Promise<{ url: string; base64?: string }>;
   };
 }
 
-function ok(output: string, duration: number, metadata?: Record<string, unknown>): ToolResult {
+function ok(
+  output: string,
+  duration: number,
+  metadata?: Record<string, unknown>
+): ToolResult {
   return { success: true, output, duration, validated: false, metadata };
 }
 
-function fail(error: string, duration: number, output: string = ''): ToolResult {
+function fail(
+  error: string,
+  duration: number,
+  output: string = ''
+): ToolResult {
   return { success: false, output, error, duration, validated: false };
 }
 
@@ -64,11 +82,12 @@ export function createImageGenerateExecutor(deps: ImageGenerateDeps = {}) {
 
       if (deps.imageApiClient) {
         const result = await deps.imageApiClient.generate(fullPrompt, size);
-        return ok(
-          `图像已生成: ${result.url}`,
-          Date.now() - startTime,
-          { url: result.url, base64: result.base64, prompt: fullPrompt, size }
-        );
+        return ok(`图像已生成: ${result.url}`, Date.now() - startTime, {
+          url: result.url,
+          base64: result.base64,
+          prompt: fullPrompt,
+          size,
+        });
       }
 
       const imageUrl = `https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=${encodedPrompt}&image_size=${size}`;
@@ -78,7 +97,10 @@ export function createImageGenerateExecutor(deps: ImageGenerateDeps = {}) {
       });
 
       if (!response.ok) {
-        return fail(`图像生成失败: HTTP ${response.status}`, Date.now() - startTime);
+        return fail(
+          `图像生成失败: HTTP ${response.status}`,
+          Date.now() - startTime
+        );
       }
 
       const contentType = response.headers.get('content-type') || '';
@@ -88,27 +110,46 @@ export function createImageGenerateExecutor(deps: ImageGenerateDeps = {}) {
         const base64 = buffer.toString('base64');
         const dataUrl = `data:${contentType};base64,${base64}`;
 
-        Logger.info(`🎨 image_generate 成功: "${prompt}" (${size})`, 'ImageGenerate');
+        Logger.info(
+          `🎨 image_generate 成功: "${prompt}" (${size})`,
+          'ImageGenerate'
+        );
 
         return ok(
           `图像已生成 (${size}, ${buffer.length} bytes)`,
           Date.now() - startTime,
-          { imageUrl, base64: dataUrl, prompt: fullPrompt, size, contentLength: buffer.length }
+          {
+            imageUrl,
+            base64: dataUrl,
+            prompt: fullPrompt,
+            size,
+            contentLength: buffer.length,
+          }
         );
       }
 
-      const json = await response.json() as Record<string, unknown>;
+      const json = (await response.json()) as Record<string, unknown>;
       const url = (json.url || json.image_url || json.data) as string;
 
       if (url) {
-        Logger.info(`🎨 image_generate 成功: "${prompt}" → ${url}`, 'ImageGenerate');
-        return ok(`图像已生成: ${url}`, Date.now() - startTime, { url, prompt: fullPrompt, size });
+        Logger.info(
+          `🎨 image_generate 成功: "${prompt}" → ${url}`,
+          'ImageGenerate'
+        );
+        return ok(`图像已生成: ${url}`, Date.now() - startTime, {
+          url,
+          prompt: fullPrompt,
+          size,
+        });
       }
 
       return fail('图像生成服务返回了无法解析的响应', Date.now() - startTime);
     } catch (error) {
       Logger.error('❌ image_generate 失败', error as Error, 'ImageGenerate');
-      return fail(`图像生成失败: ${(error as Error).message}`, Date.now() - startTime);
+      return fail(
+        `图像生成失败: ${(error as Error).message}`,
+        Date.now() - startTime
+      );
     }
   };
 }

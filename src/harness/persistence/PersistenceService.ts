@@ -7,6 +7,7 @@
 
 import { Logger } from '../../utils/Logger';
 import type { ChatMessage } from '../types';
+import type { IMemoryEngine } from '../../core/IMemoryEngine';
 import fs from 'fs';
 import path from 'path';
 
@@ -82,38 +83,7 @@ export interface EvolutionMetric {
 /** PersistenceService 依赖 — 委托给现有模块 */
 export interface PersistenceServiceDeps {
   /** 记忆引擎 */
-  memoryEngine?: {
-    storeShortTermMemory(
-      content: string,
-      scene?: string,
-      emotion?: string
-    ): Promise<unknown>;
-    storeLongTermMemory(
-      content: string,
-      scene?: string,
-      emotion?: string
-    ): Promise<unknown>;
-    storeInstantMemory(
-      content: string,
-      scene?: string,
-      emotion?: string
-    ): Promise<unknown>;
-    preciseHybridRetrieval(query: {
-      query: string;
-      scene?: string;
-      emotion?: string;
-      topK?: number;
-    }): Promise<MemoryItem[]>;
-    storeFeedbackSignal(data: {
-      feedbackType: string;
-      rating?: number;
-      message?: string;
-      traceId?: string;
-      toolName?: string;
-      userId?: string;
-      timestamp?: number;
-    }): Promise<void>;
-  } | null;
+  memoryEngine?: IMemoryEngine | null;
 
   /** 对话历史管理器 */
   conversationHistory?: {
@@ -193,21 +163,21 @@ export class PersistenceService {
     try {
       switch (type) {
         case 'instant':
-          await this.deps.memoryEngine.storeInstantMemory(
+          await this.deps.memoryEngine.storeInstantMemory!(
             content,
             scene,
             emotion
           );
           break;
         case 'long_term':
-          await this.deps.memoryEngine.storeLongTermMemory(
+          await this.deps.memoryEngine.storeLongTermMemory!(
             content,
             scene,
             emotion
           );
           break;
         default:
-          await this.deps.memoryEngine.storeShortTermMemory(
+          await this.deps.memoryEngine.storeShortTermMemory!(
             content,
             scene,
             emotion
@@ -230,12 +200,12 @@ export class PersistenceService {
     if (!this.deps.memoryEngine) return [];
 
     try {
-      return await this.deps.memoryEngine.preciseHybridRetrieval({
+      return (await this.deps.memoryEngine.preciseHybridRetrieval!({
         query,
         scene: options.scene,
         emotion: options.emotion,
         topK: options.limit || 5,
-      });
+      })) as MemoryItem[];
     } catch (err) {
       Logger.error('记忆检索失败', err as Error, 'PersistenceService');
       return [];
@@ -255,7 +225,7 @@ export class PersistenceService {
     if (!this.deps.memoryEngine) return;
 
     try {
-      await this.deps.memoryEngine.storeFeedbackSignal({
+      await this.deps.memoryEngine.storeFeedbackSignal!({
         ...data,
         timestamp: Date.now(),
       });
@@ -297,10 +267,10 @@ export class PersistenceService {
       }> = [];
 
       for (const query of queries) {
-        const results = await this.deps.memoryEngine.preciseHybridRetrieval({
+        const results = (await this.deps.memoryEngine.preciseHybridRetrieval!({
           query,
           topK: 20,
-        });
+        })) as MemoryItem[];
         allMemories.push(...results);
       }
 
@@ -320,9 +290,12 @@ export class PersistenceService {
         // 排除已通过 feedback signal 标记的
         if (id && this.promotedMemoryIds.has(`promoted:${id}`)) return false;
         return (
-          ((m as { type?: string }).type === 'short_term' || !(m as { type?: string }).type) &&
-          (((m as { importance?: number }).importance != null && (m as { importance?: number }).importance! >= 7) ||
-            ((m as { accessCount?: number }).accessCount != null && (m as { accessCount?: number }).accessCount! >= 3))
+          ((m as { type?: string }).type === 'short_term' ||
+            !(m as { type?: string }).type) &&
+          (((m as { importance?: number }).importance != null &&
+            (m as { importance?: number }).importance! >= 7) ||
+            ((m as { accessCount?: number }).accessCount != null &&
+              (m as { accessCount?: number }).accessCount! >= 3))
         );
       });
 
@@ -333,9 +306,12 @@ export class PersistenceService {
       let promoted = 0;
       for (const memory of candidates) {
         const memId = (memory as { id?: string }).id || '';
-        const memContent = typeof memory.content === 'string' ? memory.content : JSON.stringify(memory.content);
+        const memContent =
+          typeof memory.content === 'string'
+            ? memory.content
+            : JSON.stringify(memory.content);
         try {
-          await this.deps.memoryEngine.storeLongTermMemory(
+          await this.deps.memoryEngine.storeLongTermMemory!(
             memContent,
             memory.scene,
             memory.emotion

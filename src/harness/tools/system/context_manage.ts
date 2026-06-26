@@ -249,7 +249,7 @@ async function handleCreate(
 ): Promise<ToolResult> {
   // 验证文件名是否在允许列表中
   const allowedFiles = [...CONTEXT_FILE_LIST];
-  if (!allowedFiles.includes(fileName as typeof CONTEXT_FILE_LIST[number])) {
+  if (!allowedFiles.includes(fileName as (typeof CONTEXT_FILE_LIST)[number])) {
     return {
       success: false,
       output: '',

@@ -107,7 +107,7 @@ export interface EvolutionEngineDeps {
     response: string;
     toolsUsed: string[];
     totalDuration: number;
-    quality_score: number;
+    qualityScore: number;
     traceId: string;
   }): string | null;
   nudgeKnowledgePersistence(input: string, toolsUsed: string[]): string | null;
@@ -164,7 +164,12 @@ export interface FeedbackCollectorDeps {
     previousResponse: string,
     userId?: string,
     scene?: string
-  ): { type: string; input?: string; response?: string; [key: string]: unknown } | null;
+  ): {
+    type: string;
+    input?: string;
+    response?: string;
+    [key: string]: unknown;
+  } | null;
   recordToolFailure(
     toolName: string,
     errorMessage: string,
@@ -237,10 +242,45 @@ export interface HarnessDeps {
     refreshFrozenSnapshot(): void;
   };
   reflectionEngine?: ReflectionEngineDeps;
+  /** 事件总线 — 用于学习信号等事件的发布/订阅 */
+  eventBus?: {
+    on(event: string, handler: (payload: unknown) => void): void;
+    emit(event: string, payload: unknown): void;
+  };
   /** FeedbackLoops 闭环服务依赖 — 反馈收集器 */
   feedbackCollector?: FeedbackCollectorDeps;
   /** FeedbackLoops 闭环服务依赖 — 记忆助手（自动知识提取） */
   memoryAssistant?: MemoryAssistantDeps;
+  /** P2: CausalModeler — 因果建模器，识别步骤依赖和并行机会 */
+  causalModeler?: {
+    buildCausalModel(
+      task: string
+    ): Promise<import('./loop/CausalModeler').CausalGraph>;
+    analyzeDependencies(
+      graph: import('./loop/CausalModeler').CausalGraph,
+      stepId: string
+    ): import('./loop/CausalModeler').DependencyAnalysis;
+    findParallelGroups(
+      graph: import('./loop/CausalModeler').CausalGraph
+    ): string[][];
+    getFailureImpact(
+      graph: import('./loop/CausalModeler').CausalGraph,
+      stepId: string
+    ): import('./loop/CausalModeler').FailureImpact;
+  };
+  /** P1: EvaluationPipeline — 多阶段评估流水线 */
+  evaluationPipeline?: {
+    run(context: unknown): Promise<unknown>;
+    addStage?(stage: unknown): void;
+  };
+  /** P3: TrajectoryFlywheel — 轨迹飞轮引擎，分析执行模式并生成优化建议 */
+  trajectoryFlywheel?: {
+    analyze(
+      executionId?: string
+    ): import('./persistence/TrajectoryFlywheel').TrajectoryAnalysis;
+  };
+  /** 工作区根 URI — 用于 LSP 集成层配置工作区 */
+  workspaceRootUri?: string;
 }
 
 export interface ReflectionEngineDeps {

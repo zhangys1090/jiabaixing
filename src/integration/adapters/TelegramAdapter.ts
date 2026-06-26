@@ -1,10 +1,10 @@
-import { BaseIntegrationAdapter } from './BaseIntegrationAdapter';
 import {
+  IncomingMessageEvent,
   PlatformConfig,
   SendMessageResponse,
-  IncomingMessageEvent,
 } from '../../shared/contracts';
 import { Logger } from '../../utils/Logger';
+import { BaseIntegrationAdapter } from './BaseIntegrationAdapter';
 
 /** Telegram Bot API 响应中的 Update 对象 */
 interface TelegramUpdate {
@@ -177,7 +177,10 @@ export class TelegramAdapter extends BaseIntegrationAdapter {
           const result = await this.callApi<TelegramMessage>('sendPhoto', {
             chat_id: to,
             photo: url,
-            caption: imageUrls.indexOf(url) === imageUrls.length - 1 ? message : undefined,
+            caption:
+              imageUrls.indexOf(url) === imageUrls.length - 1
+                ? message
+                : undefined,
           });
           if (!result.ok) {
             throw new Error(
@@ -204,9 +207,7 @@ export class TelegramAdapter extends BaseIntegrationAdapter {
       });
 
       if (!result.ok) {
-        throw new Error(
-          `发送消息失败: ${result.description || '未知错误'}`
-        );
+        throw new Error(`发送消息失败: ${result.description || '未知错误'}`);
       }
 
       return {
@@ -230,7 +231,7 @@ export class TelegramAdapter extends BaseIntegrationAdapter {
    */
   async handleWebhook(
     payload: Record<string, unknown>
-  ): Promise<{ success: boolean; response?: unknown }> {
+  ): Promise<{ success: boolean; response?: unknown; error?: string }> {
     try {
       const update = payload as unknown as TelegramUpdate;
 

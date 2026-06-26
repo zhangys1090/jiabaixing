@@ -5,9 +5,8 @@
 import type { ToolContext, ToolDefinition, ToolResult } from '../../types';
 import { Permission, ToolCategory } from '../../types';
 import { Logger } from '../../../utils/Logger';
-import { exec, spawn } from 'child_process';
+import { exec } from 'child_process';
 import { promisify } from 'util';
-import path from 'path';
 
 const execAsync = promisify(exec);
 
@@ -64,7 +63,8 @@ export function createFileGrepExecutor(deps: FileGrepDeps = {}) {
   ): Promise<ToolResult> => {
     const startTime = Date.now();
     const pattern = String(params.pattern || '');
-    const directory = (params.directory as string) || deps.projectRoot || process.cwd();
+    const directory =
+      (params.directory as string) || deps.projectRoot || process.cwd();
     const filePattern = (params.file_pattern as string) || '';
     const ignoreCase = Boolean(params.ignore_case);
     const showContext = Number(params.show_context) || 2;
@@ -81,13 +81,16 @@ export function createFileGrepExecutor(deps: FileGrepDeps = {}) {
     }
 
     try {
-      Logger.info(`🔍 file_grep: 搜索模式="${pattern}" 在目录 "${directory}"`, 'FileGrep');
+      Logger.info(
+        `🔍 file_grep: 搜索模式="${pattern}" 在目录 "${directory}"`,
+        'FileGrep'
+      );
 
       let result: string;
       let usedTool: string;
 
       // 优先尝试 ripgrep (rg)，更快
-      if (deps.useRgPath || await isCommandAvailable('rg')) {
+      if (deps.useRgPath || (await isCommandAvailable('rg'))) {
         usedTool = 'rg';
         result = await runRipGrep(pattern, directory, {
           filePattern,
@@ -165,14 +168,11 @@ async function runRipGrep(
   args.push(pattern);
 
   const rgCmd = options.rgPath || 'rg';
-  const { stdout } = await execAsync(
-    `${rgCmd} ${args.join(' ')}`,
-    {
-      cwd: directory,
-      maxBuffer: 10 * 1024 * 1024,
-      timeout: 25000,
-    }
-  );
+  const { stdout } = await execAsync(`${rgCmd} ${args.join(' ')}`, {
+    cwd: directory,
+    maxBuffer: 10 * 1024 * 1024,
+    timeout: 25000,
+  });
   return stdout;
 }
 

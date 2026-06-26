@@ -1,10 +1,10 @@
-import { BaseIntegrationAdapter } from './BaseIntegrationAdapter';
 import {
+  IncomingMessageEvent,
   PlatformConfig,
   SendMessageResponse,
-  IncomingMessageEvent,
 } from '../../shared/contracts';
 import { Logger } from '../../utils/Logger';
+import { BaseIntegrationAdapter } from './BaseIntegrationAdapter';
 
 /** Discord Webhook 发送消息的请求体 */
 interface DiscordWebhookPayload {
@@ -50,8 +50,7 @@ export class DiscordAdapter extends BaseIntegrationAdapter {
       this.config = config;
       this.updateStatus('connecting');
 
-      this.webhookUrl =
-        process.env.DISCORD_WEBHOOK_URL || config.webhookUrl;
+      this.webhookUrl = process.env.DISCORD_WEBHOOK_URL || config.webhookUrl;
 
       if (!this.webhookUrl) {
         throw new Error('缺少 DISCORD_WEBHOOK_URL 配置');
@@ -71,9 +70,7 @@ export class DiscordAdapter extends BaseIntegrationAdapter {
       // 验证 Webhook URL 有效性
       const response = await fetch(this.webhookUrl, { method: 'GET' });
       if (!response.ok) {
-        throw new Error(
-          `Discord Webhook URL 无效 (HTTP ${response.status})`
-        );
+        throw new Error(`Discord Webhook URL 无效 (HTTP ${response.status})`);
       }
 
       const webhookInfo = (await response.json()) as Record<string, unknown>;
@@ -149,9 +146,11 @@ export class DiscordAdapter extends BaseIntegrationAdapter {
       }
 
       // Discord Webhook 成功返回 204 No Content 或 200 OK
-      const messageId = response.status === 204
-        ? `discord_msg_${Date.now()}`
-        : ((await response.json()) as Record<string, unknown>).id as string || `discord_msg_${Date.now()}`;
+      const messageId =
+        response.status === 204
+          ? `discord_msg_${Date.now()}`
+          : (((await response.json()) as Record<string, unknown>)
+              .id as string) || `discord_msg_${Date.now()}`;
 
       return {
         success: true,
@@ -174,7 +173,7 @@ export class DiscordAdapter extends BaseIntegrationAdapter {
    */
   async handleWebhook(
     payload: Record<string, unknown>
-  ): Promise<{ success: boolean; response?: unknown }> {
+  ): Promise<{ success: boolean; response?: unknown; error?: string }> {
     try {
       const interaction = payload as unknown as DiscordInteractionPayload;
 
@@ -193,7 +192,7 @@ export class DiscordAdapter extends BaseIntegrationAdapter {
           interaction.member?.user?.username ||
           'Unknown';
 
-        const commandName = interaction.data?.name as string || '';
+        const commandName = (interaction.data?.name as string) || '';
 
         const incomingMessage: IncomingMessageEvent = {
           platform: 'discord',
@@ -221,7 +220,7 @@ export class DiscordAdapter extends BaseIntegrationAdapter {
           interaction.member?.user?.username ||
           'Unknown';
 
-        const customId = interaction.data?.custom_id as string || '';
+        const customId = (interaction.data?.custom_id as string) || '';
 
         const incomingMessage: IncomingMessageEvent = {
           platform: 'discord',

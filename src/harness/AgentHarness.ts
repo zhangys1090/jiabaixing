@@ -2,22 +2,46 @@
  * Harness Agent Framework - Agent Harness 入口
  *
  * 六层架构组装点，协调 Loop/Tools/Context/Persistence/Verification/Constraints
+ *
+ * 双后端架构说明：
+ * - 当 AGENT_BACKEND=python（默认）时，请求通过 PythonAgentBridge 转发到 Python 后端
+ *   此文件中的 LoopController、MemoryEngine 等组件不会被使用
+ * - 当 AGENT_BACKEND=local 时，使用 TypeScript 本地实现（已废弃，仅用于回退）
+ *
+ * 废弃组件说明：
+ * - LoopController: 已迁移到 Python agent/loop/controller.py
+ * - MemoryEngine: 已迁移到 Python agent/memory/
+ * 预计 V6.0 移除 TypeScript 端的废弃组件
  */
 
-import { Logger } from '../utils/Logger';
 import path from 'path';
-import { LoopController, DefaultDebater } from './loop/LoopController';
-import { Planner } from './loop/Planner';
-import { Executor } from './loop/Executor';
-import { Evaluator } from './loop/Evaluator';
-import { Reporter } from './loop/Reporter';
-import { IndependentEvaluationService } from './evaluation/IndependentEvaluationService';
-import { ToolRegistry } from './tools/registry/ToolRegistry';
-import { SchemaValidator } from './tools/registry/SchemaValidator';
-import { PermissionGuard } from './tools/registry/PermissionGuard';
-import { ContextManager } from './context/ContextManager';
-import { VerificationService } from './verification/VerificationService';
+import { CronJobScheduler } from '../cron/CronJobScheduler';
+import { skillUsageTracker } from '../evolution/SkillUsageTracker';
+import { StrategyAdjuster } from '../evolution/StrategyAdjuster';
+import { SessionStore } from '../persistence/SessionStore';
+import { ACPActivityTracker } from '../ide/ACPActivityTracker';
+import { I18nManager } from '../shared/I18nManager';
+import { MessageProcessor } from '../shared/MessageProcessor';
+import { EventBus } from '../shared/EventBus';
+
+import { SkillRegistry } from '../skills/SkillRegistry';
+import { Logger } from '../utils/Logger';
 import { ConstraintsService } from './constraints/ConstraintsService';
+import { ContextManager } from './context/ContextManager';
+import { ContextWindowManager } from './context/ContextWindowManager';
+import { type HarnessDeps } from './deps';
+import { IndependentEvaluationService } from './evaluation/IndependentEvaluationService';
+import { Evaluator } from './loop/Evaluator';
+import { Executor } from './loop/Executor';
+import { DefaultDebater, LoopController } from './loop/LoopController';
+import { Planner } from './loop/Planner';
+import { ReflectionEngine } from './loop/ReflectionEngine';
+import { Reporter } from './loop/Reporter';
+import { LspClientManager } from './lsp/LspClientManager';
+import { LspCompletionProvider } from './lsp/LspCompletionProvider';
+import { LspDiagnosticsProvider } from './lsp/LspDiagnosticsProvider';
+import { AgentRegistry } from './orchestration/AgentRegistry';
+import { OrchestratorAgent } from './orchestration/OrchestratorAgent';
 import { PersistenceService } from './persistence/PersistenceService';
 import { TrajectoryDatabase } from './persistence/TrajectoryDatabase';
 import { SandboxExecutor } from './sandbox/SandboxExecutor';
@@ -26,19 +50,23 @@ import {
   syncToLegacySkillRegistry,
   type HarnessToolDeps,
 } from './tools/registerHarnessTools';
+import { PermissionGuard } from './tools/registry/PermissionGuard';
+import { SchemaValidator } from './tools/registry/SchemaValidator';
+import { ToolRegistry } from './tools/registry/ToolRegistry';
 import {
-  UserInput,
+  getDefaultToolsetForAgent,
+  getToolsetRegistry,
+  registerBuiltinToolsets,
+} from './tools/toolsets';
+import type { HarnessConfig } from './types';
+import {
   AgentResult,
   ChatMessage,
-  LifecycleEvent,
   HookContext,
+  LifecycleEvent,
+  UserInput,
 } from './types';
-import type { HarnessConfig } from './types';
-import { type HarnessDeps } from './deps';
-import { EventBus } from '../shared/EventBus';
-import { OrchestratorAgent } from './orchestration/OrchestratorAgent';
-import { AgentRegistry } from './orchestration/AgentRegistry';
-import { skillUsageTracker } from '../evolution/SkillUsageTracker';
+import { VerificationService } from './verification/VerificationService';
 
 export { type HarnessDeps } from './deps';
 
@@ -102,6 +130,9 @@ export class AgentHarness {
   private schemaValidator: SchemaValidator | null = null;
   private permissionGuard: PermissionGuard | null = null;
   private contextManager: ContextManager | null = null;
+  // P0-4: 上下文窗口管理器 — 循环内动态 token 预算管理
+  private contextWindowManager: ContextWindowManager =
+    new ContextWindowManager();
   private verificationService: VerificationService | null = null;
   private constraintsService: ConstraintsService | null = null;
   private persistenceService: PersistenceService | null = null;
@@ -114,6 +145,21 @@ export class AgentHarness {
   // 多Agent编排组件
   private agentRegistry: AgentRegistry | null = null;
   private orchestratorAgent: OrchestratorAgent | null = null;
+  // P5: 策略自适应调整器 — 驱动学习闭环
+  private strategyAdjuster: StrategyAdjuster = new StrategyAdjuster();
+  // P0: 反思引擎 — 三层反思（工具级/步骤级/任务级）
+  private reflectionEngine: ReflectionEngine | null = null;
+  // Phase 2: LSP 客户端管理器 — 语言服务器协议集成
+  private lspClientManager: LspClientManager | null = null;
+  private lspDiagnosticsProvider: LspDiagnosticsProvider | null = null;
+  private lspCompletionProvider: LspCompletionProvider | null = null;
+  // Phase 3: 会话存储 + Cron调度器 + Skill注册中心
+  private sessionStore: SessionStore | null = null;
+  private cronScheduler: CronJobScheduler | null = null;
+  private skillRegistry: SkillRegistry | null = null;
+  private acpTracker: ACPActivityTracker | null = null;
+  private messageProcessor: MessageProcessor | null = null;
+  private i18nManager: I18nManager | null = null;
 
   constructor(config?: Partial<HarnessConfig>) {
     const envConfig = getEnvConfig();
@@ -139,21 +185,6 @@ export class AgentHarness {
       Logger.warn('⚠️ 未注入依赖，部分功能不可用', 'AgentHarness');
     }
 
-    // 分步诊断
-    const stepLog = (step: string, ok: boolean, detail?: string) => {
-      if (ok) {
-        Logger.info(
-          `  ✅ ${step}${detail ? ': ' + detail : ''}`,
-          'AgentHarness'
-        );
-      } else {
-        Logger.warn(
-          `  ❌ ${step}${detail ? ': ' + detail : ''}`,
-          'AgentHarness'
-        );
-      }
-    };
-
     // Phase 1: 工具层初始化
     try {
       if (this.config.useHarnessTools) {
@@ -177,6 +208,14 @@ export class AgentHarness {
 
         Logger.info(
           `  🔧 工具层: 启用 (${result.registeredCount} 个工具)`,
+          'AgentHarness'
+        );
+
+        // P0-3: 注册内置工具集（按 Agent 角色预组装工具包）
+        registerBuiltinToolsets();
+        const toolsetIds = getToolsetRegistry().list();
+        Logger.info(
+          `  📦 工具集层: 启用 (${toolsetIds.length} 个工具集: ${toolsetIds.join(', ')})`,
           'AgentHarness'
         );
       }
@@ -260,7 +299,7 @@ export class AgentHarness {
                 const parsed = JSON.parse(jsonMatch[0]);
                 return parsed.tasks || [];
               }
-            } catch (e) {
+            } catch {
               Logger.warn('LLM目标分解失败，使用默认分解', 'AgentHarness');
             }
             return [
@@ -319,6 +358,25 @@ export class AgentHarness {
         'trajectory.db'
       );
       this.trajectoryDatabase = new TrajectoryDatabase(dbPath);
+
+      // P3: 注入语义嵌入函数 — 使 TrajectoryDatabase 支持语义相似度检索
+      try {
+        const { SemanticSimilarityEngine } =
+          await import('../memory/SemanticSimilarityEngine');
+        const semanticEngine = new SemanticSimilarityEngine();
+        await semanticEngine.initialize();
+        this.trajectoryDatabase.setEmbedFunction((text: string) => {
+          const vector = semanticEngine.generateVectorSync(text);
+          return vector;
+        });
+        Logger.info('  📐 语义嵌入: 已注入 TrajectoryDatabase', 'AgentHarness');
+      } catch (semErr) {
+        Logger.warn(
+          `  ⚠️ 语义嵌入注入失败，回退到关键词检索: ${(semErr as Error).message}`,
+          'AgentHarness'
+        );
+      }
+
       Logger.info('  📊 轨迹持久化: 启用', 'AgentHarness');
     }
 
@@ -332,6 +390,7 @@ export class AgentHarness {
         personaCore: this.deps.personaCore,
         environmentSensor: this.deps.environmentSensor,
         evolutionExamples: this.deps.evolutionExamples,
+        referenceResolver: this.deps.contextReferenceResolver || undefined,
       });
       Logger.info('  📋 上下文层: 启用', 'AgentHarness');
       if (this.deps.personaCore) {
@@ -356,6 +415,20 @@ export class AgentHarness {
         permissionGuard: this.permissionGuard || new PermissionGuard(),
         trajectoryDatabase: this.trajectoryDatabase || undefined,
         constraintsService: this.constraintsService || undefined,
+        // P5: EventBus — 用于学习信号收集
+        eventBus: EventBus as unknown as {
+          emit: (event: string, payload: unknown) => void;
+          on: (event: string, handler: (payload: unknown) => void) => void;
+        },
+        // P5: StrategyAdjuster — 策略自适应调整器
+        strategyAdjuster: this.strategyAdjuster,
+        // P0-3: 工具集系统 — 按 Agent 角色预组装工具包
+        toolsetRegistry: getToolsetRegistry(),
+        activeToolset: getDefaultToolsetForAgent(
+          this.config.agentType || 'base'
+        ),
+        // P0-4: 上下文窗口管理器 — 循环内动态 token 预算管理
+        contextWindowManager: this.contextWindowManager,
         // 非侵入式 hooks 适配器 —— 桥接约束/验证/轨迹到 Executor
         hooks: {
           beforeToolCall: async (toolName, params, _ctx) => {
@@ -403,6 +476,12 @@ export class AgentHarness {
       });
       const reporter = new Reporter();
 
+      // P0: 实例化 ReflectionEngine 并注入 TrajectoryDatabase
+      this.reflectionEngine = new ReflectionEngine(
+        this.deps.llm,
+        this.trajectoryDatabase || undefined
+      );
+
       this.loopController = new LoopController({
         planner,
         executor,
@@ -415,12 +494,153 @@ export class AgentHarness {
         trajectoryDatabase: this.trajectoryDatabase || undefined,
         orchestratorAgent: this.orchestratorAgent || undefined,
         evolutionEngine: this.deps?.evolutionEngine || undefined,
+        strategyAdjuster: this.strategyAdjuster,
+        reflectionEngine: this.reflectionEngine,
+        evaluationPipeline: this.deps?.evaluationPipeline || undefined,
+        causalModeler: this.deps?.causalModeler || undefined,
+        trajectoryFlywheel: this.deps?.trajectoryFlywheel || undefined,
       });
-      Logger.info('  🔄 循环层: 启用', 'AgentHarness');
+      Logger.info(
+        '  🔄 循环层: 启用（含反思引擎+评估流水线+因果建模+轨迹飞轮）',
+        'AgentHarness'
+      );
+    }
+
+    // P3: 订阅 learning_signal 事件，转发到 StrategyAdjuster
+    if (this.deps?.eventBus) {
+      this.deps.eventBus.on('learning_signal', (payload: unknown) => {
+        try {
+          const signal =
+            payload as import('../evolution/LearningSignalCollector').LearningSignal;
+          this.strategyAdjuster.recordSignal({
+            signalType: signal.signalType,
+            toolName: signal.toolName,
+            error: signal.error,
+            quality: signal.quality,
+            duration: signal.duration,
+            timestamp: signal.timestamp,
+          });
+        } catch {
+          // 学习信号处理失败不影响主流程
+        }
+      });
+      Logger.info('  📡 学习信号订阅: 已注册', 'AgentHarness');
     }
 
     // Phase 6.5: 注册敏感信息存储拦截钩子（由独立方法管理，不嵌入初始化流程）
     await this.registerSensitiveDataHooks();
+
+    // Phase 6.6: LSP 集成层初始化
+    try {
+      this.lspClientManager = LspClientManager.getInstance();
+      this.lspDiagnosticsProvider = new LspDiagnosticsProvider(
+        this.lspClientManager
+      );
+      this.lspCompletionProvider = new LspCompletionProvider(
+        this.lspClientManager
+      );
+
+      if (this.deps?.workspaceRootUri) {
+        this.lspClientManager.configureWorkspace({
+          rootUri: this.deps.workspaceRootUri,
+          folders: [{ uri: this.deps.workspaceRootUri }],
+        });
+      }
+
+      Logger.info(
+        '  🌐 LSP 集成层: 启用（按需连接语言服务器）',
+        'AgentHarness'
+      );
+    } catch (err) {
+      Logger.warn(
+        `  ⚠️ LSP 集成层初始化失败（非阻塞）: ${(err as Error).message}`,
+        'AgentHarness'
+      );
+      this.lspClientManager = null;
+      this.lspDiagnosticsProvider = null;
+      this.lspCompletionProvider = null;
+    }
+
+    // Phase 3: 会话存储 + Cron调度器 + Skill注册中心
+    try {
+      this.sessionStore = new SessionStore();
+      Logger.info(
+        `  🗄️ 会话存储: 已就绪 (${this.sessionStore.getStats().sessions} 个会话)`,
+        'AgentHarness'
+      );
+    } catch (err) {
+      Logger.warn(
+        `  ⚠️ 会话存储初始化失败（非阻塞）: ${(err as Error).message}`,
+        'AgentHarness'
+      );
+      this.sessionStore = null;
+    }
+
+    try {
+      this.cronScheduler = CronJobScheduler.getInstance();
+      this.cronScheduler.start();
+      Logger.info(
+        `  ⏰ Cron调度器: 已启动 (${this.cronScheduler.getJobs().length} 个任务)`,
+        'AgentHarness'
+      );
+    } catch (err) {
+      Logger.warn(
+        `  ⚠️ Cron调度器初始化失败（非阻塞）: ${(err as Error).message}`,
+        'AgentHarness'
+      );
+      this.cronScheduler = null;
+    }
+
+    try {
+      this.skillRegistry = SkillRegistry.getInstance();
+      Logger.info(
+        `  🔧 Skill注册中心: 已就绪 (${this.skillRegistry.getSkillCount()} 个技能)`,
+        'AgentHarness'
+      );
+    } catch (err) {
+      Logger.warn(
+        `  ⚠️ Skill注册中心初始化失败（非阻塞）: ${(err as Error).message}`,
+        'AgentHarness'
+      );
+      this.skillRegistry = null;
+    }
+
+    // Phase 4: ACP 活动追踪器 + 消息处理层 + i18n
+    try {
+      this.acpTracker = ACPActivityTracker.getInstance();
+      Logger.info(`  📡 ACP活动追踪器: 已就绪`, 'AgentHarness');
+    } catch (err) {
+      Logger.warn(
+        `  ⚠️ ACP活动追踪器初始化失败（非阻塞）: ${(err as Error).message}`,
+        'AgentHarness'
+      );
+      this.acpTracker = null;
+    }
+
+    try {
+      this.messageProcessor = MessageProcessor.getInstance();
+      Logger.info(`  📨 消息处理层: 已就绪`, 'AgentHarness');
+    } catch (err) {
+      Logger.warn(
+        `  ⚠️ 消息处理层初始化失败（非阻塞）: ${(err as Error).message}`,
+        'AgentHarness'
+      );
+      this.messageProcessor = null;
+    }
+
+    try {
+      this.i18nManager = I18nManager.getInstance();
+      Logger.info(
+        `  🌐 i18n管理器: 已就绪 (${this.i18nManager.getLocale()}, ${this.i18nManager.getStats().totalKeys} 条消息)`,
+        'AgentHarness'
+      );
+    } catch (err) {
+      Logger.warn(
+        `  ⚠️ i18n管理器初始化失败（非阻塞）: ${(err as Error).message}`,
+        'AgentHarness'
+      );
+      this.i18nManager = null;
+    }
 
     // Phase 7: 注册进化反馈钩子（闭环）
     if (this.constraintsService && this.deps?.evolutionEngine) {
@@ -651,6 +871,28 @@ export class AgentHarness {
         metadata: result.metadata,
       });
 
+      // Step 3: 输出安全护栏检查（OutputGuardrailEngine 集成）
+      if (this.deps.outputGuardrails && result.response) {
+        const guardrailResult = this.deps.outputGuardrails.check(
+          result.response
+        );
+        if (!guardrailResult.passed) {
+          Logger.warn(
+            `🛡️ 输出被Guardrail拦截: ${guardrailResult.reason}`,
+            'AgentHarness'
+          );
+          return {
+            ...result,
+            response: '抱歉，无法提供该内容（安全检查未通过）',
+            metadata: {
+              ...result.metadata,
+              guardrailBlocked: true,
+              guardrailReason: guardrailResult.reason,
+            },
+          };
+        }
+      }
+
       return result;
     }
 
@@ -751,6 +993,27 @@ export class AgentHarness {
   }
 
   /**
+   * 注入 TrajectoryFlywheel 到已创建的 LoopController（需在 initialize 后调用）
+   */
+  injectTrajectoryFlywheel(flywheel: {
+    analyze(
+      executionId?: string
+    ): import('./persistence/TrajectoryFlywheel').TrajectoryAnalysis;
+  }): void {
+    if (this.loopController) {
+      (
+        this.loopController as unknown as {
+          deps: Record<string, unknown>;
+        }
+      ).deps.trajectoryFlywheel = flywheel;
+      Logger.info(
+        '🔄 TrajectoryFlywheel 已注入 LoopController',
+        'AgentHarness'
+      );
+    }
+  }
+
+  /**
    * 获取独立评估服务（P0 核心功能）
    */
   getIndependentEvaluationService(): IndependentEvaluationService | null {
@@ -762,6 +1025,60 @@ export class AgentHarness {
    */
   getSandboxExecutor(): SandboxExecutor | null {
     return this.sandboxExecutor;
+  }
+
+  /**
+   * 获取 LSP 客户端管理器
+   */
+  getLspClientManager(): LspClientManager | null {
+    return this.lspClientManager;
+  }
+
+  /**
+   * 获取 LSP 诊断提供器
+   */
+  getLspDiagnosticsProvider(): LspDiagnosticsProvider | null {
+    return this.lspDiagnosticsProvider;
+  }
+
+  /**
+   * 获取 LSP 补全提供器
+   */
+  getLspCompletionProvider(): LspCompletionProvider | null {
+    return this.lspCompletionProvider;
+  }
+
+  /**
+   * 获取会话存储
+   */
+  getSessionStore(): SessionStore | null {
+    return this.sessionStore;
+  }
+
+  /**
+   * 获取 Cron 调度器
+   */
+  getCronScheduler(): CronJobScheduler | null {
+    return this.cronScheduler;
+  }
+
+  /**
+   * 获取 Skill 注册中心
+   */
+  getSkillRegistry(): SkillRegistry | null {
+    return this.skillRegistry;
+  }
+
+  getACPTracker(): ACPActivityTracker | null {
+    return this.acpTracker;
+  }
+
+  getMessageProcessor(): MessageProcessor | null {
+    return this.messageProcessor;
+  }
+
+  getI18nManager(): I18nManager | null {
+    return this.i18nManager;
   }
 
   /**
@@ -808,7 +1125,7 @@ export class AgentHarness {
     }
     if (this.persistenceService) {
       try {
-        (
+        void (
           this.persistenceService as unknown as {
             shutdown?: () => Promise<void>;
           }
@@ -821,6 +1138,52 @@ export class AgentHarness {
     if (this.sandboxExecutor) {
       this.sandboxExecutor = null;
     }
+    // Phase 2: 关闭 LSP 连接
+    if (this.lspClientManager) {
+      try {
+        await this.lspClientManager.disconnectAll();
+      } catch {
+        /* best-effort */
+      }
+      this.lspClientManager = null;
+      this.lspDiagnosticsProvider = null;
+      this.lspCompletionProvider = null;
+    }
+    // Phase 3: 关闭会话存储 + Cron调度器
+    if (this.sessionStore) {
+      try {
+        this.sessionStore.close();
+      } catch {
+        /* best-effort */
+      }
+      this.sessionStore = null;
+    }
+    if (this.cronScheduler) {
+      try {
+        this.cronScheduler.stop();
+      } catch {
+        /* best-effort */
+      }
+      this.cronScheduler = null;
+    }
+    this.skillRegistry = null;
+    if (this.acpTracker) {
+      try {
+        ACPActivityTracker.resetInstance();
+      } catch {
+        /* best-effort */
+      }
+      this.acpTracker = null;
+    }
+    if (this.messageProcessor) {
+      try {
+        MessageProcessor.resetInstance();
+      } catch {
+        /* best-effort */
+      }
+      this.messageProcessor = null;
+    }
+    this.i18nManager = null;
   }
 
   /**

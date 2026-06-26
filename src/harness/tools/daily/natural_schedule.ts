@@ -8,7 +8,7 @@
  */
 
 import type { ToolContext, ToolDefinition, ToolResult } from '../../types';
-import { Permission, ToolCategory } from '../../types';
+import { ToolCategory } from '../../types';
 import { Logger } from '../../../utils/Logger';
 
 export const NATURAL_SCHEDULE_DEF: ToolDefinition = {
@@ -23,7 +23,8 @@ export const NATURAL_SCHEDULE_DEF: ToolDefinition = {
     },
     schedule: {
       type: 'string',
-      description: '自然语言时间描述，如"每天早上9点"、"每周一上午10点"、"每小时"',
+      description:
+        '自然语言时间描述，如"每天早上9点"、"每周一上午10点"、"每小时"',
     },
     enabled: {
       type: 'boolean',
@@ -51,7 +52,11 @@ interface ScheduledTask {
 
 // 任务存储（内存 + 文件持久化）
 const tasks: Map<string, ScheduledTask> = new Map();
-const TASKS_FILE = require('path').join(process.cwd(), 'data', 'scheduled-tasks.json');
+const TASKS_FILE = require('path').join(
+  process.cwd(),
+  'data',
+  'scheduled-tasks.json'
+);
 
 function loadTasks(): void {
   try {
@@ -62,7 +67,9 @@ function loadTasks(): void {
         tasks.set(task.id, task);
       }
     }
-  } catch { /* 静默失败 */ }
+  } catch {
+    /* 静默失败 */
+  }
 }
 
 function saveTasks(): void {
@@ -70,8 +77,14 @@ function saveTasks(): void {
     const fs = require('fs');
     const dir = require('path').dirname(TASKS_FILE);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(TASKS_FILE, JSON.stringify(Array.from(tasks.values()), null, 2), 'utf-8');
-  } catch { /* 静默失败 */ }
+    fs.writeFileSync(
+      TASKS_FILE,
+      JSON.stringify(Array.from(tasks.values()), null, 2),
+      'utf-8'
+    );
+  } catch {
+    /* 静默失败 */
+  }
 }
 
 // 初始化加载
@@ -80,7 +93,9 @@ loadTasks();
 /**
  * 自然语言 → cron 表达式转换
  */
-function parseNaturalSchedule(input: string): { cron: string; description: string } | null {
+function parseNaturalSchedule(
+  input: string
+): { cron: string; description: string } | null {
   const text = input.toLowerCase().trim();
 
   // 每天/每日
@@ -88,7 +103,10 @@ function parseNaturalSchedule(input: string): { cron: string; description: strin
   if (dailyMatch) {
     const timeMatch = extractTime(text);
     if (timeMatch) {
-      return { cron: `${timeMatch.minute} ${timeMatch.hour} * * *`, description: `每天 ${timeMatch.hour}:${String(timeMatch.minute).padStart(2, '0')}` };
+      return {
+        cron: `${timeMatch.minute} ${timeMatch.hour} * * *`,
+        description: `每天 ${timeMatch.hour}:${String(timeMatch.minute).padStart(2, '0')}`,
+      };
     }
     return { cron: '0 9 * * *', description: '每天 09:00' };
   }
@@ -98,7 +116,10 @@ function parseNaturalSchedule(input: string): { cron: string; description: strin
   if (weekdayMatch) {
     const timeMatch = extractTime(text);
     if (timeMatch) {
-      return { cron: `${timeMatch.minute} ${timeMatch.hour} * * 1-5`, description: `工作日 ${timeMatch.hour}:${String(timeMatch.minute).padStart(2, '0')}` };
+      return {
+        cron: `${timeMatch.minute} ${timeMatch.hour} * * 1-5`,
+        description: `工作日 ${timeMatch.hour}:${String(timeMatch.minute).padStart(2, '0')}`,
+      };
     }
     return { cron: '0 9 * * 1-5', description: '工作日 09:00' };
   }
@@ -108,7 +129,10 @@ function parseNaturalSchedule(input: string): { cron: string; description: strin
   if (weekendMatch) {
     const timeMatch = extractTime(text);
     if (timeMatch) {
-      return { cron: `${timeMatch.minute} ${timeMatch.hour} * * 0,6`, description: `周末 ${timeMatch.hour}:${String(timeMatch.minute).padStart(2, '0')}` };
+      return {
+        cron: `${timeMatch.minute} ${timeMatch.hour} * * 0,6`,
+        description: `周末 ${timeMatch.hour}:${String(timeMatch.minute).padStart(2, '0')}`,
+      };
     }
     return { cron: '0 10 * * 0,6', description: '周末 10:00' };
   }
@@ -116,13 +140,28 @@ function parseNaturalSchedule(input: string): { cron: string; description: strin
   // 每周X
   const weeklyMatch = text.match(/每周([一二三四五六日天])/);
   if (weeklyMatch) {
-    const dayMap: Record<string, number> = { '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '日': 0, '天': 0 };
+    const dayMap: Record<string, number> = {
+      一: 1,
+      二: 2,
+      三: 3,
+      四: 4,
+      五: 5,
+      六: 6,
+      日: 0,
+      天: 0,
+    };
     const day = dayMap[weeklyMatch[1]] ?? 1;
     const timeMatch = extractTime(text);
     if (timeMatch) {
-      return { cron: `${timeMatch.minute} ${timeMatch.hour} * * ${day}`, description: `每周${weeklyMatch[1]} ${timeMatch.hour}:${String(timeMatch.minute).padStart(2, '0')}` };
+      return {
+        cron: `${timeMatch.minute} ${timeMatch.hour} * * ${day}`,
+        description: `每周${weeklyMatch[1]} ${timeMatch.hour}:${String(timeMatch.minute).padStart(2, '0')}`,
+      };
     }
-    return { cron: `0 9 * * ${day}`, description: `每周${weeklyMatch[1]} 09:00` };
+    return {
+      cron: `0 9 * * ${day}`,
+      description: `每周${weeklyMatch[1]} 09:00`,
+    };
   }
 
   // 每小时
@@ -144,7 +183,10 @@ function parseNaturalSchedule(input: string): { cron: string; description: strin
     const day = parseInt(monthlyMatch[1]);
     const timeMatch = extractTime(text);
     if (timeMatch) {
-      return { cron: `${timeMatch.minute} ${timeMatch.hour} ${day} * *`, description: `每月${day}号 ${timeMatch.hour}:${String(timeMatch.minute).padStart(2, '0')}` };
+      return {
+        cron: `${timeMatch.minute} ${timeMatch.hour} ${day} * *`,
+        description: `每月${day}号 ${timeMatch.hour}:${String(timeMatch.minute).padStart(2, '0')}`,
+      };
     }
     return { cron: `0 9 ${day} * *`, description: `每月${day}号 09:00` };
   }
@@ -152,7 +194,10 @@ function parseNaturalSchedule(input: string): { cron: string; description: strin
   // 早上/上午/中午/下午/晚上 + 时间
   const timeMatch = extractTime(text);
   if (timeMatch) {
-    return { cron: `${timeMatch.minute} ${timeMatch.hour} * * *`, description: `每天 ${timeMatch.hour}:${String(timeMatch.minute).padStart(2, '0')}` };
+    return {
+      cron: `${timeMatch.minute} ${timeMatch.hour} * * *`,
+      description: `每天 ${timeMatch.hour}:${String(timeMatch.minute).padStart(2, '0')}`,
+    };
   }
 
   return null;
@@ -160,10 +205,12 @@ function parseNaturalSchedule(input: string): { cron: string; description: strin
 
 function extractTime(text: string): { hour: number; minute: number } | null {
   // "早上9点" / "上午10点30" / "下午3点" / "晚上8点半"
-  const match = text.match(/(早上|上午|中午|下午|晚上|凌晨)?(\d{1,2})[点时:：](\d{1,2})?(半)?/);
+  const match = text.match(
+    /(早上|上午|中午|下午|晚上|凌晨)?(\d{1,2})[点时:：](\d{1,2})?(半)?/
+  );
   if (match) {
     let hour = parseInt(match[2]);
-    let minute = match[3] ? parseInt(match[3]) : (match[4] ? 30 : 0);
+    let minute = match[3] ? parseInt(match[3]) : match[4] ? 30 : 0;
 
     // 上午/下午转换
     const period = match[1];
@@ -233,8 +280,6 @@ export function createNaturalScheduleExecutor() {
       tasks.set(id, task);
       saveTasks();
 
-      // 注册到 EventBus
-      const { EventBus } = await import('../../../shared/EventBus');
       Logger.info(
         `📅 自然语言调度: "${description}" → ${parsed.cron} (${parsed.description})`,
         'NaturalSchedule'
