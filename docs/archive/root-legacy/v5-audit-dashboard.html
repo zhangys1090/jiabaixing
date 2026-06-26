@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jiabaixing V5.0 架构合规性审计报告</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0a0a0a;--surface:#141414;--raised:#1c1c1c;--border:#333;--text:#f0f0f0;--dim:#a3a3a3;--muted:#757575;--accent:#c9956b;--accent-dim:rgba(201,149,107,.14);--green:#6baf7b;--green-dim:rgba(107,175,123,.12);--red:#c96b6b;--red-dim:rgba(201,107,107,.12);--blue:#6b8fc9;--blue-dim:rgba(107,143,201,.12);--r:8px}
+body{background:var(--bg);color:var(--text);font-family:'DM Sans','Noto Sans SC',-apple-system,BlinkMacSystemFont,sans-serif;font-size:14px;line-height:1.6;padding:24px;max-width:1400px;margin:0 auto}
+h1{font-size:28px;font-weight:700;letter-spacing:-.02em;margin-bottom:4px}
+.subtitle{color:var(--dim);font-size:14px;margin-bottom:32px}
+.grid{display:grid;gap:16px;margin-bottom:24px}
+.g4{grid-template-columns:repeat(4,1fr)}
+.g3{grid-template-columns:repeat(3,1fr)}
+.g2{grid-template-columns:repeat(2,1fr)}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:20px}
+.card-title{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin-bottom:8px}
+.big{font-size:36px;font-weight:700;letter-spacing:-.02em;line-height:1.1}
+.big.green{color:var(--green)}.big.accent{color:var(--accent)}.big.blue{color:var(--blue)}.big.red{color:var(--red)}
+.unit{font-size:14px;font-weight:400;color:var(--dim);margin-left:4px}
+.badge{display:inline-flex;align-items:center;gap:6px;padding:2px 10px;border-radius:999px;font-size:11px;font-weight:500}
+.badge.pass{background:var(--green-dim);color:var(--green)}
+.badge.fail{background:var(--red-dim);color:var(--red)}
+.badge.warn{background:var(--accent-dim);color:var(--accent)}
+.section{margin-bottom:32px}
+.section-title{font-size:18px;font-weight:600;margin-bottom:16px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;padding:8px 12px;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);border-bottom:1px solid var(--border)}
+td{padding:8px 12px;border-bottom:1px solid rgba(51,51,51,.5)}
+tr:hover td{background:rgba(201,149,107,.04)}
+.bar{height:6px;border-radius:3px;background:var(--raised);overflow:hidden;margin-top:6px}
+.bar-fill{height:100%;border-radius:3px;transition:width .6s ease}
+.bar-fill.green{background:var(--green)}.bar-fill.accent{background:var(--accent)}.bar-fill.blue{background:var(--blue)}.bar-fill.red{background:var(--red)}
+.flow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.flow-node{padding:6px 14px;border-radius:6px;font-size:12px;font-weight:600;white-space:nowrap}
+.flow-node.primary{background:var(--accent-dim);color:var(--accent);border:1px solid rgba(201,149,107,.3)}
+.flow-node.secondary{background:var(--blue-dim);color:var(--blue);border:1px solid rgba(107,143,201,.3)}
+.flow-node.success{background:var(--green-dim);color:var(--green);border:1px solid rgba(107,175,123,.3)}
+.flow-arrow{color:var(--muted);font-size:16px}
+.check-list{list-style:none}
+.check-list li{display:flex;align-items:center;gap:8px;padding:6px 0;font-size:13px}
+.check-icon{width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0}
+.check-icon.pass{background:var(--green-dim);color:var(--green)}
+.check-icon.fail{background:var(--red-dim);color:var(--red)}
+.check-icon.warn{background:var(--accent-dim);color:var(--accent)}
+.timestamp{color:var(--muted);font-size:12px;margin-top:24px;text-align:right}
+</style>
+</head>
+<body>
+
+<h1>✦ Jiabaixing V5.0 架构合规性审计</h1>
+<p class="subtitle">Harness Agent Framework · E-T-C-S-L-V 六层架构验证</p>
+
+<!-- ═══ 概览指标 ═══ -->
+<div class="grid g4">
+  <div class="card">
+    <div class="card-title">源码文件</div>
+    <div class="big accent">263<span class="unit">.ts/.tsx</span></div>
+    <div class="card-title" style="margin-top:8px">总代码行</div>
+    <div style="font-size:20px;font-weight:600">58,711</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Harness 六层</div>
+    <div class="big green">40<span class="unit">文件</span></div>
+    <div class="bar"><div class="bar-fill green" style="width:100%"></div></div>
+    <div style="font-size:12px;color:var(--muted);margin-top:4px">6,494 行 · 六层完整</div>
+  </div>
+  <div class="card">
+    <div class="card-title">后端 API 端点</div>
+    <div class="big blue">20<span class="unit">路由</span></div>
+    <div class="bar"><div class="bar-fill blue" style="width:85%"></div></div>
+    <div style="font-size:12px;color:var(--muted);margin-top:4px">10 个路由文件</div>
+  </div>
+  <div class="card">
+    <div class="card-title">破窗引用</div>
+    <div class="big green">0<span class="unit">处</span></div>
+    <div class="bar"><div class="bar-fill green" style="width:100%"></div></div>
+    <div style="font-size:12px;color:var(--muted);margin-top:4px">SelfHealingEngine/SkillBridge/DirectExecutor 已清除</div>
+  </div>
+</div>
+
+<!-- ═══ 1. 前端API覆盖验证 ═══ -->
+<div class="section">
+  <div class="section-title">1. 前端 API ↔ 后端路由覆盖验证</div>
+  <div class="grid g2">
+    <div class="card">
+      <div class="card-title">覆盖状态</div>
+      <table>
+        <tr><th>模块</th><th>后端端点</th><th>前端覆盖</th><th>状态</th></tr>
+        <tr><td>核心处理</td><td>/api/process</td><td>apiService.sendMessage</td><td><span class="badge pass">✓ 覆盖</span></td></tr>
+        <tr><td>对话服务</td><td>/api/v1/chat</td><td>apiService.sendChat</td><td><span class="badge pass">✓ 覆盖</span></td></tr>
+        <tr><td>记忆系统</td><td>/api/memory/*</td><td>apiService.memory*</td><td><span class="badge pass">✓ 覆盖</span></td></tr>
+        <tr><td>集成网关</td><td>/api/integration/*</td><td>apiService.integration*</td><td><span class="badge pass">✓ 覆盖</span></td></tr>
+        <tr><td>自动化</td><td>/api/automation/*</td><td>apiService.automation*</td><td><span class="badge pass">✓ 覆盖</span></td></tr>
+        <tr><td>技能系统</td><td>/api/skills/*</td><td>apiService.skills*</td><td><span class="badge pass">✓ 覆盖</span></td></tr>
+        <tr><td>进化引擎</td><td>/api/evolution/*</td><td>apiService.evolution*</td><td><span class="badge pass">✓ 覆盖</span></td></tr>
+        <tr><td>安全审计</td><td>/api/security/*</td><td>apiService.security*</td><td><span class="badge pass">✓ 覆盖</span></td></tr>
+        <tr><td>性能监控</td><td>/api/performance/*</td><td>apiService.performance*</td><td><span class="badge pass">✓ 覆盖</span></td></tr>
+        <tr><td>系统状态</td><td>/api/system/*</td><td>apiService.system*</td><td><span class="badge pass">✓ 覆盖</span></td></tr>
+        <tr><td>TRAE优化</td><td>/api/trae/*</td><td>—</td><td><span class="badge warn">△ 内部API</span></td></tr>
+        <tr><td>调试</td><td>/api/debug/*</td><td>—</td><td><span class="badge warn">△ 开发用</span></td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <div class="card-title">WebSocket 事件覆盖</div>
+      <table>
+        <tr><th>事件类型</th><th>方向</th><th>前端处理</th><th>状态</th></tr>
+        <tr><td>user_input</td><td>C→S</td><td>ChatInterface</td><td><span class="badge pass">✓</span></td></tr>
+        <tr><td>dialog_state</td><td>S→C</td><td>useConnectionStore</td><td><span class="badge pass">✓</span></td></tr>
+        <tr><td>brain_stage_update</td><td>S→C</td><td>useAgentStore</td><td><span class="badge pass">✓</span></td></tr>
+        <tr><td>perception_update</td><td>S→C</td><td>useAgentStore</td><td><span class="badge pass">✓</span></td></tr>
+        <tr><td>skill_execution</td><td>S→C</td><td>useSkillStore</td><td><span class="badge pass">✓</span></td></tr>
+        <tr><td>evolution_event</td><td>S→C</td><td>useEvolutionStore</td><td><span class="badge pass">✓</span></td></tr>
+        <tr><td>server_log</td><td>S→C</td><td>useMonitorStore</td><td><span class="badge pass">✓</span></td></tr>
+        <tr><td>clarification_request</td><td>S→C</td><td>VibeCodingPanel</td><td><span class="badge pass">✓</span></td></tr>
+        <tr><td>execution_preview</td><td>S→C</td><td>VibeCodingPanel</td><td><span class="badge pass">✓</span></td></tr>
+        <tr><td>file_modified</td><td>S→C</td><td>useAgentStore</td><td><span class="badge pass">✓</span></td></tr>
+        <tr><td>tool_trace</td><td>S→C</td><td>useAgentStore</td><td><span class="badge pass">✓</span></td></tr>
+        <tr><td>response_ready</td><td>S→C</td><td>useConnectionStore</td><td><span class="badge pass">✓</span></td></tr>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 2. CLI 命令对接验证 ═══ -->
+<div class="section">
+  <div class="section-title">2. CLI 命令 ↔ 后端 API 对接验证</div>
+  <div class="card">
+    <table>
+      <tr><th>CLI 命令</th><th>功能</th><th>后端 API</th><th>状态</th></tr>
+      <tr><td>gateway</td><td>微信扫码连接</td><td>POST /api/integration/wechat-qr/connect</td><td><span class="badge pass">✓</span></td></tr>
+      <tr><td>gateway</td><td>微信企业号</td><td>POST /api/integration/wechat/connect</td><td><span class="badge pass">✓</span></td></tr>
+      <tr><td>gateway</td><td>QQ连接</td><td>POST /api/integration/qq/connect</td><td><span class="badge pass">✓</span></td></tr>
+      <tr><td>gateway</td><td>飞书连接</td><td>POST /api/integration/feishu/connect</td><td><span class="badge pass">✓</span></td></tr>
+      <tr><td>gateway</td><td>钉钉连接</td><td>POST /api/integration/dingtalk/connect</td><td><span class="badge pass">✓</span></td></tr>
+      <tr><td>schedule list</td><td>获取任务列表</td><td>GET /api/automation/tasks</td><td><span class="badge pass">✓</span></td></tr>
+      <tr><td>schedule add</td><td>创建任务</td><td>POST /api/automation/tasks</td><td><span class="badge pass">✓</span></td></tr>
+      <tr><td>schedule toggle</td><td>切换任务状态</td><td>PATCH /api/automation/tasks/:id/toggle</td><td><span class="badge pass">✓</span></td></tr>
+      <tr><td>schedule run</td><td>手动执行</td><td>POST /api/automation/tasks/:id/execute</td><td><span class="badge pass">✓</span></td></tr>
+      <tr><td>config show</td><td>显示配置</td><td>GET /api/llm/status</td><td><span class="badge pass">✓</span></td></tr>
+      <tr><td>daemon status</td><td>服务状态</td><td>GET /api/health</td><td><span class="badge pass">✓</span></td></tr>
+      <tr><td>chat</td><td>终端聊天</td><td>POST /api/process</td><td><span class="badge pass">✓</span></td></tr>
+    </table>
+  </div>
+</div>
+
+<!-- ═══ 3. V5.0 数据流验证 ═══ -->
+<div class="section">
+  <div class="section-title">3. V5.0 数据流验证</div>
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-title">主数据流路径</div>
+    <div class="flow">
+      <span class="flow-node primary">用户输入</span><span class="flow-arrow">→</span>
+      <span class="flow-node primary">Gateway Layer</span><span class="flow-arrow">→</span>
+      <span class="flow-node primary">JiabaixingCore</span><span class="flow-arrow">→</span>
+      <span class="flow-node primary">AgentHarness</span><span class="flow-arrow">→</span>
+      <span class="flow-node secondary">LoopController</span>
+    </div>
+    <div class="flow">
+      <span class="flow-node secondary">Planner</span><span class="flow-arrow">→</span>
+      <span class="flow-node secondary">Executor</span><span class="flow-arrow">→</span>
+      <span class="flow-node secondary">Evaluator</span><span class="flow-arrow">→</span>
+      <span class="flow-node secondary">Reporter</span><span class="flow-arrow">→</span>
+      <span class="flow-node success">响应输出</span>
+    </div>
+  </div>
+  <div class="grid g3">
+    <div class="card">
+      <div class="card-title">JiabaixingCore.processInput()</div>
+      <ul class="check-list">
+        <li><span class="check-icon pass">✓</span>委托 AgentHarness.processInput()</li>
+        <li><span class="check-icon pass">✓</span>Harness 失败 → DialogueGenerator 降级</li>
+        <li><span class="check-icon pass">✓</span>安全检查 → SecurityChecker</li>
+        <li><span class="check-icon pass">✓</span>场景注入 → SceneAnalyzer</li>
+        <li><span class="check-icon pass">✓</span>记忆注入 → MemoryEngine</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="card-title">LoopController.run()</div>
+      <ul class="check-list">
+        <li><span class="check-icon pass">✓</span>Plan→Execute→Evaluate→Report 四阶段</li>
+        <li><span class="check-icon pass">✓</span>简单任务跳过规划 (plan.simple)</li>
+        <li><span class="check-icon pass">✓</span>评估后支持回溯重规划 (≤1次)</li>
+        <li><span class="check-icon pass">✓</span>预算超限自动终止</li>
+        <li><span class="check-icon pass">✓</span>状态外部化 (无内部状态)</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="card-title">六层组装 (AgentHarness)</div>
+      <ul class="check-list">
+        <li><span class="check-icon pass">✓</span>E — LoopController</li>
+        <li><span class="check-icon pass">✓</span>T — ToolRegistry (19 工具)</li>
+        <li><span class="check-icon pass">✓</span>C — ContextManager</li>
+        <li><span class="check-icon pass">✓</span>S — PersistenceService</li>
+        <li><span class="check-icon pass">✓</span>V — VerificationService</li>
+        <li><span class="check-icon pass">✓</span>L — ConstraintsService (9 钩子)</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 4. 模块合规性 ═══ -->
+<div class="section">
+  <div class="section-title">4. 模块合规性检查</div>
+  <div class="grid g2">
+    <div class="card">
+      <div class="card-title">V5.0 架构合规</div>
+      <table>
+        <tr><th>检查项</th><th>结果</th></tr>
+        <tr><td>DirectExecutor 已移除</td><td><span class="badge pass">✓ 已移除</span></td></tr>
+        <tr><td>FC Loop 已移除</td><td><span class="badge pass">✓ 已移除</span></td></tr>
+        <tr><td>ToolExecutor/ToolManager 已移除</td><td><span class="badge pass">✓ 已移除</span></td></tr>
+        <tr><td>SkillBridge 已移除</td><td><span class="badge pass">✓ 已移除</span></td></tr>
+        <tr><td>src/tools/ 目录已移除</td><td><span class="badge pass">✓ 已移除</span></td></tr>
+        <tr><td>SelfHealingEngine 已移除</td><td><span class="badge pass">✓ 已移除</span></td></tr>
+        <tr><td>SelfRefactorEngine 已移除</td><td><span class="badge pass">✓ 已移除</span></td></tr>
+        <tr><td>破窗 import 引用</td><td><span class="badge pass">✓ 0 处</span></td></tr>
+        <tr><td>统一执行路径</td><td><span class="badge pass">✓ Core→Harness</span></td></tr>
+        <tr><td>bootstrap registerCoreSkills 死引用</td><td><span class="badge pass">✓ 已修复</span></td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <div class="card-title">前端设计系统合规</div>
+      <table>
+        <tr><th>检查项</th><th>结果</th></tr>
+        <tr><td>硬编码 CSS 颜色 (非 variables.css)</td><td><span class="badge pass">✓ 0 处</span></td></tr>
+        <tr><td>CSS 变量统一</td><td><span class="badge pass">✓ 29 文件</span></td></tr>
+        <tr><td>暗色/亮色主题切换</td><td><span class="badge pass">✓ 完整</span></td></tr>
+        <tr><td>间距系统 (s-1~s-10)</td><td><span class="badge pass">✓ 统一</span></td></tr>
+        <tr><td>圆角系统 (r-sm~r-xl)</td><td><span class="badge pass">✓ 统一</span></td></tr>
+        <tr><td>字体系统 (--font/--font-mono)</td><td><span class="badge pass">✓ 统一</span></td></tr>
+        <tr><td>WebSocket 事件覆盖</td><td><span class="badge pass">✓ 12/12</span></td></tr>
+        <tr><td>API 覆盖率</td><td><span class="badge pass">✓ 10/12 (83%)</span></td></tr>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 5. 模块统计 ═══ -->
+<div class="section">
+  <div class="section-title">5. 模块文件统计</div>
+  <div class="card">
+    <table>
+      <tr><th>模块</th><th>文件数</th><th>占比</th><th>可视化</th></tr>
+      <tr><td>harness/ (六层核心)</td><td>40</td><td>15.2%</td><td><div class="bar" style="width:200px"><div class="bar-fill green" style="width:15.2%"></div></div></td></tr>
+      <tr><td>memory/ (记忆系统)</td><td>26</td><td>9.9%</td><td><div class="bar" style="width:200px"><div class="bar-fill accent" style="width:9.9%"></div></div></td></tr>
+      <tr><td>desktop/ (桌面控制)</td><td>16</td><td>6.1%</td><td><div class="bar" style="width:200px"><div class="bar-fill blue" style="width:6.1%"></div></div></td></tr>
+      <tr><td>models/ (LLM模型)</td><td>12</td><td>4.6%</td><td><div class="bar" style="width:200px"><div class="bar-fill accent" style="width:4.6%"></div></div></td></tr>
+      <tr><td>core/ (核心引擎)</td><td>12</td><td>4.6%</td><td><div class="bar" style="width:200px"><div class="bar-fill green" style="width:4.6%"></div></div></td></tr>
+      <tr><td>security/ (安全系统)</td><td>9</td><td>3.4%</td><td><div class="bar" style="width:200px"><div class="bar-fill red" style="width:3.4%"></div></div></td></tr>
+      <tr><td>evolution/ (进化引擎)</td><td>7</td><td>2.7%</td><td><div class="bar" style="width:200px"><div class="bar-fill accent" style="width:2.7%"></div></div></td></tr>
+      <tr><td>integration/ (集成网关)</td><td>11</td><td>4.2%</td><td><div class="bar" style="width:200px"><div class="bar-fill blue" style="width:4.2%"></div></div></td></tr>
+    </table>
+  </div>
+</div>
+
+<!-- ═══ 6. 重构成果 ═══ -->
+<div class="section">
+  <div class="section-title">6. 重构成果数据</div>
+  <div class="grid g3">
+    <div class="card">
+      <div class="card-title">大文件拆分</div>
+      <table>
+        <tr><th>文件</th><th>原行数</th><th>现行数</th><th>缩减</th></tr>
+        <tr><td>DeviceManager</td><td>1357</td><td>713</td><td style="color:var(--green)">-47%</td></tr>
+        <tr><td>StateSnapshotManager</td><td>1146</td><td>680</td><td style="color:var(--green)">-40%</td></tr>
+        <tr><td>UserProfileSystem</td><td>1019</td><td>628</td><td style="color:var(--green)">-38%</td></tr>
+        <tr><td>DesktopUIInspector</td><td>908</td><td>481</td><td style="color:var(--green)">-47%</td></tr>
+        <tr><td>SecurityManager</td><td>847</td><td>592</td><td style="color:var(--green)">-30%</td></tr>
+        <tr><td>MultiModelLLMProvider</td><td>865</td><td>605</td><td style="color:var(--green)">-30%</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <div class="card-title">死代码清除</div>
+      <table>
+        <tr><th>来源</th><th>行数</th></tr>
+        <tr><td>systemStateRoutes.ts (进化循环API)</td><td style="color:var(--red)">-227</td></tr>
+        <tr><td>EventBus.ts (残留接口)</td><td style="color:var(--red)">-35</td></tr>
+        <tr><td>EvolutionOrchestrator.ts (已删引擎方法)</td><td style="color:var(--red)">-150</td></tr>
+        <tr><td>DesktopVisionEngine.ts (已删VisionEngine)</td><td style="color:var(--red)">-40</td></tr>
+        <tr><td>InteractionEngine.ts (已删依赖)</td><td style="color:var(--red)">-30</td></tr>
+        <tr><td>bootstrap.ts (死引用)</td><td style="color:var(--red)">-1</td></tr>
+        <tr><td><strong>合计</strong></td><td style="color:var(--red);font-weight:700">-483</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <div class="card-title">CSS 统一化</div>
+      <table>
+        <tr><th>指标</th><th>值</th></tr>
+        <tr><td>修复组件数</td><td>12 个 CSS 文件</td></tr>
+        <tr><td>硬编码颜色残留</td><td style="color:var(--green)">0 处</td></tr>
+        <tr><td>不存在的 CSS 变量</td><td style="color:var(--green)">0 处</td></tr>
+        <tr><td>设计系统变量覆盖</td><td>100%</td></tr>
+        <tr><td>主题切换支持</td><td>暗色 + 亮色</td></tr>
+      </table>
+    </div>
+  </div>
+</div>
+
+<p class="timestamp">审计时间: 2026-05-25 · Jiabaixing V5.0 Harness Agent Framework</p>
+
+</body>
+</html>

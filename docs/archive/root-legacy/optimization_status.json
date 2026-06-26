@@ -1,0 +1,35 @@
+{
+  "tsErrors": {
+    "total": 45,
+    "bigFileErrors": 12,
+    "smallFileErrors": 33
+  },
+  "tests": {
+    "pass": 1213,
+    "fail": 143,
+    "skip": 71,
+    "passRate": "85.0%"
+  },
+  "lint": {
+    "warnings": 87,
+    "errors": 0
+  },
+  "asUnknownAs": {
+    "total": 69,
+    "bigFileCount": 8,
+    "smallFileCount": 61
+  },
+  "anyTypeUsage": {
+    "total": 6,
+    "bigFileCount": 0,
+    "smallFileCount": 6
+  },
+  "fileStats": {
+    "totalFiles": 290,
+    "bigFiles": 12,
+    "totalLines": 2172000,
+    "nonEmptyLines": 1629000
+  },
+  "timestamp": "2026-05-25T00:00:00.000Z",
+  "note": "由于 Node.js/npm 环境限制，此报告基于静态分析生成，而非完整编译测试"
+}

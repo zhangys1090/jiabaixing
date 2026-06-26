@@ -1,0 +1,558 @@
+这是为您生成的 jiabaixing 开发演化文档，一个可直接运行的 HTML 文件。它梳理了当前已有能力、明确标注了缺失模块，并以 OpenClaw/Manus 为参照规划了从“桌面具身”到“多模型路由”的完整进化路径。
+```html
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>jiabaixing 开发文档 · 演化路线图</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #c9d1d9;
+    --text-secondary: #8b949e;
+    --accent: #f78166;
+    --accent2: #58a6ff;
+    --green: #3fb950;
+    --yellow: #d2991d;
+    --red: #f85149;
+    --radius: 12px;
+    --max-width: 1200px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    line-height: 1.6;
+    padding: 2rem 1rem;
+  }
+  .container {
+    max-width: var(--max-width);
+    margin: 0 auto;
+  }
+  h1 {
+    font-size: 2.5rem;
+    margin-bottom: 0.5rem;
+    background: linear-gradient(135deg, #f78166, #58a6ff);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .subtitle {
+    color: var(--text-secondary);
+    font-size: 1.1rem;
+    margin-bottom: 2rem;
+    border-left: 3px solid var(--accent);
+    padding-left: 1rem;
+  }
+  h2 {
+    font-size: 1.6rem;
+    margin: 2.5rem 0 1rem;
+    padding-bottom: 0.3rem;
+    border-bottom: 2px solid var(--border);
+    color: var(--accent2);
+  }
+  h3 {
+    font-size: 1.2rem;
+    margin: 1.5rem 0 0.8rem;
+    color: var(--accent);
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+  }
+  th, td {
+    text-align: left;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--border);
+  }
+  th {
+    background: #1c2129;
+    color: var(--text-secondary);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.8rem;
+    letter-spacing: 0.05em;
+  }
+  .badge {
+    display: inline-block;
+    padding: 0.2rem 0.7rem;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 600;
+  }
+  .badge-yes { background: #1a3a2a; color: var(--green); }
+  .badge-miss { background: #3a1a1a; color: var(--red); }
+  .badge-plan { background: #3a3510; color: var(--yellow); }
+  .evolution-timeline {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin: 2rem 0;
+  }
+  .phase {
+    flex: 1 1 200px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem;
+    position: relative;
+  }
+  .phase h4 {
+    color: var(--accent2);
+    margin-bottom: 0.5rem;
+  }
+  .phase ul {
+    list-style: none;
+    padding: 0;
+  }
+  .phase li {
+    padding: 0.2rem 0;
+    font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+  .phase li::before {
+    content: "▹";
+    color: var(--accent);
+  }
+  .arrow {
+    display: flex;
+    align-items: center;
+    font-size: 1.5rem;
+    color: var(--border);
+    flex-shrink: 0;
+  }
+  .reference-box {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1rem;
+    margin: 1.5rem 0;
+  }
+  .ref-card {
+    background: #1c2129;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem;
+  }
+  .ref-card h4 {
+    color: var(--accent2);
+  }
+  .goal-matrix {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+  }
+  @media (max-width: 700px) {
+    .goal-matrix { grid-template-columns: 1fr; }
+    .evolution-timeline { flex-direction: column; }
+    .arrow { display: none; }
+  }
+  code {
+    background: #1c2129;
+    padding: 0.2rem 0.4rem;
+    border-radius: 4px;
+    font-size: 0.9em;
+  }
+  .callout {
+    border-left: 4px solid var(--accent);
+    background: #1c2129;
+    padding: 1rem;
+    margin: 1.5rem 0;
+    border-radius: 0 var(--radius) var(--radius) 0;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>🤖 jiabaixing 开发文档</h1>
+<div class="subtitle">
+  本地优先的 AI 具身 Agent · 演化蓝图 v2.0<br>
+  参考 OpenClaw / Manus 能力模型，规划从“浏览器内的手”到“全桌面具身智能”的完整路径。
+</div>
+
+<!-- 当前架构 -->
+<h2>🏗️ 当前架构总览</h2>
+<div class="card">
+  <p><strong>jiabaixing</strong> 采用单一御姐秘书人格 + 技能插件架构，核心大脑为 <code>AgentLoop</code> 配合 <code>TaskDecomposer</code>，调度 22 个已注册技能。记忆引擎 (<code>MemoryEngine</code>) 提供长期/短期记忆与用户画像，进化引擎 (<code>RealTimeFeedbackLoop</code>) 实现每次交互后的自我优化。</p>
+  <div style="display:flex; flex-wrap:wrap; gap:1rem; margin-top:1rem;">
+    <div style="flex:1; min-width:200px;">
+      <h3>🧠 大脑与调度</h3>
+      <ul>
+        <li>IntelligentIntentRecognizer (18个二级意图)</li>
+        <li>AgentLoop 状态机 + TaskDecomposer</li>
+        <li>EnhancedSkillExecutor (重试/回退/超时)</li>
+        <li>AgentSelfReflection 自我反思</li>
+      </ul>
+    </div>
+    <div style="flex:1; min-width:200px;">
+      <h3>💾 记忆与人格</h3>
+      <ul>
+        <li>MemoryEngine (SQLite + Chroma 向量)</li>
+        <li>UserProfile 五维画像</li>
+        <li>PersonaCore + PersonaRules (场景语气)</li>
+        <li>LLMContextBuilder 智能记忆过滤</li>
+      </ul>
+    </div>
+    <div style="flex:1; min-width:200px;">
+      <h3>🖐️ 现有“手”与“眼”</h3>
+      <ul>
+        <li>PlaywrightSkill (浏览器操控+截图)</li>
+        <li>VisionEngine (图像分析/OCR)</li>
+        <li>FileSkill + CommandSkill</li>
+        <li>DockerSandbox 代码执行</li>
+        <li>IDESkill (VS Code/Cursor 集成)</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- 已实现 vs 缺失 功能对比 -->
+<h2>📊 功能矩阵：已有 vs 缺失 vs 规划</h2>
+<div class="card">
+<table>
+  <thead>
+    <tr><th>功能域</th><th>子能力</th><th>当前状态</th><th>说明</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td rowspan="3"><strong>浏览器操控</strong></td>
+      <td>页面导航、点击、填表</td>
+      <td><span class="badge badge-yes">✅ 已实现</span></td>
+      <td>PlaywrightSkill，支持多标签、等待选择器</td>
+    </tr>
+    <tr>
+      <td>网页截图、PDF 生成</td>
+      <td><span class="badge badge-yes">✅ 已实现</span></td>
+      <td>可全页截图、可视区域截图、元素截图</td>
+    </tr>
+    <tr>
+      <td>网络请求拦截、Cookie 管理</td>
+      <td><span class="badge badge-yes">✅ 已实现</span></td>
+      <td>Playwright 原生能力</td>
+    </tr>
+    <tr>
+      <td rowspan="3"><strong>图像/视觉理解</strong></td>
+      <td>图片内容描述、物体检测</td>
+      <td><span class="badge badge-yes">✅ 已实现</span></td>
+      <td>VisionEngine + Qwen 2.5 VL 多模态模型</td>
+    </tr>
+    <tr>
+      <td>OCR 文本提取</td>
+      <td><span class="badge badge-yes">✅ 已实现</span></td>
+      <td>支持中英文混合识别</td>
+    </tr>
+    <tr>
+      <td>屏幕实时像素分析（桌面级）</td>
+      <td><span class="badge badge-miss">❌ 缺失</span></td>
+      <td>目前仅限浏览器内截图，无系统级屏幕捕获</td>
+    </tr>
+    <tr>
+      <td rowspan="3"><strong>文件与命令</strong></td>
+      <td>本地文件读写、搜索</td>
+      <td><span class="badge badge-yes">✅ 已实现</span></td>
+      <td>FileSkill + SearchSkill，支持正则和 glob</td>
+    </tr>
+    <tr>
+      <td>终端命令执行</td>
+      <td><span class="badge badge-yes">✅ 已实现</span></td>
+      <td>CommandSkill，安全红线校验 + 沙箱</td>
+    </tr>
+    <tr>
+      <td>代码执行与调试</td>
+      <td><span class="badge badge-yes">✅ 已实现</span></td>
+      <td>DockerSandbox 隔离运行</td>
+    </tr>
+    <tr>
+      <td rowspan="4"><strong>桌面自动化 (具身)</strong></td>
+      <td>系统级屏幕像素抓取</td>
+      <td><span class="badge badge-miss">❌ 缺失</span></td>
+      <td>需引入桌面截屏 API (Win/macOS)</td>
+    </tr>
+    <tr>
+      <td>桌面 UI 控件树抓取</td>
+      <td><span class="badge badge-miss">❌ 缺失</span></td>
+      <td>Windows UI Automation / macOS Accessibility</td>
+    </tr>
+    <tr>
+      <td>系统级鼠标键盘模拟</td>
+      <td><span class="badge badge-miss">❌ 缺失</span></td>
+      <td>需 RobotJS / nut.js / pyautogui 层</td>
+    </tr>
+    <tr>
+      <td>桌面自动化编排 (RPA)</td>
+      <td><span class="badge badge-miss">❌ 缺失</span></td>
+      <td>结合屏幕识别 + 控件树 + 输入模拟</td>
+    </tr>
+    <tr>
+      <td rowspan="2"><strong>状态与容错</strong></td>
+      <td>任务状态快照 (checkpoint)</td>
+      <td><span class="badge badge-miss">❌ 缺失</span></td>
+      <td>无法中断后从断点恢复</td>
+    </tr>
+    <tr>
+      <td>执行历史回溯/撤销</td>
+      <td><span class="badge badge-miss">❌ 缺失</span></td>
+      <td>需要记录每个操作的可逆信息</td>
+    </tr>
+    <tr>
+      <td rowspan="2"><strong>模型路由</strong></td>
+      <td>多模型并行/切换</td>
+      <td><span class="badge badge-miss">❌ 缺失</span></td>
+      <td>目前仅对接 LLM.server (Qwen 2.5 3B)</td>
+    </tr>
+    <tr>
+      <td>云端大模型 backup</td>
+      <td><span class="badge badge-miss">❌ 缺失</span></td>
+      <td>无法在本地模型不可用时自动切换</td>
+    </tr>
+    <tr>
+      <td rowspan="2"><strong>感知输入</strong></td>
+      <td>语音识别</td>
+      <td><span class="badge badge-yes">✅ 已实现</span></td>
+      <td>Whisper 本地语音转文字</td>
+    </tr>
+    <tr>
+      <td>实时音视频流</td>
+      <td><span class="badge badge-plan">🔮 规划中</span></td>
+      <td>摄像头/麦克风连续输入，目前仅静态文件</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<!-- 演化路线图 -->
+<h2>🛤️ 演化路线图</h2>
+<div class="evolution-timeline">
+  <div class="phase">
+    <h4>Phase 1 · 已达成</h4>
+    <ul>
+      <li>Agent 闭环 (8步循环)</li>
+      <li>22 技能注册与调度</li>
+      <li>记忆引擎 + 用户画像</li>
+      <li>浏览器操控 (Playwright)</li>
+      <li>文件/命令执行</li>
+      <li>Vision 图像理解</li>
+      <li>IDE 集成 (VS Code)</li>
+    </ul>
+    <p style="color:var(--green); margin-top:0.5rem;">🟢 已完成</p>
+  </div>
+  <div class="arrow">→</div>
+  <div class="phase">
+    <h4>Phase 2 · 桌面具身</h4>
+    <ul>
+      <li>系统级屏幕截取 (PIL/mss)</li>
+      <li>像素级 UI 识别 (YOLO/模板匹配)</li>
+      <li>Windows UI Automation 接入</li>
+      <li>macOS Accessibility API</li>
+      <li>鼠标键盘模拟 (nut.js/RobotJS)</li>
+      <li>基础 RPA 动作库</li>
+    </ul>
+    <p style="color:var(--yellow); margin-top:0.5rem;">🟡 当前焦点</p>
+  </div>
+  <div class="arrow">→</div>
+  <div class="phase">
+    <h4>Phase 3 · 可靠性增强</h4>
+    <ul>
+      <li>状态快照 & 检查点</li>
+      <li>执行回溯 / 撤销栈</li>
+      <li>异常自动恢复</li>
+      <li>操作审计与回放</li>
+      <li>多步骤事务</li>
+    </ul>
+    <p style="color:var(--text-secondary);">⚪ 规划中</p>
+  </div>
+  <div class="arrow">→</div>
+  <div class="phase">
+    <h4>Phase 4 · 多模型路由</h4>
+    <ul>
+      <li>模型注册与健康检查</li>
+      <li>任务难度 → 模型选择</li>
+      <li>本地 Ollama / llama.cpp</li>
+      <li>云端 GPT-4o / Claude 3.7</li>
+      <li>故障转移 & 负载均衡</li>
+    </ul>
+    <p style="color:var(--text-secondary);">⚪ 规划中</p>
+  </div>
+  <div class="arrow">→</div>
+  <div class="phase">
+    <h4>Phase 5 · 全能具身</h4>
+    <ul>
+      <li>桌面全自动办公</li>
+      <li>多应用协同操控</li>
+      <li>持续视觉监控</li>
+      <li>自然语言驱动 RPA</li>
+      <li>跨设备协同 (手机/车机)</li>
+    </ul>
+    <p style="color:var(--accent2);">🌟 终极目标</p>
+  </div>
+</div>
+
+<!-- 参考对比 -->
+<h2>🔍 参考模型：OpenClaw / Manus 能力对齐</h2>
+<div class="reference-box">
+  <div class="ref-card">
+    <h4>OpenClaw 特点</h4>
+    <ul>
+      <li>跨平台桌面自动化 (Win/Mac/Linux)</li>
+      <li>像素级屏幕识别 + UI 控件树</li>
+      <li>多模型后端 (Ollama, OpenAI, Anthropic)</li>
+      <li>任务状态可回溯、可恢复</li>
+      <li>丰富的 Skill 生态 (MCP 协议)</li>
+    </ul>
+    <p style="margin-top:0.8rem; color:var(--text-secondary);">jiabaixing 当前对齐：技能架构、记忆、浏览器操控<br>差距：桌面具身、模型路由、状态快照</p>
+  </div>
+  <div class="ref-card">
+    <h4>Manus 特点</h4>
+    <ul>
+      <li>云端沙箱执行环境</li>
+      <li>浏览器 + 代码解释器 + 文件系统</li>
+      <li>ReAct 风格 Agent 循环</li>
+      <li>长时间任务异步执行</li>
+      <li>结果自动整理与交付</li>
+    </ul>
+    <p style="margin-top:0.8rem; color:var(--text-secondary);">jiabaixing 优势：本地隐私、人格统一、记忆深度<br>差距：云端弹性、任务异步持久化</p>
+  </div>
+</div>
+
+<!-- 未来开发重点 -->
+<h2>🎯 下一步开发重点 (2026 Q2-Q3)</h2>
+<div class="goal-matrix">
+  <div class="card">
+    <h3>🖥️ 桌面具身智能 (最高优先级)</h3>
+    <p>让 jiabaixing 真正拥有“手”和“脚”，能操控任何桌面应用。</p>
+    <ul>
+      <li>引入 <code>screenshot-desktop</code> / <code>mss</code> 获取全屏/区域截图</li>
+      <li>集成 <code>nut.js</code> 或 <code>@nut-tree/nut-js</code> 实现跨平台键鼠控制</li>
+      <li>Windows: 通过 <code>node-win32-automation</code> 或 PowerShell 调用 UIA</li>
+      <li>macOS: 调用 <code>osascript</code> / Accessibility API</li>
+      <li>构建 <code>DesktopSkill</code> 统一接口，注册到 SkillRegistry</li>
+      <li>实现“点击坐标(像素)”、“输入文本”、“拖拽”等原语</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>🔁 状态快照与回溯</h3>
+    <p>借鉴数据库事务思想，让每一步操作可逆、可恢复。</p>
+    <ul>
+      <li>定义 <code>Checkpoint</code> 数据结构（屏幕截图+控件树+文件清单）</li>
+      <li>每次关键操作前自动保存快照</li>
+      <li>实现 <code>rollback</code> 机制（恢复到上一个快照）</li>
+      <li>支持用户手动创建/命名检查点</li>
+      <li>长期存储检查点序列用于审计</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>🧭 多模型路由与故障转移</h3>
+    <p>不再依赖单一模型，根据任务难度和可用性智能选择。</p>
+    <ul>
+      <li>抽象 <code>ModelRouter</code> 层，管理多个后端</li>
+      <li>支持本地模型 (Ollama/llama.cpp) + 云端 (OpenAI/Claude)</li>
+      <li>基于意图复杂度自动路由：简单任务→本地，复杂推理→云端</li>
+      <li>健康检查 + 自动故障转移</li>
+      <li>成本追踪与使用统计</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>🤖 全自动办公 RPA 引擎</h3>
+    <p>自然语言描述办公流程，jiabaixing 自动执行。</p>
+    <ul>
+      <li>结合屏幕识别 + UI 控件树定位元素</li>
+      <li>录制与回放功能：用户示范一次，Agent 学会</li>
+      <li>异常弹窗自动处理（基于 Vision 识别）</li>
+      <li>跨应用工作流：Excel → 浏览器 → 邮件</li>
+      <li>定时任务与条件触发</li>
+    </ul>
+  </div>
+</div>
+
+<!-- 技术栈更新 -->
+<h2>🧰 计划引入的技术栈 (Phase 2-5)</h2>
+<div class="card">
+<table>
+  <thead><tr><th>技术</th><th>用途</th><th>对应阶段</th></tr></thead>
+  <tbody>
+    <tr><td><code>nut.js</code> / <code>@nut-tree/nut-js</code></td><td>跨平台键鼠模拟、屏幕捕获</td><td>Phase 2</td></tr>
+    <tr><td><code>screenshot-desktop</code></td><td>轻量级全屏/窗口截图</td><td>Phase 2</td></tr>
+    <tr><td><code>node-win32-automation</code> (Windows)</td><td>UIA 控件树抓取与操控</td><td>Phase 2</td></tr>
+    <tr><td><code>osascript</code> / <code>AXSwift</code> (macOS)</td><td>Accessibility API 桥接</td><td>Phase 2</td></tr>
+    <tr><td><code>better-sqlite3</code> (增强)</td><td>快照存储、检查点持久化</td><td>Phase 3</td></tr>
+    <tr><td><code>openai</code> / <code>@anthropic-ai/sdk</code></td><td>云端模型 API</td><td>Phase 4</td></tr>
+    <tr><td><code>ollama</code> (JS SDK)</td><td>本地模型管理接口</td><td>Phase 4</td></tr>
+    <tr><td><code>pino</code> / <code>opentelemetry</code></td><td>分布式追踪与审计日志</td><td>Phase 3</td></tr>
+  </tbody>
+</table>
+</div>
+
+<!-- 最终愿景 -->
+<h2>🌟 最终愿景：具身智能的本地 Agent</h2>
+<div class="callout">
+  <p style="font-size:1.1rem; margin:0;">
+    <strong>“AI 接管桌面，解放双手”</strong> —— jiabaixing 不仅能听懂你的话，还能像人一样操控电脑：打开软件、点击按钮、填写表单、分析屏幕上的数据。她拥有像素级的眼睛（屏幕识别）、灵巧的双手（键鼠模拟）、不眠不休的耐力（后台持续运行），以及永不忘记的记忆。一切都在你的本地完成，数据安全，隐私无忧。
+  </p>
+</div>
+
+<div class="card" style="margin-top:1rem;">
+  <h3>能力全景图 (目标状态)</h3>
+  <div style="display:flex; flex-wrap:wrap; gap:2rem; align-items:flex-start;">
+    <div>
+      <h4>🧠 认知层</h4>
+      <ul>
+        <li>多模型推理 (本地+云端)</li>
+        <li>长期记忆与用户画像</li>
+        <li>任务自动拆解与规划</li>
+        <li>自我反思与持续进化</li>
+      </ul>
+    </div>
+    <div>
+      <h4>👁️ 感知层</h4>
+      <ul>
+        <li>屏幕像素实时捕获</li>
+        <li>UI 控件树解析</li>
+        <li>图像/视频理解</li>
+        <li>语音识别与合成</li>
+      </ul>
+    </div>
+    <div>
+      <h4>🦾 执行层</h4>
+      <ul>
+        <li>系统级键鼠模拟</li>
+        <li>浏览器全自动操控</li>
+        <li>文件系统与命令行</li>
+        <li>IDE 深度集成</li>
+        <li>代码沙箱执行</li>
+      </ul>
+    </div>
+    <div>
+      <h4>🛡️ 保障层</h4>
+      <ul>
+        <li>状态快照与回溯</li>
+        <li>操作审计与回放</li>
+        <li>多因子安全认证</li>
+        <li>本地加密存储</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div style="margin: 3rem 0 2rem; text-align: center; color: var(--text-secondary);">
+  <p>jiabaixing · 本地优先 · 一个人格 · 持续演化</p>
+  <p style="font-size:0.9rem;">文档版本 2.0 · 2026-05 · 基于 OpenClaw & Manus 参考</p>
+</div>
+
+</div>
+</body>
+</html>
+```

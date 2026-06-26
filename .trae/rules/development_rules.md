@@ -128,8 +128,47 @@
 
 ### 3. 测试执行
 
+#### Python 侧测试（核心 AI 逻辑）
+
 ```bash
-# 运行所有测试
+# 运行全部 Python 测试（必须使用 Python 3.13）
+& "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m pytest tests/ -v
+
+# 运行特定模块测试
+& "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m pytest tests/test_llm.py -v
+& "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m pytest tests/test_memory.py -v
+& "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m pytest tests/test_core_loop.py -v
+
+# 运行特定测试用例（-k 关键字过滤）
+& "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m pytest tests/ -k "test_credential" -v
+
+# 运行测试并显示详细输出
+& "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m pytest tests/ -v --tb=long
+
+# 运行测试并生成覆盖率报告
+& "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m pytest tests/ --cov=agent --cov-report=term-missing
+```
+
+**Python 测试文件对应关系**：
+
+| 测试文件                   | 覆盖模块                                   | Phase   |
+| -------------------------- | ------------------------------------------ | ------- |
+| test_api.py                | API 基础端点                               | Phase 0 |
+| test_llm.py                | LLM Provider/Cache/Queue/Router            | Phase 1 |
+| test_memory.py             | Memory Engine/Store/Tokenizer              | Phase 2 |
+| test_loop.py               | Loop Controller/Planner/Executor/Evaluator | Phase 3 |
+| test_evolution.py          | Evolution Engine                           | Phase 4 |
+| test_phase5.py             | Skill/Cron/Session                         | Phase 5 |
+| test_phase6.py             | Context/Persona/Security                   | Phase 6 |
+| test_phase7.py             | Tool Registry                              | Phase 7 |
+| test_phase8_e2e.py         | 端到端集成                                 | Phase 8 |
+| test_core_loop.py          | ConversationLoop/Compressor/Curator        | Phase 9 |
+| test_p1_credential_cost.py | CredentialPool/CostGuard/PromptCache       | P1      |
+
+#### TypeScript 侧测试（前端/IDE 集成）
+
+```bash
+# 运行所有 TS 测试
 npm test
 
 # 运行特定测试
@@ -142,11 +181,73 @@ npm test -- --coverage
 npm test -- --watch
 ```
 
-### 4. 测试失败处理
+#### 混合架构测试（TS ↔ Python Bridge）
+
+```bash
+# 1. 启动 Python Agent 后端
+cd python
+& "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m uvicorn agent.main:app --port 8765
+
+# 2. 设置环境变量切换到 Python 后端
+$env:AGENT_BACKEND = "python"
+$env:PYTHON_AGENT_URL = "http://localhost:8765"
+
+# 3. 启动 TS 服务并验证 Bridge 通信
+npm start
+```
+
+### 4. 测试编写规范
+
+#### Python 测试规范
+
+- **测试文件命名**: `test_<模块名>.py`，放在 `python/tests/` 目录
+- **测试类命名**: `Test<功能名>`，如 `TestCredentialPool`、`TestPromptCacheManager`
+- **测试方法命名**: `test_<行为描述>`，如 `test_round_robin_rotates`、`test_exact_hit`
+- **数据库隔离**: 涉及 SQLite 的测试必须使用独立临时数据库，避免测试间数据残留
+
+  ```python
+  import tempfile, os, time
+
+  class TestPromptCacheManager:
+      _db_counter = 0
+
+      def _make_manager(self, ...):
+          TestPromptCacheManager._db_counter += 1
+          tmpdir = os.path.join(tempfile.gettempdir(), "jbx_pcache_test")
+          os.makedirs(tmpdir, exist_ok=True)
+          db_path = os.path.join(tmpdir, f"cache_{TestPromptCacheManager._db_counter}_{int(time.time()*1000)}.db")
+          store = PromptCacheStore(db_path)
+          ...
+  ```
+
+- **资源清理**: 测试结束前必须关闭数据库连接，避免 `PermissionError`
+  ```python
+  def test_with_database():
+      store = PromptCacheStore(db_path)
+      # ... 测试逻辑 ...
+      store.close()  # 必须显式关闭
+  ```
+- **异步测试**: 使用 `pytest.mark.asyncio` 装饰器
+  ```python
+  @pytest.mark.asyncio
+  async def test_async_function():
+      result = await some_async_operation()
+      assert result is not None
+  ```
+
+#### TypeScript 测试规范
+
+- **测试文件命名**: `<模块名>.test.ts`，放在对应模块的 `__tests__/` 目录
+- **测试框架**: Jest
+- **Mock 外部依赖**: 使用 `jest.mock()` 模拟 API 调用
+
+### 5. 测试失败处理
 
 - 测试失败时，禁止提交代码
 - 必须修复所有失败的测试
 - 如果测试本身有问题，先修复测试再提交
+- **Python 测试数据库残留问题**：若出现缓存命中异常，检查是否复用了同一数据库文件
+- **Windows 文件锁问题**：若出现 `PermissionError [WinError 32]`，确保测试中显式关闭了数据库连接
 
 ---
 
@@ -168,8 +269,24 @@ npm test -- --watch
 
 ### 3. 集成验证
 
+#### Python 侧集成验证
+
 ```bash
-# 运行完整测试套件
+# 运行完整 Python 测试套件
+cd c:\zy\jiabaixing\python
+& "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m pytest tests/ -v
+
+# 启动 Python Agent 服务
+& "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m uvicorn agent.main:app --port 8765 --reload
+
+# 验证健康检查
+Invoke-RestMethod http://localhost:8765/health
+```
+
+#### TypeScript 侧集成验证
+
+```bash
+# 运行完整 TS 测试套件
 npm test
 
 # 运行集成测试
@@ -181,6 +298,44 @@ npm run test:e2e
 # 启动系统验证
 npm start
 ```
+
+#### 混合架构集成验证
+
+```bash
+# 1. 启动 Python 后端
+cd c:\zy\jiabaixing\python
+& "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m uvicorn agent.main:app --port 8765
+
+# 2. 设置环境变量
+$env:AGENT_BACKEND = "python"
+$env:PYTHON_AGENT_URL = "http://localhost:8765"
+
+# 3. 启动 TS 前端
+cd c:\zy\jiabaixing
+npm start
+
+# 4. 验证 Bridge 通信
+# 在浏览器访问 http://localhost:3000/api/ide/sessions
+# 或通过 ACP 协议发送聊天请求
+```
+
+### 4. 混合架构模块归属
+
+| 层                       | 语言       | 模块                                      | 说明                               |
+| ------------------------ | ---------- | ----------------------------------------- | ---------------------------------- |
+| 前端/IDE                 | TypeScript | React + Electron + ACP                    | 用户界面                           |
+| HTTP/WS 入口             | TypeScript | Express + WebSocket                       | 请求路由                           |
+| Bridge                   | TypeScript | PythonAgentBridge                         | TS ↔ Python 通信                   |
+| LLM                      | Python     | agent/llm/                                | litellm + 缓存 + 凭据池 + 成本守卫 |
+| Memory                   | Python     | agent/memory/                             | SQLite FTS5 + jieba + 策展人       |
+| Loop                     | Python     | agent/loop/ + agent/core/                 | FC 循环 + 上下文压缩               |
+| Evolution                | Python     | agent/evolution/                          | V1+V2 合并引擎                     |
+| Skill/Cron/Session       | Python     | agent/skills/ + scheduler/ + persistence/ | 技能/定时/会话                     |
+| Context/Persona/Security | Python     | agent/core/                               | 上下文管道/人格/安全               |
+| Gateway                  | Python     | agent/gateway/                            | 多平台适配器                       |
+| Transport                | Python     | agent/llm/transports.py                   | 多 LLM 协议适配                    |
+| 桌面自动化               | TypeScript | nut.js/playwright                         | Node.js 原生                       |
+| 文件/系统工具            | TypeScript | harness/tools/                            | Node.js 文件系统                   |
 
 ---
 
@@ -254,7 +409,73 @@ try {
 - **常量**: UPPER_SNAKE_CASE (e.g., `MAX_RETRIES`)
 - **私有成员**: 下划线前缀 (e.g., `_privateMethod`)
 
-### 2. 注释规范
+### 2. 注释规范（强制执行）
+
+**所有类、公共方法、函数、接口必须有文档注释，否则不得提交。**
+
+#### 2.1 Python 注释规范
+
+- **所有类**: 必须有 `"""..."""` 文档注释，说明用途、属性和使用示例
+- **所有公共方法/函数**: 必须有 `"""..."""` 文档注释，包含参数说明、返回值说明和异常说明
+- **私有方法**: 复杂逻辑的私有方法也需要注释
+- **模块级常量**: 关键常量必须有行内注释说明含义
+- **复杂逻辑**: 必须有行内注释解释
+
+```python
+class LLMProvider:
+    """LLM提供者，管理多模型调用、缓存和容错。
+
+    集成凭据池轮换、成本守卫、Prompt缓存和传输层适配。
+
+    Attributes:
+        _models: 已注册的模型实例映射。
+        _credential_pool: API Key凭据池。
+        _cost_guard: 成本守卫实例。
+
+    Usage:
+        provider = LLMProvider()
+        response = await provider.chat("你好")
+    """
+
+    async def chat(self, prompt: str, system_prompt: str = "") -> str:
+        """发送聊天请求并返回LLM响应。
+
+        Args:
+            prompt: 用户输入文本。
+            system_prompt: 系统提示词。
+
+        Returns:
+            str: LLM生成的响应文本。
+
+        Raises:
+            LLMUnavailableError: 所有模型均不可用时抛出。
+            CostExceededError: 超出预算限制时抛出。
+        """
+        ...
+```
+
+#### 2.2 数据类注释规范
+
+```python
+@dataclass
+class TaskNode:
+    """任务节点定义，描述一个待执行的任务单元。
+
+    Attributes:
+        id: 任务唯一标识。
+        goal: 任务目标描述。
+        dependencies: 依赖的任务ID列表。
+        priority: 优先级（1-10，10最高）。
+        status: 当前状态（pending / running / completed / failed）。
+    """
+    id: str = ""
+    goal: str = ""
+    dependencies: list[str] = field(default_factory=list)
+    priority: int = 5
+    status: str = "pending"
+```
+
+#### 2.3 TypeScript 注释规范
 
 - **公共方法**: 必须有JSDoc注释
 - **复杂逻辑**: 必须有行内注释
@@ -274,6 +495,14 @@ public async generateResponse(input: string, options?: GenerateOptions): Promise
   // ...
 }
 ```
+
+#### 2.4 注释检查清单
+
+- [ ] 所有 class 有文档注释
+- [ ] 所有 public 方法有文档注释（含 Args/Returns/Raises）
+- [ ] 所有 @dataclass 有 Attributes 文档
+- [ ] 所有 Enum 有用途说明
+- [ ] 关键常量有行内注释
 
 ### 3. 代码组织
 
@@ -991,6 +1220,281 @@ npm run coverage       # 测试覆盖率
 
 ---
 
+## AI 生产级代码开发规范（强制执行版）
+
+> 所有 AI 生成的代码必须严格遵守本规范。违反规范的代码将被拒绝合并。
+
+---
+
+### 一、核心原则（最高优先级）
+
+| 原则             | 说明                                                   |
+| ---------------- | ------------------------------------------------------ |
+| 可读性优先于一切 | 代码是写给人看的，其次才是给机器执行的                 |
+| 安全第一         | 任何代码都必须首先考虑安全性，绝不生成有安全漏洞的代码 |
+| 简单就是美       | 避免过度设计，用最简单的方案解决问题                   |
+| 防御性编程       | 永远假设输入是恶意的，外部调用会失败                   |
+| 可维护性         | 代码应该易于修改、扩展和调试                           |
+| 可测试性         | 代码设计时就要考虑如何测试，避免不可测试的代码         |
+
+---
+
+### 二、代码风格与命名规范
+
+#### 2.1 通用命名规则
+
+- 使用 **英文** 命名，禁止使用拼音或混合语言
+- 命名必须 **有意义**，能够准确描述变量/函数/类的用途
+- 避免使用缩写，除非是行业通用缩写（如 ID、URL、HTTP）
+- 保持命名风格的一致性，同一项目中不混用多种风格
+
+#### 2.2 不同元素的命名规范
+
+| 元素类型          | 命名风格         | 示例                                    |
+| ----------------- | ---------------- | --------------------------------------- |
+| 类名/接口名       | PascalCase       | `UserService`, `HttpRequestHandler`     |
+| 方法名/函数名     | camelCase        | `getUserById`, `calculateTotalPrice`    |
+| 变量名/参数名     | camelCase        | `userId`, `orderList`, `isActive`       |
+| 常量名            | UPPER_SNAKE_CASE | `MAX_RETRY_COUNT`, `DEFAULT_TIMEOUT`    |
+| 枚举值            | UPPER_SNAKE_CASE | `OrderStatus.PENDING`, `HttpMethod.GET` |
+| 包名/模块名       | snake_case       | `user_service`, `data_processor`        |
+| 数据库表名/字段名 | snake_case       | `users`, `order_items`, `created_at`    |
+
+#### 2.3 代码格式规范
+
+- 使用 **4 个空格**缩进，禁止使用制表符
+- 每行代码长度不超过 **120 个字符**
+- 运算符前后必须有空格：`a = b + c`，而不是 `a=b+c`
+- 逗号后面必须有空格：`func(a, b, c)`，而不是 `func(a,b,c)`
+- 左大括号不换行，右大括号单独一行
+- 函数之间、逻辑块之间必须有空行分隔
+- 导入语句按标准库、第三方库、本地库分组，组之间有空行
+
+---
+
+### 三、架构与设计规范
+
+#### 3.1 分层架构要求
+
+严格遵循分层架构，每层只能调用下一层的方法，禁止反向调用和跨层调用：
+
+| 层         | 职责                                    |
+| ---------- | --------------------------------------- |
+| 表现层     | 处理 HTTP 请求/响应，参数校验，结果封装 |
+| 业务逻辑层 | 实现核心业务逻辑，事务管理              |
+| 数据访问层 | 与数据库交互，封装 CRUD 操作            |
+| 基础设施层 | 提供通用功能（如日志、缓存、消息队列）  |
+
+#### 3.2 设计原则
+
+- **单一职责原则**: 一个类/函数只负责一件事
+- **开闭原则**: 对扩展开放，对修改关闭
+- **依赖倒置原则**: 依赖抽象，不依赖具体实现
+- **接口隔离原则**: 使用小而专一的接口，不使用大而全的接口
+- **里氏替换原则**: 子类可以替换父类而不影响程序正确性
+
+#### 3.3 代码组织规范
+
+- 按功能模块划分包/目录，而不是按技术层划分
+- 每个模块内部再按技术层划分子目录
+- 避免出现过大的类（超过 500 行）和过长的函数（超过 50 行）
+- 提取公共代码到工具类，避免代码重复
+- 使用依赖注入管理对象依赖，避免硬编码依赖
+
+---
+
+### 四、安全性规范（绝对强制执行）
+
+#### 4.1 输入验证
+
+- **所有外部输入必须验证**: 包括请求参数、路径变量、请求头、Cookie
+- 使用**白名单验证**，而不是黑名单验证
+- 验证数据类型、长度、格式和范围
+- 对特殊字符进行转义或过滤
+- 禁止将未验证的输入直接拼接到 SQL、命令行或 HTML 中
+
+#### 4.2 防注入攻击
+
+- **必须使用参数化查询**，禁止拼接 SQL 语句
+- 使用 ORM 框架时，禁止使用原生 SQL 拼接
+- 禁止使用 `eval()`、`exec()` 等执行动态代码的函数
+- 对命令行参数进行严格验证和转义
+- 对 XML 输入进行 XXE 防护
+
+#### 4.3 认证与授权
+
+- 所有需要认证的接口必须添加认证拦截器
+- 实现基于角色的访问控制（RBAC）
+- 敏感操作需要二次验证
+- 密码必须使用强哈希算法（如 bcrypt）存储，禁止明文存储
+- 实现会话管理和令牌过期机制
+
+#### 4.4 其他安全要求
+
+- 禁止在代码中硬编码敏感信息（如密码、密钥、令牌）
+- 敏感信息在日志中必须脱敏
+- 实现防止 CSRF 攻击的机制
+- 实现防止暴力破解的机制（如限流、锁定）
+- 定期更新依赖库，修复已知的安全漏洞
+
+---
+
+### 五、错误处理与日志规范
+
+#### 5.1 错误处理原则
+
+- **不要忽略任何异常**，至少要记录日志
+- 使用异常处理错误，而不是返回码
+- 捕获具体的异常类型，而不是捕获所有异常
+- 在合适的层级处理异常，不要过度捕获
+- 向用户返回友好的错误信息，不要暴露系统内部细节
+
+#### 5.2 异常处理规范
+
+- 自定义业务异常类，区分不同类型的业务错误
+- 统一异常处理机制，使用全局异常处理器
+- 异常信息应该包含：错误码、错误消息、上下文信息
+- 在异常中包含足够的信息，便于问题定位
+- 避免在循环中捕获异常
+
+#### 5.3 日志规范
+
+| 级别  | 用途                               |
+| ----- | ---------------------------------- |
+| DEBUG | 开发调试信息，生产环境关闭         |
+| INFO  | 系统运行状态、重要操作记录         |
+| WARN  | 警告信息，不影响系统运行但需要关注 |
+| ERROR | 错误信息，影响系统正常运行         |
+| FATAL | 致命错误，系统无法继续运行         |
+
+- 使用结构化日志格式（如 JSON）
+- 日志必须包含：时间戳、日志级别、线程名、类名、方法名、消息内容
+- 敏感信息必须脱敏后再记录
+- 避免在循环中打印大量日志
+
+---
+
+### 六、性能与可靠性规范
+
+#### 6.1 数据库性能
+
+- 为所有查询条件添加合适的索引
+- 避免全表扫描，避免使用 `SELECT *`
+- 批量操作代替循环单条操作
+- 合理使用分页查询，避免查询大量数据
+- 对热点数据使用缓存
+- 避免长事务，事务范围尽可能小
+
+#### 6.2 接口性能
+
+- 接口响应时间原则上不超过 500ms
+- 避免在接口中进行复杂计算或大量 IO 操作
+- 使用异步处理非核心业务逻辑
+- 实现接口限流机制，防止系统过载
+- 避免重复调用相同的接口或查询相同的数据
+
+#### 6.3 可靠性要求
+
+- 实现重试机制，处理临时故障
+- 实现熔断机制，防止故障扩散
+- 实现降级机制，保证核心功能可用
+- 关键操作必须有幂等性保证
+- 实现健康检查接口，便于监控系统监控
+
+---
+
+### 七、测试规范
+
+#### 7.1 单元测试要求
+
+- 所有业务逻辑代码必须编写单元测试
+- 单元测试覆盖率不低于 80%
+- 测试用例应该覆盖正常情况、边界情况和异常情况
+- 使用模拟对象隔离外部依赖
+- 单元测试应该独立、可重复、快速执行
+
+#### 7.2 集成测试要求
+
+- 编写集成测试验证模块之间的交互
+- 编写接口测试验证 API 的正确性
+- 测试环境应该与生产环境尽可能一致
+- 自动化测试应该集成到 CI/CD 流程中
+
+#### 7.3 测试代码规范
+
+- 测试代码也需要遵循代码风格规范
+- 测试方法名应该清晰描述测试场景
+- 每个测试方法只测试一个场景
+- 使用断言验证结果，不要使用打印语句
+- 测试数据应该在测试方法内部准备和清理
+
+---
+
+### 八、文档规范
+
+#### 8.1 代码注释
+
+- 注释应该解释 **"为什么"**，而不是 **"做什么"**
+- 为所有公共类、公共方法添加文档注释
+- 文档注释应该包含：功能描述、参数说明、返回值说明、异常说明
+- 复杂的业务逻辑需要添加行内注释
+- 及时更新注释，避免注释与代码不一致
+
+#### 8.2 项目文档
+
+- 项目必须有 README.md 文件，包含：项目介绍、环境要求、安装部署步骤、使用说明
+- 编写 API 文档，使用 OpenAPI 规范
+- 编写数据库设计文档
+- 编写架构设计文档
+- 编写部署运维文档
+
+---
+
+### 九、版本控制规范
+
+- 提交信息必须清晰、有意义，使用 `类型：描述` 格式
+- 提交类型包括：`feat`、`fix`、`docs`、`style`、`refactor`、`test`、`chore`
+- 每次提交只做一件事，避免一次提交包含多个不相关的修改
+- 禁止直接提交到主分支，使用分支开发、合并请求的方式
+- 合并前必须进行代码审查
+- 使用语义化版本号：主版本号.次版本号.修订号
+
+---
+
+### 十、AI 辅助开发特殊要求
+
+| 要求                 | 说明                                     |
+| -------------------- | ---------------------------------------- |
+| 先理解需求再写代码   | 如果需求不明确，先询问清楚               |
+| 先设计再编码         | 先给出整体设计思路和架构，再编写具体代码 |
+| 生成完整可运行的代码 | 不要只生成代码片段                       |
+| 添加必要的注释       | 为复杂逻辑添加注释                       |
+| 说明代码的优缺点     | 如果有多种实现方案，说明各自的优缺点     |
+| 指出潜在的问题       | 指出代码中可能存在的问题和风险           |
+| 提供测试用例         | 为生成的代码提供对应的测试用例           |
+| 遵循已有代码风格     | 如果有已有代码，遵循已有代码的风格和规范 |
+
+---
+
+### 十一、违规处理
+
+#### 轻微违规
+
+- **警告**: 提醒开发者注意规则
+- **要求**: 修复问题后重新提交
+
+#### 严重违规
+
+- **拒绝**: 拒绝合并代码
+- **要求**: 重新开发符合规则的代码
+
+#### 重复违规
+
+- **限制**: 限制提交权限
+- **培训**: 要求重新学习开发规则
+
+---
+
 ## 总结
 
 ### 核心原则
@@ -1001,6 +1505,8 @@ npm run coverage       # 测试覆盖率
 4. **端到端验证** - 验证完整的用户流程
 5. **安全第一** - 始终考虑安全性
 6. **团队协作** - 保持良好的团队沟通和协作
+7. **可读性优先** - 代码是写给人看的
+8. **防御性编程** - 永远假设输入是恶意的
 
 ### 开发流程
 
@@ -1016,6 +1522,8 @@ npm run coverage       # 测试覆盖率
 - ✅ 代码审查通过
 - ✅ 安全检查通过
 - ✅ 性能指标达标
+- ✅ 命名规范符合标准
+- ✅ 错误处理完整
 
 ### 持续改进
 
@@ -1026,7 +1534,7 @@ npm run coverage       # 测试覆盖率
 
 ---
 
-**规则版本**: 2.0
-**生效日期**: 2026-05-17
+**规则版本**: 3.0
+**生效日期**: 2026-06-23
 **维护者**: 开发团队
-**最后更新**: 2026-05-17
+**最后更新**: 2026-06-23（新增 AI 生产级代码开发规范强制执行版 + 架构/安全/性能/测试/文档/版本控制规范）

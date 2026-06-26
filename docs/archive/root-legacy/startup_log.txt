@@ -1,0 +1,185 @@
+﻿2026-05-19 08:42:19 [31merror[39m:  ❌ 性能指标数据库初始化失败:
+
+
+  ===========================================================
+  |                                                         |
+  |   jiabaixing v2.0                                       |
+  |                                                         |
+  ===========================================================
+
+  🚀 启动中...
+
+  🧠 核心引擎... 2026-05-19 08:42:23 [32minfo[39m: [LLMProvider] 🔌 使用 OpenAI 兼容模式
+2026-05-19 08:42:23 [33mwarn[39m: [AgentSelfReflection] 自我反思数据加载失败
+✅
+  🔒 安全模块... 2026-05-19 08:42:23 [32minfo[39m: [NetworkGuard] ✅ 网络守卫：出站白名单已安装，仅允许本地请求
+2026-05-19 08:42:23 [32minfo[39m: [DataSovereigntyPipeline] ✅ 数据主权审计管道已初始化
+✅
+  💾 数据库... WorkerPool initialized with 4 workers
+2026-05-19 08:42:23 [32minfo[39m: [MemoryDatabase] MemoryDatabase: 初始化完成
+2026-05-19 08:42:23 [32minfo[39m: [LongTermMemory] ✅ 长期记忆：SQLite降级存储已初始化
+2026-05-19 08:42:23 [33mwarn[39m: [UserProfile] ⚠️ 加载用户画像失败，使用默认值
+2026-05-19 08:42:24 [32minfo[39m: [VectorDatabaseFactory] 创建内存向量数据库
+2026-05-19 08:42:24 [33mwarn[39m: [MemoryEngine] ⚠️ 记忆加密：密钥加载失败，使用内存密钥
+✅
+  🎭 交互模块... 2026-05-19 08:42:25 [33mwarn[39m: [SpeechSynthesizer] ⚠️ Coqui TTS Python 环境不可用，语音合成将使用本地 mock 模式
+2026-05-19 08:42:25 [32minfo[39m: [SpeechSynthesizer] 🔊 语音合成器初始化完成 [服务: local, Coqui: 不可用]
+✅
+  🔧 工具系统... 2026-05-19 08:42:25 [32minfo[39m:  📂 已从数据库加载 5 个工具权重
+2026-05-19 08:42:25 [32minfo[39m:  ✅ ToolRecommendationEngine: 权重持久化已就绪，权重已加载
+WorkerPool initialized with 4 workers
+2026-05-19 08:42:25 [33mwarn[39m: [DockerSandbox] Docker 不可用，将使用 vm2 降级方案
+2026-05-19 08:42:25 [32minfo[39m: [SandboxManager] 🔒 沙箱管理器初始化: Docker=false, vm2=true
+2026-05-19 08:42:25 [31merror[39m: [CodeSearchEngine] 代码搜索引擎初始化失败
+2026-05-19 08:42:25 [32minfo[39m: [WebSearchEngine] Web 搜索引擎初始化完成
+2026-05-19 08:42:25 [32minfo[39m: [ToolExecutor] 已注册 18 个工具
+2026-05-19 08:42:25 [32minfo[39m: [ToolExecutor] 🧹 工具执行器定期清理任务已启动
+2026-05-19 08:42:25 [32minfo[39m: [Skills] 已注册 25 个技能
+2026-05-19 08:42:25 [32minfo[39m: [SkillBridge] 🔗 SkillBridge 已绑定 ToolExecutor
+2026-05-19 08:42:25 [32minfo[39m: [SkillBridge] 🔗 SkillBridge 已同步 17/18 个工具到 SkillRegistry
+✅
+  🧠 推理引擎... 2026-05-19 08:42:25 [32minfo[39m: [PersonaEngine] PersonaEngine 初始化完成
+2026-05-19 08:42:25 [33mwarn[39m: [SpeechSynthesizer] ⚠️ Coqui TTS Python 环境不可用，语音合成将使用本地 mock 模式
+2026-05-19 08:42:25 [32minfo[39m: [SpeechSynthesizer] 🔊 语音合成器初始化完成 [服务: local, Coqui: 不可用]
+2026-05-19 08:42:25 [32minfo[39m: [VoiceprintRecognizer] 🔊 声纹识别器：初始化中...
+2026-05-19 08:42:25 [32minfo[39m: [VoiceprintRecognizer] ✅ 声纹识别器：初始化完成！
+2026-05-19 08:42:25 [32minfo[39m: [ContinuousDialogManager] 连续对话管理器：初始化中...
+2026-05-19 08:42:25 [32minfo[39m: [ContinuousDialogManager] 连续对话管理器：初始化完成
+2026-05-19 08:42:25 [33mwarn[39m: [UserProfile] ⚠️ 加载用户画像失败，使用默认值
+2026-05-19 08:42:25 [32minfo[39m: [ModelManager] ➕ 注册模型: openai_compatible
+2026-05-19 08:42:25 [32minfo[39m: [ModelManager] ➕ 注册模型: default
+2026-05-19 08:42:25 [32minfo[39m: [CoreReasoningEngine] ✅ OpenAI兼容模型已注册: qwen2.5:3b
+2026-05-19 08:42:25 [32minfo[39m: [CoreReasoningEngine] ✅ 模型初始化完成，提供商: openai, 默认模型: qwen2.5:3b
+2026-05-19 08:42:25 [32minfo[39m:  ✅ 任务拆解少样本示例库初始化完成
+2026-05-19 08:42:25 [32minfo[39m:  ✅ 工具调用失败原因分类体系初始化完成
+2026-05-19 08:42:25 [32minfo[39m:  ✅ P0级交互事件监听器启动完成
+2026-05-19 08:42:25 [32minfo[39m:  ✅ 核心推理引擎：事件总线初始化完成
+✅
+  🧬 核心初始化... 2026-05-19 08:42:25 [32minfo[39m: [JiabaixingCore] 🚀 JiabaixingCore 开始初始化...
+2026-05-19 08:42:25 [32minfo[39m: [JiabaixingCore] 🔒 步骤2：安全与加密模块已就绪
+2026-05-19 08:42:25 [32minfo[39m: [JiabaixingCore] ✅ 步骤3：记忆引擎已注入
+2026-05-19 08:42:25 [32minfo[39m: [JiabaixingCore] ✅ 步骤4：交互辅助模块已就绪
+WorkerPool initialized with 4 workers
+2026-05-19 08:42:25 [33mwarn[39m: [DockerSandbox] Docker 不可用，将使用 vm2 降级方案
+2026-05-19 08:42:25 [32minfo[39m: [SandboxManager] 🔒 沙箱管理器初始化: Docker=false, vm2=true
+2026-05-19 08:42:25 [31merror[39m: [CodeSearchEngine] 代码搜索引擎初始化失败
+2026-05-19 08:42:25 [32minfo[39m: [WebSearchEngine] Web 搜索引擎初始化完成
+2026-05-19 08:42:25 [32minfo[39m: [ToolExecutor] 已注册 18 个工具
+2026-05-19 08:42:25 [32minfo[39m: [ToolExecutor] 🧹 工具执行器定期清理任务已启动
+2026-05-19 08:42:25 [32minfo[39m: [JiabaixingCore] ✅ 步骤5：工具执行器已就绪
+2026-05-19 08:42:25 [32minfo[39m: [CodeGeneratorSkill] 🚀 CodeGeneratorSkill 初始化完成
+2026-05-19 08:42:25 [32minfo[39m: [ToolExecutor] 🚀 CodeGeneratorSkill 已注入 ToolExecutor
+2026-05-19 08:42:25 [33mwarn[39m: [SkillRegistry] 技能已存在，将被覆盖: code_generator
+2026-05-19 08:42:25 [32minfo[39m: [SkillBridge] 🔗 SkillBridge 已绑定 ToolExecutor
+2026-05-19 08:42:25 [32minfo[39m: [SkillBridge] 🔗 SkillBridge 已同步 0/18 个工具到 SkillRegistry
+2026-05-19 08:42:25 [32minfo[39m: [JiabaixingCore] ✅ 步骤5：CodeGeneratorSkill 已注入，技能已注册到 SkillRegistry
+2026-05-19 08:42:25 [32minfo[39m: [JiabaixingCore] ✅ 步骤5：工具管理器已注入
+2026-05-19 08:42:25 [32minfo[39m: [OpenAICompatibleModel] 🔌 正在连接 OpenAI 兼容服务: http://127.0.0.1:8001/v1
+2026-05-19 08:42:25 [33mwarn[39m: [OpenAICompatibleModel] ⚠️ OpenAI 兼容模型初始化检查失败: fetch failed，模型仍将尝试运行
+2026-05-19 08:42:25 [33mwarn[39m: [JiabaixingCore] ⚠️ LLM服务暂时不可用: 无法连接到 LLM 服务: fetch failed，将以降级模式运行
+2026-05-19 08:42:25 [32minfo[39m: [JiabaixingCore] ✅ 步骤7：核心推理引擎已注入
+2026-05-19 08:42:25 [32minfo[39m: [JiabaixingCore] ✅ 步骤8：交互引擎已就绪
+2026-05-19 08:42:25 [32minfo[39m: [DesktopAgentLoop] 🤖 DesktopAgentLoop 初始化
+2026-05-19 08:42:25 [32minfo[39m: [DesktopActionExecutor] 🎮 DesktopActionExecutor 初始化
+2026-05-19 08:42:25 [32minfo[39m: [ScreenCapture] 📸 ScreenCapture 初始化
+2026-05-19 08:42:25 [32minfo[39m: [WindowManager] 🪟 WindowManager 初始化
+2026-05-19 08:42:25 [32minfo[39m: [SystemInput] 🖱️ SystemInput 初始化
+2026-05-19 08:42:25 [32minfo[39m: [DesktopVisionEngine] 👁️ DesktopVisionEngine 初始化
+2026-05-19 08:42:25 [32minfo[39m: [VisionEngine] 视觉引擎初始化: provider=local, model=llava
+2026-05-19 08:42:25 [32minfo[39m: [DesktopVisionEngine] 👁️ DesktopVisionEngine 初始化完成
+2026-05-19 08:42:25 [32minfo[39m: [DesktopActionExecutor] 🎮 DesktopActionExecutor 初始化完成
+2026-05-19 08:42:25 [32minfo[39m: [DesktopAgentLoop] 🤖 DesktopAgentLoop 初始化完成
+2026-05-19 08:42:25 [32minfo[39m: [JiabaixingCore] ✅ 桌面自动化已就绪
+2026-05-19 08:42:25 [32minfo[39m: [JiabaixingCore] ✅ 核心引擎9步初始化完成
+2026-05-19 08:42:25 [32minfo[39m: [PerformanceMonitor] 📊 启动性能监控
+2026-05-19 08:42:25 [32minfo[39m: [JiabaixingCore] 📊 性能监控自动快照已启动
+2026-05-19 08:42:25 [32minfo[39m: [JiabaixingCore] 🤖 自动优化调度：开始扫描优化报告...
+2026-05-19 08:42:25 [32minfo[39m: [JiabaixingCore] 📊 自动优化调度：加载报告 [2026-04-26T08:14:48.451Z]，分析窗口: 2026-04-26T08:14:48.425Z ~ 2026-04-26T08:14:48.451Z
+2026-05-19 08:42:25 [32minfo[39m: [ToolRecommendationEngine] 🔧 工具权重已自动调整：[run_command] 权重从 0.25 调整为 0.25，原因：权重回升机制：近期有3次成功执行，成功率从6.1%开始改善
+2026-05-19 08:42:25 [32minfo[39m: [ToolRecommendationEngine] 📊 权重调整完成，共1项，已存档
+2026-05-19 08:42:25 [32minfo[39m: [JiabaixingCore] 🔧 自动优化调度：已应用 1 项工具权重调整
+2026-05-19 08:42:25 [32minfo[39m: [CoreReasoningEngine] 🧠 启发式参数已调整：[maxRetryCount] for run_command 3 → 5，原因：run_command工具平均重试3.7次
+2026-05-19 08:42:25 [32minfo[39m: [CoreReasoningEngine] 📊 启发式参数调整完成，共1项，已存档
+2026-05-19 08:42:25 [32minfo[39m: [JiabaixingCore] 🧠 自动优化调度：已应用 1 项启发式参数调整（新格式）
+2026-05-19 08:42:25 [32minfo[39m: [JiabaixingCore] 🔔 自动优化完成，2 项调整已生效。undefined
+2026-05-19 08:42:25 [32minfo[39m: [JiabaixingCore] ✅ 自动优化调度：处理完成，共应用 2 项调整
+2026-05-19 08:42:25 [32minfo[39m: [JiabaixingCore] ⏰ 自动优化定时调度已启动，间隔: 24小时
+2026-05-19 08:42:25 [32minfo[39m: [JiabaixingCore] 🧬 步骤9：自动优化调度已启动（每24小时执行一次）
+2026-05-19 08:42:25 [32minfo[39m: [JiabaixingCore] ✅ user_correction事件监听器已注册
+2026-05-19 08:42:25 [32minfo[39m: [JiabaixingCore] 🔍 已启动优化报告热监视
+2026-05-19 08:42:25 [32minfo[39m: [JiabaixingCore] 🔍 步骤9：学习循环已就绪
+2026-05-19 08:42:25 [32minfo[39m: [JiabaixingCore] 🚀 Phase 1: 开始初始化优化组件
+2026-05-19 08:42:25 [33mwarn[39m: [AgentSelfReflection] 自我反思数据加载失败
+2026-05-19 08:42:25 [32minfo[39m: [OptimizationCoordinator] 加载了44条历史指标
+2026-05-19 08:42:25 [32minfo[39m: [JiabaixingCore] ✅ Phase 1: 优化组件初始化完成
+2026-05-19 08:42:25 [32minfo[39m: [JiabaixingCore]    - 增强型意图识别器已就绪
+2026-05-19 08:42:25 [32minfo[39m: [JiabaixingCore]    - 高级推理引擎已就绪
+2026-05-19 08:42:25 [32minfo[39m: [JiabaixingCore]    - 自主规划器已就绪
+2026-05-19 08:42:25 [32minfo[39m: [JiabaixingCore]    - 优化协调器已就绪
+✅
+  🔄 Agent循环... 2026-05-19 08:42:25 [32minfo[39m: [JiabaixingCore] ✅ AgentLoop 已绑定到核心 MemoryEngine 实例
+✅
+  📡 调度器... 2026-05-19 08:42:25 [32minfo[39m: [ScenarioAwareScheduler] 🚀 场景感知调度器已启动
+2026-05-19 08:42:25 [32minfo[39m: [ScenarioAwareScheduler] 📋 执行任务: 早安简报
+2026-05-19 08:42:25 [32minfo[39m: [AgentLoop] 🚀 AgentLoop 启动: state=idle, input="处理主动交互: morning_briefing..."
+2026-05-19 08:42:25 [32minfo[39m: [AgentLoop] 👁️ AgentLoop 感知阶段: 意图抽取 + 场景识别 + 记忆召回 + 中文分词
+2026-05-19 08:42:25 [32minfo[39m: [AgentLoop] 🔤 中文分词结果: 处理, 处理主, 理主, 理主动, 主动, 主动交, 动交, 动交互, 交互, 互...
+2026-05-19 08:42:25 [32minfo[39m: [AgentLoop] 👁️ 感知完成: intent=general, scene=daily, emotion=平静(2), memoryItems=0, tokens=12
+2026-05-19 08:42:25 [32minfo[39m: [ScenarioAwareScheduler] ✅ 任务完成: 早安简报 (4ms)
+2026-05-19 08:42:25 [32minfo[39m: [ScenarioAwareScheduler] 📋 执行任务: 情绪检查
+2026-05-19 08:42:26 [32minfo[39m: [AgentLoop] 📋 AgentLoop 规划阶段: intent="general"
+2026-05-19 08:42:26 [32minfo[39m: [MemoryDrivenTrigger] ✅ 记忆驱动触发器已安装：记忆变化→自动评估→主动关怀
+✅
+  🧬 进化引擎... 2026-05-19 08:42:26 [32minfo[39m: [OptimizationResultDispatcher] ✅ 优化消费者已注册: PersonaCore
+2026-05-19 08:42:26 [32minfo[39m: [OptimizationResultDispatcher] ✅ 优化消费者已注册: SkillBridge
+2026-05-19 08:42:26 [32minfo[39m: [EvolutionEngine] 🧬 进化引擎已启动（v3 含实时反馈闭环 + P1 增强）
+2026-05-19 08:42:26 [32minfo[39m: [EvolutionEngine] ⏰ 下次每日优化: 2026年5月20日 上午3:00:00 (18 小时后)
+2026-05-19 08:42:26 [32minfo[39m: [TRAEOptimizationIntegrator] 🚀 开始初始化TRAE优化系统集成器...
+2026-05-19 08:42:26 [32minfo[39m: [TRAEOptimizationIntegrator] 📋 初始化配置管理...
+2026-05-19 08:42:26 [32minfo[39m: [AgentLoop] ⚙️ AgentLoop 执行阶段: skill=""
+2026-05-19 08:42:26 [32minfo[39m: [ScenarioAwareScheduler] ✅ 任务完成: 情绪检查 (198ms)
+2026-05-19 08:42:26 [32minfo[39m: [ScenarioAwareScheduler] 📋 执行任务: 任务提醒
+2026-05-19 08:42:26 [32minfo[39m: [AgentLoop] 🚀 AgentLoop 启动: state=idle, input="处理主动交互: task_reminder..."
+2026-05-19 08:42:26 [32minfo[39m: [AgentLoop] 👁️ AgentLoop 感知阶段: 意图抽取 + 场景识别 + 记忆召回 + 中文分词
+2026-05-19 08:42:26 [32minfo[39m: [AgentLoop] 🔤 中文分词结果: 处理, 处理主, 理主, 理主动, 主动, 主动交, 动交, 动交互, 交互, 互...
+2026-05-19 08:42:26 [32minfo[39m: [AgentLoop] 👁️ 感知完成: intent=schedule, scene=daily, emotion=平静(2), memoryItems=0, tokens=12
+2026-05-19 08:42:26 [32minfo[39m: [AgentLoop] 🔍 AgentLoop 校验阶段: success=true
+2026-05-19 08:42:26 [32minfo[39m: [AgentLoop] 🔍 校验完成: qualityScore=0.95, issues=0
+2026-05-19 08:42:26 [32minfo[39m: [ScenarioAwareScheduler] ✅ 任务完成: 任务提醒 (3ms)
+2026-05-19 08:42:26 [32minfo[39m: [ScenarioAwareScheduler] 📋 执行任务: 记忆整理
+2026-05-19 08:42:26 [32minfo[39m: [ScenarioAwareScheduler] 🧠 记忆整理完成
+2026-05-19 08:42:26 [32minfo[39m: [AgentLoop] 📋 AgentLoop 规划阶段: intent="schedule"
+2026-05-19 08:42:26 [32minfo[39m: [ScenarioAwareScheduler] ✅ 任务完成: 记忆整理 (1ms)
+2026-05-19 08:42:26 [32minfo[39m: [AgentLoop] 💬 AgentLoop 输出阶段: 生成最终响应
+2026-05-19 08:42:26 [32minfo[39m: [ScenarioAwareScheduler] 📋 执行任务: 行为分析
+2026-05-19 08:42:26 [32minfo[39m: [ScenarioAwareScheduler] ✅ 任务完成: 行为分析 (0ms)
+2026-05-19 08:42:26 [32minfo[39m: [AgentLoop] ⚙️ AgentLoop 执行阶段: skill="schedule"
+2026-05-19 08:42:26 [32minfo[39m: [AgentLoop] 🧠 AgentLoop 学习阶段: 反馈记录 + 记忆更新 + 主权审计
+2026-05-19 08:42:26 [32minfo[39m: [SkillRegistry] 🔧 执行技能: schedule
+2026-05-19 08:42:26 [32minfo[39m: [AgentLoop] 💾 执行结果已写入短期记忆: traceId=agent_1779151346195_rs8q98
+2026-05-19 08:42:26 [32minfo[39m: [SkillRegistry] ✅ 技能执行完成: schedule, 成功=true
+2026-05-19 08:42:26 [32minfo[39m: [AgentLoop] 🎯 反馈信号已存储: traceId=agent_1779151346195_rs8q98
+2026-05-19 08:42:26 [32minfo[39m: [AgentLoop] 🧬 进化反馈已触发: traceId=agent_1779151346195_rs8q98
+2026-05-19 08:42:26 [32minfo[39m: [AgentLoop] 🔍 AgentLoop 校验阶段: success=true
+2026-05-19 08:42:26 [32minfo[39m: [AgentLoop] 🔍 校验完成: qualityScore=1.00, issues=0
+2026-05-19 08:42:26 [32minfo[39m: [AgentLoop] 💬 AgentLoop 输出阶段: 生成最终响应
+2026-05-19 08:42:26 [32minfo[39m: [AgentLoop] 🧠 AgentLoop 学习阶段: 反馈记录 + 记忆更新 + 主权审计
+2026-05-19 08:42:26 [32minfo[39m: [AgentLoop] 💾 执行结果已写入短期记忆: traceId=agent_1779151346195_rs8q98
+2026-05-19 08:42:26 [32minfo[39m: [AgentLoop] 🎯 反馈信号已存储: traceId=agent_1779151346195_rs8q98
+2026-05-19 08:42:26 [32minfo[39m: [AgentLoop] 🧬 进化反馈已触发: traceId=agent_1779151346195_rs8q98
+node.exe : E:\jiabaixing\src\memory\MemoryEngine.ts:486
+At line:1 char:1
++ & "C:\Program Files\nodejs/node.exe" "C:\Program Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (E:\jiabaixing\s...ryEngine.ts:486 
+   :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+    const scored = allMemories.map((memory) => {
+                               ^
+ReferenceError: _union is not defined
+    at E:\jiabaixing\src\memory\MemoryEngine.ts:504:24
+    at Array.map (<anonymous>)
+    at MemoryEngine.keywordRetrieval (E:\jiabaixing\src\memory\MemoryEngine.ts:
+486:32)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)

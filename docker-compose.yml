@@ -1,0 +1,42 @@
+# 家百星 V5.0 Docker Compose 部署配置
+version: "3.8"
+
+services:
+  jiabaixing:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: jiabaixing
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3111}:3111"
+    environment:
+      - NODE_ENV=production
+      - PORT=3111
+      - LLM_MODEL=${LLM_MODEL:-deepseek-chat}
+      - LLM_API_KEY=${LLM_API_KEY}
+      - LLM_BASE_URL=${LLM_BASE_URL:-https://api.deepseek.com}
+      - FORCE_HTTPS=${FORCE_HTTPS:-true}
+    env_file:
+      - .env
+    volumes:
+      - jiabaixing-data:/app/data
+      - jiabaixing-logs:/app/logs
+    healthcheck:
+      test: ["CMD", "node", "-e", "const http = require('http'); const req = http.get('http://localhost:3111/api/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1); }); req.on('error', () => process.exit(1)); req.setTimeout(5000, () => { req.destroy(); process.exit(1); });"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
+
+volumes:
+  jiabaixing-data:
+    driver: local
+  jiabaixing-logs:
+    driver: local
