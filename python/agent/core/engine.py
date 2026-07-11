@@ -230,6 +230,12 @@ class AgentEngine:
         self.stream_diag: Any = None
         self.nous_rate_guard: Any = None
         self.portal_tags: Any = None
+        # P7 扩展节点
+        self.message_content: Any = None
+        self.retry_utils: Any = None
+        self.skill_provenance: Any = None
+        self.cli_output: Any = None
+        self.markdown_tables: Any = None
         # 子系统注册中心（用于拓扑排序初始化）
         self._registry: SubsystemRegistry | None = None
 
@@ -3377,6 +3383,63 @@ class AgentEngine:
             return self.portal_tags
         except Exception as e:
             log.warning("Portal Tag Manager init failed", error=str(e))
+            return None
+
+    # ── P7 扩展节点初始化 ──
+
+    async def _init_message_content(self) -> Any:
+        """初始化消息内容处理器。"""
+        try:
+            from agent.gateway.message_content import MessageContentProcessor
+            self.message_content = MessageContentProcessor()
+            log.info("Message Content Processor ready")
+            return self.message_content
+        except Exception as e:
+            log.warning("Message Content Processor init failed", error=str(e))
+            return None
+
+    async def _init_retry_utils(self) -> Any:
+        """初始化重试执行器。"""
+        try:
+            from agent.core.retry_utils import RetryExecutor
+            self.retry_utils = RetryExecutor()
+            log.info("Retry Executor ready")
+            return self.retry_utils
+        except Exception as e:
+            log.warning("Retry Executor init failed", error=str(e))
+            return None
+
+    async def _init_skill_provenance(self) -> Any:
+        """初始化技能来源追踪器。"""
+        try:
+            from agent.evolution.skill_provenance import SkillProvenance
+            self.skill_provenance = SkillProvenance()
+            log.info("Skill Provenance ready")
+            return self.skill_provenance
+        except Exception as e:
+            log.warning("Skill Provenance init failed", error=str(e))
+            return None
+
+    async def _init_cli_output(self) -> Any:
+        """初始化 CLI 输出格式化器。"""
+        try:
+            from agent.cli.cli_output import CliOutput
+            self.cli_output = CliOutput()
+            log.info("CLI Output ready")
+            return self.cli_output
+        except Exception as e:
+            log.warning("CLI Output init failed", error=str(e))
+            return None
+
+    async def _init_markdown_tables(self) -> Any:
+        """初始化 Markdown 表格渲染器。"""
+        try:
+            from agent.gateway.markdown_tables import MarkdownTables
+            self.markdown_tables = MarkdownTables()
+            log.info("Markdown Tables ready")
+            return self.markdown_tables
+        except Exception as e:
+            log.warning("Markdown Tables init failed", error=str(e))
             return None
 
     @property

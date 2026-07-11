@@ -307,4 +307,10 @@ SUBSYSTEM_DEPS: list[SubsystemSpec] = [
     SubsystemSpec("stream_diag", "_init_stream_diag", critical=False),
     SubsystemSpec("nous_rate_guard", "_init_nous_rate_guard", critical=False),
     SubsystemSpec("portal_tags", "_init_portal_tags", critical=False),
+    # ── P7 扩展节点 ──
+    SubsystemSpec("message_content", "_init_message_content", critical=False),
+    SubsystemSpec("retry_utils", "_init_retry_utils", critical=False),
+    SubsystemSpec("skill_provenance", "_init_skill_provenance", critical=False),
+    SubsystemSpec("cli_output", "_init_cli_output", critical=False),
+    SubsystemSpec("markdown_tables", "_init_markdown_tables", critical=False),
 ]
