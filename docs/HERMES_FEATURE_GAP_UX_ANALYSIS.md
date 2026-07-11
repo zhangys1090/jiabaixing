@@ -31,7 +31,7 @@
 | 消息处理层      | 10            | 4 (think_scrubber, resilience, hooks, logger)                                                                                              | 6 (message_content, retry_utils, error_classifier, stream_diag, jiter_preload, markdown_tables)                                                                                                   |
 | 演化层          | 5             | 2 (**learning_graph** ✅, skill_engine)                                                                                                    | 3 (moa_aggregator, skill_provenance, skill_usage)                                                                                                                                                 |
 
-**统计**: Hermes 200+ 功能节点，Jiabaixing 已覆盖约 **152** 个，**差距约 48 个节点**（从 60% → 76% 覆盖率）。
+**统计**: Hermes 200+ 功能节点，Jiabaixing 已覆盖约 **162** 个，**差距约 38 个节点**（从 60% → 81% 覆盖率）。
 
 ---
 
@@ -155,16 +155,16 @@ Anthropic API 支持前缀缓存：
 | Skill 安全审计       | `skills_ast_audit.py` + `skills_guard.py`  | Skill AST 审计                                      | 高       | 12h        | ✅ 已实现 |
 | Kanban 多 agent 协调 | `kanban_tools.py` (8 工具)                 | 多 agent 协调                                       | 高       | 20h        | ✅ 已实现 |
 | 委派工具             | `delegate_tool.py` + `async_delegation.py` | 子 agent 委派 + 并行委派                            | 高       | 16h        | ✅ 已实现 |
-| 网关消息镜像         | `gateway/mirror.py`                        | 跨会话消息镜像                                      | 中       | 8h         |
-| 网关配对授权         | `gateway/pairing.py`                       | DM 配对授权                                         | 中       | 6h         |
-| 网关重启             | `gateway/restart.py`                       | 热重启                                              | 低       | 4h         |
-| 网关关闭取证         | `gateway/shutdown_forensics.py`            | 关闭原因分析                                        | 低       | 4h         |
-| 中继适配器           | `gateway/relay/`                           | WebSocket 中继                                      | 中       | 8h         |
-| 记忆提供者 ABC       | `agent/memory_provider.py` + 外部后端      | Honcho / Mem0 / Hindsight 等集成                    | 高       | 20h        |
-| 批量轨迹生成         | `batch_runner.py`                          | 批量轨迹生成，用于训练数据                          | 中       | 8h         |
-| 流式诊断             | `agent/stream_diag.py`                     | 流式传输诊断                                        | 低       | 4h         |
-| Nous 速率守卫        | `agent/nous_rate_guard.py`                 | Nous Portal 速率限制                                | 中       | 4h         |
-| Portal 标签          | `agent/portal_tags.py`                     | Nous Portal OAuth 标签                              | 中       | 6h         |
+| 网关消息镜像         | `gateway/mirror.py`                        | 跨会话消息镜像                                      | 中       | 8h         | ✅ 已实现 |
+| 网关配对授权         | `gateway/pairing.py`                       | DM 配对授权                                         | 中       | 6h         | ✅ 已实现 |
+| 网关重启             | `gateway/restart.py`                       | 热重启                                              | 低       | 4h         | ✅ 已实现 |
+| 网关关闭取证         | `gateway/shutdown_forensics.py`            | 关闭原因分析                                        | 低       | 4h         | ✅ 已实现 |
+| 中继适配器           | `gateway/relay/`                           | WebSocket 中继                                      | 中       | 8h         | ✅ 已实现 |
+| 记忆提供者 ABC       | `agent/memory_provider.py` + 外部后端      | Honcho / Mem0 / Hindsight 等集成                    | 高       | 20h        | ✅ 已实现 |
+| 批量轨迹生成         | `batch_runner.py`                          | 批量轨迹生成，用于训练数据                          | 中       | 8h         | ✅ 已实现 |
+| 流式诊断             | `agent/stream_diag.py`                     | 流式传输诊断                                        | 低       | 4h         | ✅ 已实现 |
+| Nous 速率守卫        | `agent/nous_rate_guard.py`                 | Nous Portal 速率限制                                | 中       | 4h         | ✅ 已实现 |
+| Portal 标签          | `agent/portal_tags.py`                     | Nous Portal OAuth 标签                              | 中       | 6h         | ✅ 已实现 |
 
 ---
 
@@ -659,7 +659,7 @@ export const SessionSearchBar = () => {
 
 ### 6.1 核心差距
 
-**Jiabaixing 已覆盖 Hermes 约 76% 的核心功能节点**（从 60% → 76%），差距主要集中在：
+**Jiabaixing 已覆盖 Hermes 约 79% 的核心功能节点**（从 60% → 79%），差距主要集中在：
 
 1. ~~**会话回顾/搜索/摘要**~~ ✅ → 已实现
 2. ~~**Prompt 缓存/成本守卫**~~ ✅ → 已实现
@@ -670,7 +670,9 @@ export const SessionSearchBar = () => {
 7. **Skill Hub / 多 agent 协调** → ✅ 已实现
 8. ~~**插件系统 / 代理服务器 / Dashboard 认证**~~ ✅ → 已实现
 9. ~~**Skill 安全审计 / 委派工具**~~ ✅ → 已实现
-10. **网关消息镜像 / 配对授权 / 热重启** → 待实现（P5）
+10. ~~**网关消息镜像 / 配对授权 / 热重启**~~ ✅ → 已实现
+11. ~~**关闭取证 / 中继适配器 / 记忆提供者**~~ ✅ → 已实现
+12. ~~**批量轨迹 / 流式诊断 / Nous Portal**~~ ✅ → 已实现（P6）
 
 ### 6.2 集成优先级
 
@@ -680,7 +682,8 @@ export const SessionSearchBar = () => {
 **✅ P2 全部完成**: + 网关 Hook 系统 + 网关斜杠命令 + Cron 蓝图目录
 **✅ P3 核心已完成**: CLI TUI + Profile 管理 + 平台适配器(Slack/WhatsApp/Signal/Matrix) + Skill Hub + 多Agent协调
 **✅ P4 全部完成**: 插件系统 + 代理服务器 + Dashboard 认证 + Skill 安全审计 + 委派工具
-**P5 剩余**: 网关消息镜像 + 配对授权 + 热重启 + 关闭取证 + 中继适配器 + 记忆提供者
+**✅ P5 全部完成**: 消息镜像 + 配对授权 + 热重启 + 关闭取证 + 中继适配器 + 记忆提供者
+**✅ P6 全部完成**: 批量轨迹生成 + 流式诊断 + Nous 速率守卫 + Portal 标签
 
 ### 6.3 预期 UX 提升
 
@@ -721,7 +724,17 @@ export const SessionSearchBar = () => {
 | Dashboard Auth        | `python/agent/api/dashboard_auth.py`                 | 认证系统：API Key/JWT+RBAC+会话管理+审计日志       |
 | Skill Auditor         | `python/agent/evolution/skill_audit.py`              | AST审计：危险调用/不安全导入/文件访问/模式匹配     |
 | Async Delegator       | `python/agent/tools/async_delegation.py`             | 并行委派：5种聚合模式+条件路由+委派链+超时重试     |
+| Message Mirror        | `python/agent/gateway/mirror.py`                     | 消息镜像：跨会话同步+条件过滤+格式转换+双向镜像    |
+| Pairing Auth          | `python/agent/gateway/pairing.py`                    | 配对授权：DM授权流程+自动审批+过期管理+审计        |
+| Hot Reloader          | `python/agent/gateway/restart.py`                    | 热重启：文件监听+零停机重载+快照回滚+模块重载      |
+| Shutdown Forensics    | `python/agent/gateway/forensics.py`                  | 关闭取证：原因分类+堆栈捕获+恢复策略+信号处理      |
+| Relay Adapter         | `python/agent/gateway/platforms/relay_adapter.py`    | WebSocket中继：自动重连+心跳+压缩+负载均衡         |
+| Memory Providers      | `python/agent/memory/providers.py`                   | 记忆提供者：Builtin+Honcho+Mem0+工厂模式           |
+| Batch Trajectory      | `python/agent/persistence/batch_trajectory.py`       | 批量轨迹生成：质量过滤+去重+多格式输出+并行生成    |
+| Stream Diagnostics    | `python/agent/llm/stream_diag.py`                    | 流式诊断：TTFT+吞吐量+卡顿检测+健康判定+汇总统计   |
+| Nous Rate Guard       | `python/agent/llm/nous_rate_guard.py`                | 速率守卫：令牌桶+多层级限流+配额跟踪+自动降级      |
+| Portal Tags           | `python/agent/llm/portal_tags.py`                    | Portal标签：OAuth令牌+标签绑定+ACL+审计日志        |
 
 ---
 
-**下一步**: 实施 P5 节点（网关消息镜像 + 配对授权 + 热重启 + 关闭取证 + 中继适配器 + 记忆提供者）。
+**✅ P0-P6 全部完成**，覆盖率 81%。下一步可继续深挖剩余 38 个节点（消息处理层/显示交互层/LSP集成层等）。
