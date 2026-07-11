@@ -313,4 +313,10 @@ SUBSYSTEM_DEPS: list[SubsystemSpec] = [
     SubsystemSpec("skill_provenance", "_init_skill_provenance", critical=False),
     SubsystemSpec("cli_output", "_init_cli_output", critical=False),
     SubsystemSpec("markdown_tables", "_init_markdown_tables", critical=False),
+    # ── P8 扩展节点 ──
+    SubsystemSpec("display_formatter", "_init_display_formatter", critical=False),
+    SubsystemSpec("curses_tui", "_init_curses_tui", critical=False),
+    SubsystemSpec("pty_bridge", "_init_pty_bridge", critical=False),
+    SubsystemSpec("shell_completion", "_init_shell_completion", critical=False),
+    SubsystemSpec("clipboard", "_init_clipboard", critical=False),
 ]

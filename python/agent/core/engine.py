@@ -236,6 +236,12 @@ class AgentEngine:
         self.skill_provenance: Any = None
         self.cli_output: Any = None
         self.markdown_tables: Any = None
+        # P8 扩展节点
+        self.display_formatter: Any = None
+        self.curses_tui: Any = None
+        self.pty_bridge: Any = None
+        self.shell_completion: Any = None
+        self.clipboard: Any = None
         # 子系统注册中心（用于拓扑排序初始化）
         self._registry: SubsystemRegistry | None = None
 
@@ -3440,6 +3446,63 @@ class AgentEngine:
             return self.markdown_tables
         except Exception as e:
             log.warning("Markdown Tables init failed", error=str(e))
+            return None
+
+    # ── P8 扩展节点初始化 ──
+
+    async def _init_display_formatter(self) -> Any:
+        """初始化显示格式化器。"""
+        try:
+            from agent.cli.display_formatter import DisplayFormatter
+            self.display_formatter = DisplayFormatter()
+            log.info("Display Formatter ready")
+            return self.display_formatter
+        except Exception as e:
+            log.warning("Display Formatter init failed", error=str(e))
+            return None
+
+    async def _init_curses_tui(self) -> Any:
+        """初始化 Curses TUI。"""
+        try:
+            from agent.cli.curses_tui import CursesTUI
+            self.curses_tui = CursesTUI()
+            log.info("Curses TUI ready")
+            return self.curses_tui
+        except Exception as e:
+            log.warning("Curses TUI init failed", error=str(e))
+            return None
+
+    async def _init_pty_bridge(self) -> Any:
+        """初始化 PTY 桥接器。"""
+        try:
+            from agent.cli.pty_bridge import PtyBridge
+            self.pty_bridge = PtyBridge()
+            log.info("PTY Bridge ready")
+            return self.pty_bridge
+        except Exception as e:
+            log.warning("PTY Bridge init failed", error=str(e))
+            return None
+
+    async def _init_shell_completion(self) -> Any:
+        """初始化 Shell 补全生成器。"""
+        try:
+            from agent.cli.shell_completion import ShellCompletion
+            self.shell_completion = ShellCompletion()
+            log.info("Shell Completion ready")
+            return self.shell_completion
+        except Exception as e:
+            log.warning("Shell Completion init failed", error=str(e))
+            return None
+
+    async def _init_clipboard(self) -> Any:
+        """初始化剪贴板工具。"""
+        try:
+            from agent.cli.clipboard import Clipboard
+            self.clipboard = Clipboard()
+            log.info("Clipboard ready")
+            return self.clipboard
+        except Exception as e:
+            log.warning("Clipboard init failed", error=str(e))
             return None
 
     @property
