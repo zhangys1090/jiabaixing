@@ -31,7 +31,7 @@
 | 消息处理层      | 10            | 4 (think_scrubber, resilience, hooks, logger)                                                                                              | 6 (message_content, retry_utils, error_classifier, stream_diag, jiter_preload, markdown_tables)                                                                                                   |
 | 演化层          | 5             | 2 (**learning_graph** ✅, skill_engine)                                                                                                    | 3 (moa_aggregator, skill_provenance, skill_usage)                                                                                                                                                 |
 
-**统计**: Hermes 200+ 功能节点，Jiabaixing 已覆盖约 **142** 个，**差距约 58 个节点**（从 60% → 71% 覆盖率）。
+**统计**: Hermes 200+ 功能节点，Jiabaixing 已覆盖约 **147** 个，**差距约 53 个节点**（从 60% → 74% 覆盖率）。
 
 ---
 
@@ -144,17 +144,17 @@ Anthropic API 支持前缀缓存：
 ### 2.4 P3 级（未来迭代）
 
 | 节点                 | Hermes 文件                                | UX 提升                                             | 集成难度 | 预估工作量 |
-| -------------------- | ------------------------------------------ | --------------------------------------------------- | -------- | ---------- |
-| CLI TUI              | `hermes_cli/curses_ui.py`                  | TUI 界面，提升 CLI 体验                             | 高       | 16h        |
-| 插件系统             | `hermes_cli/plugins.py`                    | PluginManager，第三方扩展                           | 高       | 20h        |
-| Profile 管理         | `hermes_cli/profiles.py`                   | 多 Profile 管理，隔离配置                           | 中       | 8h         |
-| 代理服务器           | `hermes_cli/proxy/`                        | API 代理，绕过限制                                  | 中       | 12h        |
-| Dashboard 认证       | `hermes_cli/dashboard_auth/`               | Dashboard 认证                                      | 高       | 16h        |
-| 网关平台适配器扩展   | `gateway/platforms/` (12 个)               | 全平台覆盖 (Slack/WhatsApp/Signal/Matrix/Email/SMS) | 高       | 40h        |
-| Skill Hub            | `skills_hub.py` + `skills_sync.py`         | Skill 市场同步                                      | 中       | 8h         |
-| Skill 安全审计       | `skills_ast_audit.py` + `skills_guard.py`  | Skill AST 审计                                      | 高       | 12h        |
-| Kanban 多 agent 协调 | `kanban_tools.py` (8 工具)                 | 多 agent 协调                                       | 高       | 20h        |
-| 委派工具             | `delegate_tool.py` + `async_delegation.py` | 子 agent 委派 + 并行委派                            | 高       | 16h        |
+| -------------------- | ------------------------------------------ | --------------------------------------------------- | -------- | ---------- | --------- |
+| CLI TUI              | `hermes_cli/curses_ui.py`                  | TUI 界面，提升 CLI 体验                             | 高       | 16h        | ✅ 已实现 |
+| 插件系统             | `hermes_cli/plugins.py`                    | PluginManager，第三方扩展                           | 高       | 20h        |           |
+| Profile 管理         | `hermes_cli/profiles.py`                   | 多 Profile 管理，隔离配置                           | 中       | 8h         | ✅ 已实现 |
+| 代理服务器           | `hermes_cli/proxy/`                        | API 代理，绕过限制                                  | 中       | 12h        |           |
+| Dashboard 认证       | `hermes_cli/dashboard_auth/`               | Dashboard 认证                                      | 高       | 16h        |           |
+| 网关平台适配器扩展   | `gateway/platforms/` (12 个)               | 全平台覆盖 (Slack/WhatsApp/Signal/Matrix/Email/SMS) | 高       | 40h        | ✅ 已实现 |
+| Skill Hub            | `skills_hub.py` + `skills_sync.py`         | Skill 市场同步                                      | 中       | 8h         | ✅ 已实现 |
+| Skill 安全审计       | `skills_ast_audit.py` + `skills_guard.py`  | Skill AST 审计                                      | 高       | 12h        |           |
+| Kanban 多 agent 协调 | `kanban_tools.py` (8 工具)                 | 多 agent 协调                                       | 高       | 20h        | ✅ 已实现 |
+| 委派工具             | `delegate_tool.py` + `async_delegation.py` | 子 agent 委派 + 并行委派                            | 高       | 16h        |           |
 | 网关消息镜像         | `gateway/mirror.py`                        | 跨会话消息镜像                                      | 中       | 8h         |
 | 网关配对授权         | `gateway/pairing.py`                       | DM 配对授权                                         | 中       | 6h         |
 | 网关重启             | `gateway/restart.py`                       | 热重启                                              | 低       | 4h         |
@@ -659,15 +659,16 @@ export const SessionSearchBar = () => {
 
 ### 6.1 核心差距
 
-**Jiabaixing 已覆盖 Hermes 约 71% 的核心功能节点**（从 60% → 71%），差距主要集中在：
+**Jiabaixing 已覆盖 Hermes 约 74% 的核心功能节点**（从 60% → 74%），差距主要集中在：
 
 1. ~~**会话回顾/搜索/摘要**~~ ✅ → 已实现
 2. ~~**Prompt 缓存/成本守卫**~~ ✅ → 已实现
 3. ~~**错误分类/速率限制**~~ ✅ → 已实现
 4. ~~**引导/国际化**~~ ✅ → 已实现
-5. **平台适配器扩展** → 影响平台覆盖面（P3）
-6. **CLI TUI / Profile 管理** → 影响 CLI 体验（P3）
-7. **Skill Hub / 多 agent 协调** → 影响扩展性（P3）
+5. **平台适配器扩展** → ✅ 已实现（Slack/WhatsApp/Signal/Matrix）
+6. **CLI TUI / Profile 管理** → ✅ 已实现
+7. **Skill Hub / 多 agent 协调** → ✅ 已实现
+8. **插件系统 / 代理服务器 / Dashboard 认证** → 待实现（P4）
 
 ### 6.2 集成优先级
 
@@ -675,7 +676,8 @@ export const SessionSearchBar = () => {
 **✅ P1 已完成**: 凭据池完善 + 上下文压缩 + 错误分类 + 工具输出限制 + 速率限制
 **✅ P2 核心已完成**: 成本守卫 + 辅助LLM + 引导 + 国际化 + 账户用量 + 流式脱敏 + 学习图 + MoA聚合 + 会话列表 + 模型元数据
 **✅ P2 全部完成**: + 网关 Hook 系统 + 网关斜杠命令 + Cron 蓝图目录
-**P3**: CLI TUI + 平台适配器扩展 + Skill Hub + 多 agent 协调
+**✅ P3 核心已完成**: CLI TUI + Profile 管理 + 平台适配器(Slack/WhatsApp/Signal/Matrix) + Skill Hub + 多Agent协调
+**P4 剩余**: 插件系统 + 代理服务器 + Dashboard 认证 + Skill 安全审计 + 委派工具
 
 ### 6.3 预期 UX 提升
 
@@ -692,19 +694,26 @@ export const SessionSearchBar = () => {
 
 ### 6.4 新增节点清单（2026-07-11）
 
-| 节点                  | 文件路径                                      | 功能                                         |
-| --------------------- | --------------------------------------------- | -------------------------------------------- |
-| Onboarding Wizard     | `python/agent/core/onboarding.py`             | 首次运行引导：环境检测→LLM配置→技能推荐→教程 |
-| Model Cost Guard      | `python/agent/llm/model_cost_guard.py`        | 模型级成本守卫：日/小时预算+超支自动降级     |
-| Auxiliary LLM Client  | `python/agent/llm/auxiliary_client.py`        | 旁路LLM：摘要/分类/提取/翻译/视觉→廉价模型   |
-| Account Usage Tracker | `python/agent/persistence/account_usage.py`   | 账户用量追踪：日/月预算+告警+报告            |
-| Learning Graph        | `python/agent/evolution/learning_graph.py`    | 学习图：技能关系+路径查询+影响分析+拓扑排序  |
-| MoA Aggregator        | `python/agent/llm/moa_aggregator.py`          | 多模型聚合：投票/级联/加权/自洽/Best-of-N    |
-| Streaming Scrubber    | `python/agent/security/streaming_scrubber.py` | 流式脱敏：7类敏感信息+可逆还原+消息批处理    |
-| Gateway Hooks         | `python/agent/gateway/hooks.py`               | 网关Hook：8个生命周期点+优先级排序+统计      |
-| Slash Commands        | `python/agent/gateway/slash_commands.py`      | 斜杠命令：权限控制+别名+默认命令+帮助生成    |
-| Blueprint Catalog     | `python/agent/scheduler/blueprint_catalog.py` | 蓝图目录：8个内置蓝图+智能建议+一键部署      |
+| 节点                  | 文件路径                                             | 功能                                               |
+| --------------------- | ---------------------------------------------------- | -------------------------------------------------- |
+| Onboarding Wizard     | `python/agent/core/onboarding.py`                    | 首次运行引导：环境检测→LLM配置→技能推荐→教程       |
+| Model Cost Guard      | `python/agent/llm/model_cost_guard.py`               | 模型级成本守卫：日/小时预算+超支自动降级           |
+| Auxiliary LLM Client  | `python/agent/llm/auxiliary_client.py`               | 旁路LLM：摘要/分类/提取/翻译/视觉→廉价模型         |
+| Account Usage Tracker | `python/agent/persistence/account_usage.py`          | 账户用量追踪：日/月预算+告警+报告                  |
+| Learning Graph        | `python/agent/evolution/learning_graph.py`           | 学习图：技能关系+路径查询+影响分析+拓扑排序        |
+| MoA Aggregator        | `python/agent/llm/moa_aggregator.py`                 | 多模型聚合：投票/级联/加权/自洽/Best-of-N          |
+| Streaming Scrubber    | `python/agent/security/streaming_scrubber.py`        | 流式脱敏：7类敏感信息+可逆还原+消息批处理          |
+| Gateway Hooks         | `python/agent/gateway/hooks.py`                      | 网关Hook：8个生命周期点+优先级排序+统计            |
+| Slash Commands        | `python/agent/gateway/slash_commands.py`             | 斜杠命令：权限控制+别名+默认命令+帮助生成          |
+| Blueprint Catalog     | `python/agent/scheduler/blueprint_catalog.py`        | 蓝图目录：8个内置蓝图+智能建议+一键部署            |
+| Chat TUI              | `python/agent/cli_tui.py`                            | 终端富文本UI：流式输出+命令补全+历史导航+多面板    |
+| Profile Manager       | `python/agent/cli/profile_manager.py`                | 多Profile配置：模型偏好+平台配置+技能策略+导入导出 |
+| Slack Adapter         | `python/agent/gateway/platforms/slack_adapter.py`    | Slack接入：Bolt SDK+Socket Mode+mrkdwn转换         |
+| WhatsApp Adapter      | `python/agent/gateway/platforms/whatsapp_adapter.py` | WhatsApp接入：Cloud API+Webhook+模板消息           |
+| Matrix Adapter        | `python/agent/gateway/platforms/matrix_adapter.py`   | Matrix接入：Client-Server API+/sync长轮询+E2EE     |
+| Skill Hub             | `python/agent/evolution/skill_hub.py`                | 技能市场：6个内置技能+搜索+安装/更新+评分          |
+| Multi-Agent Coord     | `python/agent/evolution/multi_agent.py`              | 多Agent协调：5种协作模式+任务分配+消息传递         |
 
 ---
 
-**下一步**: 推进 P3 节点（CLI TUI + Profile 管理 + 平台适配器扩展 + Skill Hub + 多 agent 协调）。
+**下一步**: 实施 P4 节点（插件系统 + 代理服务器 + Dashboard 认证 + Skill 安全审计 + 委派工具）。
