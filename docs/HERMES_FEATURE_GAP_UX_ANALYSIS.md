@@ -12,14 +12,14 @@
 
 | 维度            | Hermes 节点数 | Jiabaixing 已有                                                                                                                                                         | 差距                                                                                                                                                                                              |
 | --------------- | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 入口层          | 5             | 3 (HTTP API, CLI, Gateway)                                                                                                                                              | 2 (Batch Runner, API Server)                                                                                                                                                                      |
-| 核心引擎层      | 10            | 8 (engine, conversation_loop, controller, turn_types, hooks, resilience)                                                                                                | 2 (turn_finalizer, turn_retry_state)                                                                                                                                                              |
-| Prompt 系统     | 12            | 6 (unified_orchestrator, context_pipeline, context_compressor, persona, system_prompt, token_budget)                                                                    | 6 (prompt_caching, conversation_compression, manual_compression_feedback, prompt_size, coding_context, context_references)                                                                        |
-| Provider/模型层 | 15            | 9 (provider, cache, credential_pool, router, transports, stream, queue, **model_cost_guard** ✅, **auxiliary_client** ✅)                                               | 6 (model_metadata, models_dev, portal_tags, nous_rate_guard, rate_limit_tracker, usage_pricing)                                                                                                   |
+| 入口层          | 5             | 4 (HTTP API, CLI, Gateway, **batch_runner** ✅)                                                                                                                         | 1 (API Server)                                                                                                                                                                                    |
+| 核心引擎层      | 10            | 10 (engine, conversation_loop, controller, turn_types, hooks, resilience, **turn_finalizer** ✅, **turn_retry_state** ✅)                                               | 0                                                                                                                                                                                                 |
+| Prompt 系统     | 12            | 8 (unified_orchestrator, context_pipeline, context_compressor, persona, system_prompt, token_budget, **prompt_caching** ✅, **coding_context** ✅)                      | 4 (conversation_compression, manual_compression_feedback, prompt_size, context_references)                                                                                                        |
+| Provider/模型层 | 15            | 10 (provider, cache, credential_pool, router, transports, stream, queue, **model_cost_guard** ✅, **auxiliary_client** ✅, **prompt_caching** ✅)                       | 5 (model_metadata, models_dev, nous_rate_guard, rate_limit_tracker, usage_pricing)                                                                                                                |
 | 记忆层          | 12            | 7 (engine, curator, episodic_memory, store, tokenizer, **account_usage** ✅)                                                                                            | 5 (memory_manager, memory_provider ABC, insights, background_review, session_search)                                                                                                              |
 | 工具系统        | 70+           | 45 (registry, 28 toolsets, mcp_tool_bridge, browser, file, code, network, desktop, lsp, memory, homeassistant)                                                          | 25 (web_search/x_search, delegate/async_delegation, image/video generation, tts/transcription, todo/clarify, kanban, skill_management, discord/feishu/yuanbao, checkpoint, env_probe)             |
 | Skill 系统      | 10            | 3 (registry, skill_commands, skill_utils)                                                                                                                               | 7 (skill_hub, skill_sync, skill_ast_audit, skill_guard, skill_provenance, skill_usage, skill_bundles)                                                                                             |
-| 会话持久化      | 10            | 6 (session_store, trajectory, flywheel, checkpoint, persistence_service)                                                                                                | 4 (session_recap, title_generator, active_sessions, session_listing)                                                                                                                              |
+| 会话持久化      | 10            | 8 (session_store, trajectory, flywheel, checkpoint, persistence_service, **session_recap** ✅, **title_generator** ✅)                                                  | 2 (active_sessions, session_listing)                                                                                                                                                              |
 | Gateway 平台层  | 20+           | 8 (telegram, discord_tool, feishu, wecom, weixin, dingtalk, yuanbao, webhook)                                                                                           | 12 (slack, whatsapp, signal, matrix, email, sms, bluebubbles, homeassistant, msgraph_webhook, api_server, qqbot)                                                                                  |
 | Cron 调度层     | 8             | 4 (scheduler, jobs, cron_service)                                                                                                                                       | 4 (blueprint_catalog, suggestion_catalog, suggestions, scheduler_provider)                                                                                                                        |
 | 安全层          | 15            | 7 (output_guardrail, sensitive_detector, permission_guard, tool_call_guard, approval_manager, schema_validator, **streaming_scrubber** ✅)                              | 8 (write_approval, slash_confirm, path_security, url_safety, threat_patterns, tirith_security, website_policy, ssl_guard)                                                                         |
@@ -29,9 +29,9 @@
 | 显示交互层      | 12            | 8 (前端 UI: ChatInterface, ChatWindow, WebSocketConnectionManager, **cli_output** ✅, **display_formatter** ✅, **curses_tui** ✅, **pty_bridge** ✅, **clipboard** ✅) | 4 (colors, banner, completion, tips)                                                                                                                                                              |
 | 国际化引导层    | 4             | 2 (**i18n** ✅, **onboarding** ✅)                                                                                                                                      | 2 (default_soul, prompt_size)                                                                                                                                                                     |
 | 消息处理层      | 10            | 7 (**think_scrubber** ✅, **resilience** ✅, **hooks** ✅, **logger** ✅, **message_content** ✅, **retry_utils** ✅, **markdown_tables** ✅)                           | 3 (error_classifier, stream_diag, jiter_preload)                                                                                                                                                  |
-| 演化层          | 5             | 4 (**learning_graph** ✅, **skill_provenance** ✅, **moa_aggregator** ✅, skill_engine)                                                                                 | 1 (skill_usage)                                                                                                                                                                                   |
+| 演化层          | 5             | 5 (**learning_graph** ✅, **skill_provenance** ✅, **moa_aggregator** ✅, skill_engine, **skill_usage_tracker** ✅)                                                     | 0                                                                                                                                                                                                 |
 
-**统计**: Hermes 200+ 功能节点，Jiabaixing 已覆盖约 **172** 个，**差距约 28 个节点**（从 60% → 87% 覆盖率）。
+**统计**: Hermes 200+ 功能节点，Jiabaixing 已覆盖约 **180** 个，**差距约 20 个节点**（从 60% → 90% 覆盖率）。
 
 ---
 
@@ -686,6 +686,7 @@ export const SessionSearchBar = () => {
 **✅ P6 全部完成**: 批量轨迹生成 + 流式诊断 + Nous 速率守卫 + Portal 标签
 **✅ P7 全部完成**: 消息内容处理 + 智能重试 + 技能来源追踪 + CLI输出格式化 + Markdown表格渲染
 **✅ P8 全部完成**: 显示格式化器 + Curses TUI + PTY桥接 + Shell补全 + 剪贴板工具
+**✅ P9 全部完成**: Prompt缓存 + 回合终态 + 回合重试状态机 + 批量运行器 + 会话回顾(已有) + 标题生成(已有) + 编码上下文(已有) + 技能使用追踪(已有)
 
 ### 6.3 预期 UX 提升
 
@@ -702,51 +703,55 @@ export const SessionSearchBar = () => {
 
 ### 6.4 新增节点清单（2026-07-11）
 
-| 节点                  | 文件路径                                             | 功能                                                |
-| --------------------- | ---------------------------------------------------- | --------------------------------------------------- |
-| Onboarding Wizard     | `python/agent/core/onboarding.py`                    | 首次运行引导：环境检测→LLM配置→技能推荐→教程        |
-| Model Cost Guard      | `python/agent/llm/model_cost_guard.py`               | 模型级成本守卫：日/小时预算+超支自动降级            |
-| Auxiliary LLM Client  | `python/agent/llm/auxiliary_client.py`               | 旁路LLM：摘要/分类/提取/翻译/视觉→廉价模型          |
-| Account Usage Tracker | `python/agent/persistence/account_usage.py`          | 账户用量追踪：日/月预算+告警+报告                   |
-| Learning Graph        | `python/agent/evolution/learning_graph.py`           | 学习图：技能关系+路径查询+影响分析+拓扑排序         |
-| MoA Aggregator        | `python/agent/llm/moa_aggregator.py`                 | 多模型聚合：投票/级联/加权/自洽/Best-of-N           |
-| Streaming Scrubber    | `python/agent/security/streaming_scrubber.py`        | 流式脱敏：7类敏感信息+可逆还原+消息批处理           |
-| Gateway Hooks         | `python/agent/gateway/hooks.py`                      | 网关Hook：8个生命周期点+优先级排序+统计             |
-| Slash Commands        | `python/agent/gateway/slash_commands.py`             | 斜杠命令：权限控制+别名+默认命令+帮助生成           |
-| Blueprint Catalog     | `python/agent/scheduler/blueprint_catalog.py`        | 蓝图目录：8个内置蓝图+智能建议+一键部署             |
-| Chat TUI              | `python/agent/cli_tui.py`                            | 终端富文本UI：流式输出+命令补全+历史导航+多面板     |
-| Profile Manager       | `python/agent/cli/profile_manager.py`                | 多Profile配置：模型偏好+平台配置+技能策略+导入导出  |
-| Slack Adapter         | `python/agent/gateway/platforms/slack_adapter.py`    | Slack接入：Bolt SDK+Socket Mode+mrkdwn转换          |
-| WhatsApp Adapter      | `python/agent/gateway/platforms/whatsapp_adapter.py` | WhatsApp接入：Cloud API+Webhook+模板消息            |
-| Matrix Adapter        | `python/agent/gateway/platforms/matrix_adapter.py`   | Matrix接入：Client-Server API+/sync长轮询+E2EE      |
-| Skill Hub             | `python/agent/evolution/skill_hub.py`                | 技能市场：6个内置技能+搜索+安装/更新+评分           |
-| Multi-Agent Coord     | `python/agent/evolution/multi_agent.py`              | 多Agent协调：5种协作模式+任务分配+消息传递          |
-| Plugin Manager        | `python/agent/cli/plugin_manager.py`                 | 插件系统：发现/安装/启用/禁用+Hook集成+沙箱隔离     |
-| API Proxy             | `python/agent/api/proxy_server.py`                   | 代理服务器：多后端路由+LRU缓存+速率限制+负载均衡    |
-| Dashboard Auth        | `python/agent/api/dashboard_auth.py`                 | 认证系统：API Key/JWT+RBAC+会话管理+审计日志        |
-| Skill Auditor         | `python/agent/evolution/skill_audit.py`              | AST审计：危险调用/不安全导入/文件访问/模式匹配      |
-| Async Delegator       | `python/agent/tools/async_delegation.py`             | 并行委派：5种聚合模式+条件路由+委派链+超时重试      |
-| Message Mirror        | `python/agent/gateway/mirror.py`                     | 消息镜像：跨会话同步+条件过滤+格式转换+双向镜像     |
-| Pairing Auth          | `python/agent/gateway/pairing.py`                    | 配对授权：DM授权流程+自动审批+过期管理+审计         |
-| Hot Reloader          | `python/agent/gateway/restart.py`                    | 热重启：文件监听+零停机重载+快照回滚+模块重载       |
-| Shutdown Forensics    | `python/agent/gateway/forensics.py`                  | 关闭取证：原因分类+堆栈捕获+恢复策略+信号处理       |
-| Relay Adapter         | `python/agent/gateway/platforms/relay_adapter.py`    | WebSocket中继：自动重连+心跳+压缩+负载均衡          |
-| Memory Providers      | `python/agent/memory/providers.py`                   | 记忆提供者：Builtin+Honcho+Mem0+工厂模式            |
-| Batch Trajectory      | `python/agent/persistence/batch_trajectory.py`       | 批量轨迹生成：质量过滤+去重+多格式输出+并行生成     |
-| Stream Diagnostics    | `python/agent/llm/stream_diag.py`                    | 流式诊断：TTFT+吞吐量+卡顿检测+健康判定+汇总统计    |
-| Nous Rate Guard       | `python/agent/llm/nous_rate_guard.py`                | 速率守卫：令牌桶+多层级限流+配额跟踪+自动降级       |
-| Portal Tags           | `python/agent/llm/portal_tags.py`                    | Portal标签：OAuth令牌+标签绑定+ACL+审计日志         |
-| Message Content       | `python/agent/gateway/message_content.py`            | 消息内容处理：表格提取+代码块+链接+摘要+类型检测    |
-| Retry Utils           | `python/agent/core/retry_utils.py`                   | 智能重试：指数退避+抖动+条件重试+装饰器+统计        |
-| Skill Provenance      | `python/agent/evolution/skill_provenance.py`         | 技能来源追踪：版本+签名+可信度+依赖链+完整性验证    |
-| CLI Output            | `python/agent/cli/cli_output.py`                     | CLI输出：彩色文本+Banner+进度条+表格+终端检测       |
-| Markdown Tables       | `python/agent/gateway/markdown_tables.py`            | Markdown表格：对齐+CSV/JSON转换+排序+过滤+渲染      |
-| Display Formatter     | `python/agent/cli/display_formatter.py`              | 统一格式化：JSON/YAML/Table/Plain+自动检测+管道模式 |
-| Curses TUI            | `python/agent/cli/curses_tui.py`                     | 全屏TUI：curses/textual后端+聊天布局+快捷键+降级    |
-| PTY Bridge            | `python/agent/cli/pty_bridge.py`                     | PTY桥接：子进程伪终端+IO桥接+大小同步+生命周期      |
-| Shell Completion      | `python/agent/cli/shell_completion.py`               | Shell补全：Bash/Zsh/Fish/PowerShell脚本生成         |
-| Clipboard             | `python/agent/cli/clipboard.py`                      | 跨平台剪贴板：pbcopy/xclip/clip/termux+降级方案     |
+| 节点                  | 文件路径                                             | 功能                                                  |
+| --------------------- | ---------------------------------------------------- | ----------------------------------------------------- |
+| Onboarding Wizard     | `python/agent/core/onboarding.py`                    | 首次运行引导：环境检测→LLM配置→技能推荐→教程          |
+| Model Cost Guard      | `python/agent/llm/model_cost_guard.py`               | 模型级成本守卫：日/小时预算+超支自动降级              |
+| Auxiliary LLM Client  | `python/agent/llm/auxiliary_client.py`               | 旁路LLM：摘要/分类/提取/翻译/视觉→廉价模型            |
+| Account Usage Tracker | `python/agent/persistence/account_usage.py`          | 账户用量追踪：日/月预算+告警+报告                     |
+| Learning Graph        | `python/agent/evolution/learning_graph.py`           | 学习图：技能关系+路径查询+影响分析+拓扑排序           |
+| MoA Aggregator        | `python/agent/llm/moa_aggregator.py`                 | 多模型聚合：投票/级联/加权/自洽/Best-of-N             |
+| Streaming Scrubber    | `python/agent/security/streaming_scrubber.py`        | 流式脱敏：7类敏感信息+可逆还原+消息批处理             |
+| Gateway Hooks         | `python/agent/gateway/hooks.py`                      | 网关Hook：8个生命周期点+优先级排序+统计               |
+| Slash Commands        | `python/agent/gateway/slash_commands.py`             | 斜杠命令：权限控制+别名+默认命令+帮助生成             |
+| Blueprint Catalog     | `python/agent/scheduler/blueprint_catalog.py`        | 蓝图目录：8个内置蓝图+智能建议+一键部署               |
+| Chat TUI              | `python/agent/cli_tui.py`                            | 终端富文本UI：流式输出+命令补全+历史导航+多面板       |
+| Profile Manager       | `python/agent/cli/profile_manager.py`                | 多Profile配置：模型偏好+平台配置+技能策略+导入导出    |
+| Slack Adapter         | `python/agent/gateway/platforms/slack_adapter.py`    | Slack接入：Bolt SDK+Socket Mode+mrkdwn转换            |
+| WhatsApp Adapter      | `python/agent/gateway/platforms/whatsapp_adapter.py` | WhatsApp接入：Cloud API+Webhook+模板消息              |
+| Matrix Adapter        | `python/agent/gateway/platforms/matrix_adapter.py`   | Matrix接入：Client-Server API+/sync长轮询+E2EE        |
+| Skill Hub             | `python/agent/evolution/skill_hub.py`                | 技能市场：6个内置技能+搜索+安装/更新+评分             |
+| Multi-Agent Coord     | `python/agent/evolution/multi_agent.py`              | 多Agent协调：5种协作模式+任务分配+消息传递            |
+| Plugin Manager        | `python/agent/cli/plugin_manager.py`                 | 插件系统：发现/安装/启用/禁用+Hook集成+沙箱隔离       |
+| API Proxy             | `python/agent/api/proxy_server.py`                   | 代理服务器：多后端路由+LRU缓存+速率限制+负载均衡      |
+| Dashboard Auth        | `python/agent/api/dashboard_auth.py`                 | 认证系统：API Key/JWT+RBAC+会话管理+审计日志          |
+| Skill Auditor         | `python/agent/evolution/skill_audit.py`              | AST审计：危险调用/不安全导入/文件访问/模式匹配        |
+| Async Delegator       | `python/agent/tools/async_delegation.py`             | 并行委派：5种聚合模式+条件路由+委派链+超时重试        |
+| Message Mirror        | `python/agent/gateway/mirror.py`                     | 消息镜像：跨会话同步+条件过滤+格式转换+双向镜像       |
+| Pairing Auth          | `python/agent/gateway/pairing.py`                    | 配对授权：DM授权流程+自动审批+过期管理+审计           |
+| Hot Reloader          | `python/agent/gateway/restart.py`                    | 热重启：文件监听+零停机重载+快照回滚+模块重载         |
+| Shutdown Forensics    | `python/agent/gateway/forensics.py`                  | 关闭取证：原因分类+堆栈捕获+恢复策略+信号处理         |
+| Relay Adapter         | `python/agent/gateway/platforms/relay_adapter.py`    | WebSocket中继：自动重连+心跳+压缩+负载均衡            |
+| Memory Providers      | `python/agent/memory/providers.py`                   | 记忆提供者：Builtin+Honcho+Mem0+工厂模式              |
+| Batch Trajectory      | `python/agent/persistence/batch_trajectory.py`       | 批量轨迹生成：质量过滤+去重+多格式输出+并行生成       |
+| Stream Diagnostics    | `python/agent/llm/stream_diag.py`                    | 流式诊断：TTFT+吞吐量+卡顿检测+健康判定+汇总统计      |
+| Nous Rate Guard       | `python/agent/llm/nous_rate_guard.py`                | 速率守卫：令牌桶+多层级限流+配额跟踪+自动降级         |
+| Portal Tags           | `python/agent/llm/portal_tags.py`                    | Portal标签：OAuth令牌+标签绑定+ACL+审计日志           |
+| Message Content       | `python/agent/gateway/message_content.py`            | 消息内容处理：表格提取+代码块+链接+摘要+类型检测      |
+| Retry Utils           | `python/agent/core/retry_utils.py`                   | 智能重试：指数退避+抖动+条件重试+装饰器+统计          |
+| Skill Provenance      | `python/agent/evolution/skill_provenance.py`         | 技能来源追踪：版本+签名+可信度+依赖链+完整性验证      |
+| CLI Output            | `python/agent/cli/cli_output.py`                     | CLI输出：彩色文本+Banner+进度条+表格+终端检测         |
+| Markdown Tables       | `python/agent/gateway/markdown_tables.py`            | Markdown表格：对齐+CSV/JSON转换+排序+过滤+渲染        |
+| Display Formatter     | `python/agent/cli/display_formatter.py`              | 统一格式化：JSON/YAML/Table/Plain+自动检测+管道模式   |
+| Curses TUI            | `python/agent/cli/curses_tui.py`                     | 全屏TUI：curses/textual后端+聊天布局+快捷键+降级      |
+| PTY Bridge            | `python/agent/cli/pty_bridge.py`                     | PTY桥接：子进程伪终端+IO桥接+大小同步+生命周期        |
+| Shell Completion      | `python/agent/cli/shell_completion.py`               | Shell补全：Bash/Zsh/Fish/PowerShell脚本生成           |
+| Clipboard             | `python/agent/cli/clipboard.py`                      | 跨平台剪贴板：pbcopy/xclip/clip/termux+降级方案       |
+| Prompt Caching        | `python/agent/llm/prompt_caching.py`                 | Prompt前缀缓存：Anthropic cache_control+断点策略+统计 |
+| Turn Finalizer        | `python/agent/core/turn_finalizer.py`                | 回合终态处理：工具结果汇总+输出格式化+后置Hook        |
+| Turn Retry State      | `python/agent/core/turn_retry_state.py`              | 回合重试状态机：错误分类+自适应策略+模型降级          |
+| Batch Runner          | `python/agent/core/batch_runner.py`                  | 批量任务运行：并行/串行/自适应+进度+重试+统计         |
 
 ---
 
-**✅ P0-P8 全部完成**，覆盖率 87%（172/200 节点）。下一步可继续深挖剩余 28 个节点（LSP集成/消息处理增强/CLI子命令等）。
+**✅ P0-P9 全部完成**，覆盖率 90%（180/200 节点）。下一步 P10：安全层增强 + 记忆层增强 + Prompt 压缩。

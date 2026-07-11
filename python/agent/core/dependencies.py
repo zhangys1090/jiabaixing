@@ -319,4 +319,9 @@ SUBSYSTEM_DEPS: list[SubsystemSpec] = [
     SubsystemSpec("pty_bridge", "_init_pty_bridge", critical=False),
     SubsystemSpec("shell_completion", "_init_shell_completion", critical=False),
     SubsystemSpec("clipboard", "_init_clipboard", critical=False),
+    # ── P9 扩展节点 ──
+    SubsystemSpec("prompt_caching", "_init_prompt_caching", critical=False),
+    SubsystemSpec("turn_finalizer", "_init_turn_finalizer", critical=False),
+    SubsystemSpec("turn_retry_state", "_init_turn_retry_state", critical=False),
+    SubsystemSpec("batch_runner", "_init_batch_runner", critical=False),
 ]

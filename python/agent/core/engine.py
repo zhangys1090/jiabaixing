@@ -242,6 +242,11 @@ class AgentEngine:
         self.pty_bridge: Any = None
         self.shell_completion: Any = None
         self.clipboard: Any = None
+        # P9 扩展节点
+        self.prompt_caching: Any = None
+        self.turn_finalizer: Any = None
+        self.turn_retry_state: Any = None
+        self.batch_runner: Any = None
         # 子系统注册中心（用于拓扑排序初始化）
         self._registry: SubsystemRegistry | None = None
 
@@ -3503,6 +3508,52 @@ class AgentEngine:
             return self.clipboard
         except Exception as e:
             log.warning("Clipboard init failed", error=str(e))
+            return None
+
+    # ── P9 扩展节点初始化 ──
+
+    async def _init_prompt_caching(self) -> Any:
+        """初始化 Prompt 前缀缓存管理器。"""
+        try:
+            from agent.llm.prompt_caching import PromptCaching
+            self.prompt_caching = PromptCaching()
+            log.info("Prompt Caching ready")
+            return self.prompt_caching
+        except Exception as e:
+            log.warning("Prompt Caching init failed", error=str(e))
+            return None
+
+    async def _init_turn_finalizer(self) -> Any:
+        """初始化回合终态处理器。"""
+        try:
+            from agent.core.turn_finalizer import TurnFinalizer
+            self.turn_finalizer = TurnFinalizer()
+            log.info("Turn Finalizer ready")
+            return self.turn_finalizer
+        except Exception as e:
+            log.warning("Turn Finalizer init failed", error=str(e))
+            return None
+
+    async def _init_turn_retry_state(self) -> Any:
+        """初始化回合重试状态机。"""
+        try:
+            from agent.core.turn_retry_state import TurnRetryState
+            self.turn_retry_state = TurnRetryState()
+            log.info("Turn Retry State ready")
+            return self.turn_retry_state
+        except Exception as e:
+            log.warning("Turn Retry State init failed", error=str(e))
+            return None
+
+    async def _init_batch_runner(self) -> Any:
+        """初始化批量任务运行器。"""
+        try:
+            from agent.core.batch_runner import BatchRunner
+            self.batch_runner = BatchRunner()
+            log.info("Batch Runner ready")
+            return self.batch_runner
+        except Exception as e:
+            log.warning("Batch Runner init failed", error=str(e))
             return None
 
     @property
