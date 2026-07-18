@@ -252,6 +252,66 @@ class SandboxExecutor:
 
         return PermissionCheckResult(allowed=True, risk_level=SecurityLevel.LOW)
 
+    def _make_preexec_fn(self) -> Any | None:
+        """T-10: 构造 preexec_fn 用于 Unix 子进程资源限制。
+
+        在 Linux/macOS 上通过 resource.setrlimit 施加内存限制。
+        Windows 不支持 preexec_fn，返回 None（由监控机制兜底）。
+        """
+        if sys.platform == "win32":
+            return None
+        try:
+            import resource
+
+            max_memory_bytes = self.config.max_memory_mb * 1024 * 1024
+
+            def _set_limits() -> None:
+                resource.setrlimit(resource.RLIMIT_AS, (max_memory_bytes, max_memory_bytes))
+                resource.setrlimit(resource.RLIMIT_DATA, (max_memory_bytes, max_memory_bytes))
+
+            return _set_limits
+        except (ImportError, AttributeError):
+            return None
+
+    async def _monitor_resources(self, proc: asyncio.subprocess.Process, timeout_sec: float) -> tuple[bytes, bytes] | None:
+        """T-10: 带资源监控的进程等待。
+
+        周期性检查子进程内存占用，超限时终止。
+        返回 None 表示因资源超限被终止。
+        """
+        max_memory_bytes = self.config.max_memory_mb * 1024 * 1024
+        check_interval = 0.5
+        elapsed = 0.0
+
+        try:
+            import psutil
+            has_psutil = True
+        except ImportError:
+            has_psutil = False
+
+        while elapsed < timeout_sec:
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    proc.communicate(), timeout=min(check_interval, timeout_sec - elapsed),
+                )
+                return stdout, stderr
+            except asyncio.TimeoutError:
+                if has_psutil and proc.pid:
+                    try:
+                        p = psutil.Process(proc.pid)
+                        mem_info = p.memory_info()
+                        if mem_info.rss > max_memory_bytes:
+                            proc.kill()
+                            await proc.wait()
+                            return None
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
+                elapsed += check_interval
+
+        proc.kill()
+        await proc.wait()
+        raise asyncio.TimeoutError()
+
     async def _execute_python(
         self, code: str, timeout_sec: float, start: float
     ) -> SandboxExecutionResult:
@@ -262,19 +322,37 @@ class SandboxExecutor:
             tmp = f.name
 
         try:
+            preexec_fn = self._make_preexec_fn()
             proc = await asyncio.create_subprocess_exec(
                 sys.executable,
                 tmp,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                preexec_fn=preexec_fn,
             )
 
             try:
-                stdout, stderr = await asyncio.wait_for(
-                    proc.communicate(), timeout=timeout_sec
-                )
+                if preexec_fn is None and self.config.max_memory_mb > 0:
+                    stdout, stderr = await self._monitor_resources(proc, timeout_sec)
+                    if stdout is None:
+                        return SandboxExecutionResult(
+                            success=False,
+                            error=f"内存超限 ({self.config.max_memory_mb}MB)",
+                            duration_ms=int((time.time() - start) * 1000),
+                            exit_code=-1,
+                            security_violations=["memory_limit_exceeded"],
+                        )
+                else:
+                    stdout, stderr = await asyncio.wait_for(
+                        proc.communicate(), timeout=timeout_sec
+                    )
             except asyncio.TimeoutError:
-                proc.kill()
+                # 进程可能已由 _monitor_resources 的超时路径先行终止（max_memory_mb>0 时），
+                # 此时再次 kill 会抛 ProcessLookupError / OSError，忽略即可。
+                try:
+                    proc.kill()
+                except (ProcessLookupError, OSError):
+                    pass
                 return SandboxExecutionResult(
                     success=False,
                     error=f"执行超时 ({timeout_sec}秒)",
@@ -325,19 +403,37 @@ class SandboxExecutor:
             tmp = f.name
 
         try:
+            preexec_fn = self._make_preexec_fn()
             proc = await asyncio.create_subprocess_exec(
                 "node",
                 tmp,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                preexec_fn=preexec_fn,
             )
 
             try:
-                stdout, stderr = await asyncio.wait_for(
-                    proc.communicate(), timeout=timeout_sec
-                )
+                if preexec_fn is None and self.config.max_memory_mb > 0:
+                    stdout, stderr = await self._monitor_resources(proc, timeout_sec)
+                    if stdout is None:
+                        return SandboxExecutionResult(
+                            success=False,
+                            error=f"内存超限 ({self.config.max_memory_mb}MB)",
+                            duration_ms=int((time.time() - start) * 1000),
+                            exit_code=-1,
+                            security_violations=["memory_limit_exceeded"],
+                        )
+                else:
+                    stdout, stderr = await asyncio.wait_for(
+                        proc.communicate(), timeout=timeout_sec
+                    )
             except asyncio.TimeoutError:
-                proc.kill()
+                # 进程可能已由 _monitor_resources 的超时路径先行终止（max_memory_mb>0 时），
+                # 此时再次 kill 会抛 ProcessLookupError / OSError，忽略即可。
+                try:
+                    proc.kill()
+                except (ProcessLookupError, OSError):
+                    pass
                 return SandboxExecutionResult(
                     success=False,
                     error=f"执行超时 ({timeout_sec}秒)",
@@ -383,18 +479,36 @@ class SandboxExecutor:
         self, code: str, timeout_sec: float, start: float
     ) -> SandboxExecutionResult:
         try:
+            preexec_fn = self._make_preexec_fn()
             proc = await asyncio.create_subprocess_shell(
                 code,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                preexec_fn=preexec_fn,
             )
 
             try:
-                stdout, stderr = await asyncio.wait_for(
-                    proc.communicate(), timeout=timeout_sec
-                )
+                if preexec_fn is None and self.config.max_memory_mb > 0:
+                    stdout, stderr = await self._monitor_resources(proc, timeout_sec)
+                    if stdout is None:
+                        return SandboxExecutionResult(
+                            success=False,
+                            error=f"内存超限 ({self.config.max_memory_mb}MB)",
+                            duration_ms=int((time.time() - start) * 1000),
+                            exit_code=-1,
+                            security_violations=["memory_limit_exceeded"],
+                        )
+                else:
+                    stdout, stderr = await asyncio.wait_for(
+                        proc.communicate(), timeout=timeout_sec
+                    )
             except asyncio.TimeoutError:
-                proc.kill()
+                # 进程可能已由 _monitor_resources 的超时路径先行终止（max_memory_mb>0 时），
+                # 此时再次 kill 会抛 ProcessLookupError / OSError，忽略即可。
+                try:
+                    proc.kill()
+                except (ProcessLookupError, OSError):
+                    pass
                 return SandboxExecutionResult(
                     success=False,
                     error=f"执行超时 ({timeout_sec}秒)",

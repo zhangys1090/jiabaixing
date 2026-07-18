@@ -46,7 +46,7 @@ class Reporter:
             elapsed = (time.time() - context.budget.start_time) * 1000
 
         # ─── 多维度质量评分 ───
-        quality = self._compute_quality_score(
+        quality, breakdown = self._compute_quality_score(
             response=last_assistant,
             steps_completed=steps_completed,
             steps_total=steps_total,
@@ -60,16 +60,32 @@ class Reporter:
             steps_completed=steps_completed,
             steps_total=steps_total,
             total_duration_ms=elapsed,
+            quality_breakdown=breakdown,
         )
 
     def _extract_response(self, context: LoopContext) -> str:
-        """从上下文中提取最终响应文本。"""
-        # 优先取最后一条 assistant 消息
-        for msg in reversed(context.messages):
-            if msg.get("role") == "assistant" and msg.get("content"):
-                return msg["content"]
+        """从上下文中提取最终响应文本。
 
-        # 降级：取最后一个成功的步骤结果
+        多步任务时，如果最后一条 assistant 消息是工具原始输出，
+        则合成面向用户的综合回答。
+        """
+        assistant_msgs = [
+            msg for msg in context.messages
+            if msg.get("role") == "assistant" and msg.get("content")
+        ]
+
+        if assistant_msgs:
+            last_msg = assistant_msgs[-1]["content"]
+            if len(assistant_msgs) > 1 and context.step_results:
+                successful = [r for r in context.step_results.values() if r.success]
+                if len(successful) > 1:
+                    steps_summary = "\n".join(
+                        f"- 步骤 {i+1}({r.tool_name or 'unknown'}): {r.content[:100]}"
+                        for i, r in enumerate(successful)
+                    )
+                    return f"任务已完成，共执行 {len(successful)} 个步骤：\n{steps_summary}\n\n最终结果：{last_msg}"
+            return last_msg
+
         if context.step_results:
             successful = [
                 r for r in context.step_results.values() if r.success
@@ -86,9 +102,10 @@ class Reporter:
         steps_total: int,
         context: LoopContext,
         elapsed_ms: float,
-    ) -> float:
+    ) -> tuple[float, dict[str, float]]:
         """计算多维度加权质量评分 (0.0 ~ 1.0)。
 
+        返回: (综合评分, 各维度得分字典)
         各维度独立计算后加权汇总，避免单一维度退化导致整体评分失真。
         """
         # 维度 1: 响应完整性 (35%)
@@ -113,6 +130,13 @@ class Reporter:
             + self.WEIGHT_EFFICIENCY * efficiency_score
         )
 
+        breakdown = {
+            "response_completeness": round(resp_score, 4),
+            "step_success_rate": round(step_score, 4),
+            "error_recovery": round(recovery_score, 4),
+            "time_efficiency": round(efficiency_score, 4),
+        }
+
         log.debug(
             "Quality score computed",
             response=round(resp_score, 3),
@@ -120,9 +144,10 @@ class Reporter:
             recovery=round(recovery_score, 3),
             efficiency=round(efficiency_score, 3),
             total=round(quality, 3),
+            breakdown=breakdown,
         )
 
-        return max(0.0, min(1.0, quality))
+        return max(0.0, min(1.0, quality)), breakdown
 
     def _score_response(self, response: str) -> float:
         """评分响应完整性：存在性 + 长度充实度。"""
@@ -152,10 +177,13 @@ class Reporter:
         if not failed:
             return 1.0  # 无失败 = 满分
 
-        # 检查是否有重试成功的记录（retry_count > 0 且最终成功）
+        # StepResult 不携带 retry_count（见 agent/loop/types.py），改为从 PlanStep 映射
+        # （审计 L-09：原 getattr(r, "retry_count", 0) 永远为 0，导致错误恢复维度恒为 0 分）
+        retry_map: dict[str, int] = {}
+        if context.plan and context.plan.steps:
+            retry_map = {s.step_id: s.retry_count for s in context.plan.steps}
         retried_and_succeeded = sum(
-            1 for r in all_results
-            if r.success and getattr(r, "retry_count", 0) > 0
+            1 for r in all_results if r.success and retry_map.get(r.step_id, 0) > 0
         )
         total_failures = len(failed) + retried_and_succeeded
         if total_failures == 0:
@@ -184,3 +212,37 @@ class Reporter:
             return 0.5  # 接近预算上限
         else:
             return 0.2  # 超出预算
+
+    # P1-4: 错误信息人性化翻译映射
+    ERROR_TRANSLATIONS: dict[str, tuple[str, str]] = {
+        "Connection refused": ("网络连接失败", "请检查网络连接后重试"),
+        "Connection reset": ("网络连接被重置", "正在尝试重新连接..."),
+        "timed out": ("请求超时", "服务响应较慢，已自动重试中"),
+        "ConnectionError": ("网络连接异常", "请检查网络是否正常"),
+        "TimeoutError": ("操作超时", "任务耗时较长，请耐心等待"),
+        "permission denied": ("权限不足", "请检查文件或目录的访问权限"),
+        "not found": ("资源未找到", "请确认文件或路径是否存在"),
+        "file not found": ("文件未找到", "请检查文件路径是否正确"),
+        "rate limit": ("请求频率过高", "请稍后再试"),
+        "token limit": ("对话内容过长", "已自动压缩历史记录"),
+        "invalid api key": ("API 密钥无效", "请检查 API 配置"),
+        "out of memory": ("系统资源不足", "已简化处理，部分功能可能受限"),
+        "disk full": ("磁盘空间不足", "请清理磁盘空间后重试"),
+        "read only": ("文件为只读", "请检查文件权限"),
+    }
+
+    @classmethod
+    def humanize_error(cls, error: str) -> tuple[str, str]:
+        """将技术错误翻译为用户友好描述。
+
+        Args:
+            error: 原始技术错误信息。
+
+        Returns:
+            (用户友好描述, 操作建议)。
+        """
+        error_lower = error.lower()
+        for pattern, (friendly, suggestion) in cls.ERROR_TRANSLATIONS.items():
+            if pattern.lower() in error_lower:
+                return friendly, suggestion
+        return f"处理请求时遇到技术问题", "请稍后重试或简化您的请求"

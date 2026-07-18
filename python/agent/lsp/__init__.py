@@ -1,65 +1,12 @@
-from agent.lsp.types import (
-    BUILTIN_SERVERS,
-    EXTENSION_MAP,
-    LspCompletionItemKind,
-    LspConnectionState,
-    LspDiagnosticSeverity,
-    LspPosition,
-    LspRange,
-    LspServerCapabilities,
-    LspServerConfig,
-    LspSymbolKind,
-    LspTextDocumentItem,
-    LspTextDocumentSyncKind,
-    LspWorkspaceConfig,
-)
-from agent.lsp.transport import LspTransport
-from agent.lsp.client_manager import LspClientManager
-from agent.lsp.completion_provider import (
-    CompletionItem,
-    CompletionResult,
-    DefinitionResult,
-    HoverResult,
-    LocationEntry,
-    LspCompletionProvider,
-    ReferencesResult,
-    SymbolEntry,
-    SymbolResult,
-)
-from agent.lsp.diagnostics_provider import (
-    DiagnosticFilter,
-    DiagnosticItem,
-    DiagnosticSummary,
-    LspDiagnosticsProvider,
-)
+"""LSP 模块初始化。"""
+
+from agent.lsp.protocol import LspProtocol, LspServerCapabilities
+from agent.lsp.servers import LspServerManager
+from agent.lsp.workspace import LspWorkspace
 
 __all__ = [
-    "BUILTIN_SERVERS",
-    "EXTENSION_MAP",
-    "LspCompletionItemKind",
-    "LspConnectionState",
-    "LspDiagnosticSeverity",
-    "LspPosition",
-    "LspRange",
+    "LspProtocol",
     "LspServerCapabilities",
-    "LspServerConfig",
-    "LspSymbolKind",
-    "LspTextDocumentItem",
-    "LspTextDocumentSyncKind",
-    "LspWorkspaceConfig",
-    "LspTransport",
-    "LspClientManager",
-    "LspCompletionProvider",
-    "CompletionItem",
-    "CompletionResult",
-    "DefinitionResult",
-    "HoverResult",
-    "LocationEntry",
-    "ReferencesResult",
-    "SymbolEntry",
-    "SymbolResult",
-    "LspDiagnosticsProvider",
-    "DiagnosticFilter",
-    "DiagnosticItem",
-    "DiagnosticSummary",
+    "LspServerManager",
+    "LspWorkspace",
 ]

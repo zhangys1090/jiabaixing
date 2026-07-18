@@ -8,6 +8,7 @@ class ChatRequest(BaseModel):
     context_files: list[str] = Field(default_factory=list)
     images: list[str] = Field(default_factory=list)
     user_id: str | None = None
+    strategy_name: str | None = None
 
 
 class ChatResponse(BaseModel):

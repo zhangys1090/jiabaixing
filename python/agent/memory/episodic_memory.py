@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from agent.config import DATA_DIR
+from agent.persistence.database import get_sync_connection
 from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("episodic_memory")
@@ -282,6 +283,8 @@ class EpisodicMemoryStore:
         if to_remove > 0:
             removed = self._episodes[:to_remove]
             self._episodes = self._episodes[to_remove:]
+            for ep in removed:
+                self._delete_episode_db(ep.id)
             log.info("Old episodes cleaned", count=len(removed))
 
     @staticmethod
@@ -320,7 +323,7 @@ class EpisodicMemoryStore:
         if self._in_memory:
             return
         try:
-            conn = sqlite3.connect(str(self._db_path))
+            conn = get_sync_connection(db_path=str(self._db_path))
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS episodes (
                     id TEXT PRIMARY KEY,
@@ -346,7 +349,7 @@ class EpisodicMemoryStore:
 
     def _load_from_db(self) -> None:
         try:
-            conn = sqlite3.connect(str(self._db_path))
+            conn = get_sync_connection(db_path=str(self._db_path))
             conn.row_factory = sqlite3.Row
             cur = conn.execute(
                 "SELECT id, content, scene, emotion, emotion_intensity, "
@@ -381,7 +384,7 @@ class EpisodicMemoryStore:
         if self._in_memory:
             return
         try:
-            conn = sqlite3.connect(str(self._db_path))
+            conn = get_sync_connection(db_path=str(self._db_path))
             conn.execute(
                 "INSERT OR REPLACE INTO episodes "
                 "(id, content, scene, emotion, emotion_intensity, timestamp, "
@@ -410,7 +413,7 @@ class EpisodicMemoryStore:
         if self._in_memory:
             return
         try:
-            conn = sqlite3.connect(str(self._db_path))
+            conn = get_sync_connection(db_path=str(self._db_path))
             conn.execute(
                 "UPDATE episodes SET importance=?, access_count=?, last_accessed=?, "
                 "tags=?, metadata=? WHERE id=?",
@@ -430,7 +433,7 @@ class EpisodicMemoryStore:
 
     def _delete_episode_db(self, memory_id: str) -> None:
         try:
-            conn = sqlite3.connect(str(self._db_path))
+            conn = get_sync_connection(db_path=str(self._db_path))
             conn.execute("DELETE FROM episodes WHERE id=?", (memory_id,))
             conn.commit()
             conn.close()

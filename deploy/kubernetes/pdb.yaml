@@ -1,0 +1,36 @@
+# PDB: 家百星 Pod 干扰预算
+# 用途: 保证滚动更新/节点维护期间至少 1 个 Pod 可用
+# Python: minAvailable 1
+# Gateway: minAvailable 1
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: jiabaixing-python-pdb
+  namespace: jiabaixing
+  labels:
+    app.kubernetes.io/name: python-backend
+    app.kubernetes.io/part-of: jiabaixing
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: python-backend
+      app.kubernetes.io/part-of: jiabaixing
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: jiabaixing-gateway-pdb
+  namespace: jiabaixing
+  labels:
+    app.kubernetes.io/name: gateway
+    app.kubernetes.io/part-of: jiabaixing
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gateway
+      app.kubernetes.io/part-of: jiabaixing

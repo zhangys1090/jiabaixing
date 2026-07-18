@@ -117,9 +117,12 @@ class MemoryCurator:
         to_forget = 0
         importance_scores: list[float] = []
 
+        forgotten_ids: list[str] = []
+        consolidated_ids: list[str] = []
+
         for mem in memories:
             mem_id = mem.get("id", "")
-            mem_type = mem.get("type", "general")
+            mem_type = mem.get("memory_type", mem.get("type", "general"))
             mem_content = mem.get("content", "")
             mem_metadata = mem.get("metadata", {})
 
@@ -133,9 +136,13 @@ class MemoryCurator:
 
             if score.total_score >= self._config.consolidation_threshold:
                 to_consolidate += 1
+                if self.consolidate_memory(mem_id):
+                    consolidated_ids.append(mem_id)
 
             if score.total_score < self._config.forget_threshold:
                 to_forget += 1
+                if self.forget_memory(mem_id):
+                    forgotten_ids.append(mem_id)
 
         avg_score = sum(importance_scores) / len(importance_scores) if importance_scores else 0.0
 
@@ -152,11 +159,22 @@ class MemoryCurator:
             "total_memories": total,
             "to_consolidate": to_consolidate,
             "to_forget": to_forget,
+            "consolidated_ids": consolidated_ids,
+            "forgotten_ids": forgotten_ids,
             "avg_importance_score": avg_score,
         }
 
-    def consolidate_memory(self, memory_id: str) -> None:
+    def consolidate_memory(self, memory_id: str) -> bool:
         self.record_usage(memory_id)
+        if self._memory:
+            try:
+                store = getattr(self._memory, "_store", None)
+                if store and hasattr(store, "update_memory_type"):
+                    store.update_memory_type(memory_id, "long_term")
+                    return True
+            except Exception:
+                pass
+        return True
 
     def forget_memory(self, memory_id: str) -> bool:
         if memory_id in self._forgotten:
@@ -165,6 +183,13 @@ class MemoryCurator:
         self._usage_counts.pop(memory_id, None)
         self._last_access.pop(memory_id, None)
         self._importance_cache.pop(memory_id, None)
+        if self._memory:
+            try:
+                store = getattr(self._memory, "_store", None)
+                if store and hasattr(store, "delete"):
+                    store.delete(memory_id)
+            except Exception:
+                pass
         return True
 
     async def review(self) -> Any:

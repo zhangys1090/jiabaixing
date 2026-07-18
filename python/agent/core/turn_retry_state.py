@@ -170,6 +170,18 @@ class TurnRetryState:
     def context(self) -> RetryContext:
         return self._context
 
+    def record_attempt(self, success: bool) -> None:
+        """记录一次重试尝试（兼容 conversation_loop 调用）。"""
+        if success:
+            self._state = RetryState.RECOVERED
+        else:
+            self._state = RetryState.RETRYING
+            self._total_retries += 1
+
+    def should_retry(self, _error: Exception) -> bool:
+        """判断是否应重试（兼容 conversation_loop 调用）。"""
+        return self._total_retries < 3
+
     def begin_turn(
         self,
         turn_id: str = "",

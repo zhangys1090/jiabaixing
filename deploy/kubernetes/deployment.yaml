@@ -1,0 +1,170 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jiabaixing
+  namespace: jiabaixing
+  labels:
+    app: jiabaixing
+    version: v5.0.0
+    tier: backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: jiabaixing
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: jiabaixing
+        version: v5.0.0
+      annotations:
+        prometheus.io/scrape: 'true'
+        prometheus.io/port: '9464'
+        prometheus.io/path: /metrics
+    spec:
+      containers:
+        - name: jiabaixing
+          image: jiabaixing:5.0.0
+          ports:
+            - containerPort: 3111
+              name: http
+              protocol: TCP
+            - containerPort: 9464
+              name: metrics
+              protocol: TCP
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: PORT
+              value: '3111'
+            - name: LLM_MODEL
+              valueFrom:
+                configMapKeyRef:
+                  name: jiabaixing-config
+                  key: llm-model
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: jiabaixing-secrets
+                  key: llm-api-key
+            - name: LLM_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: jiabaixing-config
+                  key: llm-base-url
+            - name: REDIS_ENABLED
+              value: 'true'
+            - name: REDIS_HOST
+              value: 'jiabaixing-redis'
+            - name: REDIS_PORT
+              value: '6379'
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: jiabaixing-secrets
+                  key: redis-password
+                  optional: true
+            - name: OTEL_ENABLED
+              value: 'true'
+            - name: OTEL_SERVICE_NAME
+              value: 'jiabaixing'
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: 'http://otel-collector:4317'
+            - name: OTEL_PROMETHEUS_PORT
+              value: '9464'
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: '1'
+              memory: 2Gi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3111
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3111
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+            - name: logs
+              mountPath: /app/logs
+        - name: python-agent
+          image: jiabaixing-python:5.0.0
+          ports:
+            - containerPort: 8000
+              name: http-python
+              protocol: TCP
+          env:
+            - name: LLM_MODEL
+              valueFrom:
+                configMapKeyRef:
+                  name: jiabaixing-config
+                  key: llm-model
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: jiabaixing-secrets
+                  key: llm-api-key
+            - name: REDIS_ENABLED
+              value: 'true'
+            - name: REDIS_HOST
+              value: 'jiabaixing-redis'
+            - name: REDIS_PORT
+              value: '6379'
+            - name: OTEL_ENABLED
+              value: 'true'
+            - name: OTEL_SERVICE_NAME
+              value: 'jiabaixing-python'
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: 'http://otel-collector:4317'
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: '1'
+              memory: 2Gi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 30
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: jiabaixing-data
+        - name: logs
+          emptyDir: {}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: jiabaixing
+                topologyKey: kubernetes.io/hostname

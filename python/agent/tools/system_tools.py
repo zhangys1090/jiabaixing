@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import time as _time
 from typing import Any
 
 from agent.tools.registry import (
@@ -13,7 +15,11 @@ from agent.tools.registry import (
 ASK_CLARIFICATION_DEF = ToolDefinition(
     name="ask_clarification",
     description="向用户请求澄清。适用场景：用户需求不明确、存在歧义。不适用：需求已明确时。",
+    short_desc="请求用户澄清",
     category=ToolCategory.SYSTEM,
+    tags=["clarify", "question", "system"],
+    scenes=["coding", "daily", "research"],
+    capability_level=1,
     parameters=[
         ToolParameterDef(name="question", type="string", description="需要澄清的问题"),
         ToolParameterDef(name="options", type="string", required=False, description="可选选项列表"),
@@ -24,7 +30,11 @@ ASK_CLARIFICATION_DEF = ToolDefinition(
 CONTEXT_MANAGE_DEF = ToolDefinition(
     name="context_manage",
     description="管理对话上下文，支持压缩、摘要、聚焦。适用场景：对话过长需要压缩、需要聚焦关键信息。",
+    short_desc="管理对话上下文",
     category=ToolCategory.SYSTEM,
+    tags=["context", "compress", "summarize", "system"],
+    scenes=["coding", "daily", "research"],
+    capability_level=1,
     parameters=[
         ToolParameterDef(name="action", type="string", description="操作: compress/summarize/focus/reset", enum=["compress", "summarize", "focus", "reset"]),
         ToolParameterDef(name="target", type="string", required=False, description="聚焦目标关键词"),
@@ -35,7 +45,11 @@ CONTEXT_MANAGE_DEF = ToolDefinition(
 PREVIEW_EXECUTION_DEF = ToolDefinition(
     name="preview_execution",
     description="预览执行计划，不实际执行。适用场景：高风险操作前预览、确认执行步骤。",
+    short_desc="预览执行计划",
     category=ToolCategory.SYSTEM,
+    tags=["preview", "plan", "system", "safety"],
+    scenes=["coding", "development"],
+    capability_level=2,
     parameters=[
         ToolParameterDef(name="plan", type="string", description="执行计划描述"),
     ],
@@ -45,7 +59,11 @@ PREVIEW_EXECUTION_DEF = ToolDefinition(
 ROLLBACK_CHANGES_DEF = ToolDefinition(
     name="rollback_changes",
     description="回滚最近的文件修改。适用场景：操作出错需要撤销。不适用：未做修改时。",
+    short_desc="回滚文件修改",
     category=ToolCategory.SYSTEM,
+    tags=["rollback", "undo", "revert", "system", "safety"],
+    scenes=["coding", "development"],
+    capability_level=2,
     parameters=[
         ToolParameterDef(name="file_path", type="string", required=False, description="要回滚的文件路径"),
         ToolParameterDef(name="steps", type="number", required=False, description="回滚步数"),
@@ -233,13 +251,15 @@ SHELL_GENERATE_DEF = ToolDefinition(
 
 VOICE_INTERACT_DEF = ToolDefinition(
     name="voice_interact",
-    description="语音交互工具。管理实时语音会话，支持语音合成(speak)、语音识别(listen)、会话控制等操作。适用场景：语音对话、语音播报、语音助手交互。",
+    description="语音交互工具。管理实时语音会话，支持语音合成(speak)、语音识别(listen)、会话控制等操作。speak自动检测edge-tts/系统TTS引擎；listen对接speech_transcribe工具。适用场景：语音对话、语音播报、语音助手交互。",
     category=ToolCategory.SYSTEM,
     parameters=[
         ToolParameterDef(name="action", type="string", description="操作类型", enum=["start_session", "stop_session", "speak", "listen", "status"]),
         ToolParameterDef(name="text", type="string", required=False, description="speak操作时要转为语音的文本内容"),
         ToolParameterDef(name="language", type="string", required=False, description="语音识别/合成的语言，默认zh-CN"),
         ToolParameterDef(name="emotion", type="string", required=False, description="语音合成的情绪参数", enum=["平静", "开心", "悲伤", "惊讶", "愤怒", "温柔", "宠溺"]),
+        ToolParameterDef(name="audio_path", type="string", required=False, description="listen操作时的音频文件路径，留空则尝试录音"),
+        ToolParameterDef(name="voice", type="string", required=False, description="speak操作的语音角色，如zh-CN-XiaoxiaoNeural、zh-CN-YunxiNeural"),
     ],
     risk_level="low",
 )
@@ -535,6 +555,8 @@ async def voice_interact_executor(params: dict[str, Any]) -> ToolResult:
     text = params.get("text", "")
     language = str(params.get("language", "zh-CN"))
     emotion = str(params.get("emotion", "平静"))
+    audio_path = str(params.get("audio_path", ""))
+    voice = str(params.get("voice", ""))
 
     if action == "start_session":
         _voice_session = {"id": f"voice_{int(_time.time())}", "status": "idle", "language": language, "startedAt": _time.time(), "turnCount": 0}
@@ -553,21 +575,11 @@ async def voice_interact_executor(params: dict[str, Any]) -> ToolResult:
     elif action == "speak":
         if not text:
             return ToolResult(success=False, error="speak操作需要提供text参数", duration=_time.time() - start)
-        return ToolResult(
-            success=True,
-            output=f"语音指令已接收: \"{str(text)[:50]}\"",
-            duration=_time.time() - start,
-            metadata={"emotion": emotion, "textLength": len(str(text)), "simulated": True},
-        )
+        return await _do_tts_speak(str(text), language, emotion, voice, start)
     elif action == "listen":
         if not _voice_session:
             return ToolResult(success=False, error="没有活跃的语音会话，请先使用start_session", duration=_time.time() - start)
-        return ToolResult(
-            success=True,
-            output="语音监听已就绪 (模拟模式，等待音频输入)",
-            duration=_time.time() - start,
-            metadata={"simulated": True},
-        )
+        return await _do_stt_listen(audio_path, language, start)
     elif action == "status":
         if not _voice_session:
             return ToolResult(success=True, output="当前没有活跃的语音会话", duration=_time.time() - start, metadata={"active": False})
@@ -579,6 +591,188 @@ async def voice_interact_executor(params: dict[str, Any]) -> ToolResult:
         )
     else:
         return ToolResult(success=False, error=f"不支持的操作: {action}。支持: start_session, stop_session, speak, listen, status", duration=_time.time() - start)
+
+
+async def _do_tts_speak(text: str, language: str, emotion: str, voice: str, start: float) -> ToolResult:
+    """TTS 语音合成 — 优先 edge-tts，降级系统 TTS，最终模拟"""
+    voice_map: dict[str, str] = {
+        "zh-CN": "zh-CN-XiaoxiaoNeural",
+        "zh-CN-male": "zh-CN-YunxiNeural",
+        "en-US": "en-US-JennyNeural",
+        "ja-JP": "ja-JP-NanamiNeural",
+    }
+
+    target_voice = voice or voice_map.get(language, "zh-CN-XiaoxiaoNeural")
+
+    try:
+        import edge_tts
+        import tempfile
+        from pathlib import Path
+
+        communicate = edge_tts.Communicate(text, target_voice)
+        audio_dir = Path(os.environ.get("DATA_DIR", "data")) / "tts"
+        audio_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = _time.strftime("%Y%m%d_%H%M%S")
+        audio_file = audio_dir / f"tts_{timestamp}.mp3"
+        await communicate.save(str(audio_file))
+
+        return ToolResult(
+            success=True,
+            output=f"语音合成完成（edge-tts）: {audio_file}",
+            duration=_time.time() - start,
+            metadata={"engine": "edge-tts", "voice": target_voice, "audio_path": str(audio_file), "text_length": len(text)},
+        )
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    try:
+        import subprocess
+        if os.name == "nt":
+            import pyttsx3
+            engine = pyttsx3.init()
+            engine.say(text)
+            engine.runAndWait()
+            return ToolResult(
+                success=True,
+                output=f"语音播报完成（pyttsx3）: \"{text[:50]}\"",
+                duration=_time.time() - start,
+                metadata={"engine": "pyttsx3", "simulated": False},
+            )
+    except (ImportError, Exception):
+        pass
+
+    try:
+        if os.name == "darwin":
+            subprocess.run(["say", text], check=True, timeout=10)
+            return ToolResult(
+                success=True,
+                output=f"语音播报完成（macOS say）: \"{text[:50]}\"",
+                duration=_time.time() - start,
+                metadata={"engine": "macos_say", "simulated": False},
+            )
+    except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
+        pass
+
+    return ToolResult(
+        success=True,
+        output=f"语音指令已接收（模拟模式，无TTS引擎）: \"{text[:50]}\"",
+        duration=_time.time() - start,
+        metadata={"engine": "simulated", "simulated": True, "text_length": len(text)},
+    )
+
+
+async def _do_stt_listen(audio_path: str, language: str, start: float) -> ToolResult:
+    """STT 语音识别 — 支持实时录音或文件路径"""
+    if not audio_path:
+        recorded_file = await _record_audio_realtime(language)
+        if recorded_file:
+            audio_path = recorded_file
+        else:
+            return ToolResult(
+                success=True,
+                output="语音监听已就绪（等待音频输入，请通过audio_path参数提供音频文件，或确保麦克风可用以启用实时录音）",
+                duration=_time.time() - start,
+                metadata={"simulated": True, "hint": "提供audio_path参数或确保麦克风可用"},
+            )
+
+    try:
+        from agent.tools.perception_tools import speech_transcribe_executor
+        lang_code = language.split("-")[0] if "-" in language else language
+        result = await speech_transcribe_executor({
+            "audio_path": audio_path,
+            "language": lang_code,
+        })
+        if result.success:
+            if _voice_session:
+                _voice_session["turnCount"] += 1
+            return ToolResult(
+                success=True,
+                output=f"语音识别结果: {result.output}",
+                duration=_time.time() - start,
+                metadata={"engine": "speech_transcribe", "simulated": False},
+            )
+        return ToolResult(
+            success=False,
+            error=f"语音识别失败: {result.error}",
+            duration=_time.time() - start,
+        )
+    except ImportError:
+        return ToolResult(
+            success=True,
+            output=f"语音监听已就绪（speech_transcribe不可用，模拟模式）",
+            duration=_time.time() - start,
+            metadata={"simulated": True},
+        )
+    except Exception as e:
+        return ToolResult(
+            success=False,
+            error=f"语音识别异常: {e}",
+            duration=_time.time() - start,
+        )
+
+
+async def _record_audio_realtime(language: str) -> str | None:
+    """实时录音 — 优先 sounddevice + scipy，降级 pyaudio，最终模拟"""
+    from pathlib import Path
+
+    audio_dir = Path(os.environ.get("DATA_DIR", "data")) / "voice"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = _time.strftime("%Y%m%d_%H%M%S")
+    wav_file = str(audio_dir / f"record_{timestamp}.wav")
+
+    try:
+        import sounddevice as sd
+        import scipy.io.wavfile as wav
+
+        fs = 16000
+        seconds = 5.0
+        recording = sd.rec(int(seconds * fs), samplerate=fs, channels=1, dtype='int16')
+        sd.wait()
+        wav.write(wav_file, fs, recording)
+        return wav_file
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    try:
+        import pyaudio
+        import wave
+
+        CHUNK = 1024
+        FORMAT = pyaudio.paInt16
+        CHANNELS = 1
+        RATE = 16000
+        RECORD_SECONDS = 5.0
+
+        p = pyaudio.PyAudio()
+        stream = p.open(format=FORMAT, channels=CHANNELS, rate=RATE, input=True, frames_per_buffer=CHUNK)
+
+        frames = []
+        for _ in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
+            data = stream.read(CHUNK)
+            frames.append(data)
+
+        stream.stop_stream()
+        stream.close()
+        p.terminate()
+
+        wf = wave.open(wav_file, 'wb')
+        wf.setnchannels(CHANNELS)
+        wf.setsampwidth(p.get_sample_size(FORMAT))
+        wf.setframerate(RATE)
+        wf.writeframes(b''.join(frames))
+        wf.close()
+
+        return wav_file
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    return None
 
 
 async def delegate_task_executor(params: dict[str, Any]) -> ToolResult:

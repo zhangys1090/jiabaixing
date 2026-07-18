@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from agent.config import DATA_DIR
+from agent.persistence.database import get_sync_connection
 from agent.memory.tokenizer import ChineseTokenizer
 
 
@@ -71,10 +72,8 @@ class MemoryStore:
     def __init__(self, db_path: str | Path | None = None) -> None:
         self._path = Path(db_path) if db_path else DATA_DIR / "memory.db"
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(self._path))
+        self._conn = get_sync_connection(db_path=str(self._path))
         self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA synchronous=NORMAL")
         self._init_tables()
         self._counts: dict[str, int] = self._compute_counts()
 
@@ -153,13 +152,16 @@ class MemoryStore:
         scene_filter: str | None = None,
         time_weight: float = 0.0,
         recent_hours: float = 0.0,
+        user_id: str | None = None,
     ) -> list[dict[str, Any]]:
         import json
 
         query_tokens = ChineseTokenizer.tokenize_for_search(query)
         fts_query = " OR ".join(f'"{t}"' for t in query_tokens if len(t) > 1)
+        # 空查询、纯单字 token 或通配符（如 "" / "*"）无法构成合法 FTS5 MATCH，
+        # 直接返回空结果，避免触发 sqlite3.OperationalError（审计 M-01）
         if not fts_query:
-            fts_query = query.replace('"', '""')
+            return []
 
         type_filter = ""
         params: list[Any] = [fts_query]
@@ -204,6 +206,10 @@ class MemoryStore:
                 meta = json.loads(row["metadata"])
             except (json.JSONDecodeError, TypeError):
                 pass
+
+            if user_id and meta.get("user_id") != user_id:
+                continue
+
             items.append({
                 "id": row["id"],
                 "content": row["content"],
@@ -223,7 +229,7 @@ class MemoryStore:
         query: str,
         limit: int = 10,
         memory_type: str | None = None,
-        min_relevance: float = 0.3,
+        min_relevance: float = 0.7,
     ) -> list[dict[str, Any]]:
         import json as _json
 
@@ -272,10 +278,11 @@ class MemoryStore:
                 continue
 
             jaccard = overlap / len(query_tokens | mem_tokens) if (query_tokens | mem_tokens) else 0
-            combined = jaccard * 0.6 + min(1.0, total_score / 8) * 0.4
+            # P2-1优化: 提高combined分数计算,增加精确匹配权重
+            combined = jaccard * 0.5 + min(1.0, total_score / 6) * 0.5
 
             age_hours = (now - row[6]) / 3600 if row[6] > 0 else 1000
-            recency_factor = max(0.2, 1.0 - age_hours / 720)
+            recency_factor = max(0.3, 1.0 - age_hours / 720)
             final_score = combined * recency_factor
 
             if final_score < min_relevance:
@@ -306,7 +313,7 @@ class MemoryStore:
         query: str,
         limit: int = 10,
         memory_type: str | None = None,
-        min_relevance: float = 0.3,
+        min_relevance: float = 0.7,
     ) -> list[dict[str, Any]]:
         """异步语义搜索: 优先使用向量嵌入，回退到增强关键词搜索。"""
         engine = get_semantic_engine()
@@ -445,10 +452,11 @@ class MemoryStore:
                 continue
 
             jaccard = overlap / len(query_tokens | mem_tokens) if (query_tokens | mem_tokens) else 0
-            combined = jaccard * 0.6 + min(1.0, total_score / 8) * 0.4
+            # P2-1优化: 提高combined分数计算,增加精确匹配权重
+            combined = jaccard * 0.5 + min(1.0, total_score / 6) * 0.5
 
             age_hours = (now - row[6]) / 3600 if row[6] > 0 else 1000
-            recency_factor = max(0.2, 1.0 - age_hours / 720)
+            recency_factor = max(0.3, 1.0 - age_hours / 720)
             final_score = combined * recency_factor
 
             if final_score < min_relevance:
@@ -540,6 +548,66 @@ class MemoryStore:
         self._conn.commit()
         self._counts[memory_type] = 0
         return len(rowids)
+
+    def update(
+        self,
+        memory_id: str,
+        content: str | None = None,
+        scene: str | None = None,
+        emotion: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        import json
+
+        row = self._conn.execute(
+            "SELECT id FROM memories WHERE id = ?", (memory_id,)
+        ).fetchone()
+        if not row:
+            return False
+
+        sets: list[str] = []
+        params: list[Any] = []
+        if content is not None:
+            sets.append("content = ?")
+            params.append(content)
+            tokens = ChineseTokenizer.tokenize(content)
+            sets.append("tokens = ?")
+            params.append(" ".join(tokens))
+        if scene is not None:
+            sets.append("scene = ?")
+            params.append(scene)
+        if emotion is not None:
+            sets.append("emotion = ?")
+            params.append(emotion)
+        if metadata is not None:
+            sets.append("metadata = ?")
+            params.append(json.dumps(metadata, ensure_ascii=False))
+
+        if not sets:
+            return True
+
+        params.append(memory_id)
+        self._conn.execute(
+            f"UPDATE memories SET {', '.join(sets)} WHERE id = ?", params
+        )
+        self._conn.commit()
+
+        if content is not None or scene is not None:
+            fts_row = self._conn.execute(
+                "SELECT rowid FROM memories WHERE id = ?", (memory_id,)
+            ).fetchone()
+            if fts_row:
+                current = self._conn.execute(
+                    "SELECT content, tokens, memory_type, scene FROM memories WHERE id = ?",
+                    (memory_id,),
+                ).fetchone()
+                if current:
+                    self._conn.execute(
+                        "UPDATE memories_fts SET content=?, tokens=?, memory_type=?, scene=? WHERE rowid=?",
+                        (current[0], current[1], current[2], current[3], fts_row[0]),
+                    )
+                    self._conn.commit()
+        return True
 
     def close(self) -> None:
         self._conn.close()

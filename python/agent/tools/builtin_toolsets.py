@@ -37,15 +37,16 @@ CODING_TOOLSET = ToolsetDefinition(
 DESKTOP_TOOLSET = ToolsetDefinition(
     id="desktop",
     display_name="桌面工具集",
-    description="DesktopAgent 专用：桌面自动化 + 截图 + 视觉",
+    description="DesktopAgent 专用：桌面自动化 + 截图 + 视觉 + 感知",
     extends="base",
     includes=[
         ToolsetEntry(category=ToolCategory.DESKTOP),
+        ToolsetEntry(category=ToolCategory.PERCEPTION),
         ToolsetEntry(name="execute_code"),
         ToolsetEntry(name="shell_exec"),
         ToolsetEntry(name="voice_interact"),
     ],
-    max_tools=15,
+    max_tools=20,
 )
 
 DAILY_TOOLSET = ToolsetDefinition(
@@ -76,6 +77,7 @@ FULL_TOOLSET = ToolsetDefinition(
         ToolsetEntry(category=ToolCategory.FILE),
         ToolsetEntry(category=ToolCategory.CODE),
         ToolsetEntry(category=ToolCategory.DESKTOP),
+        ToolsetEntry(category=ToolCategory.PERCEPTION),
         ToolsetEntry(category=ToolCategory.DAILY),
         ToolsetEntry(category=ToolCategory.NETWORK),
         ToolsetEntry(category=ToolCategory.IOT),

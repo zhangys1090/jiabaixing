@@ -16,7 +16,11 @@ from agent.tools.registry import (
 FILE_READ_DEF = ToolDefinition(
     name="file_read",
     description="读取指定文件的内容。适用场景：查看源代码文件、读取配置文件、获取文档内容。不适用：列出目录内容（用 file_list）、搜索文件（用 file_search）。",
+    short_desc="读取文件内容",
     category=ToolCategory.FILE,
+    tags=["file", "read", "code", "config"],
+    scenes=["coding", "development", "research", "daily"],
+    capability_level=1,
     parameters=[
         ToolParameterDef(name="file_path", type="string", description="要读取的文件路径（绝对路径或相对路径）"),
         ToolParameterDef(name="encoding", type="string", required=False, description="文件编码格式", enum=["utf-8", "ascii", "gbk"]),
@@ -29,7 +33,11 @@ FILE_READ_DEF = ToolDefinition(
 FILE_LIST_DEF = ToolDefinition(
     name="file_list",
     description="列出指定目录下的文件和子目录。适用场景：浏览项目结构、查找文件位置。不适用：读取文件内容（用 file_read）、搜索文件内容（用 file_grep）。",
+    short_desc="列出目录内容",
     category=ToolCategory.FILE,
+    tags=["file", "directory", "list"],
+    scenes=["coding", "development", "research", "daily"],
+    capability_level=1,
     parameters=[
         ToolParameterDef(name="dir_path", type="string", description="目录路径"),
         ToolParameterDef(name="pattern", type="string", required=False, description="文件名匹配模式（glob语法）"),
@@ -42,7 +50,11 @@ FILE_LIST_DEF = ToolDefinition(
 FILE_GREP_DEF = ToolDefinition(
     name="file_grep",
     description="在文件中搜索匹配的文本行。适用场景：查找代码中的变量定义、搜索日志中的错误信息。不适用：读取完整文件（用 file_read）、查找文件名（用 file_search）。",
+    short_desc="搜索文件内容",
     category=ToolCategory.FILE,
+    tags=["file", "search", "grep", "code", "debug"],
+    scenes=["coding", "development", "research"],
+    capability_level=1,
     parameters=[
         ToolParameterDef(name="pattern", type="string", description="搜索的正则表达式或关键词"),
         ToolParameterDef(name="path", type="string", required=False, description="搜索的文件或目录路径"),
@@ -56,7 +68,11 @@ FILE_GREP_DEF = ToolDefinition(
 FILE_SEARCH_DEF = ToolDefinition(
     name="file_search",
     description="按文件名搜索文件。适用场景：查找项目中的配置文件、定位源代码文件。不适用：搜索文件内容（用 file_grep）、列出目录（用 file_list）。",
+    short_desc="按文件名搜索",
     category=ToolCategory.FILE,
+    tags=["file", "search", "find"],
+    scenes=["coding", "development", "research"],
+    capability_level=1,
     parameters=[
         ToolParameterDef(name="pattern", type="string", description="文件名匹配模式"),
         ToolParameterDef(name="dir_path", type="string", required=False, description="搜索的根目录"),
@@ -68,7 +84,11 @@ FILE_SEARCH_DEF = ToolDefinition(
 FILE_EDIT_DEF = ToolDefinition(
     name="file_edit",
     description="编辑文件内容，支持全文替换或指定行范围替换。适用场景：修改代码、更新配置。不适用：创建新文件（用 file_write）、查看文件（用 file_read）。",
+    short_desc="编辑文件内容",
     category=ToolCategory.FILE,
+    tags=["file", "edit", "code", "write"],
+    scenes=["coding", "development"],
+    capability_level=2,
     parameters=[
         ToolParameterDef(name="file_path", type="string", description="要编辑的文件路径"),
         ToolParameterDef(name="old_text", type="string", description="要替换的原始文本"),
@@ -88,7 +108,11 @@ _MAX_MULTI_FILE_COUNT = 50
 INCREMENTAL_EDIT_DEF = ToolDefinition(
     name="incremental_edit",
     description='增量修改代码文件，只修改需要改的部分，保持其他代码不变。支持语法验证和预览模式。适用场景：修改函数、添加功能、修复bug、重构局部代码。不适用：创建新文件、完全重写文件。',
+    short_desc="增量修改代码文件",
     category=ToolCategory.FILE,
+    tags=["file", "edit", "code", "incremental", "refactor"],
+    scenes=["coding", "development"],
+    capability_level=2,
     parameters=[
         ToolParameterDef(name="file_path", type="string", description="要修改的文件路径"),
         ToolParameterDef(name="edits", type="array", description='修改列表，每项包含 {search: "要替换的代码", replace: "新代码", description: "修改说明"}'),
@@ -102,7 +126,11 @@ INCREMENTAL_EDIT_DEF = ToolDefinition(
 MULTI_FILE_EDIT_DEF = ToolDefinition(
     name="multi_file_edit",
     description='同时修改多个文件，保持修改的原子性。适用场景：重构涉及多个文件、添加功能需要修改多处、API变更需要同步更新。不适用：单文件修改（用 incremental_edit）。',
+    short_desc="多文件原子修改",
     category=ToolCategory.FILE,
+    tags=["file", "edit", "multi-file", "refactor", "code"],
+    scenes=["coding", "development"],
+    capability_level=3,
     parameters=[
         ToolParameterDef(name="files", type="array", description='文件修改列表，每项包含 {path, edits: [{search, replace, description}]}'),
         ToolParameterDef(name="atomic", type="boolean", required=False, description="是否原子操作（任一失败则全部回滚）"),
@@ -115,6 +143,16 @@ MULTI_FILE_EDIT_DEF = ToolDefinition(
 def _resolve_path(raw_path: str) -> Path:
     p = Path(raw_path).expanduser()
     if not p.is_absolute():
+        # 尝试多种候选根目录，解决 TS 项目相对路径与 Python 进程 CWD 不一致的问题
+        project_root = Path(os.environ.get("PROJECT_ROOT", Path(__file__).resolve().parent.parent.parent))
+        python_root = project_root / "python"
+        cwd = Path(os.getcwd()).parent.parent  # 从 python/ 往上两级到项目根
+        cwd_project = cwd if cwd != python_root else project_root
+        for base in [cwd_project, project_root, python_root, Path(os.getcwd())]:
+            candidate = base / p
+            if candidate.exists():
+                return candidate.resolve()
+        # 都没有找到就 fallback
         p = Path(os.getcwd()) / p
     return p.resolve()
 
@@ -172,7 +210,8 @@ async def file_read_executor(params: dict[str, Any]) -> ToolResult:
 async def file_list_executor(params: dict[str, Any]) -> ToolResult:
     import time
     start = time.time()
-    raw_dir = str(params.get("dir_path", "."))
+    # 兼容 TS 前端的 "directory" 参数名和 Python 后端的 "dir_path"
+    raw_dir = str(params.get("dir_path") or params.get("directory", "."))
     pattern = str(params.get("pattern", "*"))
     recursive = bool(params.get("recursive", False))
     max_depth = int(params.get("max_depth", 3))
@@ -235,9 +274,10 @@ async def file_grep_executor(params: dict[str, Any]) -> ToolResult:
     import time
     start = time.time()
     pattern = str(params.get("pattern", ""))
-    raw_path = str(params.get("path", "."))
+    # 兼容 TS 前端的 "directory" 参数名
+    raw_path = str(params.get("path") or params.get("directory", "."))
     file_pattern = str(params.get("file_pattern", "*"))
-    case_insensitive = bool(params.get("case_insensitive", False))
+    case_insensitive = bool(params.get("case_insensitive") or params.get("ignore_case", False))
     max_results = int(params.get("max_results", 50))
 
     if not pattern:
@@ -299,18 +339,43 @@ async def file_grep_executor(params: dict[str, Any]) -> ToolResult:
 
 async def file_search_executor(params: dict[str, Any]) -> ToolResult:
     import fnmatch
+    import json
+    import logging
     import time
+    from pathlib import Path
     start = time.time()
-    pattern = str(params.get("pattern", ""))
-    raw_dir = str(params.get("dir_path", "."))
-    max_results = int(params.get("max_results", 30))
+    # 兼容 TS 前端的 "query"/"filePattern" 参数名
+    pattern = str(params.get("pattern") or params.get("query", ""))
+    raw_dir = str(params.get("dir_path") or params.get("baseDir", "."))
+    max_results = int(params.get("max_results") or params.get("maxResults", 30))
+    
+    # 创建logger用于记录file_search详细日志
+    log = logging.getLogger("file_search")
 
+    # 记录调用参数
+    call_info = {
+        "timestamp": time.time(),
+        "pattern": pattern,
+        "dir_path": raw_dir,
+        "max_results": max_results,
+    }
+    log.debug(f"file_search called: {json.dumps(call_info)}")
+
+    # 检查pattern是否为空
     if not pattern:
+        log.warning(f"file_search failed: empty pattern, input={params}")
         return ToolResult(success=False, error="搜索模式不能为空")
 
     dir_path = _resolve_path(raw_dir)
-    if not dir_path.is_dir():
+    
+    # 检查目录是否存在且是有效目录
+    if not dir_path.exists():
+        log.warning(f"file_search failed: directory not found, dir={dir_path}")
         return ToolResult(success=False, error=f"目录不存在: {dir_path}")
+    
+    if not dir_path.is_dir():
+        log.warning(f"file_search failed: not a directory, path={dir_path}")
+        return ToolResult(success=False, error=f"路径不是目录: {dir_path}")
 
     _IGNORE_DIRS = {
         "node_modules", ".git", "dist", "build", "__pycache__",
@@ -330,8 +395,10 @@ async def file_search_executor(params: dict[str, Any]) -> ToolResult:
             break
 
     if not results:
+        log.warning(f"file_search completed with no results: pattern='{pattern}', dir='{raw_dir}'")
         return ToolResult(success=True, output="未找到匹配文件")
 
+    log.info(f"file_search success: found {len(results)} files for pattern='{pattern}'")
     output = f"找到 {len(results)} 个文件:\n" + "\n".join(results)
     return ToolResult(
         success=True,

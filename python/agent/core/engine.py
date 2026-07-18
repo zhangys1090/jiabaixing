@@ -28,6 +28,30 @@ from agent.core.context_pipeline import (
     ContextReferenceResolver,
 )
 from agent.core.context_compressor import ContextCompressor, ContextWindowManager
+
+
+def build_extension_catalog(env_value: str | None = None) -> Any:
+    """构建引擎使用的窄腰能力目录（skill:*/mcp:*），默认全部启用（向后兼容）。
+
+    - 注册各内置技能为 skill:<name>（OPTIONAL）。
+    - 注册各默认 MCP 服务器为 mcp:<name>（OPTIONAL）。
+    - env 表达式缺省按 "*" 处理 → 全部启用；设具体列表则仅启用所列（白名单）。
+
+    Returns:
+        ExtensionCatalog 实例。
+    """
+    from agent.catalog import EXTENSIONS_ENV, ExtensionCatalog, ExtensionState
+    from agent.skills.registry import builtin_skill_names
+
+    cat = ExtensionCatalog()
+    for name in builtin_skill_names():
+        cat.register(f"skill:{name}", ExtensionState.OPTIONAL)
+    # 默认 MCP 服务器（与 MCPServerManager._initialize_default_servers 对齐）。
+    for srv in ("filesystem", "sqlite", "browser", "cron"):
+        cat.register(f"mcp:{srv}", ExtensionState.OPTIONAL)
+    # 向后兼容：env 缺省 → 全部启用。
+    cat.apply_env(env_value if env_value else "*")
+    return cat
 from agent.core.persona import PersonaCore
 from agent.context import UnifiedContextOrchestrator, ContextBuildRequest
 from agent.context.models import ContextBuildResult
@@ -58,6 +82,7 @@ from agent.tools.permission_guard import PermissionGuard, Permission
 from agent.tools.schema_validator import SchemaValidator
 from agent.tools.tool_call_guard import ToolCallGuard
 from agent.tools.approval_manager import ApprovalManager
+from agent.security.runtime_posture import RuntimePosture
 from agent.tools.toolset_registry import ToolsetRegistry
 from agent.tools.mcp_tool_bridge import MCPToolBridge
 from agent.skills.registry import SkillRegistry
@@ -108,6 +133,8 @@ log = StructuredLogger("engine")
 class AgentEngine:
     def __init__(self) -> None:
         self.llm = LLMProvider()
+        self.provider_catalog: Any = None  # T3：Provider 目录（运行时常量 + 已配置集合）
+        self.provider_oauth_status: dict[str, dict] = {}  # T3：各 OAuth provider 凭据解析结果
         self.memory: MemoryEngine | None = None
         self.loop: LoopController | None = None
         self.evolution: EvolutionEngine | None = None
@@ -121,16 +148,15 @@ class AgentEngine:
         self.unified_context_orchestrator: UnifiedContextOrchestrator | None = None
         self.security: SecurityGuard | None = None
         self.tool_registry: ToolRegistry | None = None
-        # 会话回顾和标题生成器（延迟初始化）
-        self.session_recap: Any = None
-        self.title_generator: Any = None
         self.toolset_registry: ToolsetRegistry | None = None
+        self._toolset_mapper: Any = None  # 延迟构建的 SceneToToolsetMapper（AGENT_TOOLSET_SAMPLING）
         self.mcp_tool_bridge: MCPToolBridge | None = None
         self.permission_guard: PermissionGuard | None = None
         self.schema_validator: SchemaValidator | None = None
         self.tool_call_guard: ToolCallGuard | None = None
         self.approval_manager: ApprovalManager | None = None
         self.skill_registry: SkillRegistry | None = None
+        self.extension_catalog: Any = None  # T4：窄腰能力目录（skill:*/mcp:*）
         self.session_store: SessionStore | None = None
         self.trajectory_db: TrajectoryDatabase | None = None
         self.flywheel: TrajectoryFlywheel | None = None
@@ -247,6 +273,36 @@ class AgentEngine:
         self.turn_finalizer: Any = None
         self.turn_retry_state: Any = None
         self.batch_runner: Any = None
+        # P10 安全+记忆+Prompt增强节点
+        self.write_approval: Any = None
+        self.threat_patterns: Any = None
+        self.memory_manager: Any = None
+        self.insights: Any = None
+        self.background_review: Any = None
+        self.conversation_compression: Any = None
+        self.context_references: Any = None
+        # P11 平台扩展+LSP+ACP+Skill节点
+        self.platform_manager: Any = None
+        self.lsp_servers: Any = None
+        self.lsp_workspace: Any = None
+        self.acp_entry: Any = None
+        self.acp_server: Any = None
+        self.acp_auth: Any = None
+        self.skill_sync: Any = None
+        self.skill_bundles: Any = None
+        # P12 游离节点注册
+        self.model_cost_guard: Any = None
+        self.auxiliary_client: Any = None
+        self.moa_aggregator: Any = None
+        self.streaming_scrubber: Any = None
+        self.account_usage: Any = None
+        self.learning_graph: Any = None
+        self.rate_limit_tracker: Any = None
+        self.blueprint_catalog: Any = None
+        self.onboarding: Any = None
+        self.multi_agent: Any = None
+        self.gateway_hooks: Any = None
+        self.slash_commands: Any = None
         # 子系统注册中心（用于拓扑排序初始化）
         self._registry: SubsystemRegistry | None = None
 
@@ -457,9 +513,11 @@ class AgentEngine:
             self.tool_call_guard = None
 
         try:
-            # 非交互模式下自动批准所有工具调用（CLI/API/WS 场景无人审批）
-            self.approval_manager = ApprovalManager(auto_approve_all=True)
-            log.info("Approval Manager ready | mode=auto_approve_all")
+            # 非交互模式下自动批准所有工具调用（CLI/API/WS 场景无人审批）；
+            # 若显式设置 AGENT_RUNTIME_POSTURE 非 confirm，则由安全姿态接管裁决。
+            _posture = RuntimePosture.from_env()
+            self.approval_manager = ApprovalManager(auto_approve_all=True, posture=_posture)
+            log.info("Approval Manager ready", posture=_posture.value)
         except Exception as e:
             log.warning("Approval Manager init failed", error=str(e))
             self.approval_manager = None
@@ -620,6 +678,7 @@ class AgentEngine:
                 tool_call_guard=self.tool_call_guard,
                 approval_manager=self.approval_manager,
                 hook_manager=self.hook_manager,
+                tool_selector=self.select_openai_tools_for_input,
             )
             log.info("Conversation Loop ready (with safety modules + hooks)")
         except Exception as e:
@@ -735,17 +794,6 @@ class AgentEngine:
                 log.info("Session search tool registered")
             except Exception as e:
                 log.warning("Session search tool registration failed", error=str(e))
-
-        # 初始化会话回顾和标题生成器
-        if self.session_store:
-            try:
-                from agent.persistence.session_recap import SessionRecapGenerator
-                from agent.persistence.title_generator import SessionTitleGenerator
-                self.session_recap = SessionRecapGenerator(self.session_store, self.llm)
-                self.title_generator = SessionTitleGenerator(self.session_store, self.llm)
-                log.info("Session recap & title generator ready")
-            except Exception as e:
-                log.warning("Session recap/title generator init failed", error=str(e))
 
         if self.trajectory_db:
             try:
@@ -1023,7 +1071,7 @@ class AgentEngine:
 
         try:
             if self.hook_manager:
-                await self.hook_manager.trigger(BEFORE_LOOP, session_id=session_id, event="before_loop")
+                await self.hook_manager.trigger(BEFORE_LOOP, session_id=session_id)
 
             if self.security:
                 sec_result = self.security.check_command(message)
@@ -1091,7 +1139,7 @@ class AgentEngine:
             elif self.conversation:
                 result = await self._process_with_conversation(message, session_id, use_tools, trace_id=trace_id)
             else:
-                result = await self._process_simple(message, session_id)
+                result = await self._process_simple(message, session_id, trace_id=trace_id)
 
             if self.feedback_loops:
                 try:
@@ -1113,7 +1161,6 @@ class AgentEngine:
             if self.hook_manager:
                 await self.hook_manager.trigger(
                     AFTER_LOOP,
-                    event="after_loop",
                     session_id=session_id,
                     trace_id=result.get("trace_id", ""),
                     quality_score=result.get("quality_score", 0),
@@ -1178,6 +1225,7 @@ class AgentEngine:
         self,
         message: str,
         session_id: str = "default",
+        trace_id: str | None = None,
     ) -> dict[str, Any]:
         context_parts: list[str] = []
         memory_results: list[dict[str, Any]] = []
@@ -2149,7 +2197,7 @@ class AgentEngine:
                 if cancel_token and cancel_token.is_set():
                     yield {"type": "done", "trace_id": "", "content": "任务已取消"}
                     return
-                chunk_str = chunk if isinstance(chunk, str) else str(chunk)
+                chunk_str = chunk if isinstance(chunk, str) else (chunk.get("content", "") if isinstance(chunk, dict) else str(chunk))
                 response_buffer.append(chunk_str)
                 yield {"type": "token", "content": chunk_str}
         except Exception as e:
@@ -2173,6 +2221,43 @@ class AgentEngine:
     # ─────────────────────────────────────────────────────────────
 
     async def _init_llm(self) -> LLMProvider:
+        # T3：构建 Provider 目录（元数据 + providers.json 合并）并解析 OAuth 凭据。
+        # 凭据解析优雅降级，绝不阻断启动。
+        try:
+            from agent.config import DATA_DIR
+            from agent.llm.oauth_credentials import resolve_provider_credentials
+            from agent.llm.provider_catalog import ProviderCatalog
+
+            catalog_path = DATA_DIR / "providers.json"
+            self.provider_catalog = ProviderCatalog.from_providers_json(catalog_path)
+
+            oauth_status: dict[str, dict] = {}
+            for spec in self.provider_catalog.configured_with_oauth():
+                try:
+                    creds = resolve_provider_credentials(spec.id)
+                    if creds is not None:
+                        oauth_status[spec.id] = creds
+                        # 只记录来源/降级状态，绝不记录密钥明文。
+                        log.info(
+                            "Provider OAuth 凭据解析",
+                            provider=spec.id,
+                            source=creds.get("source"),
+                            degraded=creds.get("degraded"),
+                        )
+                except Exception as e:
+                    log.warning("Provider OAuth 凭据解析失败", provider=spec.id, error=str(e))
+            self.provider_oauth_status = oauth_status
+            log.info(
+                "Provider Catalog ready",
+                known=len(self.provider_catalog.known_provider_ids()),
+                configured=len(self.provider_catalog.configured_ids()),
+                oauth_resolved=len(oauth_status),
+            )
+        except Exception as e:
+            log.warning("Provider Catalog 初始化失败", error=str(e))
+            self.provider_catalog = None
+            self.provider_oauth_status = {}
+
         available = await self.llm.check_available()
         status = "available" if available else "unavailable"
         log.info("LLM Provider initialized", model=self.llm.model, status=status)
@@ -2211,11 +2296,146 @@ class AgentEngine:
     async def _init_toolset_registry(self) -> ToolsetRegistry | None:
         try:
             self.toolset_registry = ToolsetRegistry(self.tool_registry)
-            log.info("Toolset Registry ready")
+            # R2 运行时依赖：将内置工具集定义注册进引擎持有的注册表实例，
+            # 使 resolve(toolset_id) 可用（全局注册表与引擎实例不是同一个）。
+            from agent.tools.builtin_toolsets import BUILTIN_TOOLSETS
+            for definition in BUILTIN_TOOLSETS:
+                self.toolset_registry.register(definition)
+            log.info("Toolset Registry ready", toolsets=len(BUILTIN_TOOLSETS))
             return self.toolset_registry
         except Exception as e:
             log.warning("Toolset Registry init failed", error=str(e))
             return None
+
+    # ==================== R2：场景→工具集运行时选择 ====================
+
+    def _ensure_toolset_mapper(self) -> Any:
+        """延迟构建并缓存 SceneToToolsetMapper（读取 AGENT_TOOLSET_SAMPLING）。"""
+        if self._toolset_mapper is None:
+            from agent.tools.toolset_registry import SceneToToolsetMapper
+            self._toolset_mapper = SceneToToolsetMapper()
+        return self._toolset_mapper
+
+    def _feed_evolution_toolset(
+        self,
+        scene: str,
+        toolset_id: str,
+        tool_names: list[str],
+        method: str = "sampled",
+    ) -> None:
+        """把 R2 采样选中的工具集喂送给 EvolutionEngine（场景→工具集分布学习）。
+
+        仅在 evolution 子系统就绪且确有工具被选中时生效；任何异常都吞掉，
+        绝不影响正常工具选择流程（零回归）。
+        """
+        evo = self.evolution
+        if evo is None or not tool_names:
+            return
+        try:
+            evo.record_toolset_selection(
+                scene=scene,
+                toolset_id=toolset_id,
+                tool_names=list(tool_names),
+                method=method,
+            )
+        except Exception as e:
+            log.debug("工具集采样信号喂送 EvolutionEngine 失败", error=str(e))
+
+    def select_tools_for_input(
+        self,
+        input_text: str,
+        env: str | None = None,
+        rng: Any = None,
+    ) -> list[Any]:
+        """按场景选择活跃工具集（R2 接入运行时，返回 ToolDefinition 列表）。
+
+        数据流:
+            用户输入 + 环境
+              → SceneToToolsetMapper.detect_scene()
+              → sample_toolset()（AGENT_TOOLSET_SAMPLING=on 时概率分发，否则确定性）
+              → toolset_registry.resolve(toolset_id) 展开工具名
+              → tool_registry.filter_tools(工具名集合)
+
+        退化保护（零回归）:
+            - AGENT_TOOLSET_SAMPLING 未启用 → 返回全量工具（行为同旧版）。
+            - toolset_registry / tool_registry 为 None → 全量或空。
+            - 工具集解析为空 → 退化为全量工具。
+
+        Args:
+            input_text: 用户输入文本。
+            env: 环境标识（如 "coding" / "browsing"），可选。
+            rng: 可选随机源（测试可复现）；None 时由映射器自带 rng 决定。
+
+        Returns:
+            list[ToolDefinition]: 过滤后的活跃工具定义列表。
+        """
+        if self.tool_registry is None:
+            return []
+        if self.toolset_registry is None:
+            return self.tool_registry.filter_tools(None)
+        try:
+            mapper = self._ensure_toolset_mapper()
+        except Exception as e:
+            log.warning("SceneToToolsetMapper 构建失败, 退化为全量工具", error=str(e))
+            return self.tool_registry.filter_tools(None)
+        # 开关未开启：返回全量工具（确定性，零回归）。
+        if not mapper.enable_sampling:
+            return self.tool_registry.filter_tools(None)
+        scene = mapper.detect_scene(input_text, env)
+        config = mapper.sample_toolset(scene, rng=rng)
+        resolved = self.toolset_registry.resolve(config.toolset_id, self.tool_registry)
+        if resolved is None or not resolved.tool_names:
+            log.warning(
+                "工具集解析为空, 退化为全量工具",
+                scene=scene,
+                toolset_id=config.toolset_id,
+            )
+            return self.tool_registry.filter_tools(None)
+        return self.tool_registry.filter_tools(set(resolved.tool_names))
+
+    def select_openai_tools_for_input(
+        self,
+        input_text: str,
+        env: str | None = None,
+        rng: Any = None,
+    ) -> list[dict[str, Any]]:
+        """select_tools_for_input 的 OpenAI Function-Calling Schema 形态。
+
+        供 ConversationLoop 直接作为 tool_selector 注入 LLM 调用。
+        开关未启用或任一子系统缺失时返回全量工具 schema（零回归）。
+
+        Returns:
+            list[dict]: OpenAI 格式的工具 schema 列表。
+        """
+        if self.tool_registry is None:
+            return []
+        if self.toolset_registry is None:
+            return self.tool_registry.to_openai_tools()
+        try:
+            mapper = self._ensure_toolset_mapper()
+        except Exception as e:
+            log.warning("SceneToToolsetMapper 构建失败, 退化为全量工具", error=str(e))
+            return self.tool_registry.to_openai_tools()
+        if not mapper.enable_sampling:
+            return self.tool_registry.to_openai_tools()
+        scene = mapper.detect_scene(input_text, env)
+        config = mapper.sample_toolset(scene, rng=rng)
+        openai_tools = self.toolset_registry.resolve_to_openai(config.toolset_id, self.tool_registry)
+        if not openai_tools:
+            log.warning(
+                "工具集 OpenAI schema 为空, 退化为全量工具",
+                scene=scene,
+                toolset_id=config.toolset_id,
+            )
+            return self.tool_registry.to_openai_tools()
+        # R2 → EvolutionEngine：把采样选中的工具集作为学习信号喂送（每次 LLM
+        # 工具选择事件喂一次，供进化引擎积累"场景→工具集"分布）。
+        tool_names = [
+            (t.get("function") or {}).get("name") or t.get("name")
+            for t in openai_tools
+        ]
+        self._feed_evolution_toolset(scene, config.toolset_id, tool_names, method="sampled")
+        return openai_tools
 
     async def _init_mcp_tool_bridge(self) -> MCPToolBridge | None:
         try:
@@ -2223,7 +2443,15 @@ class AgentEngine:
             mcp_manager = MCPServerManager.get_instance()
             self.mcp_tool_bridge = MCPToolBridge(provider=mcp_manager)
             if self.tool_registry is not None:
-                synced = await self.mcp_tool_bridge.sync_to_registry(self.tool_registry)
+                # T4：按 ExtensionCatalog 门控 MCP 服务器同步（默认全启用）。
+                enabled_check = (
+                    (lambda ref: self.extension_catalog.is_enabled(ref))
+                    if self.extension_catalog is not None
+                    else None
+                )
+                synced = await self.mcp_tool_bridge.sync_to_registry(
+                    self.tool_registry, enabled_check=enabled_check
+                )
                 self.mcp_tool_bridge.start_auto_sync(self.tool_registry)
                 log.info("MCP Tool Bridge ready", synced_tools=synced)
             else:
@@ -2262,8 +2490,12 @@ class AgentEngine:
 
     async def _init_approval_manager(self) -> ApprovalManager | None:
         try:
-            self.approval_manager = ApprovalManager(auto_approve_all=True)
-            log.info("Approval Manager ready | mode=auto_approve_all")
+            _posture = RuntimePosture.from_env()
+            self.approval_manager = ApprovalManager(auto_approve_all=True, posture=_posture)
+            # 接线 R1 管理面控制器（姿态覆盖 / 锁定 推送到真实执行器）
+            from agent.security.runtime_control import get_controller
+            get_controller().attach_approval_manager(self.approval_manager)
+            log.info("Approval Manager ready", posture=_posture.value)
             return self.approval_manager
         except Exception as e:
             log.warning("Approval Manager init failed", error=str(e))
@@ -2334,6 +2566,7 @@ class AgentEngine:
                 tool_call_guard=self.tool_call_guard,
                 approval_manager=self.approval_manager,
                 hook_manager=self.hook_manager,
+                tool_selector=self.select_openai_tools_for_input,
             )
             log.info("Conversation Loop ready (with safety modules + hooks)")
             return self.conversation
@@ -2479,7 +2712,13 @@ class AgentEngine:
     async def _init_skill_registry(self) -> SkillRegistry | None:
         try:
             self.skill_registry = SkillRegistry.get_instance()
-            self.skill_registry.register_builtin_skills()
+            # T4：按 ExtensionCatalog 门控内置技能注册（默认全启用）。
+            enabled_check = (
+                (lambda ref: self.extension_catalog.is_enabled(ref))
+                if self.extension_catalog is not None
+                else None
+            )
+            self.skill_registry.register_builtin_skills(enabled_check=enabled_check)
             log.info("Skill Registry ready", count=len(self.skill_registry.get_all_skills()))
             return self.skill_registry
         except Exception as e:
@@ -3078,17 +3317,6 @@ class AgentEngine:
             log.warning("Delegate Delegator init failed", error=str(e))
             return None
 
-    async def _init_write_approval(self) -> Any:
-        """初始化写入审批管理器。"""
-        try:
-            from agent.tools.write_approval_tool import WriteApprovalManager
-            self.write_approval_manager = WriteApprovalManager()
-            log.info("Write Approval Manager ready")
-            return self.write_approval_manager
-        except Exception as e:
-            log.warning("Write Approval Manager init failed", error=str(e))
-            return None
-
     # ── T1 效率层 ──
 
     async def _init_lazy_deps(self) -> Any:
@@ -3231,14 +3459,48 @@ class AgentEngine:
         """初始化插件管理器。"""
         try:
             from agent.plugins import PluginManager
-            self.plugin_manager = PluginManager()
+            from agent.plugins.trust import PluginTrustPolicy
+            # 从环境变量预声明受信插件（未列出的插件默认 UNTRUSTED）。
+            self.plugin_manager = PluginManager(trust_policy=PluginTrustPolicy.from_env())
+            # T2：运行时激活工具信任 gate —— 把受信插件的工具注册进核心工具
+            # 注册表（每个工具过 guard_plugin_tool；UNTRUSTED 工具全不注册）。
+            # 初始无插件时为空操作；后续启用插件并调用 register_all_tools 即生效。
+            if self.tool_registry is not None:
+                try:
+                    self.plugin_manager.register_all_tools(self.tool_registry)
+                    log.info("Plugin tools registration (trust-gated) attempted")
+                except Exception as e:
+                    log.warning("Plugin tools registration skipped", error=str(e))
             log.info("Plugin Manager ready")
+            # 接线 R1-B 管理面控制器（插件信任改写推送到真实策略）
+            from agent.security.runtime_control import get_controller
+            get_controller().attach_plugin_policy(self.plugin_manager._trust)
             return self.plugin_manager
         except Exception as e:
             log.warning("Plugin Manager init failed", error=str(e))
             return None
 
     # ── P3-P5 扩展节点初始化 ──
+
+    async def _init_extension_catalog(self) -> Any:
+        """T4：构建窄腰能力目录（skill:*/mcp:*），供技能/MCP 注册门控复用。
+
+        默认全部启用（向后兼容）；AGENT_OPTIONAL_EXTENSIONS 可设为白名单。
+        """
+        try:
+            from agent.catalog import EXTENSIONS_ENV
+
+            self.extension_catalog = build_extension_catalog(os.environ.get(EXTENSIONS_ENV))
+            log.info(
+                "Extension Catalog ready",
+                enabled=len(self.extension_catalog.list_enabled()),
+                total=len(self.extension_catalog.entries()),
+            )
+            return self.extension_catalog
+        except Exception as e:
+            log.warning("Extension Catalog init failed", error=str(e))
+            self.extension_catalog = None
+            return None
 
     async def _init_skill_hub(self) -> Any:
         """初始化技能市场（Skill Hub）。"""
@@ -3515,7 +3777,7 @@ class AgentEngine:
     async def _init_prompt_caching(self) -> Any:
         """初始化 Prompt 前缀缓存管理器。"""
         try:
-            from agent.llm.prompt_caching import PromptCaching
+            from agent.llm.prompt_cache import PromptCaching
             self.prompt_caching = PromptCaching()
             log.info("Prompt Caching ready")
             return self.prompt_caching
@@ -3554,6 +3816,309 @@ class AgentEngine:
             return self.batch_runner
         except Exception as e:
             log.warning("Batch Runner init failed", error=str(e))
+            return None
+
+    # ── P10 安全+记忆+Prompt增强节点初始化 ──
+
+    async def _init_write_approval(self) -> Any:
+        """初始化文件写入审批工具。"""
+        try:
+            from agent.security.write_approval import WriteApproval
+            self.write_approval = WriteApproval()
+            log.info("Write Approval ready")
+            return self.write_approval
+        except Exception as e:
+            log.warning("Write Approval init failed", error=str(e))
+            return None
+
+    async def _init_threat_patterns(self) -> Any:
+        """初始化威胁模式检测器。"""
+        try:
+            from agent.security.threat_patterns import ThreatPatternDetector
+            self.threat_patterns = ThreatPatternDetector()
+            log.info("Threat Patterns ready")
+            return self.threat_patterns
+        except Exception as e:
+            log.warning("Threat Patterns init failed", error=str(e))
+            return None
+
+    async def _init_memory_manager(self) -> Any:
+        """初始化统一记忆管理器。"""
+        try:
+            from agent.memory.memory_manager import MemoryManager
+            self.memory_manager = MemoryManager()
+            log.info("Memory Manager ready")
+            return self.memory_manager
+        except Exception as e:
+            log.warning("Memory Manager init failed", error=str(e))
+            return None
+
+    async def _init_insights(self) -> Any:
+        """初始化记忆洞察提取器。"""
+        try:
+            from agent.memory.insights import InsightExtractor
+            self.insights = InsightExtractor()
+            log.info("Insights ready")
+            return self.insights
+        except Exception as e:
+            log.warning("Insights init failed", error=str(e))
+            return None
+
+    async def _init_background_review(self) -> Any:
+        """初始化后台记忆审查器。"""
+        try:
+            from agent.memory.background_review import BackgroundReview
+            self.background_review = BackgroundReview()
+            log.info("Background Review ready")
+            return self.background_review
+        except Exception as e:
+            log.warning("Background Review init failed", error=str(e))
+            return None
+
+    async def _init_conversation_compression(self) -> Any:
+        """初始化长对话压缩器。"""
+        try:
+            from agent.context.conversation_compression import ConversationCompression
+            self.conversation_compression = ConversationCompression()
+            log.info("Conversation Compression ready")
+            return self.conversation_compression
+        except Exception as e:
+            log.warning("Conversation Compression init failed", error=str(e))
+            return None
+
+    async def _init_context_references(self) -> Any:
+        """初始化上下文引用解析器。"""
+        try:
+            from agent.context.context_references import ContextReferences
+            self.context_references = ContextReferences()
+            log.info("Context References ready")
+            return self.context_references
+        except Exception as e:
+            log.warning("Context References init failed", error=str(e))
+            return None
+
+    # ── P11 平台扩展+LSP+ACP+Skill节点初始化 ──
+
+    async def _init_platform_manager(self) -> Any:
+        """初始化多平台适配器管理器。"""
+        try:
+            from agent.gateway.platform_manager import PlatformManager
+            self.platform_manager = PlatformManager()
+            log.info("Platform Manager ready")
+            return self.platform_manager
+        except Exception as e:
+            log.warning("Platform Manager init failed", error=str(e))
+            return None
+
+    async def _init_lsp_servers(self) -> Any:
+        """初始化 LSP 服务器管理器。"""
+        try:
+            from agent.lsp.servers import LspServerManager
+            self.lsp_servers = LspServerManager()
+            log.info("LSP Servers ready")
+            return self.lsp_servers
+        except Exception as e:
+            log.warning("LSP Servers init failed", error=str(e))
+            return None
+
+    async def _init_lsp_workspace(self) -> Any:
+        """初始化 LSP 工作区。"""
+        try:
+            from agent.lsp.workspace import LspWorkspace
+            self.lsp_workspace = LspWorkspace()
+            log.info("LSP Workspace ready")
+            return self.lsp_workspace
+        except Exception as e:
+            log.warning("LSP Workspace init failed", error=str(e))
+            return None
+
+    async def _init_acp_entry(self) -> Any:
+        """初始化 ACP 协议入口。"""
+        try:
+            from agent.acp.entry import ACPEntry
+            self.acp_entry = ACPEntry(agent_engine=self)
+            log.info("ACP Entry ready")
+            return self.acp_entry
+        except Exception as e:
+            log.warning("ACP Entry init failed", error=str(e))
+            return None
+
+    async def _init_acp_server(self) -> Any:
+        """初始化 ACP HTTP 服务器。"""
+        try:
+            from agent.acp.server import ACPServer
+            self.acp_server = ACPServer(agent_engine=self)
+            log.info("ACP Server ready")
+            return self.acp_server
+        except Exception as e:
+            log.warning("ACP Server init failed", error=str(e))
+            return None
+
+    async def _init_acp_auth(self) -> Any:
+        """初始化 ACP 认证管理器。"""
+        try:
+            from agent.acp.auth import ACPAuthManager
+            self.acp_auth = ACPAuthManager()
+            log.info("ACP Auth ready")
+            return self.acp_auth
+        except Exception as e:
+            log.warning("ACP Auth init failed", error=str(e))
+            return None
+
+    async def _init_skill_sync(self) -> Any:
+        """初始化技能同步管理器。"""
+        try:
+            from agent.skill.skill_sync import SkillSyncManager
+            self.skill_sync = SkillSyncManager()
+            log.info("Skill Sync ready")
+            return self.skill_sync
+        except Exception as e:
+            log.warning("Skill Sync init failed", error=str(e))
+            return None
+
+    async def _init_skill_bundles(self) -> Any:
+        """初始化技能打包器。"""
+        try:
+            from agent.skill.skill_bundles import SkillBundler
+            self.skill_bundles = SkillBundler()
+            log.info("Skill Bundles ready")
+            return self.skill_bundles
+        except Exception as e:
+            log.warning("Skill Bundles init failed", error=str(e))
+            return None
+
+    # ── P12 游离节点初始化 ──
+
+    async def _init_model_cost_guard(self) -> Any:
+        """初始化模型成本守卫。"""
+        try:
+            from agent.llm.model_cost_guard import ModelCostGuard
+            self.model_cost_guard = ModelCostGuard()
+            log.info("Model Cost Guard ready")
+            return self.model_cost_guard
+        except Exception as e:
+            log.warning("Model Cost Guard init failed", error=str(e))
+            return None
+
+    async def _init_auxiliary_client(self) -> Any:
+        """初始化辅助 LLM 客户端。"""
+        try:
+            from agent.llm.auxiliary_client import AuxiliaryLLMClient
+            self.auxiliary_client = AuxiliaryLLMClient()
+            log.info("Auxiliary LLM Client ready")
+            return self.auxiliary_client
+        except Exception as e:
+            log.warning("Auxiliary LLM Client init failed", error=str(e))
+            return None
+
+    async def _init_moa_aggregator(self) -> Any:
+        """初始化 MoA 聚合器。"""
+        try:
+            from agent.llm.moa_aggregator import MoAAggregator
+            self.moa_aggregator = MoAAggregator()
+            log.info("MoA Aggregator ready")
+            return self.moa_aggregator
+        except Exception as e:
+            log.warning("MoA Aggregator init failed", error=str(e))
+            return None
+
+    async def _init_streaming_scrubber(self) -> Any:
+        """初始化流式脱敏器。"""
+        try:
+            from agent.security.streaming_scrubber import StreamingScrubber
+            self.streaming_scrubber = StreamingScrubber()
+            log.info("Streaming Scrubber ready")
+            return self.streaming_scrubber
+        except Exception as e:
+            log.warning("Streaming Scrubber init failed", error=str(e))
+            return None
+
+    async def _init_account_usage(self) -> Any:
+        """初始化账户用量追踪。"""
+        try:
+            from agent.persistence.account_usage import AccountUsageTracker
+            self.account_usage = AccountUsageTracker()
+            log.info("Account Usage Tracker ready")
+            return self.account_usage
+        except Exception as e:
+            log.warning("Account Usage Tracker init failed", error=str(e))
+            return None
+
+    async def _init_learning_graph(self) -> Any:
+        """初始化学习图。"""
+        try:
+            from agent.evolution.learning_graph import LearningGraph
+            self.learning_graph = LearningGraph()
+            log.info("Learning Graph ready")
+            return self.learning_graph
+        except Exception as e:
+            log.warning("Learning Graph init failed", error=str(e))
+            return None
+
+    async def _init_rate_limit_tracker(self) -> Any:
+        """初始化速率限制追踪器。"""
+        try:
+            from agent.llm.rate_limit_tracker import RateLimitTracker
+            self.rate_limit_tracker = RateLimitTracker()
+            log.info("Rate Limit Tracker ready")
+            return self.rate_limit_tracker
+        except Exception as e:
+            log.warning("Rate Limit Tracker init failed", error=str(e))
+            return None
+
+    async def _init_blueprint_catalog(self) -> Any:
+        """初始化蓝图目录。"""
+        try:
+            from agent.scheduler.blueprint_catalog import BlueprintCatalog
+            self.blueprint_catalog = BlueprintCatalog()
+            log.info("Blueprint Catalog ready")
+            return self.blueprint_catalog
+        except Exception as e:
+            log.warning("Blueprint Catalog init failed", error=str(e))
+            return None
+
+    async def _init_onboarding(self) -> Any:
+        """初始化引导向导。"""
+        try:
+            from agent.core.onboarding import OnboardingWizard
+            self.onboarding = OnboardingWizard()
+            log.info("Onboarding Wizard ready")
+            return self.onboarding
+        except Exception as e:
+            log.warning("Onboarding Wizard init failed", error=str(e))
+            return None
+
+    async def _init_multi_agent(self) -> Any:
+        """初始化多智能体协调器。"""
+        try:
+            from agent.evolution.multi_agent import MultiAgentCoordinator
+            self.multi_agent = MultiAgentCoordinator()
+            log.info("Multi-Agent Coordinator ready")
+            return self.multi_agent
+        except Exception as e:
+            log.warning("Multi-Agent Coordinator init failed", error=str(e))
+            return None
+
+    async def _init_gateway_hooks(self) -> Any:
+        """初始化 Gateway 钩子管理器。"""
+        try:
+            from agent.gateway.hooks import HookManager as GatewayHookManager
+            self.gateway_hooks = GatewayHookManager()
+            log.info("Gateway Hooks ready")
+            return self.gateway_hooks
+        except Exception as e:
+            log.warning("Gateway Hooks init failed", error=str(e))
+            return None
+
+    async def _init_slash_commands(self) -> Any:
+        """初始化斜杠命令管理器。"""
+        try:
+            from agent.gateway.slash_commands import SlashCommandManager
+            self.slash_commands = SlashCommandManager()
+            log.info("Slash Commands ready")
+            return self.slash_commands
+        except Exception as e:
+            log.warning("Slash Commands init failed", error=str(e))
             return None
 
     @property

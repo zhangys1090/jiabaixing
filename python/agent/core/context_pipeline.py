@@ -37,6 +37,17 @@ DANGEROUS_CONTEXT_PATTERNS = [
 
 @dataclass
 class TokenAllocation:
+    """Token 预算分配方案 — 按区域分配可用 Token。
+
+    Attributes:
+        system_prompt: 系统提示区域 Token 数。
+        memory: 记忆注入区域 Token 数。
+        history: 历史消息区域 Token 数。
+        dynamic_context: 动态上下文区域 Token 数。
+        tool_results: 工具结果区域 Token 数。
+        reserve: 预留区域 Token 数（供 LLM 生成使用）。
+    """
+
     system_prompt: int = 2400
     memory: int = 1200
     history: int = 2000
@@ -56,10 +67,31 @@ _ALLOCATION_RATIOS = {
 
 
 class TokenBudgetAllocator:
+    """Token 预算分配器 — 按比例将总预算分配到各区域。
+
+    默认比例：system_prompt 30%、memory 15%、history 25%、
+    dynamic_context 15%、tool_results 15%、reserve 10%。
+
+    Usage:
+        allocator = TokenBudgetAllocator(total_budget=8000)
+        allocation = allocator.allocate()
+        truncated = allocator.truncate_to_budget(text, allocation.system_prompt)
+    """
+
     def __init__(self, total_budget: int = 8000) -> None:
+        """初始化预算分配器。
+
+        Args:
+            total_budget: 总 Token 预算。
+        """
         self._total = total_budget
 
     def allocate(self) -> TokenAllocation:
+        """按比例分配 Token 预算到各区域。
+
+        Returns:
+            TokenAllocation: 分配方案。
+        """
         return TokenAllocation(
             system_prompt=int(self._total * _ALLOCATION_RATIOS["system_prompt"]),
             memory=int(self._total * _ALLOCATION_RATIOS["memory"]),
@@ -71,9 +103,26 @@ class TokenBudgetAllocator:
 
     @staticmethod
     def estimate_tokens(text: str) -> int:
+        """估算文本 Token 数（4 字符 ≈ 1 Token）。
+
+        Args:
+            text: 输入文本。
+
+        Returns:
+            int: 估算 Token 数（最小为 1）。
+        """
         return max(1, len(text) // 4)
 
     def truncate_to_budget(self, text: str, budget: int) -> str:
+        """将文本截断到指定 Token 预算内。
+
+        Args:
+            text: 输入文本。
+            budget: Token 预算。
+
+        Returns:
+            str: 截断后的文本（超出部分用 "..." 替代）。
+        """
         estimated = self.estimate_tokens(text)
         if estimated <= budget:
             return text
@@ -82,11 +131,23 @@ class TokenBudgetAllocator:
 
     @property
     def total_budget(self) -> int:
+        """获取总 Token 预算。"""
         return self._total
 
 
 @dataclass
 class ContextEntry:
+    """上下文条目 — 记录注入到上下文管道中的各段内容。
+
+    Attributes:
+        id: 条目唯一标识。
+        type: 条目类型（system / dynamic / memory / reference）。
+        content: 条目内容文本。
+        priority: 优先级（1-10，10 最高）。
+        token_estimate: Token 估算数。
+        source: 来源组件名称。
+    """
+
     id: str
     type: str
     content: str
@@ -140,6 +201,23 @@ class ContextManager:
         persona_summary: str = "",
         scene: str = "daily",
     ) -> list[dict[str, str]]:
+        """构建完整 LLM 对话上下文消息列表。
+
+        按 Token 预算分配，依次注入：系统提示 → 人格语气 → 动态上下文 →
+        记忆 → 历史消息 → @引用展开 → 用户输入。
+
+        Args:
+            user_input: 用户输入文本。
+            system_prompt: 系统提示文本。
+            memories: 相关记忆文本列表。
+            history: 历史消息列表。
+            dynamic_context: 动态上下文文本。
+            persona_summary: 人格摘要文本。
+            scene: 场景名称（用于语气指令生成）。
+
+        Returns:
+            list[dict[str, str]]: 完整的消息列表，可直接传给 LLM。
+        """
         self._entries = []
         allocation = self._allocator.allocate()
         messages: list[dict[str, str]] = []
@@ -180,8 +258,30 @@ class ContextManager:
             ))
 
         if history:
-            for msg in history[-10:]:
-                messages.append({"role": msg.get("role", "user"), "content": msg.get("content", "")})
+            budget = allocation.history
+            history_tokens = 0
+            included: list[dict[str, str]] = []
+            for msg in reversed(history):
+                content = msg.get("content", "")
+                role = msg.get("role", "user")
+                msg_tokens = self._allocator.estimate_tokens(content)
+                if history_tokens + msg_tokens <= budget:
+                    included.append({"role": role, "content": content})
+                    history_tokens += msg_tokens
+                else:
+                    break
+            included.reverse()
+            messages.extend(included)
+            if len(included) < len(history):
+                from agent.core.logger import StructuredLogger
+                log = StructuredLogger("context_pipeline")
+                log.debug(
+                    "历史消息受预算约束截断",
+                    total=len(history),
+                    included=len(included),
+                    used_tokens=history_tokens,
+                    budget=budget,
+                )
 
         final_user_input = user_input
 
@@ -200,13 +300,34 @@ class ContextManager:
         return messages
 
     def get_entries(self) -> list[ContextEntry]:
+        """获取当前上下文条目列表。
+
+        Returns:
+            list[ContextEntry]: 上下文条目列表。
+        """
         return list(self._entries)
 
     def get_allocation(self) -> TokenAllocation:
+        """获取当前 Token 预算分配方案。
+
+        Returns:
+            TokenAllocation: 分配方案。
+        """
         return self._allocator.allocate()
 
     @staticmethod
     def infer_scene(input_text: str) -> str:
+        """从用户输入推断场景类型。
+
+        基于关键词匹配，支持 development/work/comfort/greeting/briefing/daily
+        六种场景，无法匹配时降级到 daily。
+
+        Args:
+            input_text: 用户输入文本。
+
+        Returns:
+            str: 场景名称。
+        """
         text = input_text.lower()
         if re.search(r"代码|编程|开发|调试|bug|函数|接口|api|重构|部署", text):
             return "development"

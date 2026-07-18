@@ -7,6 +7,16 @@ from typing import Any
 
 @dataclass
 class ToneParams:
+    """语气参数 — 控制回复的风格特征。
+
+    Attributes:
+        temperature: 创造性温度（0=精确，1=自由）。
+        formality: 正式程度（0=轻松，1=正式）。
+        verbosity: 冗长程度（0=简洁，1=详细）。
+        emoji_frequency: 表情符号频率（0=无，1=频繁）。
+        proactive: 是否主动提供建议。
+    """
+
     temperature: float = 0.7
     formality: float = 0.5
     verbosity: float = 0.5
@@ -25,25 +35,65 @@ _SCENE_TONES: dict[str, ToneParams] = {
 
 
 class PersonaCore:
+    """人格核心 — 管理角色名称、特质和场景语气。
+
+    根据不同场景（开发、工作、关怀、问候、简报、日常）自动调整
+    回复风格，支持场景覆盖和特质动态增删。
+
+    Usage:
+        persona = PersonaCore()
+        summary = persona.build_persona_summary()
+        tone = persona.get_tone_for_scene("development")
+        instruction = persona.build_scene_tone_instruction("work")
+    """
+
     def __init__(self) -> None:
+        """初始化人格核心，使用默认名称和特质。"""
         self._name: str = "贾百姓"
         self._traits: list[str] = ["友好", "专业", "有耐心", "善于学习"]
         self._scene_overrides: dict[str, ToneParams] = {}
 
     @property
     def name(self) -> str:
+        """获取角色名称。"""
         return self._name
 
     def build_persona_summary(self) -> str:
+        """构建人格摘要文本，用于注入系统提示。
+
+        Returns:
+            str: 格式化的人格摘要（如"你是贾百姓，友好、专业、有耐心、善于学习。"）。
+        """
         traits = "、".join(self._traits)
         return f"你是{self._name}，{traits}。"
 
     def get_tone_for_scene(self, scene: str) -> ToneParams:
+        """获取指定场景的语气参数。
+
+        优先返回用户覆盖的语气，否则返回预设场景语气，最终降级到 daily。
+
+        Args:
+            scene: 场景名称（development/work/comfort/greeting/briefing/daily）。
+
+        Returns:
+            ToneParams: 语气参数实例。
+        """
         if scene in self._scene_overrides:
             return self._scene_overrides[scene]
         return _SCENE_TONES.get(scene, _SCENE_TONES["daily"])
 
     def build_scene_tone_instruction(self, scene: str) -> str:
+        """根据场景语气参数构建 LLM 指令文本。
+
+        将 temperature、formality、verbosity、emoji_frequency、proactive
+        五个维度转化为中文指令片段，用分号连接。
+
+        Args:
+            scene: 场景名称。
+
+        Returns:
+            str: 语气指令文本，空字符串表示无特殊指令。
+        """
         tone = self.get_tone_for_scene(scene)
         instructions: list[str] = []
         if tone.temperature < 0.4:
@@ -72,11 +122,27 @@ class PersonaCore:
         return "；".join(instructions) if instructions else ""
 
     def set_scene_override(self, scene: str, tone: ToneParams) -> None:
+        """设置场景的语气覆盖。
+
+        Args:
+            scene: 场景名称。
+            tone: 自定义语气参数。
+        """
         self._scene_overrides[scene] = tone
 
     def add_trait(self, trait: str) -> None:
+        """添加人格特质（去重）。
+
+        Args:
+            trait: 特质名称。
+        """
         if trait not in self._traits:
             self._traits.append(trait)
 
     def remove_trait(self, trait: str) -> None:
+        """移除人格特质。
+
+        Args:
+            trait: 特质名称。
+        """
         self._traits = [t for t in self._traits if t != trait]

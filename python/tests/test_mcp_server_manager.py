@@ -243,3 +243,192 @@ class TestMCPServerManager:
         manager = MCPServerManager()
         manager.reload_config()
         assert manager.get_server_count() >= 4
+
+    @pytest.mark.asyncio
+    async def test_list_resources_not_running(self):
+        manager = MCPServerManager()
+        result = await manager.list_resources("nonexistent")
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_read_resource_not_running(self):
+        manager = MCPServerManager()
+        with pytest.raises(RuntimeError, match="未运行"):
+            await manager.read_resource("nonexistent", "file:///test.txt")
+
+    @pytest.mark.asyncio
+    async def test_list_prompts_not_running(self):
+        manager = MCPServerManager()
+        result = await manager.list_prompts("nonexistent")
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_get_prompt_not_running(self):
+        manager = MCPServerManager()
+        with pytest.raises(RuntimeError, match="未运行"):
+            await manager.get_prompt("nonexistent", "greeting")
+
+    @pytest.mark.asyncio
+    async def test_list_all_resources_no_servers(self):
+        manager = MCPServerManager()
+        result = await manager.list_all_resources()
+        assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_list_all_prompts_no_servers(self):
+        manager = MCPServerManager()
+        result = await manager.list_all_prompts()
+        assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_list_resources_no_capability(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        manager = MCPServerManager()
+        proc = MagicMock()
+        proc.initialized = True
+        proc.capabilities = {}
+        manager._processes["test-srv"] = proc
+
+        result = await manager.list_resources("test-srv")
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_list_prompts_no_capability(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        manager = MCPServerManager()
+        proc = MagicMock()
+        proc.initialized = True
+        proc.capabilities = {}
+        manager._processes["test-srv"] = proc
+
+        result = await manager.list_prompts("test-srv")
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_list_resources_with_capability(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        manager = MCPServerManager()
+        proc = MagicMock()
+        proc.initialized = True
+        proc.capabilities = {"resources": True}
+        manager._processes["test-srv"] = proc
+
+        manager.send_request = AsyncMock(return_value={
+            "result": {
+                "resources": [
+                    {"uri": "file:///docs/readme.md", "name": "readme"},
+                ]
+            }
+        })
+
+        result = await manager.list_resources("test-srv")
+        assert len(result) == 1
+        assert result[0]["name"] == "readme"
+        manager.send_request.assert_awaited_once_with("test-srv", "resources/list", {})
+
+    @pytest.mark.asyncio
+    async def test_read_resource_success(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        manager = MCPServerManager()
+        proc = MagicMock()
+        proc.initialized = True
+        proc.capabilities = {"resources": True}
+        manager._processes["test-srv"] = proc
+
+        manager.send_request = AsyncMock(return_value={
+            "result": {
+                "contents": [
+                    {"uri": "file:///docs/readme.md", "mimeType": "text/plain", "text": "# Hello"},
+                ]
+            }
+        })
+
+        result = await manager.read_resource("test-srv", "file:///docs/readme.md")
+        assert "contents" in result
+        manager.send_request.assert_awaited_once_with(
+            "test-srv", "resources/read", {"uri": "file:///docs/readme.md"}
+        )
+
+    @pytest.mark.asyncio
+    async def test_list_prompts_with_capability(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        manager = MCPServerManager()
+        proc = MagicMock()
+        proc.initialized = True
+        proc.capabilities = {"prompts": True}
+        manager._processes["test-srv"] = proc
+
+        manager.send_request = AsyncMock(return_value={
+            "result": {
+                "prompts": [
+                    {"name": "greeting", "description": "Say hello"},
+                ]
+            }
+        })
+
+        result = await manager.list_prompts("test-srv")
+        assert len(result) == 1
+        assert result[0]["name"] == "greeting"
+        manager.send_request.assert_awaited_once_with("test-srv", "prompts/list", {})
+
+    @pytest.mark.asyncio
+    async def test_get_prompt_success(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        manager = MCPServerManager()
+        proc = MagicMock()
+        proc.initialized = True
+        proc.capabilities = {"prompts": True}
+        manager._processes["test-srv"] = proc
+
+        manager.send_request = AsyncMock(return_value={
+            "result": {
+                "description": "A greeting prompt",
+                "messages": [{"role": "user", "content": {"type": "text", "text": "Hello {name}"}}],
+            }
+        })
+
+        result = await manager.get_prompt("test-srv", "greeting", {"name": "World"})
+        assert "messages" in result
+        manager.send_request.assert_awaited_once_with(
+            "test-srv", "prompts/get", {"name": "greeting", "arguments": {"name": "World"}}
+        )
+
+    @pytest.mark.asyncio
+    async def test_read_resource_error(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        manager = MCPServerManager()
+        proc = MagicMock()
+        proc.initialized = True
+        proc.capabilities = {"resources": True}
+        manager._processes["test-srv"] = proc
+
+        manager.send_request = AsyncMock(return_value={
+            "error": {"code": -32602, "message": "Resource not found"}
+        })
+
+        with pytest.raises(RuntimeError, match="MCP资源读取失败"):
+            await manager.read_resource("test-srv", "file:///missing.txt")
+
+    @pytest.mark.asyncio
+    async def test_get_prompt_error(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        manager = MCPServerManager()
+        proc = MagicMock()
+        proc.initialized = True
+        proc.capabilities = {"prompts": True}
+        manager._processes["test-srv"] = proc
+
+        manager.send_request = AsyncMock(return_value={
+            "error": {"code": -32602, "message": "Prompt not found"}
+        })
+
+        with pytest.raises(RuntimeError, match="MCP提示模板获取失败"):
+            await manager.get_prompt("test-srv", "missing_prompt")

@@ -147,6 +147,8 @@ class PersistenceService:
         self._promoted_ids: set[str] = set()
         self._initialized = False
         self._flush_count = 0
+        # P1 修复：持久化写入锁，防止并发 flush 导致数据撕裂
+        self._flush_lock = asyncio.Lock()
 
     async def initialize(self) -> None:
         if self._initialized:
@@ -299,26 +301,31 @@ class PersistenceService:
         self._initialized = False
 
     async def _flush_task_states(self) -> None:
-        path = self._data_dir / "task-states.json"
-        try:
-            data = [
-                {
-                    "task_id": t.task_id,
-                    "user_id": t.user_id,
-                    "description": t.description,
-                    "status": t.status,
-                    "plan_json": t.plan_json,
-                    "current_step_index": t.current_step_index,
-                    "step_results_json": t.step_results_json,
-                    "created_at": t.created_at,
-                    "updated_at": t.updated_at,
-                    "resume_context": t.resume_context,
-                }
-                for t in self._task_states.values()
-            ]
-            path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        except Exception:
-            pass
+        # P1 修复：加锁防止并发写入数据撕裂
+        async with self._flush_lock:
+            path = self._data_dir / "task-states.json"
+            try:
+                data = [
+                    {
+                        "task_id": t.task_id,
+                        "user_id": t.user_id,
+                        "description": t.description,
+                        "status": t.status,
+                        "plan_json": t.plan_json,
+                        "current_step_index": t.current_step_index,
+                        "step_results_json": t.step_results_json,
+                        "created_at": t.created_at,
+                        "updated_at": t.updated_at,
+                        "resume_context": t.resume_context,
+                    }
+                    for t in self._task_states.values()
+                ]
+                # 原子写入：先写临时文件再重命名
+                tmp_path = path.with_suffix(".json.tmp")
+                tmp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+                tmp_path.replace(path)
+            except Exception:
+                pass
 
     async def _load_task_states(self) -> None:
         path = self._data_dir / "task-states.json"

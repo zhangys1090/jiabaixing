@@ -398,10 +398,11 @@ class VerificationService:
             except Exception:
                 pass
 
+        # 无 LLM 时无法真正评估目标达成，不得误判为成功（审计 V-01）
         return GoalProgress(
-            achieved=True,
-            progress=0.8,
-            remaining_steps=[],
+            achieved=False,
+            progress=0.0,
+            remaining_steps=["配置 LLM 以评估目标进度"],
             suggested_action="continue",
         )
 
@@ -429,9 +430,10 @@ class VerificationService:
         response = await self.deps.llm.chat(prompt)
         json_match = re.search(r"\{[\s\S]*\}", response)
         if not json_match:
+            # 解析失败时不得默认成功（审计 V-02）
             return GoalProgress(
-                achieved=True,
-                progress=0.7,
+                achieved=False,
+                progress=0.3,
                 remaining_steps=[],
                 suggested_action="continue",
             )
@@ -439,8 +441,9 @@ class VerificationService:
         try:
             parsed = json.loads(json_match.group())
             return GoalProgress(
-                achieved=parsed.get("achieved", True),
-                progress=max(0.0, min(1.0, parsed.get("progress", 0.7))),
+                # 缺字段时默认未达成，避免误通过（审计 V-02）
+                achieved=parsed.get("achieved", False),
+                progress=max(0.0, min(1.0, parsed.get("progress", 0.0))),
                 remaining_steps=parsed.get("remainingSteps", []),
                 suggested_action=parsed.get("suggestedAction", "continue"),
             )

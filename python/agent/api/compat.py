@@ -173,14 +173,14 @@ async def health_detail():
 async def process(req: ProcessRequest):
     eng = _get_engine()
     if not eng:
-        return {"response": "", "traceId": "", "intent": "unknown", "error": _engine_unavailable()}
+        return {"response": "", "trace_id": "", "intent": "unknown", "error": _engine_unavailable()}
     result = await eng.process_input(
         message=req.input or "",
         session_id="api_process",
     )
     return {
         "response": result.get("content", ""),
-        "traceId": result.get("trace_id", ""),
+        "trace_id": result.get("trace_id", ""),
         "intent": result.get("intent", "chat"),
     }
 
@@ -534,7 +534,7 @@ async def conversations(limit: int = 50):
 
 @router.post("/simulate_task")
 async def simulate_task(req: dict):
-    return {"traceId": "", "taskId": ""}
+    return {"trace_id": "", "taskId": ""}
 
 
 @router.post("/optimization/process")
@@ -652,11 +652,26 @@ async def tools_execute(req: dict):
 
 @router.get("/tools/list")
 async def tools_list():
+    from fastapi import Request
     eng = _get_engine()
     if not eng or not hasattr(eng, "tool_registry") or not eng.tool_registry:
         return {"tools": [], "count": 0}
     defs = eng.tool_registry.get_all_definitions()
-    tools = [{"name": d.name, "description": d.description, "category": d.category.value} for d in defs]
+
+    api_key = ""
+    try:
+        from agent.main import app
+        request = Request({})
+    except Exception:
+        pass
+
+    tools = []
+    for d in defs:
+        tool_info = {"name": d.name, "description": d.description, "category": d.category.value}
+        if hasattr(d, "risk_level") and d.risk_level == "high":
+            tool_info["restricted"] = True
+        tools.append(tool_info)
+
     return {"tools": tools, "count": len(tools)}
 
 

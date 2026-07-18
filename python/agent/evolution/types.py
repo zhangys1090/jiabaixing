@@ -45,6 +45,9 @@ class FeedbackSignal:
     response_length: int = 0
     rounds_used: int = 0
 
+    def __post_init__(self) -> None:
+        self.quality_score = max(0.0, min(1.0, self.quality_score))
+
 
 @dataclass
 class EvolutionAction:
@@ -91,6 +94,11 @@ class SignalType(str, Enum):
     NEGATIVE = "negative"
     TASK_SUCCESS = "task_success"
     TASK_FAILURE = "task_failure"
+    PLAN_QUALITY = "plan_quality"
+    TOOL_SELECTION_QUALITY = "tool_selection_quality"
+    REFLECTION_EFFECTIVENESS = "reflection_effectiveness"
+    CONTEXT_COMPRESSION_SUCCESS = "context_compression_success"
+    MEMORY_RETRIEVAL_HIT = "memory_retrieval_hit"
 
 
 @dataclass
@@ -100,6 +108,10 @@ class LearningSignal:
     quality: float = 0.5
     error: str | None = None
     timestamp: float = 0.0
+    metadata: dict[str, Any] = field(default_factory=dict)
+    plan_steps: int = 0
+    reflection_score: float = 0.0
+    memory_hit: bool = False
 
 
 @dataclass
@@ -115,6 +127,7 @@ class RollbackSnapshot:
     timestamp: float
     avg_quality: float
     avg_response_time_ms: float
+    interaction_count: int = 0  # 拍快照时的交互计数，用于回滚验证差值（审计 E-01）
     tool_weights: dict[str, float] = field(default_factory=dict)
     reflection_max_retries: int = 2
     enable_deep_reflection: bool = True

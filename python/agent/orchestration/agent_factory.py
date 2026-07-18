@@ -907,8 +907,17 @@ class OrchestratorAgent:
     整合目标分解、Agent选择、SubAgentFanout和ResultAggregator，
     提供完整的多Agent协调工作流：分析 → 拆解 → 分配 → 执行 → 聚合 → 重规划。
 
+    支持 A2A 协议远程 Agent 发现：当本地 AgentRegistry 无合适 Agent 时，
+    通过 A2AClient 主动发现远程 Agent 并委派任务，遵循"本地优先"策略。
+
     Usage:
-        orchestrator = OrchestratorAgent(registry=registry, agent_factory=factory)
+        orchestrator = OrchestratorAgent(
+            registry=registry,
+            agent_factory=factory,
+            a2a_manager=a2a_manager,
+            a2a_remote_endpoints=["http://remote:8765"],
+            self_agent_id="agent:jiabaixing",
+        )
         result = await orchestrator.orchestrate("重构整个项目")
         print(f"成功: {result.success}, 耗时: {result.duration_ms}ms")
     """
@@ -918,18 +927,140 @@ class OrchestratorAgent:
         registry: AgentRegistry | None = None,
         agent_factory: AgentFactory | None = None,
         max_retries: int = 2,
+        a2a_manager: Any | None = None,
+        a2a_remote_endpoints: list[str] | None = None,
+        self_agent_id: str = "agent:jiabaixing",
+        a2a_poll_interval_seconds: float = 0.5,
+        a2a_task_timeout_seconds: float = 30.0,
+        a2a_auth_interceptor: Any | None = None,
     ) -> None:
+        """初始化顶层协调 Agent.
+
+        Args:
+            registry: 本地 Agent 注册中心. None 则使用全局单例.
+            agent_factory: Agent 工厂. None 则使用全局单例.
+            max_retries: 失败重试次数.
+            a2a_manager: A2A 协议管理器，用于本地 Task 状态管理. None 则不启用 A2A.
+            a2a_remote_endpoints: 远程 A2A Agent 端点 URL 列表，用于主动发现远程 Agent.
+            self_agent_id: 本机 Agent ID，作为 A2A Task 的 from_agent_id.
+            a2a_poll_interval_seconds: A2A 远程 Task 状态轮询间隔（秒）.
+            a2a_task_timeout_seconds: A2A 远程 Task 总超时（秒）.
+            a2a_auth_interceptor: A2A 出站鉴权拦截器，注入到 A2AClient 用于出站凭据注入.
+        """
         self._registry = registry or AgentRegistry.get_instance()
         self._agent_factory = agent_factory or AgentFactory.get_instance()
         self._max_retries = max_retries
         self._complexity_analyzer = TaskComplexityAnalyzer()
         self._aggregator: Any = None
+        # A2A 远程发现能力
+        self._a2a_manager = a2a_manager
+        self._a2a_remote_endpoints = list(a2a_remote_endpoints or [])
+        self._self_agent_id = self_agent_id
+        self._a2a_poll_interval = max(0.05, a2a_poll_interval_seconds)
+        self._a2a_task_timeout = max(1.0, a2a_task_timeout_seconds)
+        self._a2a_auth_interceptor = a2a_auth_interceptor
 
     def _get_aggregator(self) -> Any:
         if self._aggregator is None:
             from agent.orchestration.result_aggregator import ResultAggregator
             self._aggregator = ResultAggregator()
         return self._aggregator
+
+    def _a2a_enabled(self) -> bool:
+        """判断 A2A 远程发现能力是否启用.
+
+        Returns:
+            bool: 启用返回 True.
+        """
+        return bool(self._a2a_remote_endpoints)
+
+    async def _delegate_via_a2a(self, goal: str) -> dict[str, Any] | None:
+        """通过 A2A 协议委派任务给远程 Agent.
+
+        遍历远程端点列表，按 task-execution 能力发现远程 Agent，
+        找到后调用 create_task 委派任务并轮询直到完成或超时。
+
+        Args:
+            goal: 任务描述.
+
+        Returns:
+            dict | None: 远程执行结果，无可用远程 Agent 或超时返回 None.
+        """
+        if not self._a2a_enabled():
+            return None
+
+        # 延迟导入，避免模块加载循环
+        from agent.a2a import A2AClient, A2ACapabilityType, A2ATaskStatus
+
+        for endpoint in self._a2a_remote_endpoints:
+            client = A2AClient(
+                endpoint,
+                auth_interceptor=self._a2a_auth_interceptor,
+            )
+            try:
+                # 1. 发现远程 Agent — 按 task-execution 能力筛选
+                remote_agents = await client.discover_agents(
+                    capability=A2ACapabilityType.TASK_EXECUTION
+                )
+                if not remote_agents:
+                    continue
+
+                remote_agent = remote_agents[0]
+
+                # 将发现的远程 Agent Card 设置为 target_card，用于后续出站鉴权头注入
+                client.set_target_card(remote_agent)
+
+                # 2. 创建委派 Task
+                task = await client.create_task(
+                    from_agent_id=self._self_agent_id,
+                    to_agent_id=remote_agent.id,
+                    description=goal,
+                    input_data={"source": "orchestrator_a2a_fallback"},
+                )
+                if task is None:
+                    continue
+
+                # 3. 轮询 Task 状态直到终态或超时
+                import asyncio as _asyncio
+                elapsed = 0.0
+                while elapsed < self._a2a_task_timeout:
+                    await _asyncio.sleep(self._a2a_poll_interval)
+                    elapsed += self._a2a_poll_interval
+                    current = await client.get_task(task.id)
+                    if current is None:
+                        break
+                    if current.status == A2ATaskStatus.COMPLETED:
+                        return {
+                            "goal": goal,
+                            "status": "completed",
+                            "via": "a2a",
+                            "remote_agent": remote_agent.id,
+                            "remote_endpoint": endpoint,
+                            "output": current.output,
+                        }
+                    if current.status in (A2ATaskStatus.FAILED, A2ATaskStatus.CANCELLED):
+                        return {
+                            "goal": goal,
+                            "status": "failed",
+                            "via": "a2a",
+                            "remote_agent": remote_agent.id,
+                            "error": current.error or f"remote task {current.status.value}",
+                        }
+                # 超时
+                return {
+                    "goal": goal,
+                    "status": "timeout",
+                    "via": "a2a",
+                    "remote_agent": remote_agent.id,
+                    "error": f"a2a task timeout after {self._a2a_task_timeout}s",
+                }
+            except Exception as e:
+                log.warning("A2A delegation failed", endpoint=endpoint, error=str(e))
+                continue
+            finally:
+                await client.close()
+
+        return None
 
     async def orchestrate(
         self,
@@ -1092,9 +1223,11 @@ class OrchestratorAgent:
 
     def _create_executor(self) -> Any:
         registry = self._registry
+        orchestrator_ref = self
 
         class RegistryExecutor:
             async def execute(self_node, task: TaskNode) -> Any:
+                # 本地优先策略：先查本地 AgentRegistry
                 agent = registry.get(task.assigned_to or "")
                 if agent:
                     registry.set_state(task.assigned_to or "", "busy")
@@ -1105,6 +1238,12 @@ class OrchestratorAgent:
                     except Exception:
                         registry.report_error(task.assigned_to or "")
                         raise
+                # 本地无合适 Agent → 通过 A2A 协议发现远程 Agent 委派任务
+                # 此前该分支返回 {"status": "no_agent_available"}，导致跨 Agent 协作能力闲置
+                if orchestrator_ref._a2a_enabled():
+                    a2a_result = await orchestrator_ref._delegate_via_a2a(task.goal)
+                    if a2a_result is not None:
+                        return a2a_result
                 return {"goal": task.goal, "status": "no_agent_available"}
 
         return RegistryExecutor()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from typing import Any
 
@@ -12,6 +13,7 @@ from agent.loop.types import (
     PlanStep,
 )
 from agent.tools.registry import ToolRegistry
+from agent.loop.tot_planner import TreeOfThoughtsPlanner, TotConfig
 
 log = StructuredLogger("planner")
 
@@ -21,10 +23,28 @@ class Planner:
         self,
         llm: LLMProvider,
         tool_registry: ToolRegistry | None = None,
+        memory_engine: Any | None = None,
     ) -> None:
         self.llm = llm
         self._tool_registry = tool_registry
         self._reflection_insight: str | None = None
+        self._memory_engine = memory_engine
+        # P0 接线修复：接入 TreeOfThoughtsPlanner，此前完全孤立（0 调用点）
+        _tot_enabled = os.environ.get("TOT_PLANNER_ENABLED", "true").lower() == "true"
+        self._tot_planner: TreeOfThoughtsPlanner | None = None
+        if _tot_enabled:
+            self._tot_planner = TreeOfThoughtsPlanner(
+                llm=llm,
+                tot_config=TotConfig(
+                    enabled=True,
+                    enable_task_nature_analysis=True,
+                    max_candidates=3,
+                ),
+            )
+
+    def set_memory_engine(self, engine: Any) -> None:
+        """设置记忆引擎，用于主动检索历史经验。"""
+        self._memory_engine = engine
 
     def set_tool_registry(self, registry: ToolRegistry) -> None:
         self._tool_registry = registry
@@ -58,24 +78,7 @@ class Planner:
         return "simple"
 
     async def _analyze_complexity_semantic(self, text: str) -> str:
-        """语义化复杂度分析: 先用快速正则预判，仅对中等复杂度任务调用 LLM。
-
-        优化策略（省 LLM 调用）：
-        - 短文本（<15字符）且无关键词 → 直接判定 simple，不调 LLM
-        - 高复杂度关键词命中 ≥3 → 直接判定 complex，不调 LLM
-        - 其他情况 → 调用 LLM 精确判断
-        """
-        # 快速预判：超短文本直接 simple
-        stripped = text.strip()
-        if len(stripped) < 15 and not re.search(r'[?？!！]', stripped):
-            return "simple"
-
-        # 快速预判：高关键词命中直接 complex
-        keyword_score = self._keyword_complexity_score(text)
-        if keyword_score >= 3:
-            return "complex"
-
-        # 边界情况：1-2 个关键词 → 用 LLM 精确判断
+        """语义化复杂度分析: 使用 LLM 判断任务复杂度。"""
         prompt = (
             "判断以下用户任务的复杂度等级。只回复一个词: simple / moderate / complex\n\n"
             "判断标准:\n"
@@ -129,8 +132,49 @@ class Planner:
         context: LoopContext,
         complexity: str,
     ) -> ExecutionPlan:
+        # P0 接线修复：complex 任务优先使用 Tree of Thoughts 多候选规划
+        # 此前 TotPlanner 完全孤立，complex 任务的 ToT 能力从未被启用
+        if complexity == "complex" and self._tot_planner is not None:
+            try:
+                tot_plan, tot_meta = await self._tot_planner.plan_with_tot(input_text, context)
+                if tot_plan.steps:
+                    log.info(
+                        "ToT planning succeeded",
+                        candidates=tot_meta.candidate_count if tot_meta else 0,
+                        strategy=tot_meta.selected_strategy if tot_meta else "fallback",
+                    )
+                    return tot_plan
+                log.debug("ToT returned empty plan, falling back to standard planning")
+            except Exception as e:
+                log.warning("ToT planning failed, falling back", error=str(e))
+
         max_steps = 5 if complexity == "complex" else 3
         tool_catalog = self._build_tool_catalog()
+
+        # P0-2: 主动记忆检索 — 在规划前注入相似任务经验
+        experience_injection = ""
+        if self._memory_engine:
+            try:
+                memories = await self._memory_engine.search_with_context(
+                    query=input_text,
+                    limit=3,
+                    use_recency_decay=True,
+                    use_knowledge_graph=False,
+                )
+                if memories:
+                    experience_lines = ["【历史经验参考】"]
+                    for m in memories[:3]:
+                        content_preview = (m.get("content", "") or "")[:200]
+                        score = m.get("relevance_score", 0)
+                        experience_lines.append(f"  - 相关度{score:.2f}: {content_preview}")
+                    experience_injection = "\n".join(experience_lines)
+                    log.info(
+                        "Proactive memory retrieval",
+                        results=len(memories),
+                        injection=len(experience_injection),
+                    )
+            except Exception as e:
+                log.debug("Memory retrieval failed (non-blocking)", error=str(e))
 
         system_content = (
             "你是一个任务规划专家。将用户任务分解为具体步骤。\n"
@@ -140,6 +184,9 @@ class Planner:
             "为每个步骤选择最合适的工具。如果不需要工具，可以省略 [工具名]。\n\n"
             f"{tool_catalog}"
         )
+
+        if experience_injection:
+            system_content += f"\n\n{experience_injection}"
 
         messages = [
             {"role": "system", "content": system_content},

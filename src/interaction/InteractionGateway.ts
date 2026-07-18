@@ -12,9 +12,9 @@
  *              AgentHarness / JiabaixingCore
  */
 
-import { Logger } from '../utils/Logger';
-import { EventBus } from '../shared/EventBus';
 import { TaskComplexityAnalyzer } from '../core/TaskComplexityAnalyzer';
+import { EventBus, JiabaixingEventBus } from '../shared/EventBus';
+import { Logger } from '../utils/Logger';
 
 /** 输入来源枚举 */
 export enum InputSource {
@@ -164,11 +164,11 @@ export class InteractionGateway {
       }
 
       // 3. 发送到核心处理
-      (EventBus as any).emit('gateway_input_received', {
+      (EventBus as JiabaixingEventBus).emit('gateway_input_received', {
         traceId,
         source: input.source,
         textLength: input.text.length,
-        executionDepth,
+        executionDepth: Number(executionDepth),
       });
 
       const result = await core.processInput(input.text, input.userId, traceId);
@@ -183,11 +183,11 @@ export class InteractionGateway {
         duration,
       };
 
-      (EventBus as any).emit('gateway_output_sent', {
+      (EventBus as JiabaixingEventBus).emit('gateway_output_sent', {
         traceId,
-        success: true,
+        response: result.response,
         duration,
-        executionDepth,
+        success: true,
       });
 
       Logger.info(
@@ -206,11 +206,11 @@ export class InteractionGateway {
         'InteractionGateway'
       );
 
-      (EventBus as any).emit('gateway_output_sent', {
+      (EventBus as JiabaixingEventBus).emit('gateway_output_sent', {
         traceId,
-        success: false,
+        response: '',
         duration,
-        error: errorMessage,
+        success: false,
       });
 
       return {

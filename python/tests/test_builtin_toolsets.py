@@ -66,7 +66,7 @@ def test_full_toolset_includes_all_categories():
     assert ToolCategory.COGNITION in categories
     assert ToolCategory.FILE in categories
     assert ToolCategory.CODE in categories
-    assert len(categories) == 9
+    assert len(categories) == 10
 
 
 def test_agent_toolset_map_complete():

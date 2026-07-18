@@ -1,0 +1,156 @@
+{
+  "toolsetMap": {
+    "coding": {
+      "toolsetId": "coding",
+      "disclosureLevel": 3,
+      "tags": ["code", "git", "file", "shell", "debug", "test", "review"],
+      "excludeCategories": ["desktop", "daily"]
+    },
+    "desktop": {
+      "toolsetId": "desktop",
+      "disclosureLevel": 2,
+      "tags": ["desktop", "automation", "screenshot", "window", "input"],
+      "excludeCategories": ["code"]
+    },
+    "development": {
+      "toolsetId": "coding",
+      "disclosureLevel": 3,
+      "tags": [
+        "code",
+        "git",
+        "file",
+        "shell",
+        "debug",
+        "test",
+        "review",
+        "deploy"
+      ],
+      "excludeCategories": ["desktop", "daily"]
+    },
+    "research": {
+      "toolsetId": "network",
+      "disclosureLevel": 2,
+      "tags": ["search", "web", "fetch", "knowledge", "analysis"]
+    },
+    "briefing": {
+      "toolsetId": "full",
+      "disclosureLevel": 2,
+      "tags": ["summary", "report", "analysis", "file", "search"]
+    },
+    "work": {
+      "toolsetId": "full",
+      "disclosureLevel": 2,
+      "tags": ["project", "file", "search", "schedule", "report"]
+    },
+    "daily": {
+      "toolsetId": "daily",
+      "disclosureLevel": 1,
+      "tags": ["memory", "note", "schedule", "search"]
+    },
+    "comfort": {
+      "toolsetId": "minimal",
+      "disclosureLevel": 1,
+      "tags": ["memory", "chat"]
+    },
+    "greeting": {
+      "toolsetId": "minimal",
+      "disclosureLevel": 1,
+      "tags": ["chat"]
+    }
+  },
+  "keywords": {
+    "coding": [
+      "代码",
+      "编程",
+      "开发",
+      "调试",
+      "bug",
+      "函数",
+      "接口",
+      "api",
+      "重构",
+      "部署",
+      "git",
+      "commit",
+      "test",
+      "测试",
+      "编译",
+      "build",
+      "npm",
+      "yarn",
+      "pnpm",
+      "import",
+      "export",
+      "class",
+      "类型",
+      "typescript",
+      "python",
+      "react",
+      "node",
+      "修复",
+      "优化"
+    ],
+    "desktop": [
+      "桌面",
+      "窗口",
+      "截图",
+      "自动化",
+      "鼠标",
+      "键盘",
+      "点击",
+      "打开应用",
+      "关闭",
+      "最小化",
+      "最大化",
+      "切换"
+    ],
+    "research": [
+      "搜索",
+      "查找",
+      "研究",
+      "了解",
+      "调查",
+      "比较",
+      "分析",
+      "有什么",
+      "推荐",
+      "最新",
+      "新闻",
+      "资料"
+    ],
+    "briefing": [
+      "简报",
+      "总结",
+      "日报",
+      "周报",
+      "进度",
+      "汇报",
+      "报告",
+      "生成报告",
+      "写总结"
+    ],
+    "work": [
+      "工作",
+      "项目",
+      "排期",
+      "会议",
+      "汇报",
+      "方案",
+      "需求",
+      "上线",
+      "任务"
+    ],
+    "comfort": [
+      "难过",
+      "烦",
+      "累",
+      "焦虑",
+      "压力",
+      "不开心",
+      "心情",
+      "崩溃",
+      "安慰"
+    ],
+    "greeting": ["你好", "早上好", "晚安", "嗨", "hello", "hi", "hey"]
+  }
+}

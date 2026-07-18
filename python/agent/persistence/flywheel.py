@@ -51,7 +51,7 @@ class TrajectoryAnalysis:
 class FlywheelConfig:
     analysis_window_hours: int = 168
     min_sample_size: int = 10
-    auto_apply_optimizations: bool = False
+    auto_apply_optimizations: bool = True  # P1 修复：默认启用自动应用，闭合飞轮
     suggestion_threshold: float = 0.7
 
 
@@ -110,11 +110,37 @@ class TrajectoryFlywheel:
         if suggestion.confidence < self.config.suggestion_threshold:
             return {"success": False, "message": "建议置信度低于阈值"}
 
+        # P1 修复：实际应用建议到进化引擎工具权重，而非仅记录到内存 dict
+        applied = False
+        try:
+            from agent.evolution.orchestrator import EvolutionOrchestrator
+
+            orchestrator = EvolutionOrchestrator.get_instance()
+            if orchestrator._evolution_engine:
+                engine = orchestrator._evolution_engine
+                # 根据 suggestion.type 调整工具权重
+                if suggestion.type == "tool" and suggestion.description:
+                    # 提取工具名（描述中通常包含工具名）
+                    for tool_name in engine._tool_weights:
+                        if tool_name in suggestion.description:
+                            # 成功模式 → 提升权重，失败模式 → 降低权重
+                            if "失败" in suggestion.description or "错误" in suggestion.description:
+                                new_weight = max(0.1, engine._tool_weights[tool_name] - 0.1)
+                                engine._update_tool_weight(tool_name, new_weight)
+                                applied = True
+                            elif "成功" in suggestion.description or "优化" in suggestion.description:
+                                new_weight = min(1.0, engine._tool_weights[tool_name] + 0.1)
+                                engine._update_tool_weight(tool_name, new_weight)
+                                applied = True
+        except Exception:
+            pass
+
         self._applied_optimizations[suggestion_id] = {
             "timestamp": time.time(),
             "impact": suggestion.estimated_improvement,
+            "actually_applied": applied,
         }
-        return {"success": True, "message": f"已应用建议: {suggestion.description}"}
+        return {"success": True, "message": f"已应用建议: {suggestion.description}", "applied_to_engine": applied}
 
     def get_improvement_trend(self) -> dict[str, Any]:
         if len(self._recent_analyses) < 2:

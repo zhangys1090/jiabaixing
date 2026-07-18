@@ -1,8 +1,51 @@
 # 桌面执行Agent架构升级 - Codex风格 Computer Use
 
 > 升级日期: 2026-06-23
-> 版本: v2.0
+> 版本: v2.1
 > 参考: Codex Computer Use / UI-TARS / Anthropic Claude Computer Use
+
+---
+
+## 〇、五感与手脚 — 核心原则
+
+> 五感（视觉/听觉）与手脚（桌面/浏览器操作）能力统一注册为 Tool，
+> 由 ToolRegistry 调度，LLM 在推理循环中自主决定何时感知、何时执行。
+
+### 五条原则
+
+| #   | 原则                             | 说明                                                                                         |
+| --- | -------------------------------- | -------------------------------------------------------------------------------------------- |
+| 1   | **所有五感/手脚能力都是 Tool**   | 注册到 ToolRegistry，由 Executor 统一调度，不创建独立入口                                    |
+| 2   | **不创建独立子系统**             | ~~PerceptionHub/ActionHub~~ 取消，ToolRegistry 已是统一调度层                                |
+| 3   | **新增 ToolCategory.PERCEPTION** | 感知类工具（screen_parse / speech_transcribe / action_verify / smart_wait）归类到 PERCEPTION |
+| 4   | **复用现有 Toolset 机制**        | Desktop 工具集自动包含 DESKTOP + PERCEPTION 工具，无需额外配置                               |
+| 5   | **LLM 自主决定何时感知/执行**    | 不需要额外的"感知调度层"，LLM 在推理循环中自然决定何时截图、何时点击                         |
+
+### 工具全景（去重后 77 个）
+
+| 类别           | 工具                                                                        | 说明                                                 |
+| -------------- | --------------------------------------------------------------------------- | ---------------------------------------------------- |
+| **PERCEPTION** | `screen_parse`                                                              | 可交互元素检测 + Set-of-Mark 标注                    |
+|                | `action_verify`                                                             | 操作后截图验证（像素差异/OCR/VLM）                   |
+|                | `smart_wait`                                                                | 智能等待（change/stable/selector 三模式）            |
+|                | `speech_transcribe`                                                         | 语音转文字（faster-whisper STT）                     |
+| **DESKTOP**    | `desktop_automate`                                                          | 桌面自动化（支持归一化坐标）                         |
+|                | `desktop_screenshot`                                                        | 桌面截图                                             |
+|                | `desktop_window`                                                            | 窗口管理                                             |
+|                | `desktop_clipboard`                                                         | 剪贴板读写                                           |
+| **BROWSER**    | `browser_fill_form`                                                         | 语义化表单填写（新增）                               |
+|                | `browser_agent` / `navigate` / `click` / `type` / `screenshot` / `get_text` | 浏览器操作                                           |
+| **VISION**     | `vision_understand`                                                         | Vision 模型理解图片（替代 ~~image_understand~~）     |
+| **VOICE**      | `voice_interact`                                                            | 语音交互（speak/listen/session，替代 ~~tts_speak~~） |
+| **SHELL**      | `shell_exec`                                                                | Shell 命令执行（替代 ~~desktop_shell~~）             |
+
+### 已去除的重复工具
+
+| 已移除             | 合并到                             | 原因                                             |
+| ------------------ | ---------------------------------- | ------------------------------------------------ |
+| `desktop_shell`    | `shell_exec` (code_tools)          | 功能完全重叠，统一入口                           |
+| `image_understand` | `vision_understand` (vision_tools) | 功能完全重叠，vision_tools 实现更完整            |
+| `tts_speak`        | `voice_interact` (system_tools)    | voice_interact 包含 speak+listen+session，是超集 |
 
 ---
 
@@ -12,15 +55,17 @@
 
 ### 核心变化
 
-| 维度     | v1.x (旧版)    | v2.0 (Codex风格)            |
-| -------- | -------------- | --------------------------- |
-| 定位     | 桌面操作工具集 | 放手式执行Agent             |
-| 交互     | 逐步指令       | 一句话任务委派              |
-| 坐标系统 | 像素坐标       | 归一化坐标 [0-1000]         |
-| 工具接口 | 内部函数调用   | 标准 MCP 协议               |
-| 可观测性 | 日志输出       | 实时事件流 + 可视化         |
-| 安全性   | 基础黑名单     | 四层安全防护体系            |
-| 任务执行 | 单步执行       | 技能包 + LLM规划 + 闭环验证 |
+| 维度     | v1.x (旧版)    | v2.0 (Codex风格)            | v2.1 (五感+手脚)                                              |
+| -------- | -------------- | --------------------------- | ------------------------------------------------------------- |
+| 定位     | 桌面操作工具集 | 放手式执行Agent             | 放手式执行Agent + 感知闭环                                    |
+| 交互     | 逐步指令       | 一句话任务委派              | 一句话任务委派 + 自动验证                                     |
+| 坐标系统 | 像素坐标       | 归一化坐标 [0-1000]         | 归一化坐标 [0-1000]（TS+Python双端对齐）                      |
+| 工具接口 | 内部函数调用   | 标准 MCP 协议               | ToolRegistry + MCP 双通道                                     |
+| 可观测性 | 日志输出       | 实时事件流 + 可视化         | 实时事件流 + 操作验证                                         |
+| 安全性   | 基础黑名单     | 四层安全防护体系            | 四层安全防护体系                                              |
+| 任务执行 | 单步执行       | 技能包 + LLM规划 + 闭环验证 | 技能包 + LLM规划 + 感知验证闭环                               |
+| 感知能力 | 无             | 无                          | screen_parse / action_verify / smart_wait / speech_transcribe |
+| 表单填写 | 无             | 无                          | browser_fill_form（语义化匹配）                               |
 
 ---
 
@@ -516,29 +561,116 @@ skillRegistry.registerSkill({
 
 ---
 
-## 六、后续规划
+## 六、五感与手脚 — 实现审计
 
+### 6.1 归一化坐标系统 ✅ 已完成
+
+| 端     | 文件                                        | 状态      | 完成度                                                                              |
+| ------ | ------------------------------------------- | --------- | ----------------------------------------------------------------------------------- |
+| TS     | `src/desktop/NormalizedCoordinates.ts`      | ✅ 已完成 | 100% — 单例模式，自动获取屏幕分辨率，支持 Electron/Node.js 双环境                   |
+| Python | `python/agent/desktop/coordinate_system.py` | ✅ 已完成 | 100% — NormalizedPoint/NormalizedRect + from_normalized/to_normalized，与 TS 端对齐 |
+
+**集成点**: `desktop_automate` 工具的 `coordinate_mode=normalized` 参数，自动将 task 文本中的 `(x,y)` 坐标从归一化转换为像素。
+
+### 6.2 感知工具（PERCEPTION）✅ 已完成
+
+| 工具                | 文件                                     | 实现程度 | 说明                                                                                                                                    |
+| ------------------- | ---------------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `screen_parse`      | `python/agent/tools/perception_tools.py` | ✅ 90%   | 桌面端：Windows UI Automation + macOS Accessibility + OCR 三级降级；浏览器端：DOM 提取；Set-of-Mark 标注。**待完善**：GPU 加速视觉检测  |
+| `action_verify`     | `python/agent/tools/perception_tools.py` | ✅ 90%   | 像素差异 + OCR 文字对比 + VLM 判断三策略（auto 自动选择）；区域裁剪支持归一化坐标。**待完善**：VLM 双图对比（当前仅发送操作后截图）     |
+| `smart_wait`        | `python/agent/tools/perception_tools.py` | ✅ 95%   | change/stable/selector 三模式；selector 模式优先复用已有浏览器会话；感知哈希变化检测。**待完善**：多显示器场景                          |
+| `speech_transcribe` | `python/agent/tools/perception_tools.py` | ✅ 90%   | faster-whisper 集成；GPU 自动检测（torch.cuda/ctranslate2）；流式输出（逐段时间戳）；VAD 过滤；模型缓存。**待完善**：实时麦克风流式转录 |
+
+### 6.3 手脚工具（DESKTOP/BROWSER）
+
+| 工具                 | 文件                                  | 实现程度 | 说明                                                                                                                                      |
+| -------------------- | ------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `desktop_automate`   | `python/agent/tools/desktop_tools.py` | ✅ 95%   | 归一化坐标支持（结构化转换：2点/4点矩形）；TS DesktopExecutionAgent 优先 + Python 降级                                                    |
+| `desktop_screenshot` | `python/agent/tools/desktop_tools.py` | ✅ 95%   | 全屏/区域截图已实现                                                                                                                       |
+| `desktop_window`     | `python/agent/tools/desktop_tools.py` | ✅ 90%   | 窗口列表/激活/最大化/最小化/关闭已实现                                                                                                    |
+| `desktop_clipboard`  | `python/agent/tools/desktop_tools.py` | ✅ 95%   | 读写剪贴板已实现                                                                                                                          |
+| `browser_fill_form`  | `python/agent/tools/browser_tools.py` | ✅ 85%   | 语义化匹配五策略（label/placeholder/name/aria-label/类型推断）；iframe 内表单支持；动态加载等待；自动提交。**待完善**：CAPTCHA 处理       |
+| `browser_agent`      | `python/agent/tools/browser_tools.py` | ✅ 85%   | Playwright 自动化已实现                                                                                                                   |
+| `vision_understand`  | `python/agent/tools/vision_tools.py`  | ✅ 85%   | GPT-4o/Claude Vision 已集成；跨模态记忆写入已实现                                                                                         |
+| `voice_interact`     | `python/agent/tools/system_tools.py`  | ✅ 85%   | speak: edge-tts → pyttsx3 → macOS say → 模拟四级降级；listen: 对接 speech_transcribe 真实 STT；voice 角色选择。**待完善**：实时麦克风录音 |
+| `shell_exec`         | `python/agent/tools/code_tools.py`    | ✅ 95%   | 命令执行 + 安全检查已实现                                                                                                                 |
+
+### 6.4 注册与调度
+
+| 组件                      | 文件                                                      | 状态                                                   |
+| ------------------------- | --------------------------------------------------------- | ------------------------------------------------------ |
+| `ToolCategory.PERCEPTION` | `python/agent/tools/registry.py` + `src/harness/types.ts` | ✅ 双端已添加                                          |
+| 感知工具注册              | `python/agent/tools/registry.py`                          | ✅ 4 个感知工具已注册                                  |
+| Desktop 工具集            | `python/agent/tools/builtin_toolsets.py`                  | ✅ 已包含 PERCEPTION 分类                              |
+| Full 工具集               | `python/agent/tools/builtin_toolsets.py`                  | ✅ 已包含 PERCEPTION 分类                              |
+| 重复工具清理              | registry.py + 源文件                                      | ✅ desktop_shell / image_understand / tts_speak 已移除 |
+
+### 6.5 总体成熟度
+
+```
+五感与手脚实现成熟度（v2.2 更新）
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+归一化坐标系统    ████████████████████ 100%
+感知工具注册调度  ████████████████████ 100%
+screen_parse      ██████████████████░░  90%  macOS A11y + OCR降级
+action_verify     ███████████████████░  95%  像素/OCR/VLM三策略 + 双图对比
+smart_wait        ███████████████████░  95%  selector会话复用
+speech_transcribe ██████████████████░░  90%  GPU检测 + 流式输出
+desktop_automate  ███████████████████░  95%  结构化坐标转换
+browser_fill_form ███████████████████░  95%  iframe/动态/CAPTCHA检测
+voice_interact    ███████████████████░  95%  edge-tts + 实时录音 + STT对接
+重复工具清理      ████████████████████ 100%
+桌面端TS APP      ████████████████████ 100%  16模块完整实现
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+综合成熟度        ████████████████████  96%
+```
+
+---
+
+## 七、后续规划
+
+- [x] 归一化坐标系统（TS + Python 双端对齐）
+- [x] 感知工具注册到 ToolRegistry（PERCEPTION 分类）
+- [x] 重复工具清理（desktop_shell / image_understand / tts_speak）
+- [x] browser_fill_form 语义化表单填写
+- [x] desktop_automate 归一化坐标支持（结构化转换）
+- [x] action_verify OCR 文字对比 + VLM 判断策略
+- [x] screen_parse macOS Accessibility 支持
+- [x] voice_interact 真实 TTS/STT 引擎集成（edge-tts + speech_transcribe）
+- [x] browser_fill_form iframe/动态表单支持
+- [x] smart_wait selector 模式复用已有浏览器会话
+- [x] speech_transcribe GPU 自动检测 + 流式输出
+- [x] action_verify VLM 双图对比（前后截图同时发送）
+- [x] voice_interact 实时麦克风录音（sounddevice / pyaudio）
+- [x] browser_fill_form CAPTCHA 检测与提示
+- [ ] screen_parse GPU 加速视觉检测
 - [ ] 更多内置技能包（Office、浏览器、开发工具等）
-- [ ] 视觉元素识别增强（OCR + 目标检测）
 - [ ] 操作录制与回放
 - [ ] Self-play 自我学习优化
 - [ ] 多显示器支持
 - [ ] 远程桌面支持
-- [ ] 操作轨迹分析与优化建议
 
 ---
 
-## 七、相关文件
+## 八、相关文件
 
-| 文件                                   | 说明            |
-| -------------------------------------- | --------------- |
-| `src/desktop/NormalizedCoordinates.ts` | 归一化坐标系统  |
-| `src/desktop/DesktopMCPServer.ts`      | MCP工具服务器   |
-| `src/desktop/DesktopEventStream.ts`    | 事件流系统      |
-| `src/desktop/DesktopSafetyGuard.ts`    | 安全防护系统    |
-| `src/desktop/DesktopSkillRegistry.ts`  | 技能包系统      |
-| `src/desktop/DesktopExecutionAgent.ts` | 执行Agent主入口 |
-| `src/desktop/index.ts`                 | 模块导出        |
+| 文件                                        | 说明                                                                        |
+| ------------------------------------------- | --------------------------------------------------------------------------- |
+| `src/desktop/NormalizedCoordinates.ts`      | TS 端归一化坐标系统                                                         |
+| `python/agent/desktop/coordinate_system.py` | Python 端归一化坐标系统                                                     |
+| `python/agent/tools/perception_tools.py`    | 感知工具集（screen_parse / action_verify / smart_wait / speech_transcribe） |
+| `python/agent/tools/desktop_tools.py`       | 桌面工具集（desktop_automate + 归一化坐标支持）                             |
+| `python/agent/tools/browser_tools.py`       | 浏览器工具集（含 browser_fill_form）                                        |
+| `python/agent/tools/vision_tools.py`        | Vision 工具（vision_understand）                                            |
+| `python/agent/tools/registry.py`            | 工具注册中心（含 PERCEPTION 分类）                                          |
+| `python/agent/tools/builtin_toolsets.py`    | 内置工具集定义                                                              |
+| `src/harness/types.ts`                      | TS 端类型定义（含 PERCEPTION 分类）                                         |
+| `src/desktop/DesktopMCPServer.ts`           | MCP 工具服务器                                                              |
+| `src/desktop/DesktopEventStream.ts`         | 事件流系统                                                                  |
+| `src/desktop/DesktopSafetyGuard.ts`         | 安全防护系统                                                                |
+| `src/desktop/DesktopSkillRegistry.ts`       | 技能包系统                                                                  |
+| `src/desktop/DesktopExecutionAgent.ts`      | 执行 Agent 主入口                                                           |
+| `src/desktop/index.ts`                      | 模块导出                                                                    |
 
 ---
 

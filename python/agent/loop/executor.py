@@ -20,6 +20,9 @@ from agent.loop.types import (
     StepResult,
 )
 from agent.tools.registry import ToolRegistry
+from agent.core.otel_tracer import otel_trace
+from agent.core.otel_metrics import tool_calls_counter, tool_duration_histogram
+from opentelemetry import trace as _otel_trace_api
 
 log = StructuredLogger("executor")
 
@@ -52,8 +55,27 @@ class Executor:
         self._reflection = reflection
 
     def set_robustness_manager(self, manager: RobustnessManager) -> None:
-        """设置鲁棒性管理器。"""
         self._robustness = manager
+
+    def _get_dynamic_max_retries(self) -> int:
+        """P0 修复：从 EvolutionOrchestrator 实时反馈动态获取最大反思重试次数。
+
+        此前 _MAX_REFLECTION_RETRIES=3 硬编码，学习闭环未打通。
+        现在根据进化引擎的实时质量反馈动态调整：高质量时减少重试，低质量时增加重试。
+        """
+        base_retries = self._robustness.config.max_reflection_retries
+        try:
+            from agent.evolution.orchestrator import EvolutionOrchestrator
+
+            orchestrator = EvolutionOrchestrator.get_instance()
+            if orchestrator._is_running:
+                feedback = orchestrator.get_realtime_feedback()
+                suggested = feedback.get("suggested_max_retries")
+                if isinstance(suggested, int) and 1 <= suggested <= 6:
+                    return suggested
+        except Exception:
+            pass
+        return base_retries
 
     async def execute(
         self,
@@ -73,6 +95,11 @@ class Executor:
             for i, step in enumerate(plan.steps):
                 if step.status == "completed":
                     continue
+
+                # 取消检查点：每个步骤执行前检查
+                if context.is_cancelled():
+                    log.info("Executor cancelled by user", step_index=i, step_id=step.step_id)
+                    break
 
                 context.current_step_index = i
                 result = await self._execute_step(step, context)
@@ -338,17 +365,18 @@ class Executor:
         # ─── 类型路由：网络/超时类 → 指数退避，不调 LLM ───
         if error_type in (ErrorType.NETWORK_ERROR, ErrorType.TIMEOUT, ErrorType.RETRYABLE,
                           ErrorType.RATE_LIMITED, ErrorType.OVERLOADED):
-            return await self._retry_with_backoff(step, error_type)
+            return await self._retry_with_backoff(step, error_type, context)
 
         # ─── 类型路由：工具不可用 → 直接降级，不调 LLM ───
         if error_type == ErrorType.TOOL_UNAVAILABLE:
             return await self._retry_with_fallback(step, context)
 
         max_reflection_retries = min(
-            self._robustness.config.max_reflection_retries,
+            self._get_dynamic_max_retries(),
             step.max_retries,
         )
 
+        reflection = None
         for attempt in range(max_reflection_retries):
             if step.retry_count >= step.max_retries:
                 break
@@ -406,23 +434,24 @@ class Executor:
                 if reflection.alternative_tool and self._tool_registry:
                     definition = self._tool_registry.get_definition(reflection.alternative_tool)
                     if definition:
+                        original_tool = step.tool_name  # 保存原始工具名
                         step.tool_name = reflection.alternative_tool
                         log.info(
                             "Switching to alternative tool (from reflection)",
-                            original=step.tool_name,
+                            original=original_tool,
                             alternative=reflection.alternative_tool,
                         )
                         # P1-2: 经验迁移 — 从原工具迁移经验到替代工具
                         if self._reflection:
                             try:
                                 migrated = self._reflection.transfer_experience(
-                                    source_tool=step.tool_name,
+                                    source_tool=original_tool,  # 修复: 用原始工具名，不是已替换的 step.tool_name
                                     target_tool=reflection.alternative_tool,
                                 )
                                 if migrated:
                                     log.info(
                                         "Experience transferred",
-                                        source=step.tool_name,
+                                        source=original_tool,
                                         target=reflection.alternative_tool,
                                         count=len(migrated),
                                     )
@@ -430,12 +459,24 @@ class Executor:
                                 pass
 
             # 工具替代：通用路径和参数路径都执行到此
-            if not (error_type in (ErrorType.PARAM_ERROR, ErrorType.SYNTAX_ERROR) and reflection.corrected_args):
-                if reflection.alternative_tool and self._tool_registry:
-                    definition = self._tool_registry.get_definition(reflection.alternative_tool)
-                    if definition:
-                        step.tool_name = reflection.alternative_tool
-                elif self._robustness.has_tool_alternatives(step.tool_name):
+            # 注意：替代工具已在上面（第406-430行）设置，这里只做 fallback 检查
+            if reflection is not None and not (
+                error_type in (ErrorType.PARAM_ERROR, ErrorType.SYNTAX_ERROR)
+                and reflection.corrected_args
+            ):
+                if not reflection.alternative_tool:  # 只在 reflection 未提供替代工具时检查 robustness fallback
+                    if self._robustness.has_tool_alternatives(step.tool_name):
+                        alternatives = self._robustness.get_tool_alternatives(step.tool_name)
+                        if alternatives:
+                            alt = alternatives[0]
+                            if self._tool_registry.get_definition(alt.tool):
+                                step.tool_name = alt.tool
+                                step.tool_params = alt.arg_transform(step.tool_params or {})
+                                log.info(
+                                    "Switching to alternative tool (from robustness fallback)",
+                                    original=step.tool_name,
+                                    alternative=alt.tool,
+                                )
                     # 使用鲁棒性模块的降级映射作为后备
                     alternatives = self._robustness.get_tool_alternatives(step.tool_name)
                     if alternatives:
@@ -483,13 +524,14 @@ class Executor:
         )
         return result
 
+    @otel_trace("tool.execute")
     async def _execute_with_tool(
         self,
         step: PlanStep,
         context: LoopContext,
     ) -> StepResult:
         """执行工具调用，支持自动重试和错误分类。
-        
+
         第一阶段增强：
         - 集成错误分类器，区分不同类型的错误
         - 支持指数退避重试
@@ -499,6 +541,12 @@ class Executor:
         start = time.time()
         tool_name = step.tool_name or ""
         tool_params = dict(step.tool_params) if step.tool_params else {}
+
+        # OTel span 属性：记录工具名
+        try:
+            _otel_trace_api.get_current_span().set_attribute("tool_name", tool_name)
+        except Exception:
+            pass
 
         if not tool_params and step.description:
             tool_params = await self._infer_tool_params(tool_name, step.description, context)
@@ -530,7 +578,19 @@ class Executor:
                     # 记录成功指标
                     if self._robustness.config.enable_metrics:
                         self._robustness.metrics.record_tool_call(True, duration)
-                    
+
+                    # OTel 指标与 span 属性：工具调用成功
+                    try:
+                        tool_calls_counter().add(
+                            1, {"tool_name": tool_name, "status": "success"}
+                        )
+                        tool_duration_histogram().record(duration / 1000.0)
+                        _otel_trace_api.get_current_span().set_attribute(
+                            "tool_success", True
+                        )
+                    except Exception:
+                        pass
+
                     return StepResult(
                         step_id=step.step_id,
                         success=True,
@@ -677,6 +737,16 @@ class Executor:
             error=last_error,
             error_type=last_error_type,
         )
+
+        # OTel 指标与 span 属性：工具调用失败
+        try:
+            tool_calls_counter().add(
+                1, {"tool_name": tool_name, "status": "failed"}
+            )
+            tool_duration_histogram().record(duration / 1000.0)
+            _otel_trace_api.get_current_span().set_attribute("tool_success", False)
+        except Exception:
+            pass
 
         return StepResult(
             step_id=step.step_id,
@@ -952,10 +1022,19 @@ class Executor:
         """
         return self._robustness.get_metrics_summary()
 
-    async def _retry_with_backoff(self, step: PlanStep, error_type: str) -> StepResult:
+    async def _retry_with_backoff(
+        self, step: PlanStep, error_type: str, context: LoopContext
+    ) -> StepResult:
         """错误类型路由：网络/超时类错误 → 指数退避重试，不调 LLM。"""
         import asyncio
+
         base_delay = 0.5 if error_type in (ErrorType.RETRYABLE, ErrorType.TIMEOUT) else 1.0
+        # 预置结果，避免 max_retries==0 时 result 未绑定（审计 L-02）
+        result = StepResult(
+            step_id=step.step_id,
+            success=False,
+            error=f"Backoff retries exhausted ({error_type})",
+        )
         for attempt in range(self._robustness.config.retry_config.max_retries):
             if step.retry_count >= step.max_retries:
                 break
@@ -969,15 +1048,13 @@ class Executor:
             )
             await asyncio.sleep(delay)
             step.retry_count += 1
-            result = await self._execute_step(step, type('ctx', (), {'step_results': {}})())
+            # 传入真实 context，避免伪造对象导致 AttributeError（审计 L-02）
+            result = await self._execute_step(step, context)
             if result.success:
                 return result
             if step.retry_count >= step.max_retries:
                 break
-        return result if 'result' in dir() else StepResult(
-            step_id=step.step_id, success=False,
-            error=f"Backoff retries exhausted ({error_type})",
-        )
+        return result
 
     async def _retry_with_fallback(self, step: PlanStep, context: LoopContext) -> StepResult:
         """错误类型路由：工具不可用 → 直接尝试降级替代工具，不调 LLM。"""

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 import uuid
@@ -7,10 +8,12 @@ from typing import Any
 
 from agent.llm.provider import LLMProvider
 from agent.loop.causal import CausalModeler, CausalGraph, DependencyAnalysis, FailureImpact
+from agent.loop.attention import AttentionFocusManager
 from agent.loop.evaluator import Evaluator
 from agent.loop.executor import Executor
 from agent.loop.observer import LoopObserver, LoopPhase
 from agent.loop.planner import Planner
+from agent.loop.quality_scorer import BuiltInQualityScorer
 from agent.loop.reflection import (
     DeepReflectionResult,
     ExperienceEntry,
@@ -45,16 +48,26 @@ from agent.evolution.implicit_feedback import (
     FeedbackSource,
 )
 from agent.persistence.trajectory import (
+    ExecutionEstimate,
     ExecutionRecord,
     ToolInvocationRecord,
     StateTransitionRecord,
     TrajectoryDatabase,
 )
+from agent.constraints.service import AdaptiveBudgetConfig, ConstraintsService
 from agent.tools.registry import ToolRegistry
+from agent.core.canary_release import CanaryReleaseManager
+from agent.core.otel_tracer import otel_trace, get_tracer
+from agent.core.otel_metrics import loop_iterations_counter, loop_duration_histogram
+from agent.core.logger import StructuredLogger
+
+# 模块级日志器：供 replan / A2A fallback / meta reflection 等所有代码路径使用
+log = StructuredLogger("controller")
 
 
 class LoopController:
     MAX_REPLAN_COUNT = 3
+    MAX_CONTINUE_STREAK = 3  # 连续 continue 且无进度提升时强制升级为重规划（审计 L-05）
 
     def __init__(
         self,
@@ -63,9 +76,17 @@ class LoopController:
         tool_registry: ToolRegistry | None = None,
         evolution: Any | None = None,
         reflection_kb: ReflectionKnowledgeBase | None = None,
+        memory_engine: Any | None = None,
+        canary_manager: CanaryReleaseManager | None = None,
+        constraints_service: ConstraintsService | None = None,
     ) -> None:
         self.llm = llm
+        # 灰度发布：注入到 LLMProvider，供 chat/chat_stream 在调用前选择版本
+        if canary_manager is not None:
+            self.llm.canary_manager = canary_manager
         self.planner = Planner(llm, tool_registry=tool_registry)
+        if memory_engine:
+            self.planner.set_memory_engine(memory_engine)
         self.reflection = ReflectionEngine(llm, knowledge_base=reflection_kb)
         self.executor = Executor(llm, tool_registry=tool_registry, reflection=self.reflection)
         self.evaluator = Evaluator(llm)
@@ -74,6 +95,9 @@ class LoopController:
         self.trajectory_db = trajectory_db
         self.tool_registry = tool_registry
         self.evolution = evolution
+        # 时间预算预估：注入 ConstraintsService，供 _resolve_budget_max_duration 调用
+        # resolve_adaptive_budget 实现历史预估 → 静态配置的降级策略
+        self.constraints_service: ConstraintsService | None = constraints_service
         self.state: LoopState = LoopState.IDLE
         self._last_reflection_insight: dict[str, Any] | None = None
         self._hooks: dict[LifecycleHook, list[Any]] = {
@@ -85,18 +109,31 @@ class LoopController:
         # 隐式反馈收集器
         self._feedback_collector = ImplicitFeedbackCollector.get_instance()
 
+        # 模块级日志器（无条件初始化，避免取消任务等路径触发 AttributeError）
+        self._logger: StructuredLogger = log
+
         # 反思应用管理器（可选）
         self._reflection_app: ReflectionApplicationManager | None = None
         self._reflection_app_enabled = os.environ.get("REFLECTION_APPLICATION_ENABLED", "true").lower() == "true"
         if self._reflection_app_enabled:
             try:
                 self._reflection_app = ReflectionApplicationManager(kb=reflection_kb)
-                self._logger = StructuredLogger("controller")
                 self._logger.info("Reflection application manager enabled")
             except Exception as e:
-                from agent.core.logger import StructuredLogger as _SL
-                _SL("controller").warning("Failed to init reflection application manager", error=str(e))
+                self._logger.warning("Failed to init reflection application manager", error=str(e))
                 self._reflection_app = None
+
+        # 注意力聚焦管理器
+        self._attention_focus = AttentionFocusManager(
+            max_messages=int(os.environ.get("ATTENTION_MAX_MESSAGES", "15")),
+            max_total_tokens=int(os.environ.get("ATTENTION_MAX_TOKENS", "4000")),
+        )
+
+        # P2-1: 内置质量评分器
+        self._quality_scorer = BuiltInQualityScorer(
+            max_expected_rounds=int(os.environ.get("QUALITY_MAX_ROUNDS", "5")),
+            max_expected_steps_per_round=int(os.environ.get("QUALITY_MAX_STEPS", "8")),
+        )
 
         # 检查环境变量启用状态
         if os.environ.get("LOOP_OBSERVER_ENABLED", "").lower() == "true":
@@ -123,12 +160,16 @@ class LoopController:
                 from agent.core.logger import StructuredLogger as _SL
                 _SL("controller").warning("Hook error", hook=hook.value, error=str(e))
 
+    @otel_trace("loop.execute")
     async def run(
         self,
         input_text: str,
         messages: list[dict[str, str]] | None = None,
         session_id: str = "default",
         react_mode: bool | None = None,
+        cancel_event: "asyncio.Event | None" = None,
+        user_id: str | None = None,
+        strategy_name: str | None = None,
     ) -> AgentResult:
         # P1-3: 自动选择执行模式 — 简单任务用 ReAct，复杂任务用 Plan→Exec→Eval
         if react_mode is None:
@@ -139,15 +180,26 @@ class LoopController:
                 messages=messages,
                 session_id=session_id,
                 max_iterations=10,
+                cancel_event=cancel_event,
+                user_id=user_id,
+                strategy_name=strategy_name,
             )
 
         trace_id = f"loop_{uuid.uuid4().hex[:8]}"
+
+        # P2 #15: 基于历史数据预估执行时间，注入 BudgetState.max_duration_ms
+        task_type = self._derive_task_type(input_text)
+        max_duration_ms = self._resolve_budget_max_duration(task_type, input_text)
+
         context = LoopContext(
             user_input=input_text,
             session_id=session_id,
             messages=list(messages) if messages else [],
-            budget=BudgetState(start_time=time.time()),
+            budget=BudgetState(start_time=time.time(), max_duration_ms=max_duration_ms),
             trace_id=trace_id,
+            cancel_event=cancel_event,
+            user_id=user_id,
+            strategy_name=strategy_name,
         )
 
         # 循环观察者：开始追踪
@@ -167,33 +219,67 @@ class LoopController:
                 status="running",
                 created_at=int(time.time() * 1000),
                 updated_at=int(time.time() * 1000),
+                task_type=task_type,
             )
             self.trajectory_db.record_execution(exec_record)
 
         causal_graph: CausalGraph | None = None
 
         replan_count = 0
+        continue_streak = 0
         plan: ExecutionPlan | None = None
 
         await self._fire_hook(LifecycleHook.BEFORE_LOOP, context, {"input_text": input_text})
 
         while True:
+            # 取消检查点：每轮循环开头检查
+            if context.is_cancelled():
+                self._logger.info("Loop cancelled by user", trace_id=trace_id, round=context.budget.rounds_used)
+                break
+
             if context.budget.rounds_used >= context.budget.max_rounds:
                 break
 
             if context.budget.tool_calls_used >= context.budget.max_tool_calls:
                 break
 
-            # ─── 时间预算检查 ───
-            elapsed_ms = (time.time() - context.budget.start_time) * 1000
-            if context.budget.max_duration_ms > 0 and elapsed_ms >= context.budget.max_duration_ms:
-                log.warning(
-                    "Time budget exceeded, stopping loop",
-                    elapsed_ms=f"{elapsed_ms:.0f}",
-                    budget_ms=context.budget.max_duration_ms,
-                    rounds_used=context.budget.rounds_used,
-                )
-                break
+            if self.constraints_service:
+                try:
+                    from agent.constraints.service import BudgetState as ServiceBudgetState
+                    budget_state = ServiceBudgetState(
+                        rounds_used=context.budget.rounds_used,
+                        hard_round_limit=context.budget.max_rounds,
+                        soft_round_limit=context.budget.max_rounds,
+                        tokens_used=context.budget.tokens_used,
+                        token_hard_limit=context.budget.max_tokens,
+                        token_warning_limit=context.budget.max_tokens,
+                        tool_calls_used=context.budget.tool_calls_used,
+                        max_tool_calls=context.budget.max_tool_calls,
+                        max_duration_ms=context.budget.max_duration_ms,
+                        start_time=context.budget.start_time,
+                    )
+                    budget_result = self.constraints_service.check_budget(budget_state)
+                    if not budget_result.within_budget:
+                        self._logger.warning(
+                            "Constraint budget exceeded, stopping loop",
+                            trace_id=trace_id,
+                            warnings=budget_result.warnings,
+                        )
+                        break
+                except Exception:
+                    pass
+
+            # 时间预算强制（审计 L-04）：max_duration_ms<=0 视为不启用时间预算
+            if context.budget.max_duration_ms and context.budget.max_duration_ms > 0:
+                elapsed_ms = (time.time() - context.budget.start_time) * 1000
+                if elapsed_ms > context.budget.max_duration_ms:
+                    self._logger.info(
+                        "Loop exceeded max duration, stopping",
+                        trace_id=trace_id,
+                        elapsed_ms=int(elapsed_ms),
+                        max_duration_ms=context.budget.max_duration_ms,
+                    )
+                    break
 
             context.budget.rounds_used += 1
 
@@ -239,6 +325,11 @@ class LoopController:
             self.state = LoopState.EXECUTING
             self._observer.start_phase(LoopPhase.EXECUTOR)
 
+            # 取消检查点：执行前检查
+            if context.is_cancelled():
+                self._logger.info("Loop cancelled before executing", trace_id=trace_id)
+                break
+
             if self.trajectory_db:
                 self.trajectory_db.record_state_transition(StateTransitionRecord(
                     execution_id=trace_id,
@@ -247,31 +338,12 @@ class LoopController:
                     reason=f"第{context.budget.rounds_used}轮执行",
                 ))
 
-            # P1-4: 有链式依赖时使用 execute_chain，有并行组时使用 execute_parallel，否则使用 execute
+            # P1-4: 有链式依赖时使用 execute_chain，否则使用 execute
             has_chain = any(
                 s.input_from_step for s in plan.steps
             ) if plan and plan.steps else False
-            parallel_groups: list[list[str]] = context.metadata.get("parallel_groups", [])
             if has_chain:
                 executor_output = await self.executor.execute_chain(plan.steps, context)
-            elif parallel_groups and len(parallel_groups) > 1 and not plan.simple:
-                # 因果建模识别到多并行组 → 并行执行独立步骤
-                # 收集所有非链式、非已完成的步骤进行并行执行
-                independent_steps = [
-                    s for s in plan.steps
-                    if s.status != "completed" and not s.input_from_step
-                ]
-                if len(independent_steps) > 1:
-                    log.info(
-                        "Parallel execution via causal model",
-                        parallel_groups=len(parallel_groups),
-                        independent_steps=len(independent_steps),
-                    )
-                    executor_output = await self.executor.execute_parallel(
-                        independent_steps, context
-                    )
-                else:
-                    executor_output = await self.executor.execute(plan, context)
             else:
                 executor_output = await self.executor.execute(plan, context)
 
@@ -317,15 +389,29 @@ class LoopController:
 
                 await self._reflect_on_failure(failed_steps[0], context)
 
-                if causal_graph and causal_graph.nodes:
-                    impact = self.causal.get_failure_impact(
-                        causal_graph, failed_steps[0].step_id
+            # P1-1: 成功反思 — 从成功执行中提炼模式和最佳实践
+            successful_steps = [sr for sr in executor_output.step_results if sr.success and sr.tool_name]
+            for sr in successful_steps:
+                try:
+                    await self.reflection.reflect_on_success(
+                        tool_name=sr.tool_name or "",
+                        args=sr.tool_params if hasattr(sr, 'tool_params') else {},
+                        result=sr.content or "",
+                        context={"traceId": context.trace_id, "step_id": sr.step_id},
                     )
-                    if impact.affected_steps:
-                        context.messages.append({
-                            "role": "system",
-                            "content": f"【因果影响分析】步骤 {failed_steps[0].step_id} 失败可能影响: {', '.join(impact.affected_steps)} (严重度: {impact.severity})",
-                        })
+                except Exception:
+                    pass  # 成功反思失败不影响主流程
+
+            # 因果影响分析（如果有失败的步骤）
+            if failed_steps and causal_graph and causal_graph.nodes:
+                impact = self.causal.get_failure_impact(
+                    causal_graph, failed_steps[0].step_id
+                )
+                if impact.affected_steps:
+                    context.messages.append({
+                        "role": "system",
+                        "content": f"【因果影响分析】步骤 {failed_steps[0].step_id} 失败可能影响: {', '.join(impact.affected_steps)} (严重度: {impact.severity})",
+                    })
 
             if self.trajectory_db:
                 for idx, sr in enumerate(executor_output.step_results):
@@ -348,6 +434,12 @@ class LoopController:
 
             # ─── 轻量级反思（每轮执行后） ───
             await self._lightweight_reflection_round(executor_output.step_results, context)
+
+            # P0-3: 注意力聚焦 — 清理低价值上下文消息
+            try:
+                self._attention_focus.apply_to_context(context)
+            except Exception:
+                pass
 
             # ─── Phase 3: EVALUATING ───
             self.state = LoopState.EVALUATING
@@ -421,11 +513,25 @@ class LoopController:
             if action == "continue":
                 if eval_result.goal_progress >= 0.8:
                     break
+                continue_streak += 1
+                # 卡死保护（审计 L-05）：持续 continue 但进度无提升时强制升级为重规划
+                if continue_streak >= self.MAX_CONTINUE_STREAK and context.plan:
+                    replan_count += 1
+                    if replan_count >= self.MAX_REPLAN_COUNT:
+                        break
+                    plan = None
+                    self._logger.info(
+                        "Stuck in continue with no progress, forcing replan",
+                        trace_id=trace_id,
+                        continue_streak=continue_streak,
+                    )
+                    continue
                 if context.budget.rounds_used >= context.budget.max_rounds:
                     break
                 continue
 
             elif action == "replan":
+                continue_streak = 0
                 replan_count += 1
                 if replan_count >= self.MAX_REPLAN_COUNT:
                     break
@@ -571,6 +677,79 @@ class LoopController:
                             timestamp=_t.time(),
                         ))
 
+                # P1-2: 丰富学习信号 — 注入 PLAN_QUALITY
+                plan_quality = 0.5  # 默认中等
+                try:
+                    planned_steps = len(context.plan.steps) if context.plan and context.plan.steps else 0
+                    executed_steps = len(context.step_results) if hasattr(context, 'step_results') else 0
+                    if planned_steps > 0:
+                        completion_ratio = executed_steps / planned_steps
+                        plan_quality = min(1.0, max(0.0, completion_ratio))
+                except Exception:
+                    pass
+                self.evolution.record_signal(LearningSignal(
+                    signal_type=SignalType.PLAN_QUALITY,
+                    quality=plan_quality,
+                    metadata={"planned_steps": plan_quality * 10, "executed_steps": executed_steps},
+                    timestamp=_t.time(),
+                ))
+
+                # P1-2: 丰富学习信号 — 注入 TOOL_SELECTION_QUALITY（基于工具成功率）
+                tool_stats: dict[str, tuple[int, int]] = {}  # tool_name -> (success_count, total_count)
+                for sr in context.step_results.values():
+                    if sr.tool_name:
+                        if sr.tool_name not in tool_stats:
+                            tool_stats[sr.tool_name] = [0, 0]
+                        tool_stats[sr.tool_name][1] += 1
+                        if sr.success:
+                            tool_stats[sr.tool_name][0] += 1
+                for tname, (succ, total) in tool_stats.items():
+                    self.evolution.record_signal(LearningSignal(
+                        signal_type=SignalType.TOOL_SELECTION_QUALITY,
+                        tool_name=tname,
+                        quality=succ / total if total > 0 else 0.0,
+                        timestamp=_t.time(),
+                    ))
+
+                # P1-2: 丰富学习信号 — 注入 REFLECTION_EFFECTIVENESS
+                if self.reflection and hasattr(self.reflection, '_experience_store'):
+                    exp_count = len(self.reflection._experience_store) if self.reflection._experience_store else 0
+                    if exp_count > 0:
+                        self.evolution.record_signal(LearningSignal(
+                            signal_type=SignalType.REFLECTION_EFFECTIVENESS,
+                            quality=min(1.0, exp_count / 10.0),  # 10+ 条经验 = 满分
+                            metadata={"experience_count": exp_count},
+                            timestamp=_t.time(),
+                        ))
+
+                # P1-2: 丰富学习信号 — 注入 MEMORY_RETRIEVAL_HIT
+                if self.planner and hasattr(self.planner, '_memory_engine') and self.planner._memory_engine:
+                    try:
+                        recent_msgs = [m for m in context.messages if isinstance(m, dict)]
+                        recent_input = recent_msgs[-1].get('content', '') if recent_msgs else ''
+                        if recent_input:
+                            hits = self.planner._memory_engine.search_with_context(recent_input, top_k=1)
+                            if hits:
+                                self.evolution.record_signal(LearningSignal(
+                                    signal_type=SignalType.MEMORY_RETRIEVAL_HIT,
+                                    quality=float(hits[0].get('similarity', 0)),
+                                    metadata={"retrieved_count": len(hits)},
+                                    timestamp=_t.time(),
+                                ))
+                    except Exception:
+                        pass
+
+                # P1-2: 丰富学习信号 — 注入 CONTEXT_COMPRESSION_SUCCESS
+                if context.messages:
+                    msg_len = len(context.messages)
+                    if msg_len <= 10:  # 注意力聚焦生效了
+                        self.evolution.record_signal(LearningSignal(
+                            signal_type=SignalType.CONTEXT_COMPRESSION_SUCCESS,
+                            quality=1.0,
+                            metadata={"message_count": msg_len},
+                            timestamp=_t.time(),
+                        ))
+
                 # 将隐式反馈统计传递给进化引擎
                 try:
                     feedback_stats = self._feedback_collector.get_statistics()
@@ -592,6 +771,18 @@ class LoopController:
             self._meta_reflect_counter = 0
             asyncio.ensure_future(self._trigger_meta_reflect(context))
 
+        # OTel 指标：记录循环迭代次数与总耗时
+        try:
+            _loop_success = report.quality_score >= 0.6
+            loop_iterations_counter().add(
+                context.budget.rounds_used,
+                {"status": "success" if _loop_success else "failed"},
+            )
+            _loop_duration_s = time.time() - context.budget.start_time
+            loop_duration_histogram().record(_loop_duration_s)
+        except Exception:
+            pass  # 指标记录失败不影响主流程
+
         return AgentResult(
             response=report.response,
             quality_score=report.quality_score,
@@ -606,6 +797,8 @@ class LoopController:
                 "total_duration_ms": report.total_duration_ms,
                 "replan_count": replan_count,
                 "reflection_metrics": self.reflection.get_metrics().__dict__,
+                "plan_steps": [s.dict() if hasattr(s, "dict") else s for s in context.plan.steps] if context.plan and context.plan.steps else [],
+                "needs_replan": report.quality_score < 0.5 and replan_count < context.budget.max_rounds,
             },
         )
 
@@ -615,6 +808,9 @@ class LoopController:
         messages: list[dict[str, str]] | None = None,
         session_id: str = "default",
         max_iterations: int = 10,
+        cancel_event: "asyncio.Event | None" = None,
+        user_id: str | None = None,
+        strategy_name: str | None = None,
     ) -> AgentResult:
         """P1-1: 结构化 ReAct 循环: Thought → Action → Observation。
 
@@ -628,6 +824,9 @@ class LoopController:
             messages: 历史消息。
             session_id: 会话ID。
             max_iterations: 最大迭代次数。
+            cancel_event: 取消事件，设置后将在下一个检查点中止循环。
+            user_id: 用户标识，用于灰度发布分桶（可选）。
+            strategy_name: 灰度发布策略名称（可选）。
 
         Returns:
             AgentResult: 最终结果。
@@ -640,6 +839,9 @@ class LoopController:
             messages=list(messages) if messages else [],
             budget=BudgetState(start_time=_t.time()),
             trace_id=f"react-{session_id}-{_t.time_ns()}",
+            cancel_event=cancel_event,
+            user_id=user_id,
+            strategy_name=strategy_name,
         )
 
         self.state = LoopState.EXECUTING
@@ -651,23 +853,9 @@ class LoopController:
         while step_count < max_iterations:
             step_count += 1
 
-            # ─── ReAct 预算检查：时间 + 工具调用次数 ───
-            elapsed_ms = (_t.time() - context.budget.start_time) * 1000
-            if context.budget.max_duration_ms > 0 and elapsed_ms >= context.budget.max_duration_ms:
-                log.warning(
-                    "ReAct time budget exceeded",
-                    elapsed_ms=f"{elapsed_ms:.0f}",
-                    budget_ms=context.budget.max_duration_ms,
-                    iterations=step_count,
-                )
-                break
-            if context.budget.tool_calls_used >= context.budget.max_tool_calls:
-                log.warning(
-                    "ReAct tool call budget exceeded",
-                    used=context.budget.tool_calls_used,
-                    max=context.budget.max_tool_calls,
-                    iterations=step_count,
-                )
+            # 取消检查点：每步开头检查
+            if context.is_cancelled():
+                self._logger.info("ReAct loop cancelled by user", trace_id=context.trace_id, step=step_count)
                 break
 
             structured_step = await self._react_think_structured(input_text, context, step_count)
@@ -702,6 +890,19 @@ class LoopController:
                 is_final=False,
             )
 
+            # P1 强化：Thought 质量评估 — 检测敷衍式推理，注入改进提示
+            prev_obs = structured_steps[-1].observation if (len(structured_steps) > 1 and structured_steps[-1].observation) else None
+            thought_score, thought_hint = self._evaluate_thought_quality(
+                thought=structured_step.thought,
+                observation=prev_obs,
+                step_index=step_count,
+            )
+            if thought_hint:
+                context.messages.append({
+                    "role": "system",
+                    "content": f"【推理质量提示】{thought_hint}",
+                })
+
             action_result = await self._react_act(thought, context)
 
             observation = await self._react_observe(action_result, context)
@@ -711,6 +912,12 @@ class LoopController:
                 "role": "system",
                 "content": structured_step.to_context_message(),
             })
+
+            # P0-3: ReAct循环中也应用注意力聚焦
+            try:
+                self._attention_focus.apply_to_context(context, max_messages=12)
+            except Exception:
+                pass
 
             if action_result.success and action_result.is_complete:
                 self.state = LoopState.REPORTING
@@ -726,23 +933,94 @@ class LoopController:
                 )
 
             if not action_result.success:
-                reflection = await self.reflection.reflect(
-                    tool_name=thought.tool_name or "unknown",
-                    args=thought.tool_args or {},
-                    error=action_result.error or "unknown error",
-                    context={"iteration": step_count},
-                )
-                if reflection.corrected_args and thought.tool_name:
-                    corrected_step = PlanStep(
-                        step_id=f"react-correct-{step_count}",
-                        description=f"修正重试: {thought.text[:100]}",
-                        tool_name=thought.tool_name,
-                        tool_params=reflection.corrected_args,
+                # P1 强化：多轮自纠错 — 从单次修正升级为「分析→修正→重试→降级」闭环
+                correction_attempts = 0
+                max_corrections = int(os.environ.get("REACT_MAX_CORRECTIONS", "2"))
+                current_tool = thought.tool_name
+                current_args = thought.tool_args or {}
+                current_error = action_result.error or "unknown error"
+                correction_succeeded = False
+
+                while correction_attempts < max_corrections and current_tool:
+                    correction_attempts += 1
+                    reflection = await self.reflection.reflect(
+                        tool_name=current_tool or "unknown",
+                        args=current_args,
+                        error=current_error,
+                        context={"iteration": step_count, "correction_attempt": correction_attempts},
                     )
-                    corrected_result = await self.executor._execute_step(corrected_step, context)
-                    if corrected_result.success:
-                        obs_text = f"[观察] 修正后工具调用成功: {corrected_result.content[:200] if corrected_result.content else '完成'}"
-                        context.messages.append({"role": "system", "content": obs_text})
+
+                    # 路径A：参数修正后重试原工具
+                    if reflection.corrected_args and current_tool:
+                        corrected_step = PlanStep(
+                            step_id=f"react-correct-{step_count}-{correction_attempts}",
+                            description=f"修正重试#{correction_attempts}: {thought.text[:100]}",
+                            tool_name=current_tool,
+                            tool_params=reflection.corrected_args,
+                        )
+                        corrected_result = await self.executor._execute_step(corrected_step, context)
+                        if corrected_result.success:
+                            obs_text = f"[观察] 第{correction_attempts}次修正后工具调用成功: {corrected_result.content[:200] if corrected_result.content else '完成'}"
+                            context.messages.append({"role": "system", "content": obs_text})
+                            correction_succeeded = True
+                            # 记录成功经验
+                            self.reflection.record_experience(
+                                ExperienceEntry(
+                                    tool_name=current_tool,
+                                    args=reflection.corrected_args,
+                                    error=current_error,
+                                    root_cause=reflection.root_cause,
+                                    resolution=f"第{correction_attempts}次参数修正成功",
+                                    success=True,
+                                )
+                            )
+                            break
+                        # 修正后仍失败，更新错误信息进入下一轮
+                        current_error = corrected_result.error or current_error
+                        current_args = reflection.corrected_args
+                        continue
+
+                    # 路径B：替代工具降级
+                    if reflection.alternative_tool and self.tool_registry:
+                        alt_def = self.tool_registry.get_definition(reflection.alternative_tool) if hasattr(self.tool_registry, 'get_definition') else None
+                        if alt_def or reflection.alternative_tool:
+                            log.info(
+                                "ReAct self-correction: switching to alternative tool",
+                                original=current_tool,
+                                alternative=reflection.alternative_tool,
+                                attempt=correction_attempts,
+                            )
+                            alt_step = PlanStep(
+                                step_id=f"react-alt-{step_count}-{correction_attempts}",
+                                description=f"替代工具重试: {reflection.alternative_tool}",
+                                tool_name=reflection.alternative_tool,
+                                tool_params=reflection.corrected_args or {},
+                            )
+                            alt_result = await self.executor._execute_step(alt_step, context)
+                            if alt_result.success:
+                                obs_text = f"[观察] 替代工具 {reflection.alternative_tool} 调用成功: {alt_result.content[:200] if alt_result.content else '完成'}"
+                                context.messages.append({"role": "system", "content": obs_text})
+                                correction_succeeded = True
+                                self.reflection.record_experience(
+                                    ExperienceEntry(
+                                        tool_name=current_tool,
+                                        args=current_args,
+                                        error=current_error,
+                                        root_cause=reflection.root_cause,
+                                        resolution=f"降级到替代工具 {reflection.alternative_tool} 成功",
+                                        success=True,
+                                    )
+                                )
+                                break
+                            current_error = alt_result.error or current_error
+                            current_tool = reflection.alternative_tool
+                            current_args = reflection.corrected_args or {}
+                            continue
+                    break
+
+                if not correction_succeeded:
+                    obs_text = f"[观察] 工具调用失败，经{correction_attempts}次自纠错仍未能恢复: {current_error[:200]}"
+                    context.messages.append({"role": "system", "content": obs_text})
 
         self.state = LoopState.REPORTING
         return AgentResult(
@@ -783,7 +1061,14 @@ class LoopController:
         messages.extend(context.messages[-10:])
         messages.append({"role": "user", "content": f"当前任务: {input_text}"})
 
-        result = await self.llm.chat(messages=messages, use_cache=False)
+        # 灰度发布：从 LoopContext 读取 user_id/strategy_name 传递到 llm.chat，
+        # 触发 CanaryReleaseManager.select_version 进行哈希分桶选择版本
+        result = await self.llm.chat(
+            messages=messages,
+            use_cache=False,
+            user_id=context.user_id,
+            strategy_name=context.strategy_name,
+        )
         content = result.get("content", "")
 
         return self._parse_structured_react(content, step_index)
@@ -828,6 +1113,35 @@ class LoopController:
         elif legacy.tool_name:
             step.action = {"tool_name": legacy.tool_name, "tool_args": legacy.tool_args or {}}
         return step
+
+    def _evaluate_thought_quality(
+        self,
+        thought: str,
+        observation: str | None = None,
+        step_index: int = 0,
+    ) -> tuple[float, str | None]:
+        """P1 强化：评估 Thought 推理质量，检测敷衍式推理。
+
+        Returns:
+            (quality_score, improvement_hint) — score ∈ [0,1]，hint 为 None 表示质量合格。
+        """
+        if not thought or len(thought.strip()) < 10:
+            return 0.2, "Thought 过短，请详细分析当前状态和下一步行动的理由"
+
+        # 检查是否引用了上一步的 Observation
+        if observation and step_index > 0:
+            obs_keywords = [w for w in observation[:200] if len(w) > 2]
+            references_obs = any(kw in thought for kw in observation[:80])
+            if not references_obs:
+                return 0.4, "Thought 未引用上一步观察结果，请基于 Observation 分析"
+
+        # 检查是否是模板化推理（仅说"我需要调用XX工具"）
+        template_patterns = ["我需要调用", "我将使用", "让我用", "调用工具"]
+        is_template = any(p in thought for p in template_patterns) and len(thought) < 30
+        if is_template:
+            return 0.3, "Thought 过于简略，请说明为什么选择这个工具以及预期效果"
+
+        return 0.8, None
 
     async def _react_act(
         self,
@@ -881,10 +1195,18 @@ class LoopController:
     def _should_use_react(self, input_text: str) -> bool:
         """P1-3: 判断是否使用 ReAct 模式而非 Plan→Exec→Eval。
 
-        当任务满足以下条件时使用 ReAct：
-        - 非复杂多步骤任务
-        - 需要单次工具调用即可完成
+        语义化判断逻辑：
+        - 含明确工具指示词的单步骤任务 → ReAct
+        - 多步骤复杂任务（含2+个"然后/接着/并且"）→ Plan→Exec→Eval
+        - 其他默认走 Plan→Exec→Eval（更可控）
         """
+        # 多步骤指示词 → 不使用 ReAct，走 Plan→Exec→Eval
+        multi_step_indicators = ["然后", "接着", "并且", "之后", "最后", "第一步", "第二步", "先", "再"]
+        multi_step_count = sum(1 for kw in multi_step_indicators if kw in input_text)
+        if multi_step_count >= 2:
+            return False
+
+        # 单步骤工具指示词 → 使用 ReAct
         react_indicators = [
             "搜索", "查找", "查询", "搜索一下", "找一下",
             "读取", "打开", "看看",
@@ -894,7 +1216,107 @@ class LoopController:
         for kw in react_indicators:
             if kw in input_text:
                 return True
+
+        # 默认走 Plan→Exec→Eval（更可控，支持重规划和反思）
         return False
+
+    def _derive_task_type(self, input_text: str) -> str:
+        """从输入文本推导任务类型，用于时间预算预估分类。
+
+        P2 #15: 将任务分为 react / simple / moderate / complex 四类，
+        与历史执行记录的 task_type 字段对齐，使 estimate_execution_time
+        能按类型过滤历史样本。
+
+        Args:
+            input_text: 用户输入文本。
+
+        Returns:
+            str: 任务类型标识（react/simple/moderate/complex）。
+        """
+        if self._should_use_react(input_text):
+            return "react"
+        try:
+            complexity = self.planner._analyze_complexity(input_text)
+            return complexity  # "simple" / "moderate" / "complex"
+        except Exception:
+            return "moderate"
+
+    def _compute_complexity(self, input_text: str | None) -> float | None:
+        """基于关键词密度估算任务复杂度（0.0-1.0）。
+
+        用于 trajectory_db.estimate_execution_time 的 complexity 参数，
+        使历史预估能根据任务难度做线性调整。
+
+        Args:
+            input_text: 用户输入文本，None 时返回 None。
+
+        Returns:
+            float | None: 复杂度分值（0.0-1.0），None 表示未提供输入。
+        """
+        if not input_text:
+            return None
+        try:
+            # 复用 planner 的关键词复杂度评分（返回命中的关键词数）
+            raw_score = self.planner._keyword_complexity_score(input_text)
+            # 归一化到 0.0-1.0：5+ 个关键词命中即视为最高复杂度
+            return min(1.0, raw_score / 5.0)
+        except Exception:
+            return None
+
+    def _resolve_budget_max_duration(self, task_type: str, input_text: str | None = None) -> int:
+        """解析预算最大执行时长（毫秒）。
+
+        P2 #15: 优先调用 trajectory_db.estimate_execution_time 获取历史预估，
+        并传入 complexity 参数实现难度感知；样本充足时通过
+        ConstraintsService.resolve_adaptive_budget 计算 max_duration_ms
+        （= estimated_ms * 1.2）；样本不足或异常时降级到
+        AdaptiveBudgetConfig 静态配置。任何异常都不影响主流程，回退到默认 60000ms。
+
+        Args:
+            task_type: 任务类型标识。
+            input_text: 用户输入文本，用于计算复杂度（可选）。
+
+        Returns:
+            int: 最大执行时长（毫秒）。
+        """
+        # 优先使用历史预估 + ConstraintsService.resolve_adaptive_budget
+        if self.trajectory_db:
+            try:
+                complexity = self._compute_complexity(input_text)
+                estimate = self.trajectory_db.estimate_execution_time(
+                    task_type, complexity=complexity
+                )
+                if estimate is not None and self.constraints_service:
+                    allocation = self.constraints_service.resolve_adaptive_budget(
+                        task_type, historical_estimate=estimate
+                    )
+                    return allocation.max_duration_ms
+                if estimate is not None:
+                    return int(estimate.estimated_ms * 1.2)
+            except Exception:
+                pass  # 预估失败，降级到静态配置
+
+        # 降级到 ConstraintsService.resolve_adaptive_budget 静态配置
+        if self.constraints_service:
+            try:
+                allocation = self.constraints_service.resolve_adaptive_budget(task_type)
+                return allocation.max_duration_ms
+            except Exception:
+                pass
+
+        # 最终兜底：AdaptiveBudgetConfig 静态默认值
+        try:
+            config = AdaptiveBudgetConfig()
+            base_map = {
+                "simple": config.simple,
+                "moderate": config.moderate,
+                "complex": config.complex,
+                "react": config.simple,  # react 任务按简单任务处理
+            }
+            allocation = base_map.get(task_type, config.moderate)
+            return allocation.max_duration_ms
+        except Exception:
+            return 60000  # BudgetAllocation 默认 max_duration_ms
 
     def _build_react_tool_list(self) -> str:
         if not self.tool_registry:

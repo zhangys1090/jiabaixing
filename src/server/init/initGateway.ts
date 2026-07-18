@@ -1,6 +1,5 @@
 import { EventBus } from '../../shared/EventBus';
 import type { IntegrationPlatform } from '../../shared/contracts';
-import type { AgentHarness } from '../../harness/AgentHarness';
 import type { JiabaixingCore } from '../../core/JiabaixingCore';
 import { Logger } from '../../utils/Logger';
 
@@ -8,7 +7,7 @@ export interface GatewayInitResult {}
 
 export async function initGateway(
   core: JiabaixingCore,
-  harness: AgentHarness | null
+  _harness: unknown
 ): Promise<GatewayInitResult> {
   const { GatewayBridge } = await import('../../integration/GatewayBridge');
   const gatewayBridge = GatewayBridge.getInstance();
@@ -16,11 +15,8 @@ export async function initGateway(
   gatewayBridge.setIncomingMessageHandler(async (message) => {
     Logger.info(`收到平台消息: ${message.platform}`, 'Bootstrap');
 
-    if (harness) {
-      const result = await harness.processInput({
-        text: message.content,
-        userId: message.from,
-      });
+    try {
+      const result = await core.processInput(message.content, message.from);
 
       if (result.response && message.from && message.platform) {
         await gatewayBridge.sendMessage({
@@ -29,6 +25,12 @@ export async function initGateway(
           to: message.from,
         });
       }
+    } catch (error) {
+      Logger.error(
+        `处理平台消息失败: ${(error as Error).message}`,
+        error as Error,
+        'Bootstrap'
+      );
     }
   });
 
@@ -58,29 +60,24 @@ export async function initGateway(
       };
       Logger.info(`收到平台消息: ${payload.platform}`, 'Bootstrap');
 
-      if (harness) {
-        const result = await harness.processInput({
-          text: payload.content,
-          userId: payload.from,
-        });
+      const result = await core.processInput(payload.content, payload.from);
 
-        if (result.response && payload.from && payload.platform) {
-          if (gatewayBridge.isWorkerAlive()) {
-            await gatewayBridge.sendMessage({
-              platform: payload.platform as IntegrationPlatform,
-              message: result.response,
-              to: payload.from,
-            });
-          } else {
-            const { IntegrationManager } =
-              await import('../../integration/IntegrationManager');
-            const im = IntegrationManager.getInstance();
-            await im.sendMessage({
-              platform: payload.platform as IntegrationPlatform,
-              message: result.response,
-              to: payload.from,
-            });
-          }
+      if (result.response && payload.from && payload.platform) {
+        if (gatewayBridge.isWorkerAlive()) {
+          await gatewayBridge.sendMessage({
+            platform: payload.platform as IntegrationPlatform,
+            message: result.response,
+            to: payload.from,
+          });
+        } else {
+          const { IntegrationManager } =
+            await import('../../integration/IntegrationManager');
+          const im = IntegrationManager.getInstance();
+          await im.sendMessage({
+            platform: payload.platform as IntegrationPlatform,
+            message: result.response,
+            to: payload.from,
+          });
         }
       }
     } catch (error) {

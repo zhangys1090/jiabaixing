@@ -1,0 +1,343 @@
+{
+  "generatedAt": "2026-07-15T13:03:29.367Z",
+  "summary": {
+    "pass": 37,
+    "fail": 0,
+    "total": 37
+  },
+  "results": [
+    {
+      "source": "AGENTS§0.1",
+      "id": "A-LLM-Provider",
+      "assertion": "TS 侧不得独立实现「LLM-Provider」",
+      "pass": true,
+      "evidence": "TS 侧无 class LLMProvider 实现(仅可能保留 interface/type 契约,已迁移 Python)",
+      "rootCause": "符合(已删除实现)",
+      "recommendation": "无需处理"
+    },
+    {
+      "source": "AGENTS§0.1",
+      "id": "A-LLM-MultiModel",
+      "assertion": "TS 侧不得独立实现「LLM-MultiModel」",
+      "pass": true,
+      "evidence": "TS 侧无 class MultiModelLLMProvider 实现(仅可能保留 interface/type 契约,已迁移 Python)",
+      "rootCause": "符合(已删除实现)",
+      "recommendation": "无需处理"
+    },
+    {
+      "source": "AGENTS§0.1",
+      "id": "A-Memory-Engine",
+      "assertion": "TS 侧不得独立实现「Memory-Engine」",
+      "pass": true,
+      "evidence": "TS 侧无 class MemoryEngine 实现(仅可能保留 interface/type 契约,已迁移 Python)",
+      "rootCause": "符合(已删除实现)",
+      "recommendation": "无需处理"
+    },
+    {
+      "source": "AGENTS§0.1",
+      "id": "A-Memory-ShortTerm",
+      "assertion": "TS 侧「Memory-ShortTerm」已废弃且无生产实例化",
+      "pass": true,
+      "evidence": "src/memory/ShortTermMemory.ts @deprecated 且无活跃实例化(仅保留作为 interface 契约或本地回退存根)",
+      "rootCause": "符合(转发壳/停用)",
+      "recommendation": "无需处理"
+    },
+    {
+      "source": "AGENTS§0.1",
+      "id": "A-Memory-LongTerm",
+      "assertion": "TS 侧「Memory-LongTerm」已废弃且无生产实例化",
+      "pass": true,
+      "evidence": "src/memory/LongTermMemory.ts @deprecated 且无活跃实例化(仅保留作为 interface 契约或本地回退存根)",
+      "rootCause": "符合(转发壳/停用)",
+      "recommendation": "无需处理"
+    },
+    {
+      "source": "AGENTS§0.1",
+      "id": "A-Memory-VectorDB",
+      "assertion": "TS 侧「Memory-VectorDB」已废弃且无生产实例化",
+      "pass": true,
+      "evidence": "src/memory/VectorDatabaseFactory.ts @deprecated 且无活跃实例化(仅保留作为 interface 契约或本地回退存根)",
+      "rootCause": "符合(转发壳/停用)",
+      "recommendation": "无需处理"
+    },
+    {
+      "source": "AGENTS§0.1",
+      "id": "A-Loop-Controller",
+      "assertion": "TS 侧不得独立实现「Loop-Controller」",
+      "pass": true,
+      "evidence": "TS 侧无 class LoopController 实现(仅可能保留 interface/type 契约,已迁移 Python)",
+      "rootCause": "符合(已删除实现)",
+      "recommendation": "无需处理"
+    },
+    {
+      "source": "AGENTS§0.1",
+      "id": "A-Evolution-Engine",
+      "assertion": "TS 侧不得独立实现「Evolution-Engine」",
+      "pass": true,
+      "evidence": "TS 侧无 class EvolutionEngine 实现(仅可能保留 interface/type 契约,已迁移 Python)",
+      "rootCause": "符合(已删除实现)",
+      "recommendation": "无需处理"
+    },
+    {
+      "source": "AGENTS§0.1",
+      "id": "A-A2A-Manager",
+      "assertion": "TS 侧「A2A-Manager」已废弃且无生产实例化",
+      "pass": true,
+      "evidence": "src/harness/orchestration/AgentRegistry.ts @deprecated 且无活跃实例化(仅保留作为 interface 契约或本地回退存根)",
+      "rootCause": "符合(转发壳/停用)",
+      "recommendation": "无需处理"
+    },
+    {
+      "source": "AGENTS§0.1",
+      "id": "A-Redis-Cache",
+      "assertion": "TS 侧不得独立实现「Redis-Cache」",
+      "pass": true,
+      "evidence": "TS 侧无 class RedisCache 实现(仅可能保留 interface/type 契约,已迁移 Python)",
+      "rootCause": "符合(已删除实现)",
+      "recommendation": "无需处理"
+    },
+    {
+      "source": "AGENTS§0.1",
+      "id": "A-MQ-MessageQueue",
+      "assertion": "TS 侧不得独立实现「MQ-MessageQueue」",
+      "pass": true,
+      "evidence": "TS 侧无 class MessageQueue 实现(仅可能保留 interface/type 契约,已迁移 Python)",
+      "rootCause": "符合(已删除实现)",
+      "recommendation": "无需处理"
+    },
+    {
+      "source": "AGENTS§0.1",
+      "id": "A-LLM-CredentialPool",
+      "assertion": "TS 侧「LLM-CredentialPool」已废弃且无生产实例化",
+      "pass": true,
+      "evidence": "src/models/ProviderManager.ts @deprecated 且无活跃实例化(仅保留作为 interface 契约或本地回退存根)",
+      "rootCause": "符合(转发壳/停用)",
+      "recommendation": "无需处理"
+    },
+    {
+      "source": "AGENTS§0.1",
+      "id": "A-Persistence-Session",
+      "assertion": "TS 侧不得独立实现「Persistence-Session」",
+      "pass": true,
+      "evidence": "TS 侧无 class SessionStore 实现(仅可能保留 interface/type 契约,已迁移 Python)",
+      "rootCause": "符合(已删除实现)",
+      "recommendation": "无需处理"
+    },
+    {
+      "source": "AGENTS§0.1",
+      "id": "A-Persistence-Trajectory",
+      "assertion": "TS 侧不得独立实现「Persistence-Trajectory」",
+      "pass": true,
+      "evidence": "TS 侧无 class TrajectoryDatabase 实现(仅可能保留 interface/type 契约,已迁移 Python)",
+      "rootCause": "符合(已删除实现)",
+      "recommendation": "无需处理"
+    },
+    {
+      "source": "AGENTS§0.1",
+      "id": "A-OTel-SDK",
+      "assertion": "TS 侧不得独立集成 OTel SDK(仅透传 traceId)",
+      "pass": true,
+      "evidence": "TS 侧未发现 @opentelemetry/sdk-node 独立集成",
+      "rootCause": "符合",
+      "recommendation": "无需处理"
+    },
+    {
+      "source": "ARCH§1.5",
+      "id": "B-ContextReferenceResolver",
+      "assertion": "✅「ContextReferenceResolver」应被生产代码挂载",
+      "pass": true,
+      "evidence": "引用于: src/core/ConstitutionPromptBuilder.ts, src/core/UnifiedContextPipeline.ts, src/harness/context/ContextManager.ts, src/harness/context/UnifiedContextBuilder.ts",
+      "rootCause": "符合",
+      "recommendation": "无需处理"
+    },
+    {
+      "source": "ARCH§1.5",
+      "id": "B-BatchProcessor",
+      "assertion": "✅「BatchProcessor」应被生产代码挂载",
+      "pass": true,
+      "evidence": "引用于: src/server/routes/batchRoutes.ts",
+      "rootCause": "符合",
+      "recommendation": "无需处理"
+    },
+    {
+      "source": "ARCH§1.5",
+      "id": "B-SandboxExecutor",
+      "assertion": "✅「SandboxExecutor」应被生产代码挂载",
+      "pass": true,
+      "evidence": "引用于: src/harness/AgentHarness.ts, src/harness/tools/system/execute_code.ts",
+      "rootCause": "符合",
+      "recommendation": "无需处理"
+    },
+    {
+      "source": "ARCH§1.5",
+      "id": "B-HookManager",
+      "assertion": "✅「HookManager」应被生产代码挂载",
+      "pass": true,
+      "evidence": "引用于: src/harness/constraints/ConstraintsService.ts, src/plugins/PluginContext.ts",
+      "rootCause": "符合",
+      "recommendation": "无需处理"
+    },
+    {
+      "source": "ARCH§1.5",
+      "id": "B-SkillRegistry",
+      "assertion": "✅「SkillRegistry」应被生产代码挂载",
+      "pass": true,
+      "evidence": "引用于: src/core/JiabaixingCore.ts, src/curator/CuratorService.ts, src/desktop/DesktopSkillRegistry.ts, src/harness/AgentHarness.ts",
+      "rootCause": "符合",
+      "recommendation": "无需处理"
+    },
+    {
+      "source": "ARCH§1.5",
+      "id": "B-CuratorService",
+      "assertion": "✅「CuratorService」应被生产代码挂载",
+      "pass": true,
+      "evidence": "引用于: src/cli/commands/curator.ts",
+      "rootCause": "符合",
+      "recommendation": "无需处理"
+    },
+    {
+      "source": "ARCH§1.5",
+      "id": "B-SpeechSynthesizer",
+      "assertion": "✅「SpeechSynthesizer」应被生产代码挂载",
+      "pass": true,
+      "evidence": "引用于: src/harness/tools/network/tts_speak.ts, src/harness/tools/system/voice_interact.ts, src/interaction/InteractionEngine.ts, src/server/init/initHarness.ts",
+      "rootCause": "符合",
+      "recommendation": "无需处理"
+    },
+    {
+      "source": "ARCH§1.5",
+      "id": "B-ExternalMemoryProvider",
+      "assertion": "✅「ExternalMemoryProvider」应被生产代码挂载",
+      "pass": true,
+      "evidence": "引用于: src/memory/external/MemoryFileProvider.ts, src/plugins/PluginInterface.ts",
+      "rootCause": "符合",
+      "recommendation": "无需处理"
+    },
+    {
+      "source": "ARCH§1.5",
+      "id": "B-ACPServer",
+      "assertion": "✅「ACPServer」应被生产代码挂载",
+      "pass": true,
+      "evidence": "引用于: src/ide/ACPActivityTracker.ts, src/ide/ACPStdioServer.ts, src/ide/PythonAgentBridge.ts, src/server/routes/acpRoutes.ts",
+      "rootCause": "符合",
+      "recommendation": "无需处理"
+    },
+    {
+      "source": "ARCH§1.5",
+      "id": "B-TrajectoryExporter",
+      "assertion": "✅「TrajectoryExporter」应被生产代码挂载",
+      "pass": true,
+      "evidence": "引用于: src/core/JiabaixingCore.ts",
+      "rootCause": "符合",
+      "recommendation": "无需处理"
+    },
+    {
+      "source": "ARCH§1.5",
+      "id": "B-PY-TTS(voice_mode)",
+      "assertion": "✅「TTS(voice_mode)」文档标注的 Python 指向应真实存在",
+      "pass": true,
+      "evidence": "Python 实现存在: python/agent/tools/voice_mode_tool.py",
+      "rootCause": "符合(文档已正确指向 Python)",
+      "recommendation": "无需处理"
+    },
+    {
+      "source": "ARCH§1.5",
+      "id": "B-PY-PromptCacheManager",
+      "assertion": "✅「PromptCacheManager」文档标注的 Python 指向应真实存在",
+      "pass": true,
+      "evidence": "Python 实现存在: python/agent/llm/prompt_cache.py (含 class PromptCacheManager)",
+      "rootCause": "符合(文档已正确指向 Python)",
+      "recommendation": "无需处理"
+    },
+    {
+      "source": "ARCH§1.5",
+      "id": "B-PY-CheckpointService",
+      "assertion": "✅「CheckpointService」文档标注的 Python 指向应真实存在",
+      "pass": true,
+      "evidence": "Python 实现存在: python/agent/persistence/checkpoint.py (含 class CheckpointService)",
+      "rootCause": "符合(文档已正确指向 Python)",
+      "recommendation": "无需处理"
+    },
+    {
+      "source": "ARCH§1.5",
+      "id": "B-PY-Mem0Provider",
+      "assertion": "✅「Mem0Provider」文档标注的 Python 指向应真实存在",
+      "pass": true,
+      "evidence": "Python 实现存在: python/agent/memory/providers.py (含 class Mem0Provider)",
+      "rootCause": "符合(文档已正确指向 Python)",
+      "recommendation": "无需处理"
+    },
+    {
+      "source": "ARCH§1.5",
+      "id": "B-PY-VoiceSessionManager",
+      "assertion": "✅「VoiceSessionManager」文档标注的 Python 指向应真实存在",
+      "pass": true,
+      "evidence": "Python 实现存在: python/agent/tools/voice_mode_tool.py (含 class VoiceModeManager)",
+      "rootCause": "符合(文档已正确指向 Python)",
+      "recommendation": "无需处理"
+    },
+    {
+      "source": "ARCH§1.5",
+      "id": "B-PY-PluginManager",
+      "assertion": "✅「PluginManager」文档标注的 Python 指向应真实存在",
+      "pass": true,
+      "evidence": "Python 实现存在: python/agent/plugins/manager.py (含 class PluginManager)",
+      "rootCause": "符合(文档已正确指向 Python)",
+      "recommendation": "无需处理"
+    },
+    {
+      "source": "ARCH§1.5",
+      "id": "B-PY-PluginLoader",
+      "assertion": "✅「PluginLoader」文档标注的 Python 指向应真实存在",
+      "pass": true,
+      "evidence": "Python 实现存在: python/agent/plugins/manager.py",
+      "rootCause": "符合(文档已正确指向 Python)",
+      "recommendation": "无需处理"
+    },
+    {
+      "source": "AGENTS§0.3",
+      "id": "C-tautology",
+      "assertion": "测试不得含恒真断言空壳",
+      "pass": true,
+      "evidence": "恒真断言守卫: 0 命中",
+      "rootCause": "符合",
+      "recommendation": "无需处理"
+    },
+    {
+      "source": "AGENTS§0.3",
+      "id": "C-stub-skip",
+      "assertion": "不得存在空体 skip 存根(占位假实现)",
+      "pass": true,
+      "evidence": "未发现空体 skip 存根",
+      "rootCause": "符合",
+      "recommendation": "无需处理"
+    },
+    {
+      "source": "ARCH§3.4",
+      "id": "D-dangling-path",
+      "assertion": "ARCHITECTURE 文档(实时)点名的缓存 TS 文件应真实存在",
+      "pass": true,
+      "evidence": "文档已不再点名已删除的 TS 缓存路径(已对齐 Python)",
+      "rootCause": "符合",
+      "recommendation": "无需处理"
+    },
+    {
+      "source": "ARCH§1.1",
+      "id": "D-port",
+      "assertion": "端口描述应覆盖 Python 后端(3112)",
+      "pass": true,
+      "evidence": "文档含 3112",
+      "rootCause": "符合",
+      "recommendation": "无需处理"
+    },
+    {
+      "source": "ARCH",
+      "id": "D-storage",
+      "assertion": "存储描述应反映实际(Python 中心 SQLite/FTS5)",
+      "pass": true,
+      "evidence": "未发现过期 Chroma 宏观描述",
+      "rootCause": "符合",
+      "recommendation": "无需处理"
+    }
+  ]
+}

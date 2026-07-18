@@ -37,9 +37,41 @@ def _get_logger() -> Any:
     return log
 
 
+def _convert_normalized_task(task: str, screen_width: int, screen_height: str) -> str:
+    """将任务描述中的归一化坐标 (x,y) 转换为像素坐标
+
+    支持格式：
+    - (500,300)          → 单点坐标
+    - (100,200,400,600)  → 矩形区域 x1,y1,x2,y2
+    - click(500,300)     → 带动作前缀
+    """
+    import re
+    from agent.desktop.coordinate_system import from_normalized, NORMALIZED_MAX
+
+    def _replacer(m: re.Match) -> str:
+        nums_str = m.group(1)
+        nums = [int(p.strip()) for p in nums_str.split(",")]
+
+        if len(nums) == 2:
+            nx, ny = nums
+            if 0 <= nx <= NORMALIZED_MAX and 0 <= ny <= NORMALIZED_MAX:
+                px, py = from_normalized(nx, ny, screen_width, screen_height)
+                return f"({px},{py})"
+        elif len(nums) == 4:
+            x1, y1, x2, y2 = nums
+            if all(0 <= v <= NORMALIZED_MAX for v in nums):
+                px1, py1 = from_normalized(x1, y1, screen_width, screen_height)
+                px2, py2 = from_normalized(x2, y2, screen_width, screen_height)
+                return f"({px1},{py1},{px2},{py2})"
+
+        return m.group(0)
+
+    return re.sub(r'\((\d+(?:\s*,\s*\d+){1,3})\)', _replacer, task)
+
+
 async def _call_ts_desktop(task: str, timeout: float = 60.0) -> dict[str, Any] | None:
     """调用 TS DesktopExecutionAgent 执行桌面任务。
-    
+
     Returns:
         成功时返回 TS 响应 dict，失败（网络错误/超时/500）时返回 None。
     """
@@ -79,10 +111,11 @@ from agent.desktop.desktop_controller import get_desktop_controller
 
 DESKTOP_AUTOMATE_DEF = ToolDefinition(
     name="desktop_automate",
-    description='在用户电脑上执行桌面自动化操作。支持截图、点击、输入文字、按键、移动鼠标、滚动、拖拽、剪贴板读写、Shell命令、窗口管理、打开应用。适用场景：用户要求操作电脑（打开应用、截图、点击、输入文字、管理窗口等）。不适用：纯文字对话、信息查询。',
+    description='在用户电脑上执行桌面自动化操作。支持截图、点击、输入文字、按键、移动鼠标、滚动、拖拽、剪贴板读写、窗口管理、打开应用。坐标支持归一化模式(0-1000)和像素模式。Shell命令请用shell_exec工具。适用场景：用户要求操作电脑（打开应用、截图、点击、输入文字、管理窗口等）。不适用：纯文字对话、信息查询。',
     category=ToolCategory.DESKTOP,
     parameters=[
         ToolParameterDef(name="task", type="string", description="桌面操作描述，如：打开记事本并输入Hello World、截图保存桌面、点击屏幕上的确定按钮、最大化浏览器窗口、读取剪贴板内容"),
+        ToolParameterDef(name="coordinate_mode", type="string", required=False, description="坐标模式：pixel（绝对像素）或 normalized（归一化0-1000），默认pixel", enum=["pixel", "normalized"]),
     ],
     risk_level="high",
 )
@@ -126,16 +159,7 @@ DESKTOP_CLIPBOARD_DEF = ToolDefinition(
 )
 
 
-DESKTOP_SHELL_DEF = ToolDefinition(
-    name="desktop_shell",
-    description='在用户电脑上执行Shell命令。适用场景：需要执行命令行操作、运行脚本、查看系统信息等。注意：危险操作会被拦截。',
-    category=ToolCategory.DESKTOP,
-    parameters=[
-        ToolParameterDef(name="command", type="string", description="要执行的Shell命令"),
-        ToolParameterDef(name="timeout", type="number", required=False, description="超时时间（秒），默认30秒"),
-    ],
-    risk_level="high",
-)
+# desktop_shell 已移除 — 与 shell_exec (code_tools) 重复，统一使用 shell_exec
 
 
 # ─────────────────────────────────────────────────────────────
@@ -162,15 +186,24 @@ def _is_dangerous_command(command: str) -> bool:
 
 async def desktop_automate_executor(params: dict[str, Any]) -> ToolResult:
     """桌面自动化执行器 - 高级接口，一句话任务
-    
+
     优先调用 TS DesktopExecutionAgent（Codex 风格 Computer Use），
     TS 不可用时回退到 Python DesktopController。
+    支持 coordinate_mode=normalized 时将归一化坐标(0-1000)转换为像素坐标。
     """
     start = time.time()
     task = str(params.get("task", ""))
+    coordinate_mode = str(params.get("coordinate_mode", "pixel")).lower()
 
     if not task:
         return ToolResult(success=False, error="请提供要执行的桌面操作任务描述", duration=time.time() - start)
+
+    # ─── 归一化坐标转换 ───
+    if coordinate_mode == "normalized":
+        from agent.desktop.coordinate_system import NormalizedPoint
+        controller = get_desktop_controller()
+        sw, sh = controller.get_screen_size()
+        task = _convert_normalized_task(task, sw, sh)
 
     # ─── 优先走 TS DesktopExecutionAgent ───
     ts_result = await _call_ts_desktop(task)
@@ -472,32 +505,4 @@ async def desktop_clipboard_executor(params: dict[str, Any]) -> ToolResult:
         return ToolResult(success=False, error=f"剪贴板操作失败: {e}", duration=time.time() - start)
 
 
-async def desktop_shell_executor(params: dict[str, Any]) -> ToolResult:
-    """Shell命令执行器"""
-    start = time.time()
-    command = str(params.get("command", ""))
-    timeout = int(params.get("timeout", 30))
-
-    if not command:
-        return ToolResult(success=False, error="请提供要执行的命令", duration=time.time() - start)
-
-    # 安全检查
-    if _is_dangerous_command(command):
-        return ToolResult(
-            success=False,
-            error="⚠️ 检测到危险操作，已被安全策略拦截。如需执行，请确认操作安全性。",
-            duration=time.time() - start,
-        )
-
-    controller = get_desktop_controller()
-
-    try:
-        result = controller.shell_exec(command, timeout=timeout)
-        return ToolResult(
-            success=result.success,
-            output=result.output if result.success else result.output,
-            error=result.error if not result.success else None,
-            duration=time.time() - start,
-        )
-    except Exception as e:
-        return ToolResult(success=False, error=f"命令执行失败: {e}", duration=time.time() - start)
+# desktop_shell_executor 已移除 — 与 shell_exec (code_tools) 重复

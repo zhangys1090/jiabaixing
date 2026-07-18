@@ -1,0 +1,52 @@
+# ConfigMap: 家百星非敏感配置
+# 用途: 集中管理所有服务的环境变量（非敏感）
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jiabaixing-config
+  namespace: jiabaixing
+  labels:
+    app.kubernetes.io/name: jiabaixing-config
+    app.kubernetes.io/part-of: jiabaixing
+    app.kubernetes.io/managed-by: kubectl
+data:
+  # 后端类型与地址
+  AGENT_BACKEND: 'python'
+  AGENT_PORT: '8765'
+  PYTHON_AGENT_URL: 'http://jiabaixing-python:8765'
+  # Redis 缓存
+  REDIS_URL: 'redis://jiabaixing-redis:6379/0'
+  REDIS_ENABLED: 'true'
+  # 消息队列主干（P0: 多副本解耦执行，启用 Redis Streams 消费者组）
+  MQ_ENABLED: 'true'
+  MQ_STREAM_PREFIX: 'jiabaixing'
+  # OpenTelemetry 可观测性
+  OTEL_ENABLED: 'true'
+  OTEL_EXPORTER_OTLP_ENDPOINT: 'http://otel-collector:4317'
+  OTEL_SERVICE_NAME: 'jiabaixing-agent'
+  # API 网关限流（0=禁用，生产建议 100）
+  RATE_LIMIT_CAPACITY: '100'
+  RATE_LIMIT_REFILL: '10.0'
+  # API Key 认证（格式 key:name，留空则不要求认证）
+  API_KEYS: ''
+  # 日志与运行环境
+  LOG_LEVEL: 'info'
+  NODE_ENV: 'production'
+  # 分布式锁（P0: 多实例部署）
+  LOCK_TIMEOUT_MS: '30000'
+  LOCK_RETRY_INTERVAL_MS: '200'
+  LOCK_MAX_RETRIES: '10'
+  LOCK_AUTO_EXTEND: 'true'
+  # 水平扩展 / 副本数（审计残留：领导者选举 + 分片）
+  # AGENT_REPLICAS 由 verify_production_readiness.py 读取，>=2 才体现跨实例价值
+  AGENT_REPLICAS: '2'
+  # SHARD_COUNT 与副本数一致时启用一致性哈希分片；单副本保持 1（不分片）。
+  # 真正按副本归属性分片需 StatefulSet 提供 REPLICA_INDEX（ordinal），
+  # Deployment 场景无需设置 REPLICA_INDEX（默认 0，所有 key 由 replica-0 负责）。
+  SHARD_COUNT: '2'
+  # 内存泄漏防护（P0: 缓冲区守卫+监控）
+  TRAJECTORY_MAX_ENTRIES: '500'
+  TRAJECTORY_MAX_STEPS: '20'
+  MAX_LISTENERS_PER_EVENT: '200'
+  MEMORY_THRESHOLD_MB: '512'
+  MEMORY_MONITOR_INTERVAL: '60'

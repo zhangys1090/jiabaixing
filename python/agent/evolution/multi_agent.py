@@ -34,6 +34,11 @@ from enum import Enum
 from typing import Any, Callable, Awaitable
 
 from agent.core.logger import StructuredLogger
+from agent.infrastructure.message_queue import (
+    Message,
+    MessagePriority,
+    create_message_queue,
+)
 
 log = StructuredLogger("multi_agent")
 
@@ -138,6 +143,27 @@ class AgentMessage:
         if self.timestamp == 0.0:
             self.timestamp = time.time()
 
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "from_agent": self.from_agent,
+            "to_agent": self.to_agent,
+            "content": self.content,
+            "msg_type": self.msg_type,
+            "timestamp": self.timestamp,
+        }
+
+    @classmethod
+    def from_payload(cls, data: dict[str, Any]) -> "AgentMessage":
+        return cls(
+            id=data.get("id", ""),
+            from_agent=data.get("from_agent", ""),
+            to_agent=data.get("to_agent", ""),
+            content=data.get("content", ""),
+            msg_type=data.get("msg_type", "info"),
+            timestamp=data.get("timestamp", 0.0),
+        )
+
 
 class MultiAgentCoordinator:
     """多 Agent 协调器。
@@ -148,7 +174,13 @@ class MultiAgentCoordinator:
     def __init__(self) -> None:
         self._agents: dict[str, AgentNode] = {}
         self._tasks: dict[str, AgentTask] = {}
-        self._message_queue: asyncio.Queue[AgentMessage] = asyncio.Queue()
+        # P-残留：Agent 间消息改为经 MQ 传输（多副本可跨实例投递）。
+        # 本地 inbox 仍作为 receive_messages 的拉取缓冲，保持向后兼容语义。
+        self._coord_id: str = uuid.uuid4().hex[:8]
+        self._inbox: dict[str, list[AgentMessage]] = defaultdict(list)
+        self._mq: Any = None
+        self._mq_started: bool = False
+        self._mq_topic: str = f"multi_agent.msg.{self._coord_id}"
         self._handlers: dict[str, Callable[..., Awaitable[str]]] = {}
         self._leader: str = ""
 
@@ -372,25 +404,59 @@ class MultiAgentCoordinator:
 
     async def send_message(self, from_agent: str, to_agent: str, content: str, msg_type: str = "info") -> None:
         msg = AgentMessage(
+            id=str(uuid.uuid4()),
             from_agent=from_agent,
             to_agent=to_agent,
             content=content,
             msg_type=msg_type,
         )
-        await self._message_queue.put(msg)
+        # 本地快速投递：同进程 send→receive 立即可见，保持向后兼容语义
+        self._deliver_local(msg)
+        # MQ 传输：跨副本投递（无 Redis 时退化为进程内队列，回声由 _on_mq 跳过）
+        await self._ensure_mq()
+        payload = msg.to_payload()
+        payload["sender_coord_id"] = self._coord_id
+        await self._mq.publish(self._mq_topic, payload, priority=MessagePriority.NORMAL)
 
     async def receive_messages(self, agent_id: str) -> list[AgentMessage]:
-        messages = []
-        temp = []
-        while not self._message_queue.empty():
-            msg = self._message_queue.get_nowait()
-            if msg.to_agent == agent_id or msg.to_agent == "*":
-                messages.append(msg)
-            else:
-                temp.append(msg)
-        for m in temp:
-            await self._message_queue.put(m)
+        messages = list(self._inbox.pop(agent_id, []))
         return messages
+
+    async def _ensure_mq(self) -> None:
+        """惰性初始化 Agent 消息 MQ（多副本跨实例投递）。"""
+        if self._mq_started:
+            return
+        self._mq = create_message_queue()
+        await self._mq.start()
+        await self._mq.subscribe(self._mq_topic, self._on_mq)
+        self._mq_started = True
+
+    async def _on_mq(self, msg: Message) -> None:
+        """MQ 消费者：还原 AgentMessage 并投递到本地 inbox / 广播缓冲。
+
+        跳过自身回声（send_message 已本地投递），仅处理来自其他副本的消息。
+        """
+        try:
+            payload = msg.payload
+            if isinstance(payload, str):
+                import json
+
+                payload = json.loads(payload)
+            if payload.get("sender_coord_id") == self._coord_id:
+                return  # 本地已投递，忽略自身回声
+            agent_msg = AgentMessage.from_payload(payload)
+        except Exception as exc:
+            log.warning("解析 Agent 消息失败", error=str(exc))
+            return
+        self._deliver_local(agent_msg)
+
+    def _deliver_local(self, msg: AgentMessage) -> None:
+        if msg.to_agent == "*":
+            # 广播：投递到所有已注册 agent 的本地 inbox（每个 agent 各自消费一次）
+            for agent_id in self._agents:
+                self._inbox[agent_id].append(msg)
+        else:
+            self._inbox[msg.to_agent].append(msg)
 
     def get_stats(self) -> dict[str, Any]:
         return {

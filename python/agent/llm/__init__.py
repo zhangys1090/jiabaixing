@@ -6,7 +6,7 @@
 from agent.llm.stream_diag import StreamDiagnostics
 from agent.llm.nous_rate_guard import NousRateGuard, RateTier
 from agent.llm.portal_tags import PortalTagManager
-from agent.llm.prompt_caching import PromptCaching
+from agent.llm.prompt_cache import PromptCaching
 
 __all__ = [
     "StreamDiagnostics",

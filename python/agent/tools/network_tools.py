@@ -13,7 +13,11 @@ from agent.tools.registry import (
 WEB_SEARCH_DEF = ToolDefinition(
     name="web_search",
     description="实时网络搜索，返回标题+链接+摘要。适用场景：查最新信息、新闻、技术文档、市场数据。不适用：本地文件（用file_search）、代码问题（用code_analyze）。",
+    short_desc="网络搜索",
     category=ToolCategory.NETWORK,
+    tags=["web", "search", "internet", "research"],
+    scenes=["research", "coding", "daily"],
+    capability_level=1,
     parameters=[
         ToolParameterDef(name="query", type="string", description="搜索关键词"),
         ToolParameterDef(name="max_results", type="number", required=False, description="最大结果数"),
@@ -24,7 +28,11 @@ WEB_SEARCH_DEF = ToolDefinition(
 WEB_FETCH_DEF = ToolDefinition(
     name="web_fetch",
     description="获取网页内容并转为文本。适用场景：读取网页文章、获取API数据。不适用：搜索信息（用 web_search）。",
+    short_desc="获取网页内容",
     category=ToolCategory.NETWORK,
+    tags=["web", "fetch", "url", "scrape"],
+    scenes=["research", "coding"],
+    capability_level=1,
     parameters=[
         ToolParameterDef(name="url", type="string", description="要获取的网页URL"),
         ToolParameterDef(name="format", type="string", required=False, description="输出格式: text/markdown", enum=["text", "markdown"]),
@@ -32,21 +40,16 @@ WEB_FETCH_DEF = ToolDefinition(
     risk_level="low",
 )
 
-TTS_SPEAK_DEF = ToolDefinition(
-    name="tts_speak",
-    description="文字转语音播报。适用场景：语音提醒、朗读文本。不适用：文字聊天（直接回复）。",
-    category=ToolCategory.NETWORK,
-    parameters=[
-        ToolParameterDef(name="text", type="string", description="要朗读的文本"),
-        ToolParameterDef(name="voice", type="string", required=False, description="语音类型"),
-    ],
-    risk_level="low",
-)
+# tts_speak 已移除 — 与 voice_interact (desktop_tools) 重复，统一使用 voice_interact
 
 CHART_GENERATE_DEF = ToolDefinition(
     name="chart_generate",
     description="根据数据生成图表描述。适用场景：数据可视化、生成图表配置。不适用：纯文本分析。",
+    short_desc="生成图表",
     category=ToolCategory.NETWORK,
+    tags=["chart", "visualize", "data", "graph"],
+    scenes=["research", "briefing", "coding"],
+    capability_level=2,
     parameters=[
         ToolParameterDef(name="data", type="string", description="数据（JSON格式或描述）"),
         ToolParameterDef(name="chart_type", type="string", required=False, description="图表类型: bar/line/pie/scatter", enum=["bar", "line", "pie", "scatter"]),
@@ -113,19 +116,7 @@ async def web_fetch_executor(params: dict[str, Any]) -> ToolResult:
         return ToolResult(success=False, error=f"获取网页失败: {e}")
 
 
-async def tts_speak_executor(params: dict[str, Any]) -> ToolResult:
-    import time
-    start = time.time()
-    text = str(params.get("text", ""))
-
-    if not text:
-        return ToolResult(success=False, error="文本不能为空")
-
-    return ToolResult(
-        success=True,
-        output=f"已将文本加入语音播报队列: {text[:50]}...",
-        duration=time.time() - start,
-    )
+# tts_speak_executor 已移除 — 与 voice_interact (desktop_tools) 重复
 
 
 async def chart_generate_executor(params: dict[str, Any]) -> ToolResult:

@@ -163,20 +163,34 @@ class ResultAggregator:
         failed_tasks: list[str] = []
 
         for task in task_nodes:
-            detail = TaskDetail(task_id=task.id, status="failed")
-
             if task.status == "completed" and task.id in agent_results:
-                detail.status = "completed"
-                detail.result = agent_results[task.id]
+                detail = TaskDetail(
+                    task_id=task.id,
+                    status="completed",
+                    result=agent_results[task.id],
+                )
                 completed_count += 1
-            elif task.status == "failed":
-                detail.status = "failed"
-                detail.error = task.error or "未知错误"
-                failed_count += 1
-                failed_tasks.append(task.id)
             else:
-                detail.status = "failed"
-                detail.error = f"任务未完成 (状态: {task.status})"
+                # 未成功完成的任务（失败 / 待处理 / 跳过 / 标记完成但无结果）
+                # 均计入失败，整体 success 才正确反映"是否有任务没跑成"。
+                if task.status == "failed":
+                    detail = TaskDetail(
+                        task_id=task.id,
+                        status="failed",
+                        error=task.error or "未知错误",
+                    )
+                elif task.status in ("skipped", "pending"):
+                    detail = TaskDetail(
+                        task_id=task.id,
+                        status=task.status,
+                        error=f"任务{task.status}",
+                    )
+                else:
+                    detail = TaskDetail(
+                        task_id=task.id,
+                        status="skipped",
+                        error=f"任务未完成 (状态: {task.status})",
+                    )
                 failed_count += 1
                 failed_tasks.append(task.id)
 

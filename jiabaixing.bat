@@ -55,8 +55,25 @@ for /f "tokens=5" %%a in ('netstat -ano ^| findstr :3111') do (
     if not "%%a"=="" taskkill /f /pid %%a >nul 2>&1
 )
 
+:: start Python Agent backend (V5.0 true backend, best-effort)
+echo   [0/4] Starting Python Agent backend (port 3112)...
+set "PYOK=0"
+if exist "%~dp0.venv\Scripts\python.exe" (
+    start /b "" cmd /c "cd /d %~dp0python && "%~dp0.venv\Scripts\python.exe" -m uvicorn agent.main:app --host 127.0.0.1 --port 3112 > "%~dp0logs\python_backend.log" 2>&1"
+    for /l %%i in (1,1,40) do (
+        >nul 2>&1 curl -s http://127.0.0.1:3112/health
+        if not errorlevel 1 (
+            set "PYOK=1"
+            goto py_wait_done
+        )
+        timeout /t 1 /nobreak >nul
+    )
+)
+:py_wait_done
+if "%PYOK%"=="1" ( echo   [OK] Python Agent backend ready (3112) ) else ( echo   [WARN] Python backend not ready; TS gateway will fall back to local )
+
 :: start backend
-echo   [1/3] Starting backend...
+echo   [1/4] Starting backend...
 start /b "" cmd /c "cd /d C:\zy\jiabaixing && npx tsx --env-file=.env src/main.ts"
 
 :: wait for ready

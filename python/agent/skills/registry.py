@@ -5,7 +5,7 @@ import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from agent.config import DATA_DIR
 
@@ -182,6 +182,65 @@ class Skill:
         )
 
 
+#: 内置技能定义（模块级，供 register_builtin_skills 与 builtin_skill_names 共用）。
+_BUILTIN_SKILL_DEFINITIONS: list[SkillDefinition] = [
+    SkillDefinition(
+        name="chat",
+        description="基础聊天技能",
+        category="communication",
+        tags=["chat", "conversation"],
+        source="builtin",
+    ),
+    SkillDefinition(
+        name="code_analysis",
+        description="代码分析技能",
+        category="development",
+        tags=["code", "analysis", "review"],
+        parameters=[
+            SkillParameter(name="code", description="要分析的代码"),
+            SkillParameter(name="language", required=False, description="编程语言"),
+        ],
+        source="builtin",
+    ),
+    SkillDefinition(
+        name="file_search",
+        description="文件搜索技能",
+        category="filesystem",
+        tags=["file", "search", "find"],
+        parameters=[
+            SkillParameter(name="pattern", description="搜索模式"),
+            SkillParameter(name="path", required=False, description="搜索路径"),
+        ],
+        source="builtin",
+    ),
+    SkillDefinition(
+        name="memory_recall",
+        description="记忆回忆技能",
+        category="memory",
+        tags=["memory", "recall", "search"],
+        parameters=[
+            SkillParameter(name="query", description="搜索查询"),
+        ],
+        source="builtin",
+    ),
+    SkillDefinition(
+        name="task_plan",
+        description="任务规划技能",
+        category="planning",
+        tags=["plan", "task", "organize"],
+        parameters=[
+            SkillParameter(name="task", description="要规划的任务"),
+        ],
+        source="builtin",
+    ),
+]
+
+
+def builtin_skill_names() -> list[str]:
+    """返回所有内置技能的 name 列表（供 ExtensionCatalog 等目录声明复用）。"""
+    return [d.name for d in _BUILTIN_SKILL_DEFINITIONS]
+
+
 class SkillRegistry:
     """技能注册中心——管理所有技能的统一注册和发现。
 
@@ -273,59 +332,19 @@ class SkillRegistry:
     def _rebuild_categories(self) -> None:
         self._categories = {s.definition.category for s in self._skills.values()}
 
-    def register_builtin_skills(self) -> None:
-        builtins = [
-            SkillDefinition(
-                name="chat",
-                description="基础聊天技能",
-                category="communication",
-                tags=["chat", "conversation"],
-                source="builtin",
-            ),
-            SkillDefinition(
-                name="code_analysis",
-                description="代码分析技能",
-                category="development",
-                tags=["code", "analysis", "review"],
-                parameters=[
-                    SkillParameter(name="code", description="要分析的代码"),
-                    SkillParameter(name="language", required=False, description="编程语言"),
-                ],
-                source="builtin",
-            ),
-            SkillDefinition(
-                name="file_search",
-                description="文件搜索技能",
-                category="filesystem",
-                tags=["file", "search", "find"],
-                parameters=[
-                    SkillParameter(name="pattern", description="搜索模式"),
-                    SkillParameter(name="path", required=False, description="搜索路径"),
-                ],
-                source="builtin",
-            ),
-            SkillDefinition(
-                name="memory_recall",
-                description="记忆回忆技能",
-                category="memory",
-                tags=["memory", "recall", "search"],
-                parameters=[
-                    SkillParameter(name="query", description="搜索查询"),
-                ],
-                source="builtin",
-            ),
-            SkillDefinition(
-                name="task_plan",
-                description="任务规划技能",
-                category="planning",
-                tags=["plan", "task", "organize"],
-                parameters=[
-                    SkillParameter(name="task", description="要规划的任务"),
-                ],
-                source="builtin",
-            ),
-        ]
-        for defn in builtins:
+    def register_builtin_skills(
+        self, enabled_check: "Callable[[str], bool] | None" = None
+    ) -> None:
+        """注册所有内置技能。
+
+        Args:
+            enabled_check: 可选门控回调 ref("skill:<name>") -> bool；返回 False 的
+                技能被跳过（T4：ExtensionCatalog 窄腰门控，向后兼容默认全启用）。
+        """
+        for defn in _BUILTIN_SKILL_DEFINITIONS:
+            ref = f"skill:{defn.name}"
+            if enabled_check is not None and not enabled_check(ref):
+                continue
             self.register(Skill(definition=defn))
 
 

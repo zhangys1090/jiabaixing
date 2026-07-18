@@ -313,6 +313,18 @@ class SelfModificationEngine:
 
     async def _execute_action(self, action: V2EvolutionAction) -> bool:
         try:
+            # 安全边界强制：执行任何文件操作前先评估，禁止路径/禁止删除入口文件直接拒绝，
+            # 避免 LLM 生成的计划修改/删除 agent/main.py、src/core/ 等受保护路径。
+            assessment = self.assess_action_safety(action)
+            if not assessment.allowed:
+                log.warning(
+                    "Action blocked by safety boundary",
+                    target=action.target,
+                    risk=assessment.risk_level,
+                    reason=assessment.reason,
+                )
+                self.learn_safety_outcome(action, success=False)
+                return False
             if action.type == "MODIFY_FILE":
                 return self._modify_file(action)
             elif action.type == "CREATE_FILE":
@@ -646,7 +658,36 @@ class EvolutionEngineV2:
         return result
 
     async def _validate_evolution(self, plan: V2EvolutionPlan) -> dict[str, Any]:
-        return {"passed": True, "details": "验证通过（Python侧暂无编译检查）"}
+        # 真实验证：对本次计划改动/新建的 .py 文件做 AST 语法检查、.json 做结构检查。
+        # 历史实现恒返回 passed=True，导致坏改动不会被发现/回滚（进化质量门失效）。
+        import ast
+
+        errors: list[str] = []
+        for action in plan.actions:
+            if action.type not in ("MODIFY_FILE", "CREATE_FILE", "UPDATE_CONFIG", "UPDATE_PROMPT"):
+                continue
+            target = action.target or ""
+            p = Path(target)
+            if target.endswith(".py"):
+                if not p.exists():
+                    errors.append(f"文件不存在: {target}")
+                    continue
+                try:
+                    ast.parse(p.read_text(encoding="utf-8"), filename=target)
+                except SyntaxError as e:
+                    errors.append(f"语法错误 {target}: {e.msg} (line {e.lineno})")
+                except Exception as e:  # noqa: BLE001
+                    errors.append(f"校验失败 {target}: {e}")
+            elif target.endswith(".json"):
+                if p.exists():
+                    try:
+                        json.loads(p.read_text(encoding="utf-8"))
+                    except Exception as e:  # noqa: BLE001
+                        errors.append(f"JSON 无效 {target}: {e}")
+
+        if errors:
+            return {"passed": False, "details": "; ".join(errors)}
+        return {"passed": True, "details": "校验通过：Python 语法 / JSON 结构检查无误"}
 
     def _record_history(self, plan: V2EvolutionPlan, result: V2EvolutionResult) -> None:
         self._history.append(V2EvolutionHistory(

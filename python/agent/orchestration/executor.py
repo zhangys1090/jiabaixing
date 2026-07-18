@@ -15,6 +15,7 @@ class TaskStatus(str, Enum):
     FAILED = "failed"
     CANCELLED = "cancelled"
     SKIPPED = "skipped"
+    PARTIALLY_COMPLETED = "partially_completed"
 
 
 class TaskPriority(int, Enum):
@@ -281,7 +282,9 @@ class OrchestrationExecutor:
 
         overall_status = TaskStatus.COMPLETED
         if failed_count > 0:
-            overall_status = TaskStatus.FAILED if completed_count == 0 else TaskStatus.COMPLETED
+            overall_status = TaskStatus.PARTIALLY_COMPLETED if completed_count > 0 else TaskStatus.FAILED
+        elif skipped_count > 0 and completed_count == 0:
+            overall_status = TaskStatus.SKIPPED
 
         errors = [
             f"{tid}: {t.error}"

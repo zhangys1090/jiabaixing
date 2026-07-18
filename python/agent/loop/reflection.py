@@ -14,6 +14,8 @@ from agent.loop.reflection_knowledge_base import (
     ReflectionExperience,
     ReflectionKnowledgeBase,
 )
+from agent.core.otel_tracer import otel_trace
+from opentelemetry import trace as _otel_trace_api
 
 
 ERROR_CATEGORIES: list[tuple[re.Pattern[str], str]] = [
@@ -165,8 +167,8 @@ class ReflectionEngine:
             "lightweight_reflection_total_ms": 0.0,
         }
 
-        # 轻量级反思配置
-        self._lightweight_enabled = os.environ.get("LIGHTWEIGHT_REFLECTION_ENABLED", "false").lower() == "true"
+        # 轻量级反思配置 — P0 修复：默认启用，确保每轮自动反思实际生效
+        self._lightweight_enabled = os.environ.get("LIGHTWEIGHT_REFLECTION_ENABLED", "true").lower() == "true"
         self._lightweight_max_ms = float(os.environ.get("LIGHTWEIGHT_REFLECTION_MAX_MS", "500"))
 
         # 反思知识库（可选）
@@ -174,7 +176,8 @@ class ReflectionEngine:
         if enable_kb is not None:
             self._kb_enabled = enable_kb
         else:
-            self._kb_enabled = os.environ.get("REFLECTION_KB_ENABLED", "").lower() == "true"
+            # P0 修复：默认启用反思知识库，提升经验复用率
+            self._kb_enabled = os.environ.get("REFLECTION_KB_ENABLED", "true").lower() == "true"
         self._logger = StructuredLogger("reflection_engine")
 
         if self._kb_enabled and not self._kb:
@@ -185,6 +188,7 @@ class ReflectionEngine:
                 self._logger.warning("Failed to initialize knowledge base", error=str(e))
                 self._kb = None
 
+    @otel_trace("loop.reflection")
     async def reflect(
         self,
         tool_name: str,
@@ -195,6 +199,12 @@ class ReflectionEngine:
         self._metrics["total_reflections"] += 1
         ctx = context or {}
         similar = self.get_relevant_experiences(tool_name, error, 3)
+
+        # OTel span 属性：反思类型
+        try:
+            _otel_trace_api.get_current_span().set_attribute("reflection_type", "failure")
+        except Exception:
+            pass
 
         prompt = self._build_reflect_prompt(tool_name, args, error, ctx, similar)
         try:
@@ -208,6 +218,11 @@ class ReflectionEngine:
             if parsed:
                 if similar:
                     self._metrics["experience_reuses"] += 1
+                # OTel span 属性：反思成功
+                try:
+                    _otel_trace_api.get_current_span().set_attribute("success", True)
+                except Exception:
+                    pass
                 return ReflectionResult(
                     root_cause=parsed.get("rootCause", f"{tool_name} 执行失败"),
                     corrected_args=parsed.get("correctedArgs"),
@@ -217,8 +232,14 @@ class ReflectionEngine:
 
             return self._fallback_reflect(tool_name, error)
         except Exception:
+            # OTel span 属性：反思失败
+            try:
+                _otel_trace_api.get_current_span().set_attribute("success", False)
+            except Exception:
+                pass
             return self._fallback_reflect(tool_name, error)
 
+    @otel_trace("loop.reflection")
     async def deep_reflect(
         self,
         user_input: str,
@@ -235,6 +256,12 @@ class ReflectionEngine:
         self._metrics["deep_reflections"] += 1
         prompt = self._build_deep_reflect_prompt(user_input, trajectory, eval_result)
 
+        # OTel span 属性：反思类型
+        try:
+            _otel_trace_api.get_current_span().set_attribute("reflection_type", "deep")
+        except Exception:
+            pass
+
         try:
             response = await self.llm.chat(
                 messages=[{"role": "user", "content": prompt}],
@@ -245,6 +272,11 @@ class ReflectionEngine:
 
             if parsed and parsed.get("diagnosis"):
                 self._metrics["deep_reflection_successes"] += 1
+                # OTel span 属性：深度反思成功
+                try:
+                    _otel_trace_api.get_current_span().set_attribute("success", True)
+                except Exception:
+                    pass
                 return DeepReflectionResult(
                     diagnosis=parsed.get("diagnosis", "未知诊断"),
                     root_cause=parsed.get("rootCause", "未知"),
@@ -254,6 +286,11 @@ class ReflectionEngine:
 
             return self._fallback_deep_reflect(trajectory, eval_result)
         except Exception:
+            # OTel span 属性：深度反思失败
+            try:
+                _otel_trace_api.get_current_span().set_attribute("success", False)
+            except Exception:
+                pass
             return self._fallback_deep_reflect(trajectory, eval_result)
 
     async def reflect_on_task_failure(

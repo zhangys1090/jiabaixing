@@ -43,11 +43,33 @@ async def health():
 @root_router.get("/v1/status", response_model=StatusResponse)
 async def status():
     eng = get_engine()
+    memory_entries = 0
+    active_sessions = 0
+    skills_count = 0
+
+    if eng:
+        try:
+            if hasattr(eng, "memory") and eng.memory:
+                stats = eng.memory.get_stats()
+                memory_entries = stats.get("total_entries", 0)
+        except Exception:
+            pass
+        try:
+            if hasattr(eng, "session_store") and eng.session_store:
+                active_sessions = len(eng.session_store.list_sessions())
+        except Exception:
+            pass
+        try:
+            if hasattr(eng, "tool_registry") and eng.tool_registry:
+                skills_count = eng.tool_registry.size()
+        except Exception:
+            pass
+
     return StatusResponse(
         llm_model=eng.llm.model if eng else "",
-        memory_entries=0,
-        active_sessions=0,
-        skills_count=0,
+        memory_entries=memory_entries,
+        active_sessions=active_sessions,
+        skills_count=skills_count,
     )
 
 
@@ -62,6 +84,8 @@ async def chat(req: ChatRequest) -> ChatResponse:
         session_id=req.session_id,
         context_files=req.context_files,
         use_loop=use_loop,
+        user_id=req.user_id,
+        strategy_name=req.strategy_name,
     )
     return ChatResponse(**result)
 
@@ -84,6 +108,9 @@ async def stream_chat(websocket: WebSocket, session_id: str):
                 continue
 
             trace_id = data.get("trace_id", "")
+            # 灰度参数：从 WebSocket 消息体读取，支持端到端灰度发布
+            ws_user_id = data.get("user_id")
+            ws_strategy_name = data.get("strategy_name")
 
             await websocket.send_json(StreamChunk(
                 type="stream_start",
@@ -105,6 +132,8 @@ async def stream_chat(websocket: WebSocket, session_id: str):
                     result = await eng.process_input(
                         message=message,
                         session_id=session_id,
+                        user_id=ws_user_id,
+                        strategy_name=ws_strategy_name,
                     )
                     content = result.get("content", "")
                     chunk_size = 20

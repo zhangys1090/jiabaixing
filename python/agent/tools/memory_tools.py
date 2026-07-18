@@ -13,7 +13,11 @@ from agent.tools.registry import (
 MEMORY_RECALL_DEF = ToolDefinition(
     name="memory_recall",
     description='搜索用户的历史记忆和背景信息。适用场景：用户提到"之前说过"、"上次聊的"、或者需要了解用户偏好/习惯/背景时。不适用：普通聊天问候、上下文中已有足够信息。',
+    short_desc="搜索历史记忆",
     category=ToolCategory.MEMORY,
+    tags=["memory", "recall", "search", "history"],
+    scenes=["coding", "daily", "research", "comfort"],
+    capability_level=1,
     parameters=[
         ToolParameterDef(name="query", type="string", description="搜索关键词"),
         ToolParameterDef(name="limit", type="number", required=False, description="返回结果数量上限"),
@@ -24,7 +28,11 @@ MEMORY_RECALL_DEF = ToolDefinition(
 MEMORY_SEARCH_DEF = ToolDefinition(
     name="memory_search",
     description="按条件搜索记忆。适用场景：查找特定类型的记忆、按时间范围搜索。不适用：简单关键词搜索（用 memory_recall）。",
+    short_desc="按条件搜索记忆",
     category=ToolCategory.MEMORY,
+    tags=["memory", "search", "filter"],
+    scenes=["coding", "daily", "research"],
+    capability_level=1,
     parameters=[
         ToolParameterDef(name="query", type="string", description="搜索关键词"),
         ToolParameterDef(name="scene", type="string", required=False, description="场景过滤"),
@@ -36,7 +44,11 @@ MEMORY_SEARCH_DEF = ToolDefinition(
 MEMORY_STORE_DEF = ToolDefinition(
     name="memory_store",
     description="存储信息到记忆系统。适用场景：用户明确要求记住某些信息、重要偏好/习惯需要持久化。不适用：临时对话内容（系统自动处理）。",
+    short_desc="存储信息到记忆",
     category=ToolCategory.MEMORY,
+    tags=["memory", "store", "save"],
+    scenes=["coding", "daily", "research", "comfort"],
+    capability_level=1,
     parameters=[
         ToolParameterDef(name="content", type="string", description="要存储的内容"),
         ToolParameterDef(name="type", type="string", required=False, description="记忆类型: short_term/long_term/instant", enum=["short_term", "long_term", "instant"]),
@@ -49,7 +61,11 @@ MEMORY_STORE_DEF = ToolDefinition(
 KNOWLEDGE_QUERY_DEF = ToolDefinition(
     name="knowledge_query",
     description="查询知识库中的结构化知识。适用场景：查询已保存的文档、FAQ、专业知识。不适用：搜索对话记忆（用 memory_recall）。",
+    short_desc="查询知识库",
     category=ToolCategory.MEMORY,
+    tags=["memory", "knowledge", "query", "faq"],
+    scenes=["coding", "research", "daily"],
+    capability_level=1,
     parameters=[
         ToolParameterDef(name="query", type="string", description="查询问题"),
         ToolParameterDef(name="domain", type="string", required=False, description="知识领域"),

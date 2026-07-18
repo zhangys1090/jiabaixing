@@ -11,7 +11,7 @@ from agent.evolution.engine import EvolutionEngine
 from agent.evolution.llm_capability_detector import LLMCapabilityDetector, LLMCapabilities, LLMProtocol
 from agent.evolution.strategy_adapter import StrategyAdapter
 from agent.evolution.types import RollbackSnapshot
-from agent.evolution.v2_engine import EvolutionEngineV2
+from agent.evolution.v2_engine import EvolutionEngineV2, V2EvolutionCause
 
 log = StructuredLogger("evolution_orchestrator")
 
@@ -321,22 +321,35 @@ class EvolutionOrchestrator:
                 last = self._engine_last_triggered.get("EvolutionEngineV2", 0)
                 if now - last >= cooldown / 1000:
                     try:
-                        cause = self._detect_v2_evolution_cause()
-                        if cause:
-                            plan = await self._evolution_engine_v2.plan_evolution(cause)
-                            if plan and plan.actions:
-                                v2_result = await self._evolution_engine_v2.execute(plan)
+                        cause_dict = self._detect_v2_evolution_cause()
+                        if cause_dict:
+                            # _detect_v2_evolution_cause 返回 dict，需转换为 V2EvolutionCause；
+                            # 且 EvolutionEngineV2 的公开 API 为 trigger_evolution（内部完成
+                            # generate_evolution_plan + 执行 + 校验 + 回滚），历史上误调用
+                            # 不存在的 plan_evolution/execute 导致 AttributeError 被吞、V2 从不执行。
+                            cause = V2EvolutionCause(
+                                type=str(cause_dict.get("type", "")),
+                                description=str(cause_dict.get("description", "")),
+                                context=cause_dict.get("context", {}) or {},
+                                timestamp=float(cause_dict.get("timestamp", now)),
+                            )
+                            v2_result = await self._evolution_engine_v2.trigger_evolution(cause)
+                            if v2_result is not None:
                                 results.append(OptimizationCycleResult(
                                     engine_name="EvolutionEngineV2",
                                     triggered=True,
-                                    detail=f"Plan: {plan.title}, Success: {v2_result.success}",
+                                    detail=(
+                                        f"Cause: {cause.type}, Success: {v2_result.success}, "
+                                        f"actions: {v2_result.executed_actions}, "
+                                        f"validation: {v2_result.validation_passed}"
+                                    ),
                                 ))
                                 self._engine_last_triggered["EvolutionEngineV2"] = now
                             else:
                                 results.append(OptimizationCycleResult(
                                     engine_name="EvolutionEngineV2",
                                     triggered=False,
-                                    detail="No plan generated",
+                                    detail="No plan generated / evolution skipped",
                                 ))
                         else:
                             results.append(OptimizationCycleResult(
@@ -663,6 +676,7 @@ class EvolutionOrchestrator:
             timestamp=time.time(),
             avg_quality=avg_q,
             avg_response_time_ms=avg_rt,
+            interaction_count=self._interaction_count,
             tool_weights={},
             reason=reason,
         )
@@ -671,9 +685,9 @@ class EvolutionOrchestrator:
         """检查待验证的优化，若质量下降则触发回滚。"""
         expired: list[str] = []
         for cycle_id, snapshot in self._pending_rollbacks.items():
-            # 等待足够多的交互后再验证
-            elapsed = self._interaction_count - (self._optimization_cycles[-1].timestamp if self._optimization_cycles else 0)
-            if elapsed < 1:
+            # 等待足够多的交互后再验证（审计 E-01：原用"交互计数 − 时间戳"恒为负，
+            # 导致回滚判断永不触发；改为基于快照时的交互计数差值）
+            if self._interaction_count - snapshot.interaction_count < self._VERIFICATION_INTERACTIONS:
                 continue
 
             if current_quality < snapshot.avg_quality - self._ROLLBACK_THRESHOLD:

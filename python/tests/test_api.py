@@ -1,3 +1,5 @@
+import sys
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -22,7 +24,8 @@ async def test_health(client: AsyncClient):
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "ok"
-    assert data["python_version"] == "3.13.0"
+    # 端点返回真实解释器版本，断言应与当前运行环境一致（避免硬编码版本随运行时漂移）。
+    assert data["python_version"] == sys.version.split()[0]
 
 
 @pytest.mark.anyio
@@ -84,3 +87,25 @@ async def test_plan_endpoint_exists(client: AsyncClient):
         json={"task": "test task", "session_id": "test"},
     )
     assert resp.status_code in (200, 502, 503)
+
+
+@pytest.mark.anyio
+async def test_evolution_metrics_endpoint(client: AsyncClient):
+    """TS EvolutionEngine.getMetrics 的 Python 主实现端点（删除 TS 后由 Python 承接）。"""
+    resp = await client.get("/v1/evolution/metrics")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "available" in data
+    assert "tool_weights" in data
+    assert "metrics" in data
+
+
+@pytest.mark.anyio
+async def test_evolution_insights_endpoint(client: AsyncClient):
+    """TS EvolutionEngine.getInsights 的 Python 主实现端点（删除 TS 后由 Python 承接）。"""
+    resp = await client.get("/v1/evolution/insights")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "available" in data
+    assert "insights" in data
+    assert "recommendations" in data

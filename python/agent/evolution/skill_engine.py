@@ -322,11 +322,76 @@ class SkillAutoGenerator:
             skills_dir = Path(__file__).resolve().parent.parent.parent / "data" / "evolution" / "skills"
         self._skills_dir = Path(skills_dir)
         self._skills_dir.mkdir(parents=True, exist_ok=True)
+        # 语义去重缓存 - 存储已生成skill的输入文本hash
+        self._generated_inputs: list[tuple[str, float]] = []  # (text_hash, timestamp)
+
+    def _text_hash(self, text: str) -> str:
+        """生成文本的词袋hash用于快速比较,使用jieba分词"""
+        try:
+            import jieba
+            words = jieba.cut(text.lower())
+            return "|".join(sorted(set(w for w in words if len(w) >= 2)))
+        except ImportError:
+            # jieba不可用时退化为字符级hash
+            chars = set(text.lower())
+            return "|".join(sorted(c for c in chars if len(c) >= 1))
+
+    def _jaccard_similarity(self, text_a: str, text_b: str) -> float:
+        """计算两个文本的Jaccard相似度,使用jieba分词"""
+        try:
+            import jieba
+            words_a = set(w for w in jieba.cut(text_a.lower()) if len(w) >= 2)
+            words_b = set(w for w in jieba.cut(text_b.lower()) if len(w) >= 2)
+        except ImportError:
+            words_a = set(c for c in text_a.lower())
+            words_b = set(c for c in text_b.lower())
+        
+        if not words_a or not words_b:
+            return 0.0
+        
+        intersection = words_a & words_b
+        union = words_a | words_b
+        
+        return len(intersection) / len(union)
+
+    def _is_duplicate_input(self, new_input: str, threshold: float = 0.7) -> bool:
+        """检查新输入是否与已生成的skill输入高度相似"""
+        if len(self._generated_inputs) == 0:
+            return False
+        
+        now = time.time()
+        
+        # 清理超过30天的旧记录
+        self._generated_inputs = [
+            (h, t) for h, t in self._generated_inputs
+            if (now - t) < _STALE_AFTER_DAYS * 24 * 60 * 60
+        ]
+        
+        # 使用Jaccard相似度计算
+        for existing_hash, _ in self._generated_inputs:
+            sim = self._jaccard_similarity(new_input, existing_hash)
+            if sim >= threshold:
+                return True
+        
+        return False
+
+    def _track_generated_input(self, text: str) -> None:
+        """记录已生成的skill输入用于去重"""
+        text_hash = self._text_hash(text)
+        self._generated_inputs.append((text_hash, time.time()))
 
     def generate(self, params: SkillGenerationParams) -> str | None:
         if params.quality_score < _MIN_QUALITY_FOR_GENERATION:
             return None
         if not params.input or len(params.input) < _MIN_INPUT_LENGTH:
+            return None
+
+        # 新增: 语义去重检查
+        if self._is_duplicate_input(params.input, threshold=0.7):
+            log.debug(
+                "Skill generation skipped: semantically duplicate input",
+                input_hash=self._text_hash(params.input)[:16],
+            )
             return None
 
         skill_name = self._skill_name_from_input(params.input)
@@ -390,6 +455,8 @@ _由 jiabaixing SkillAutoGenerator 于 {time.strftime('%Y-%m-%d %H:%M:%S', time.
 """
         try:
             skill_path.write_text(content, encoding="utf-8")
+            # 记录输入用于语义去重
+            self._track_generated_input(params.input)
             self._tracker.register(skill_name, str(skill_path), params.quality_score, source="auto")
             log.info("Skill generated", name=skill_name, quality=f"{params.quality_score:.2f}")
             return str(skill_path)

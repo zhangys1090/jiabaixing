@@ -27,19 +27,6 @@ class TransportConfig:
 
 
 @dataclass
-class UnifiedMessage:
-    role: str
-    content: str
-
-
-@dataclass
-class UnifiedToolDef:
-    name: str
-    description: str
-    parameters: dict[str, Any]
-
-
-@dataclass
 class TransportRequest:
     url: str
     method: str = "POST"
@@ -79,6 +66,7 @@ class BaseTransport(ABC):
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
         stream: bool = False,
+        tool_choice: str = "auto",
     ) -> TransportRequest:
         ...
 
@@ -109,6 +97,7 @@ class ChatCompletionsTransport(BaseTransport):
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
         stream: bool = False,
+        tool_choice: str = "auto",
     ) -> TransportRequest:
         base_url = self._config.base_url.rstrip("/")
         url = f"{base_url}/chat/completions"
@@ -125,7 +114,7 @@ class ChatCompletionsTransport(BaseTransport):
         }
         if tools:
             body["tools"] = tools
-            body["tool_choice"] = "auto"
+            body["tool_choice"] = tool_choice
         return TransportRequest(url=url, method="POST", headers=headers, body=body)
 
     def normalize_response(self, raw: dict[str, Any]) -> TransportResponse:
@@ -189,6 +178,7 @@ class AnthropicTransport(BaseTransport):
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
         stream: bool = False,
+        tool_choice: str = "auto",
     ) -> TransportRequest:
         base_url = self._config.base_url.rstrip("/")
         url = f"{base_url}/v1/messages"
@@ -299,6 +289,7 @@ class GeminiTransport(BaseTransport):
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
         stream: bool = False,
+        tool_choice: str = "auto",
     ) -> TransportRequest:
         model = self._config.model
         base_url = self._config.base_url.rstrip("/")
@@ -388,6 +379,7 @@ class BedrockTransport(BaseTransport):
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
         stream: bool = False,
+        tool_choice: str = "auto",
     ) -> TransportRequest:
         model = self._config.model
         region = self._config.extra.get("region", "us-east-1")

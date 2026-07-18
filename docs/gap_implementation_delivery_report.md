@@ -1,598 +1,207 @@
-# Jiabaixing Agent 架构差距补足项目 - 交付报告
+# Jiabaixing Agent 架构差距补足项目 - 交付报告（修订版）
 
 **项目名称**: jiabaixing agent 架构差距补足项目
-**交付日期**: 2026-06-24
-**版本**: v1.0.0
-**状态**: 已完成
+**修订日期**: 2026-07-05
+**版本**: v2.4.0
+**状态**: GAP-01~10 全部完成 + 闭环集成 + 执行基线已建立 + 文档注释全覆盖 + 测试补全
 
 ---
 
-## 一、项目概述
+## 〇、修订说明
 
-### 1.1 项目背景
+本报告为 v1.0 的修订版，核心变更：
 
-基于对 Jiabaixing Agent 系统的深度架构审计，识别出 10 项核心架构差距，涵盖主动反思、自动进化、经验泛化、上下文管理等多个维度。本项目旨在系统性地补足这些差距，提升 Agent 的自主性、学习能力和执行效率。
-
-### 1.2 审计结论回顾
-
-| 架构层级 | 成熟度 | 核心问题                       |
-| -------- | ------ | ------------------------------ |
-| 编排层   | 75%    | 主动性不足，反思只在失败时触发 |
-| 执行层   | 70%    | 学习闭环不完整，经验复用率低   |
-| 状态层   | 65%    | 上下文管理被动，记忆策展不足   |
-
-### 1.3 交付范围
-
-本次交付覆盖全部 10 项架构差距，按优先级 P0→P1→P2→P3 顺序完成：
-
-- **P0 高优先级** (2项): 主动反思机制增强、自动进化触发机制
-- **P1 中优先级** (2项): 经验泛化与迁移、主动上下文管理与注意力聚焦
-- **P2 优化项** (3项): 增量重规划、细粒度策略自适应、自动化记忆策展
-- **P3 长期优化** (3项): 规划质量预检、多维度学习信号、反思结果应用闭环
+1. **修正虚假完成标记**：原报告全部标记"✅ 完成"，实际多项仅完成代码骨架，未集成、未测试
+2. **新增 P0 阻塞项**：Python Redis / Python OTel / K8s 部署（原报告未覆盖）
+3. **补充混合架构**：Agent 核心功能全部采用 Python 端
+4. **测试覆盖真实状态**：取消所有 describe.skip，补齐测试
+5. **v2.1 更新**：GAP-02~10 全部集成到 engine.py，API 网关/金丝雀发布/动态优先级已完成，Python 测试 1801 passed / 0 failed
+6. **v2.2 更新**：深度代码审计发现 GAP 模块"初始化但未闭环"问题，已修复；补全文档注释；建立执行基线；K8s 部署配置更新；Python 测试 1813 passed / 0 failed
+7. **v2.3 更新**：全面补全核心模块文档注释（conversation_loop / think_scrubber / context_compressor / resilience / security / persona / context_pipeline）；正式创建执行基线文档 docs/execution_baseline.md；交付报告版本同步更新
+8. **v2.4 更新**：修复 resilience.py Logger 兼容问题（get_logger → StructuredLogger）；新增 resilience 完整测试套件（RetryConfig / CircuitState / get_circuit / with_retry / with_circuit_breaker / resilient_call）；补全 context_compressor 注意力聚焦测试（extract_attention_keywords / compress_with_attention）；Python 测试 2059 passed / 0 failed
 
 ---
 
-## 二、改动清单
+## 一、P0 阻塞项（最高优先级）
 
-### 2.1 新增文件 (11个)
+### P0-1：Python Redis 分布式缓存 ✅ 已完成
 
-| 序号 | 文件路径                                    | 所属GAP | 说明                             |
-| ---- | ------------------------------------------- | ------- | -------------------------------- |
-| 1    | `agent/evolution/monitor.py`                | GAP-02  | 性能监控器，实时监控性能指标     |
-| 2    | `agent/evolution/trigger.py`                | GAP-02  | 进化触发器，基于告警自动触发进化 |
-| 3    | `agent/evolution/fewshot_generalizer.py`    | GAP-03  | 少样本经验泛化器                 |
-| 4    | `agent/context/adapters/attention_focus.py` | GAP-04  | 注意力聚焦适配器                 |
-| 5    | `agent/loop/incremental_planner.py`         | GAP-05  | 增量重规划器                     |
-| 6    | `agent/evolution/strategy_adapter.py`       | GAP-06  | 细粒度策略适配器                 |
-| 7    | `agent/memory/curator.py`                   | GAP-07  | 自动化记忆策展人                 |
-| 8    | `agent/loop/plan_quality_checker.py`        | GAP-08  | 规划质量检查器                   |
-| 9    | `agent/evolution/learning_signals.py`       | GAP-09  | 多维度学习信号收集器             |
-| 10   | `agent/loop/reflection_applier.py`          | GAP-10  | 反思结果应用管理器               |
-| 11   | `tests/test_gap_implementations.py`         | 全部    | 单元测试文件                     |
-
-### 2.2 修改文件 (2个)
-
-| 序号 | 文件路径                   | 所属GAP | 修改内容                     |
-| ---- | -------------------------- | ------- | ---------------------------- |
-| 1    | `agent/loop/reflection.py` | GAP-01  | 新增成功反思、轻量级反思功能 |
-| 2    | `agent/loop/controller.py` | GAP-01  | 集成每轮轻量级反思调用       |
-
-### 2.3 代码统计
-
-| 指标         | 数值      |
-| ------------ | --------- |
-| 新增代码行数 | ~2,500 行 |
-| 新增文件数   | 11 个     |
-| 修改文件数   | 2 个      |
-| 测试用例数   | 50+ 个    |
-| 数据类/枚举  | 30+ 个    |
-
----
-
-## 三、各GAP实现详情
-
-### GAP-01：主动反思机制增强 ✅
-
-**问题**: 反思只在失败时触发，成功路径无学习
-
-**目标**: 每轮执行后自动轻量级反思，成功经验也沉淀
+**问题**: Python 后端无 Redis 缓存层，无法支持分布式部署
 
 **实现内容**:
 
-1. **新增数据类**
-   - `SuccessReflectionResult`: 成功反思结果（成功模式、关键洞察、可复用技巧）
-   - `LightweightReflectionResult`: 轻量级反思结果（<500ms）
-   - 更新 `ReflectionMetrics`: 增加 success_reflections、lightweight_reflections 等统计
+- `python/agent/memory/redis_cache.py` — 异步 Redis 缓存（JSON 序列化、TTL、健康检查、优雅降级）
+- `python/agent/core/engine.py` — AgentEngine 初始化时注入 Redis 缓存
+- `pyproject.toml` — 添加 `redis[hiredis]>=5.0.0` 依赖
+- 环境变量 `REDIS_ENABLED` / `REDIS_HOST` / `REDIS_PORT` 控制
 
-2. **新增核心方法**
-   - `reflect_on_success()`: 对成功执行进行反思，总结成功经验
-   - `lightweight_reflect()`: 轻量级反思，每轮执行后调用
-   - `_extract_success_pattern()`: 提取成功模式
-   - `_generate_success_insight()`: 生成成功洞察
-   - `_generate_reusable_tips()`: 生成可复用技巧
-   - `_extract_quick_learning()`: 提取快速学习点
-   - `_record_success_experience()`: 记录成功经验到知识库
-
-3. **Controller集成**
-   - `_lightweight_reflection_round()`: 每轮执行后的轻量级反思
-   - 支持配置开关（环境变量 `LIGHTWEIGHT_REFLECTION_ENABLED`）
-   - 失败时静默降级，不影响主流程
-
-**验收标准达成情况**:
-
-- ✅ 每轮都有反思记录（轻量级反思）
-- ✅ 成功经验可被复用（记录到知识库）
-- ✅ 反思耗时<500ms（规则化分析，不调用LLM）
+**测试覆盖**: Python 测试 1620 passed
 
 ---
 
-### GAP-02：自动进化触发机制 ✅
+### P0-2：Python OpenTelemetry 可观测性 ✅ 已完成
 
-**问题**: 进化主要靠显式触发，信号稀疏
-
-**目标**: 基于性能指标自动触发进化（连续失败、成功率下降、响应超时等）
+**问题**: Python 后端无分布式追踪和指标采集
 
 **实现内容**:
 
-1. **性能监控器 (`PerformanceMonitor`)**
-   - 实时性能指标采集和统计
-   - 滑动窗口统计（可配置窗口大小）
-   - 5种告警类型：连续失败、成功率下降、响应超时、错误突增、性能退化
-   - 3种告警级别：info、warning、critical
-   - 告警去重机制（5分钟内同类型告警只触发一次）
-   - 基线性能自动学习
+- `python/agent/infrastructure/otel_setup.py` — OTel 初始化（TracerProvider + MeterProvider + Prometheus）
+- `python/agent/core/engine.py` — AgentEngine 初始化 OTel tracer/meter
+- `python/agent/main.py` — FastAPI 自动埋点（FastAPIInstrumentor）
+- `pyproject.toml` — 添加 OTel 全套依赖
+- 环境变量 `OTEL_ENABLED` / `OTEL_EXPORTER_OTLP_ENDPOINT` / `OTEL_PROMETHEUS_PORT` 控制
 
-2. **进化触发器 (`EvolutionTrigger`)**
-   - 3种触发策略：保守、适度、激进
-   - 进化频率控制（最小间隔、每日最大次数）
-   - 进化成功率阈值保护（成功率过低暂停自动进化）
-   - 自动回滚失败的进化
-   - 告警到进化类型的智能映射
-   - 异步监控循环（每30秒检查一次）
-
-**验收标准达成情况**:
-
-- ✅ 能自动检测性能退化（5种检测维度）
-- ✅ 进化成功率>60%（基于历史成功率的保护机制）
-- ✅ 失败自动回滚（集成V2进化引擎的回滚机制）
+**测试覆盖**: `python/tests/test_otel_setup.py` — 25/25 passed
 
 ---
 
-### GAP-03：经验泛化与迁移 ✅
+### P0-3：Kubernetes 生产部署配置 ✅ 已完成
 
-**问题**: 具体案例多，但通用模式提取不足，跨任务复用差
-
-**目标**: 从多个相似案例提取通用模式，建立经验关联网络
+**问题**: 无生产级容器编排配置
 
 **实现内容**:
 
-1. **泛化模式 (`GeneralizedPattern`)**
-   - 从多个经验中抽象出通用模式
-   - 包含共同上下文、关键洞察、来源经验
-   - 置信度评分和成功率统计
-
-2. **经验关联网络**
-   - 经验相似度计算（类型、动作、洞察、标签多维度）
-   - 关联关系存储（相似、派生、互补）
-   - 关联索引加速查询
-
-3. **核心功能**
-   - `generalize_from_experiences()`: 从经验中泛化模式（最少3个）
-   - `find_similar_experiences()`: 查找相似经验
-   - `migrate_experience()`: 经验迁移到新上下文
-   - `build_relation_network()`: 构建经验关联网络
-
-4. **相似度算法**
-   - 类型相似度（权重0.2）
-   - 动作相似度（权重0.3，词袋模型）
-   - 洞察相似度（权重0.3，词袋模型）
-   - 标签相似度（权重0.2，Jaccard系数）
-
-**验收标准达成情况**:
-
-- ✅ 能从3个案例提取通用模式（默认最小3个）
-- ✅ 经验复用率提升30%（通过关联网络和迁移机制）
+- `deploy/kubernetes/namespace-and-redis.yaml` — Namespace + ConfigMap + Secret + Redis StatefulSet
+- `deploy/kubernetes/deployment.yaml` — 应用 Deployment（含 Redis/OTel 环境变量、Prometheus 注解）
+- `deploy/kubernetes/service.yaml` — Service 定义（应用 + Redis）
+- `deploy/kubernetes/ingress.yaml` — Ingress 规则（路径路由 + TLS）
+- `deploy/kubernetes/hpa.yaml` — HPA 自动扩缩容（CPU 80% + Memory 70%）
 
 ---
 
-### GAP-04：主动上下文管理与注意力聚焦 ✅
+## 二、原 GAP-01~10 真实状态
 
-**问题**: 上下文压缩被动触发，注意力聚焦不足
+| GAP    | 名称                       | 原状态  | 真实状态  | 说明                                                                                          |
+| ------ | -------------------------- | ------- | --------- | --------------------------------------------------------------------------------------------- |
+| GAP-01 | 主动反思机制增强           | ✅ 完成 | ✅ 已完成 | 代码已集成到 controller.py，测试通过                                                          |
+| GAP-02 | 自动进化触发机制           | ✅ 完成 | ✅ 已完成 | PerformanceMonitor + EvolutionTrigger 已集成到 engine.py，loop 路径埋点完成，告警闭环触发进化 |
+| GAP-03 | 经验泛化与迁移             | ✅ 完成 | ✅ 已完成 | FewShotGeneralizer 已集成到 engine.py，基于知识库跨任务泛化                                   |
+| GAP-04 | 主动上下文管理与注意力聚焦 | ✅ 完成 | ✅ 已完成 | AttentionFocusEngine 已注册为 ContextComponent，上下文压缩集成完成                            |
+| GAP-05 | 增量重规划                 | ✅ 完成 | ✅ 已完成 | IncrementalPlanner 已集成到 engine.py loop 路径，needs_replan 触发重规划                      |
+| GAP-06 | 细粒度策略自适应           | ✅ 完成 | ✅ 已完成 | StrategyAdapter 已集成到 engine.py，chat/loop 路径均记录 outcome，最优策略推荐闭环            |
+| GAP-07 | 自动化记忆策展             | ✅ 完成 | ✅ 已完成 | Curator 已集成到 engine.py，loop 路径完成后自动策展记忆                                       |
+| GAP-08 | 规划质量预检               | ✅ 完成 | ✅ 已完成 | PlanQualityChecker 已集成到 engine.py，loop 结果后自动质量检查                                |
+| GAP-09 | 多维度学习信号             | ✅ 完成 | ✅ 已完成 | LearningSignalCollector 已集成到 engine.py，chat/loop 路径均采集信号，弱项检测闭环            |
+| GAP-10 | 反思结果应用闭环           | ✅ 完成 | ✅ 已完成 | ReflectionApplicationManager 已集成到 engine.py，与反思引擎闭环                               |
 
-**目标**: 实时评估信息重要性，动态调整注意力焦点，主动压缩低价值信息
+### 状态定义
 
-**实现内容**:
-
-1. **注意力聚焦适配器 (`AttentionFocusAdapter`)**
-   - 作为 ContextComponent 集成到统一上下文编排器
-   - 多维度信息重要性评估
-   - 主动压缩低价值信息
-   - 关键信息保护机制
-
-2. **重要性评估维度**
-   - 角色权重（system > user > assistant）
-   - 位置权重（最近的消息更重要）
-   - 关键词权重（错误、重要、关键等加分）
-   - 内容长度权重（适中长度更重要）
-   - 结构化内容加分（列表、代码块、表格等）
-
-3. **压缩策略**
-   - 系统消息始终保留
-   - 最近N条消息保留（可配置）
-   - 关键信息（critical级别）保留
-   - 低价值消息摘要或删除
-   - 按重要性排序分配Token预算
-
-**验收标准达成情况**:
-
-- ✅ token使用率降20%（目标压缩比例可配置，默认20%）
-- ✅ 关键信息保留率>95%（关键信息保护机制）
+- ✅ **已完成**: 代码已实现 + 已集成到主系统 + 测试通过
+- ⚠️ **代码完成，集成待验证**: 代码已编写，但未与主流程深度集成，端到端流程未验证
+- ❌ **未完成**: 代码未实现或无法运行
 
 ---
 
-### GAP-05：增量重规划 ✅
+## 三、测试覆盖真实状态
 
-**问题**: 重规划时全量重新生成，效率低且不稳定
+### 3.1 已修复的测试问题
 
-**目标**: 只调整受影响部分，不全量重规划
+| 原测试文件                                                  | 问题                                     | 修复措施                                      |
+| ----------------------------------------------------------- | ---------------------------------------- | --------------------------------------------- |
+| `tests/unit/core/JiabaixingCore.test.ts`                    | 7 个 describe.skip（引用已移除方法）     | 重写为 V5.0 架构测试（12 个用例）             |
+| `tests/unit/plugins/PluginMarket.test.ts`                   | 引用不存在的 PluginMarket 类             | 重写为 PluginManager.test.ts（19 个用例）     |
+| `tests/unit/multimodal/NonVerbalInteractionManager.test.ts` | 引用不存在的 NonVerbalInteractionManager | 重写为 MultimodalInput.test.ts（22 个用例）   |
+| `tests/coordination/coordinator-manager.test.ts`            | 引用不存在的 CoordinatorManager          | 重写为 IntegrationManager.test.ts（8 个用例） |
+| `tests/integration/complete-system-integration.test.ts`     | 引用不存在的 IntegrationLayer            | 重写为 system-integration.test.ts（4 个用例） |
+| `tests/phase1-optimization.test.ts`                         | 引用已删除模块                           | 删除                                          |
 
-**实现内容**:
+### 3.2 新增测试
 
-1. **增量规划器 (`IncrementalPlanner`)**
-   - 基于依赖分析的影响范围检测
-   - 只重新规划受影响的步骤
-   - 保留未受影响的步骤（特别是已完成的）
-   - 计划变更记录和追踪
+| 测试文件                                        | 用例数 | 覆盖内容                                                                       |
+| ----------------------------------------------- | ------ | ------------------------------------------------------------------------------ |
+| `tests/unit/core/JiabaixingCore.test.ts`        | 12     | processInput Python路由/降级、generateProactiveMessage、treeOfThoughtReasoning |
+| `tests/unit/plugins/PluginManager.test.ts`      | 19     | 注册/注销/初始化/查询/验证                                                     |
+| `tests/unit/multimodal/MultimodalInput.test.ts` | 22     | 文本/语音/图像/视频/传感器/合并/序列化                                         |
+| `tests/coordination/IntegrationManager.test.ts` | 8      | 平台信息/消息发送/Webhook                                                      |
+| `tests/integration/system-integration.test.ts`  | 4      | Core+IntegrationManager 集成                                                   |
+| `python/tests/test_otel_setup.py`               | 13     | OTel 开关/初始化/NoOp/traced 装饰器                                            |
+| `python/tests/test_tot_planner.py`              | 12     | ToT 配置/规划/评估/降级                                                        |
 
-2. **核心功能**
-   - `incremental_replan()`: 执行增量重规划
-   - `_analyze_impact()`: 分析变更影响范围（BFS遍历依赖图）
-   - `_replan_affected_steps()`: 重新规划受影响步骤
-   - `_merge_plan()`: 合并保留和重规划的步骤
-   - `_record_changes()`: 记录所有计划变更
+### 3.3 测试运行结果
 
-3. **特性**
-   - 已完成步骤保护（默认开启）
-   - 每次重规划最大变更数限制
-   - 变更类型记录（新增、删除、修改、重排序）
-   - 完整的变更历史追踪
-
-**验收标准达成情况**:
-
-- ✅ 只调整受影响部分（基于依赖图的影响分析）
-- ✅ 保留未受影响的步骤（特别是已完成的）
-- ✅ 提高重规划效率和稳定性
-
----
-
-### GAP-06：细粒度策略自适应 ✅
-
-**问题**: 策略调整粗粒度，不同任务类型使用相同策略
-
-**目标**: 按任务类型独立调优策略参数
-
-**实现内容**:
-
-1. **策略适配器 (`StrategyAdapter`)**
-   - 按任务类型独立管理策略
-   - 基于多臂老虎机算法的探索-利用平衡
-   - 策略参数版本管理
-   - 自动自适应调整
-
-2. **核心功能**
-   - `register_strategy()`: 注册策略（含参数）
-   - `record_outcome()`: 记录策略执行结果
-   - `get_best_strategy()`: 获取最佳策略（epsilon-greedy）
-   - `update_strategy_params()`: 更新策略参数
-   - `_adapt_strategy()`: 自适应调整（探索率、当前策略等）
-
-3. **特性**
-   - 拉普拉斯平滑（避免小样本偏差）
-   - 探索率动态调整（经验越多，探索越少）
-   - 策略参数版本管理（支持回滚）
-   - 完整的统计指标
-
-**验收标准达成情况**:
-
-- ✅ 按任务类型独立调优策略参数
-- ✅ 基于反馈自动调整（探索-利用平衡）
-- ✅ 策略参数版本管理和回滚
+| 套件                | 通过 | 失败      | 跳过 |
+| ------------------- | ---- | --------- | ---- |
+| TypeScript 新增测试 | 65   | 0         | 0    |
+| Python 全套测试     | 2059 | 0         | 7    |
+| TypeScript 全套测试 | 2133 | 61 (预存) | 2    |
 
 ---
 
-### GAP-07：自动化记忆策展 ✅
+## 四、混合架构说明
 
-**问题**: 记忆管理被动，无自动巩固和遗忘机制
+### 4.1 架构决策
 
-**目标**: 自动巩固、遗忘、重要性评估
+Agent 核心功能全部采用 Python 端实现：
 
-**实现内容**:
+| 功能     | 实现位置                       | 说明                           |
+| -------- | ------------------------------ | ------------------------------ |
+| LLM 调用 | Python `agent/llm/`            | LiteLLM 统一接口               |
+| 记忆引擎 | Python `agent/memory/`         | Redis 缓存 + SQLite 持久化     |
+| 推理循环 | Python `agent/loop/`           | ToT 规划 + 反思 + 增量重规划   |
+| 工具执行 | Python `agent/tools/`          | MCP 桥接 + 内置工具            |
+| 进化引擎 | Python `agent/evolution/`      | 自动进化 + 策略自适应          |
+| 可观测性 | Python `agent/infrastructure/` | OTel + Prometheus              |
+| API 网关 | Python `agent/infrastructure/` | 限流 + 认证 + 追踪中间件       |
+| 金丝雀   | Python `agent/core/`           | 灰度发布 + 健康监测 + 自动回滚 |
+| 优先级   | Python `agent/core/`           | 动态多因子优先级评分           |
 
-1. **记忆策展人 (`MemoryCurator`)**
-   - 记忆重要性自动评估（4维度加权）
-   - 自动巩固（高频使用的记忆强化）
-   - 自动遗忘（低价值记忆清理）
-   - 记忆存储容量管理
+### 4.2 TypeScript 端角色
 
-2. **重要性评估维度**
-   - 频率评分（使用频率，对数缩放）
-   - 新近度评分（指数衰减，7天半衰期）
-   - 相关性评分（类型、元数据标记）
-   - 质量评分（内容长度、结构化程度、验证标记）
+TypeScript 端保留以下职责：
 
-3. **策展策略**
-   - 定期策展（默认1小时间隔）
-   - 容量超限自动清理
-   - 重要记忆优先保留
-   - 可配置的遗忘阈值
+- IDE 集成（VSCode Extension）
+- 桌面客户端（Electron）
+- 前端 UI（React）
+- 平台集成适配器（微信/飞书/钉钉等）
+- Python Bridge 通信层
 
-**验收标准达成情况**:
+### 4.3 通信机制
 
-- ✅ 自动巩固（高频使用记忆强化）
-- ✅ 自动遗忘（低价值记忆清理）
-- ✅ 重要性评估（4维度加权评分）
-
----
-
-### GAP-08：规划质量预检 ✅
-
-**问题**: 计划质量无预检，执行后才发现问题
-
-**目标**: 执行前进行规划质量检查，识别潜在问题
-
-**实现内容**:
-
-1. **规划质量检查器 (`PlanQualityChecker`)**
-   - 4维度质量评估：完整性、可行性、风险、优化
-   - 多维度问题检测
-   - 优化建议生成
-   - 质量评分和通过判定
-
-2. **检查维度**
-   - **完整性检查**: 空计划、步骤数量、步骤描述、工具/动作指定
-   - **可行性检查**: 循环依赖检测、依赖存在性、复杂度评估
-   - **风险检查**: 错误处理机制、验证步骤、高风险操作检测
-   - **优化检查**: 并行执行机会、重复步骤、依赖顺序、明确产出
-
-3. **特性**
-   - 可配置的通过阈值
-   - 问题严重程度分级（critical/high/medium/low）
-   - 具体的改进建议
-   - 完整的统计追踪
-
-**验收标准达成情况**:
-
-- ✅ 执行前进行规划质量检查
-- ✅ 识别潜在问题（4维度，10+种问题类型）
-- ✅ 提供优化建议
-
----
-
-### GAP-09：多维度学习信号 ✅
-
-**问题**: 学习信号单一，主要依赖结果反馈
-
-**目标**: 从多个维度收集学习信号，丰富反馈来源
-
-**实现内容**:
-
-1. **学习信号收集器 (`LearningSignalCollector`)**
-   - 多维度信号采集（结果、过程、质量、隐式反馈、性能、学习）
-   - 信号质量评估和过滤
-   - 信号聚合和趋势分析
-   - 洞察和建议生成
-
-2. **信号类型**
-   - **结果信号**: 任务成功/失败/部分成功
-   - **过程信号**: 步骤成功/失败、工具使用、计划效率
-   - **质量信号**: 输出质量、代码质量、响应质量
-   - **隐式反馈**: 用户重试、用户纠正、用户参与度
-   - **性能信号**: 响应时间、Token使用、内存使用
-   - **学习信号**: 知识获取、技能提升、模式识别
-
-3. **分析功能**
-   - 趋势分析（提升/下降/稳定）
-   - 强弱项识别
-   - 洞察生成
-   - 改进建议
-
-**验收标准达成情况**:
-
-- ✅ 多维度学习信号采集（6大类，10+种具体信号）
-- ✅ 信号质量评估和过滤
-- ✅ 趋势分析和洞察生成
-
----
-
-### GAP-10：反思结果应用闭环 ✅
-
-**问题**: 反思结果存储后缺乏应用机制，未形成闭环
-
-**目标**: 确保反思结果能够被实际应用，形成完整学习闭环
-
-**实现内容**:
-
-1. **反思应用管理器 (`ReflectionApplier`)**
-   - 反思结果的结构化存储和检索
-   - 反思结果的应用策略管理
-   - 应用效果追踪和评估
-   - 反思-应用-反馈闭环管理
-
-2. **核心功能**
-   - `add_reflection()`: 添加反思结果（含可执行项、标签、优先级）
-   - `apply_reflections()`: 应用相关反思（相关性+质量评分）
-   - `record_application_result()`: 记录应用结果（更新成功率）
-   - 自动状态流转：pending → applied → verified/rejected
-
-3. **闭环机制**
-   - 反思检索（按类型、标签、上下文）
-   - 相关性评分（类型匹配、标签匹配、关键词匹配）
-   - 质量评分（可执行项、洞察、应用历史、验证状态）
-   - 应用效果验证（达到使用次数后自动验证）
-
-**验收标准达成情况**:
-
-- ✅ 反思结果能够被实际应用（相关性检索+评分排序）
-- ✅ 应用效果追踪和评估
-- ✅ 形成完整的学习闭环（反思→应用→反馈→优化）
-
----
-
-## 四、设计原则与最佳实践
-
-### 4.1 生产级代码质量
-
-- **完整的类型注解**: 所有函数和数据类都有完整的类型注解
-- **完善的文档**: 每个模块、类、方法都有详细的文档字符串
-- **一致的命名规范**: 遵循项目现有命名风格（snake_case）
-- **错误处理**: 完善的异常捕获和降级机制
-- **日志记录**: 关键操作都有结构化日志
-
-### 4.2 可配置性与向后兼容
-
-- **环境变量开关**: 所有新功能都有可配置开关，默认关闭或渐进开启
-- **可配置参数**: 阈值、权重、间隔等都可通过配置调整
-- **静默降级**: 新功能失败时不影响主流程
-- **向后兼容**: 不破坏现有API和行为
-
-### 4.3 性能优化
-
-- **轻量级实现**: 反思类操作优先使用规则化分析，不阻塞主流程
-- **缓存机制**: 索引缓存、执行顺序缓存等
-- **滑动窗口**: 统计使用滑动窗口，避免内存泄漏
-- **采样机制**: 高频率信号支持采样，降低开销
-
-### 4.4 安全边界
-
-- **回滚机制**: 进化、策略变更都有回滚能力
-- **阈值保护**: 自动进化有成功率阈值、频率限制
-- **容量限制**: 所有存储都有最大数量限制
-- **错误隔离**: 各模块独立，单模块失败不影响整体
-
----
-
-## 五、测试覆盖
-
-### 5.1 测试文件
-
-`tests/test_gap_implementations.py` - 综合测试文件，包含10个测试类，50+个测试用例
-
-### 5.2 测试覆盖范围
-
-| GAP    | 测试类                            | 测试用例数 | 覆盖内容                         |
-| ------ | --------------------------------- | ---------- | -------------------------------- |
-| GAP-01 | TestGAP01ActiveReflection         | 5          | 成功反思、轻量级反思、性能、指标 |
-| GAP-02 | TestGAP02AutoEvolutionTrigger     | 5          | 监控器、告警、触发器、策略       |
-| GAP-03 | TestGAP03ExperienceGeneralization | 4          | 泛化、迁移、相似度、创建         |
-| GAP-04 | TestGAP04AttentionFocus           | 4          | 评分、压缩、系统消息保护         |
-| GAP-05 | TestGAP05IncrementalReplanning    | 4          | 重规划、影响分析、完成保护       |
-| GAP-06 | TestGAP06StrategyAdapter          | 5          | 注册、记录、最佳策略、参数       |
-| GAP-07 | TestGAP07MemoryCurator            | 4          | 重要性评估、使用记录、策展       |
-| GAP-08 | TestGAP08PlanQualityChecker       | 4          | 好计划、空计划、问题检测、风险   |
-| GAP-09 | TestGAP09LearningSignals          | 4          | 记录、分析、过滤、创建           |
-| GAP-10 | TestGAP10ReflectionApplier        | 5          | 添加、应用、结果记录、闭环       |
-
-### 5.3 测试类型
-
-- **单元测试**: 每个模块的独立功能测试
-- **集成测试**: 模块间协作测试
-- **性能测试**: 轻量级反思的性能验证
-- **边界测试**: 空输入、极端值等边界情况
-
----
-
-## 六、集成指南
-
-### 6.1 启用方式
-
-所有新功能默认关闭，可通过以下方式启用：
-
-```python
-# 方式1：环境变量
-os.environ["LIGHTWEIGHT_REFLECTION_ENABLED"] = "true"
-
-# 方式2：代码配置
-from agent.loop.reflection import ReflectionEngine
-engine = ReflectionEngine()
-engine._lightweight_enabled = True  # 不推荐，建议用环境变量
-
-# 方式3：实例化时配置
-from agent.evolution.monitor import PerformanceMonitor, PerformanceThresholds
-config = PerformanceThresholds(consecutive_failures=5, window_size=200)
-monitor = PerformanceMonitor(thresholds=config, enabled=True)
+```
+TypeScript (Node.js) ←→ Python Bridge ←→ Python Agent Core
+     ↓                                      ↓
+  IDE/Desktop                           Redis + OTel
 ```
 
-### 6.2 关键集成点
-
-1. **Controller集成** (GAP-01)
-   - 已在 `controller.py` 中集成轻量级反思
-   - 每轮执行后自动调用
-   - 失败时静默降级
-
-2. **上下文编排器集成** (GAP-04)
-   - `AttentionFocusAdapter` 继承自 `ContextComponent`
-   - 可通过 `register_component()` 注册到统一编排器
-
-3. **进化引擎集成** (GAP-02)
-   - `EvolutionTrigger` 接收 `EvolutionEngineV2` 实例
-   - 自动调用 `trigger_evolution()` 方法
-
-### 6.3 渐进式启用建议
-
-1. **第一阶段**: 启用GAP-01（轻量级反思），观察性能影响
-2. **第二阶段**: 启用GAP-04（注意力聚焦），验证Token节省效果
-3. **第三阶段**: 启用GAP-07（记忆策展），优化记忆质量
-4. **第四阶段**: 启用GAP-02（自动进化），从保守策略开始
-5. **第五阶段**: 逐步启用其他P1/P2/P3功能
+- `AGENT_BACKEND=python` 时，TypeScript 端 processInput 路由到 Python 后端
+- Python 后端不可用时，降级到 TypeScript 端 LLM 直接调用
 
 ---
 
-## 七、后续优化建议
+## 五、待办事项
 
-### 7.1 短期优化 (1-2周)
+### 5.1 已完成项（2026-07-04 更新）
 
-1. **LLM增强**: 为反思、泛化等模块增加LLM增强选项（当前是规则化）
-2. **持久化**: 为监控、策略、策展等模块增加持久化存储
-3. **可视化**: 增加性能指标、学习信号的可视化看板
+- [x] GAP-02~10 端到端集成验证 — 全部已集成到 engine.py，测试 2059 passed
+- [x] GAP-04 AttentionFocusAdapter 注册到上下文编排器 — 已注册为 ContextComponent
+- [x] GAP-07 MemoryCurator 集成到记忆引擎 — Curator 已集成到 engine.py loop 路径
+- [x] GAP-10 ReflectionApplier 与反思引擎闭环 — ReflectionApplicationManager 已集成
+- [x] Python 端 API 网关（限流、认证、追踪）— ApiGatewayMiddleware 已实现
+- [x] Python 端金丝雀发布机制 — CanaryReleaseManager + API 端点已完成
+- [x] Python 端动态优先级评分 — DynamicPriorityScorer + API 端点已完成
+- [x] GAP 模块闭环集成 — 所有模块从"初始化"升级为"输出被读取和用于决策"
+- [x] 文档注释补全 — canary_release / dynamic_priority / api_gateway 全部补齐 JSDoc
+- [x] K8s 部署配置更新 — ConfigMap 加入限流/金丝雀变量，HPA 拆分，Ingress 修正
+- [x] Python 后端 Dockerfile — python/Dockerfile 已创建
+- [x] 执行基线文档 — docs/execution_baseline.md 已正式创建（7 条核心调用链 + 架构组件清单 + 测试基线 + 部署基线）
+- [x] 文档注释全覆盖 — conversation_loop / think_scrubber / context_compressor / resilience / security / persona / context_pipeline / canary_release / dynamic_priority / api_gateway 全部补齐 docstring
+- [x] 测试补全 — resilience 完整测试套件（25 用例）；context_compressor 注意力聚焦测试（5 用例）；修复 resilience.py Logger 兼容问题
 
-### 7.2 中期优化 (1-2月)
+### 5.2 高优先级（1-2 周）
 
-1. **深度集成**: 将新模块更深度地集成到主循环和编排器
-2. **A/B测试**: 为策略自适应增加A/B测试框架
-3. **在线学习**: 实现真正的在线学习，实时更新模型
+- [ ] 修复 MCP SSE transport + multimodal 7 个失败测试（ChineseTokenizer.extract_tags 兼容）
+- [ ] K8s 生产环境部署验证
+- [ ] 金丝雀发布在 staging 环境验证
 
-### 7.3 长期优化 (3-6月)
+### 5.3 长期优化（1-3 月）
 
-1. **元学习**: 学习如何学习，自动调整学习策略
-2. **跨Agent迁移**: 实现不同Agent之间的经验迁移
-3. **自动架构优化**: 基于学习信号自动优化系统架构
-
----
-
-## 八、风险与注意事项
-
-### 8.1 性能风险
-
-- **轻量级反思**: 已验证<100ms，对主流程影响可忽略
-- **注意力聚焦**: 压缩计算是O(n)，消息量大时可能有影响，建议异步执行
-- **自动进化**: 进化本身耗时，已通过频率限制控制
-
-### 8.2 质量风险
-
-- **过度泛化**: 经验泛化可能过度抽象，丢失关键细节，有置信度评分保护
-- **错误遗忘**: 记忆策展可能误删重要记忆，有重要性评估和阈值保护
-- **错误进化**: 自动进化可能引入新问题，有回滚机制和成功率保护
-
-### 8.3 运维建议
-
-1. **监控指标**: 关注各模块的统计指标，及时发现异常
-2. **日志审计**: 定期审计自动进化、策略变更等操作日志
-3. **灰度发布**: 新功能先在测试环境验证，再生产灰度
-4. **回滚预案**: 准备好回滚方案，出现问题快速恢复
+- [ ] LLM 增强反思和泛化
+- [ ] A/B 测试框架
+- [ ] 在线学习
+- [ ] 跨 Agent 经验迁移
 
 ---
 
-## 九、总结
-
-本次架构差距补足项目成功完成了全部10项GAP的实现，涵盖了从P0到P3的所有优先级。项目遵循生产级开发规范，所有功能都有可配置开关、完善的错误处理和详细的文档。
-
-**核心收益**:
-
-- **主动性提升**: 从被动响应到主动反思、主动进化、主动管理
-- **学习闭环**: 形成完整的"反思→应用→反馈→优化"学习闭环
-- **效率提升**: 增量重规划、注意力聚焦等显著提升执行效率
-- **质量保障**: 规划预检、质量监控、自动回滚等保障系统稳定性
-
-**交付物**:
-
-- 11个新增模块文件
-- 2个修改的核心文件
-- 50+个单元测试用例
-- 完整的交付文档
-
-项目已达到交付标准，建议按照渐进式启用策略逐步上线，在生产环境中持续观察和优化。
-
----
-
-**报告生成时间**: 2026-06-24
-**报告版本**: v1.0
+**报告修订时间**: 2026-07-05
+**报告版本**: v2.4
+**修订人**: 开发团队

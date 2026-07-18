@@ -28,6 +28,8 @@ from agent.context.unified_orchestrator import (
     UnifiedContextOrchestrator,
     get_orchestrator,
 )
+from agent.context.coding_context import CodingContext, CodingContextDetector
+from agent.context.subdirectory_hints import DirectoryHints, SubdirectoryHints
 
 __all__ = [
     # 数据模型
@@ -54,4 +56,10 @@ __all__ = [
     # 编排器
     "UnifiedContextOrchestrator",
     "get_orchestrator",
+    # 编码上下文
+    "CodingContext",
+    "CodingContextDetector",
+    # 子目录提示
+    "DirectoryHints",
+    "SubdirectoryHints",
 ]

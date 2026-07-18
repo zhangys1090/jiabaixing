@@ -14,7 +14,8 @@
  * - 事件驱动：通过 EventBus 广播状态变更
  */
 
-import { MCPServerConfig, MCPServerManager } from '../mcp/MCPServerManager';
+import { MCPServerConfig } from '../mcp/types';
+import { getActivePythonBridge } from '../ide/bridgeRegistry';
 import {
   GatewayOverview,
   GatewayStatus,
@@ -65,7 +66,6 @@ export class MultiPlatformGateway {
   private mode: GatewayMode;
   private manager: IntegrationManager;
   private bridge: GatewayBridge;
-  private mcpManager: MCPServerManager;
   private initialized = false;
   private started = false;
   private messageQueue: Array<IncomingMessageEvent> = [];
@@ -79,7 +79,6 @@ export class MultiPlatformGateway {
     this.queueSize = options?.queueSize ?? 100;
     this.manager = IntegrationManager.getInstance();
     this.bridge = GatewayBridge.getInstance();
-    this.mcpManager = MCPServerManager.getInstance();
 
     // 注册 IM 平台消息处理
     this.bridge.setIncomingMessageHandler(async (msg) => {
@@ -202,10 +201,13 @@ export class MultiPlatformGateway {
         await this.bridge.stop();
       }
       // 停止所有 MCP 服务器
-      const mcpHealth = this.mcpManager.getAllServerStatus();
-      for (const [name, status] of Object.entries(mcpHealth)) {
-        if (status.running) {
-          this.mcpManager.stopServer(name);
+      const bridge = getActivePythonBridge();
+      if (bridge) {
+        const mcpHealth = await bridge.getMcpServersStatus();
+        for (const [name, status] of Object.entries(mcpHealth)) {
+          if ((status as { running?: boolean }).running) {
+            await bridge.stopMcpServer(name);
+          }
         }
       }
     } catch (err) {
@@ -221,11 +223,11 @@ export class MultiPlatformGateway {
   /**
    * 获取网关概览（所有平台 + MCP 的统一状态）
    */
-  getOverview(): GatewayOverview {
+  async getOverview(): Promise<GatewayOverview> {
     // 1. IM 平台状态
     const imPlatforms: Record<string, GatewayStatus> = {};
     const imList = this.isWorkerActive()
-      ? this.bridge.getPlatforms()
+      ? await this.bridge.getPlatforms()
       : this.manager.getPlatforms();
 
     for (const p of imList) {
@@ -243,7 +245,13 @@ export class MultiPlatformGateway {
 
     // 2. MCP 服务器状态
     const mcpPlatforms: Record<string, GatewayStatus> = {};
-    const mcpHealth = this.mcpManager.getAllServerStatus();
+    const bridge = getActivePythonBridge();
+    const mcpHealth: Record<string, MCPServerHealth> = bridge
+      ? ((await bridge.getMcpServersStatus()) as Record<
+          string,
+          MCPServerHealth
+        >)
+      : {};
     for (const [name, health] of Object.entries(mcpHealth)) {
       mcpPlatforms[name] = {
         kind: 'mcp_server',
@@ -326,11 +334,11 @@ export class MultiPlatformGateway {
   /**
    * 获取 IM 平台状态
    */
-  getIMPlatformStatus(
+  async getIMPlatformStatus(
     platform: IntegrationPlatform
-  ): IntegrationStatus | undefined {
+  ): Promise<IntegrationStatus | undefined> {
     if (this.isWorkerActive()) {
-      return this.bridge.getPlatformStatus(platform);
+      return await this.bridge.getPlatformStatus(platform);
     }
     return this.manager.getPlatformStatus(platform);
   }
@@ -338,9 +346,9 @@ export class MultiPlatformGateway {
   /**
    * 列出所有 IM 平台信息
    */
-  listIMPlatforms(): IntegrationPlatformInfo[] {
+  async listIMPlatforms(): Promise<IntegrationPlatformInfo[]> {
     if (this.isWorkerActive()) {
-      return this.bridge.getPlatforms();
+      return await this.bridge.getPlatforms();
     }
     return this.manager.getPlatforms();
   }
@@ -379,28 +387,38 @@ export class MultiPlatformGateway {
     if (!this.validateAdapter({ platform: config.name, connect: () => true })) {
       return;
     }
-    this.mcpManager.registerServer(config);
+    const bridge = getActivePythonBridge();
+    if (!bridge) return;
+    void bridge.registerMcpServer(config);
   }
 
   /**
    * 启动 MCP 服务器
    */
   async startMCPServer(name: string): Promise<boolean> {
-    return await this.mcpManager.startServer(name);
+    const bridge = getActivePythonBridge();
+    return bridge ? await bridge.startMcpServer(name) : false;
   }
 
   /**
    * 停止 MCP 服务器
    */
-  stopMCPServer(name: string): boolean {
-    return this.mcpManager.stopServer(name);
+  async stopMCPServer(name: string): Promise<boolean> {
+    const bridge = getActivePythonBridge();
+    return bridge ? await bridge.stopMcpServer(name) : false;
   }
 
   /**
    * 列出所有 MCP 服务器状态
    */
-  listMCPServers(): Record<string, MCPServerHealth> {
-    return this.mcpManager.getAllServerStatus();
+  async listMCPServers(): Promise<Record<string, MCPServerHealth>> {
+    const bridge = getActivePythonBridge();
+    return bridge
+      ? ((await bridge.getMcpServersStatus()) as Record<
+          string,
+          MCPServerHealth
+        >)
+      : {};
   }
 
   /**
@@ -411,7 +429,9 @@ export class MultiPlatformGateway {
     toolName: string,
     args?: Record<string, unknown>
   ): Promise<unknown> {
-    return await this.mcpManager.callTool(serverName, toolName, args);
+    const bridge = getActivePythonBridge();
+    if (!bridge) return null;
+    return await bridge.callMcpTool(serverName, toolName, args);
   }
 
   // ==================== Webhook 操作 ====================

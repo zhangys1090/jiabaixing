@@ -54,7 +54,7 @@ class EvalGate:
                 reasons.append("通过率呈下降趋势")
 
         passed = len(reasons) == 0
-        return EvalGate(
+        return EvalGateResult(
             passed=passed,
             reason="; ".join(reasons) if reasons else "门控通过",
             details=details,

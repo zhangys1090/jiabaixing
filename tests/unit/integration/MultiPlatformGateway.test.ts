@@ -84,47 +84,18 @@ jest.mock('../../../src/integration/GatewayBridge', () => ({
   },
 }));
 
-jest.mock('../../../src/mcp/MCPServerManager', () => ({
-  MCPServerManager: {
-    getInstance: jest.fn().mockReturnValue({
-      registerServer: jest.fn(),
-      startServer: jest.fn().mockResolvedValue(true),
-      stopServer: jest.fn().mockReturnValue(true),
-      getAllServerHealth: jest.fn().mockReturnValue({
-        filesystem: {
-          name: 'filesystem',
-          running: false,
-          initialized: false,
-          healthy: false,
-          restartCount: 0,
-          lastHealthCheck: null,
-          uptime: 0,
-        },
-        browser: {
-          name: 'browser',
-          running: true,
-          initialized: true,
-          healthy: true,
-          restartCount: 0,
-          lastHealthCheck: null,
-          uptime: 0,
-        },
-      }),
-      getAllServerStatus: jest.fn().mockReturnValue({
-        filesystem: {
-          name: 'filesystem',
-          running: false,
-          healthy: false,
-        },
-        browser: {
-          name: 'browser',
-          running: true,
-          healthy: true,
-        },
-      }),
-      callTool: jest.fn().mockResolvedValue({ success: true }),
+jest.mock('../../../src/ide/bridgeRegistry', () => ({
+  getActivePythonBridge: jest.fn().mockReturnValue({
+    getMcpServersStatus: jest.fn().mockResolvedValue({
+      filesystem: { running: false, initialized: false },
+      browser: { running: true, initialized: true },
     }),
-  },
+    registerMcpServer: jest.fn(),
+    startMcpServer: jest.fn().mockResolvedValue(true),
+    stopMcpServer: jest.fn().mockResolvedValue(true),
+    callMcpTool: jest.fn().mockResolvedValue({ content: 'ok' }),
+  }),
+  setActivePythonBridge: jest.fn(),
 }));
 
 import { MultiPlatformGateway } from '../../../src/integration/MultiPlatformGateway';
@@ -153,20 +124,20 @@ describe('MultiPlatformGateway', () => {
       expect(instance1).not.toBe(instance2);
     });
 
-    it('initialize 后 getOverview 应返回 hybrid 模式', () => {
+    it('initialize 后 getOverview 应返回 hybrid 模式', async () => {
       const gateway = MultiPlatformGateway.getInstance({ mode: 'hybrid' });
       gateway.initialize();
-      const overview = gateway.getOverview();
+      const overview = await gateway.getOverview();
       expect(overview.mode).toBe('hybrid');
       expect(overview.initialized).toBe(true);
     });
   });
 
   describe('网关概览', () => {
-    it('getOverview 应包含 IM 平台和 MCP 平台', () => {
+    it('getOverview 应包含 IM 平台和 MCP 平台', async () => {
       const gateway = MultiPlatformGateway.getInstance();
       gateway.initialize();
-      const overview = gateway.getOverview();
+      const overview = await gateway.getOverview();
 
       expect(overview.imPlatforms).toBeDefined();
       expect(overview.mcpPlatforms).toBeDefined();
@@ -174,10 +145,10 @@ describe('MultiPlatformGateway', () => {
       expect(overview.totalPlatforms).toBeGreaterThan(0);
     });
 
-    it('应返回队列状态应包含微信和飞书的状态', () => {
+    it('应返回队列状态应包含微信和飞书的状态', async () => {
       const gateway = MultiPlatformGateway.getInstance();
       gateway.initialize();
-      const overview = gateway.getOverview();
+      const overview = await gateway.getOverview();
 
       expect(overview.imPlatforms['wechat']).toBeDefined();
       expect(overview.imPlatforms['feishu']).toBeDefined();
@@ -185,10 +156,10 @@ describe('MultiPlatformGateway', () => {
       expect(overview.imPlatforms['feishu'].connected).toBe(true);
     });
 
-    it('应返回 MCP 服务器状态', () => {
+    it('应返回 MCP 服务器状态', async () => {
       const gateway = MultiPlatformGateway.getInstance();
       gateway.initialize();
-      const overview = gateway.getOverview();
+      const overview = await gateway.getOverview();
 
       expect(overview.mcpPlatforms['filesystem']).toBeDefined();
       expect(overview.mcpPlatforms['browser']).toBeDefined();
@@ -196,19 +167,19 @@ describe('MultiPlatformGateway', () => {
       expect(overview.mcpPlatforms['browser'].kind).toBe('mcp_server');
     });
 
-    it('应统计 activePlatforms 正确', () => {
+    it('应统计 activePlatforms 正确', async () => {
       const gateway = MultiPlatformGateway.getInstance();
       gateway.initialize();
-      const overview = gateway.getOverview();
+      const overview = await gateway.getOverview();
 
       expect(overview.activePlatforms).toBeGreaterThanOrEqual(1);
       expect(overview.totalPlatforms).toBeGreaterThan(overview.activePlatforms);
     });
 
-    it('应返回生成时间戳', () => {
+    it('应返回生成时间戳', async () => {
       const gateway = MultiPlatformGateway.getInstance();
       gateway.initialize();
-      const overview = gateway.getOverview();
+      const overview = await gateway.getOverview();
       expect(overview.generatedAt).toBeTruthy();
       expect(Date.parse(overview.generatedAt)).toBeGreaterThan(0);
     });
@@ -246,10 +217,10 @@ describe('MultiPlatformGateway', () => {
       expect(result.success).toBe(true);
     });
 
-    it('listIMPlatforms 应返回平台列表', () => {
+    it('listIMPlatforms 应返回平台列表', async () => {
       const gateway = MultiPlatformGateway.getInstance();
       gateway.initialize();
-      const platforms = gateway.listIMPlatforms();
+      const platforms = await gateway.listIMPlatforms();
       expect(platforms.length).toBeGreaterThan(0);
       expect(platforms[0].id).toBe('wechat');
     });
@@ -273,17 +244,17 @@ describe('MultiPlatformGateway', () => {
       expect(success).toBe(true);
     });
 
-    it('stopMCPServer 应停止服务器', () => {
+    it('stopMCPServer 应停止服务器', async () => {
       const gateway = MultiPlatformGateway.getInstance();
       gateway.initialize();
-      const success = gateway.stopMCPServer('test');
+      const success = await gateway.stopMCPServer('test');
       expect(success).toBe(true);
     });
 
-    it('listMCPServers 应返回服务器列表', () => {
+    it('listMCPServers 应返回服务器列表', async () => {
       const gateway = MultiPlatformGateway.getInstance();
       gateway.initialize();
-      const servers = gateway.listMCPServers();
+      const servers = await gateway.listMCPServers();
       expect(servers).toBeDefined();
       expect(servers['filesystem']).toBeDefined();
     });
@@ -326,19 +297,19 @@ describe('MultiPlatformGateway', () => {
   });
 
   describe('模式切换', () => {
-    it('inline 模式应跳过 Worker 检查', () => {
+    it('inline 模式应跳过 Worker 检查', async () => {
       MultiPlatformGateway.resetInstance();
       const gateway = MultiPlatformGateway.getInstance({ mode: 'inline' });
       gateway.initialize();
-      const overview = gateway.getOverview();
+      const overview = await gateway.getOverview();
       expect(overview.mode).toBe('inline');
     });
 
-    it('mcp_only 模式应正确', () => {
+    it('mcp_only 模式应正确', async () => {
       MultiPlatformGateway.resetInstance();
       const gateway = MultiPlatformGateway.getInstance({ mode: 'mcp_only' });
       gateway.initialize();
-      const overview = gateway.getOverview();
+      const overview = await gateway.getOverview();
       expect(overview.mode).toBe('mcp_only');
     });
   });

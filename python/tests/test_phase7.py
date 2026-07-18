@@ -124,7 +124,10 @@ def test_register_default_tools():
     assert count >= 15
     assert registry.size() == count
     assert len(registry.get_by_category(ToolCategory.MEMORY)) == 4
-    assert len(registry.get_by_category(ToolCategory.COGNITION)) == 3
+    # COGNITION 现含认知/UX/委派/Sanbao 群论推理等工具（随能力扩展增长，
+    # 见 agent/tools/{cognition_tools,clarify_tool,todo_tool,write_approval_tool,
+    # delegate_tool,sanbao_tools,vision_tools}.py 的 category 定义）。
+    assert len(registry.get_by_category(ToolCategory.COGNITION)) == 14
 
 
 @pytest.mark.anyio

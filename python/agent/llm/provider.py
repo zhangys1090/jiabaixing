@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import json
+import asyncio
 import os
 import time
 from typing import Any, AsyncIterator
@@ -10,11 +10,19 @@ import litellm
 from litellm import acompletion
 
 from agent.config import EMBEDDING_MODEL, LLM_API_KEY, LLM_BASE_URL, LLM_MAX_TOKENS, LLM_MODEL, LLM_TEMPERATURE
+from agent.core.canary_release import CanaryReleaseManager, safe_record_outcome
+from agent.core.otel_metrics import llm_tokens_counter
+from agent.core.production_metrics import get_production_metrics_collector
 from agent.llm.cache import LLMCache
-from agent.llm.credential_pool import CostGuard, CredentialEntry, CredentialPool, RotationStrategy
-from agent.llm.prompt_cache import PromptCacheManager
+from agent.llm.credential_pool import CostGuard, CredentialEntry, CredentialPool, RotationStrategy, _MODEL_PRICING
+from agent.llm.prompt_cache import (
+    AnthropicPrefixCacheBuilder,
+    PromptCacheManager,
+    apply_anthropic_prefix_cache,
+)
 from agent.llm.queue import RequestQueue
 from agent.llm.router import ProviderConfig, ProviderManager
+from agent.llm.stream import stream_via_litellm, stream_via_transport
 from agent.llm.transports import (
     BaseTransport,
     TransportConfig,
@@ -22,6 +30,41 @@ from agent.llm.transports import (
     TransportResponse,
     TransportType,
 )
+
+
+def _record_llm_tokens(model: str, usage: dict[str, Any] | None) -> None:
+    """将 LLM 响应的 usage 记录到 OTel Counter（OTel 未启用时为 NoOp）。
+
+    同时通过 ProductionMetricsCollector.record_llm_usage 记录 token 用量与成本，
+    实现 P3-#3 生产埋点的统一采集。
+
+    Args:
+        model: 实际调用的模型名。
+        usage: 包含 input_tokens/output_tokens 的 usage 字典；为 None 时跳过。
+    """
+    if not usage:
+        return
+    try:
+        input_tokens = int(usage.get("input_tokens", 0) or 0)
+        output_tokens = int(usage.get("output_tokens", 0) or 0)
+        if input_tokens > 0:
+            llm_tokens_counter().add(input_tokens, {"model": model, "type": "prompt"})
+        if output_tokens > 0:
+            llm_tokens_counter().add(output_tokens, {"model": model, "type": "completion"})
+        # P3-#3: 统一通过生产埋点采集器记录 token + 成本（复用 _MODEL_PRICING 估算成本）
+        pricing = _MODEL_PRICING.get(model)
+        if not pricing:
+            pricing = {"input": 1.0 / 1_000_000, "output": 3.0 / 1_000_000}
+        cost = input_tokens * pricing["input"] + output_tokens * pricing["output"]
+        get_production_metrics_collector().record_llm_usage(
+            model=model,
+            prompt_tokens=input_tokens,
+            completion_tokens=output_tokens,
+            cost=cost,
+        )
+    except Exception:
+        # OTel 记录失败不影响 LLM 主流程
+        pass
 
 
 class LLMProvider:
@@ -34,9 +77,18 @@ class LLMProvider:
         self.queue = RequestQueue(max_concurrent=3)
         self.provider_manager = ProviderManager()
         self.prompt_cache = PromptCacheManager()
+        # Anthropic 前缀缓存构建器：为 Claude 模型自动标记 cache_control 断点
+        # 可节省 90% 前缀 token 成本，首字延迟降低 30%
+        self.anthropic_cache_builder = AnthropicPrefixCacheBuilder(
+            enabled=os.environ.get("ANTHROPIC_CACHE_ENABLED", "true").lower() == "true",
+            min_prefix_tokens=int(os.environ.get("ANTHROPIC_CACHE_MIN_TOKENS", "1024")),
+            max_breakpoints=int(os.environ.get("ANTHROPIC_CACHE_MAX_BREAKPOINTS", "4")),
+        )
         self.credential_pool: CredentialPool | None = None
         self.cost_guard = CostGuard()
         self._transport_cache: dict[str, BaseTransport] = {}
+        # 灰度发布管理器：可选，由 LoopController 注入
+        self.canary_manager: CanaryReleaseManager | None = None
 
         if LLM_API_KEY:
             os.environ["OPENAI_API_KEY"] = LLM_API_KEY
@@ -78,19 +130,64 @@ class LLMProvider:
         stream: bool = False,
         use_cache: bool = True,
         system_prompt: str | None = None,
+        user_id: str | None = None,
+        strategy_name: str | None = None,
     ) -> dict[str, Any]:
+        # 灰度发布：基于用户哈希分桶选择版本
+        model_override: str | None = None
+        canary_active = False
+        if self.canary_manager and user_id and strategy_name:
+            try:
+                assignment = await self.canary_manager.select_version(user_id, strategy_name)
+                if assignment.is_canary:
+                    model_override = assignment.canary_version
+                    canary_active = True
+            except Exception:
+                pass  # 灰度选择失败不影响主流程
+
+        effective_model = model_override or self.model
+
+        estimated_input_tokens = sum(len(m.get("content", "")) // 4 for m in messages)
+        estimated_output_tokens = self.max_tokens
+        estimated_cost = self.cost_guard.calculate_cost(
+            effective_model, estimated_input_tokens, estimated_output_tokens
+        )
+        if not self.cost_guard.check_budget(estimated_cost):
+            from agent.core.logger import StructuredLogger
+            log = StructuredLogger("llm_provider")
+            log.warning(
+                "LLM 请求因预算超限被拦截",
+                model=effective_model,
+                estimated_cost=estimated_cost,
+                daily_spent=self.cost_guard.get_daily_spent(),
+                daily_budget=self.cost_guard._daily_budget,
+            )
+            return {
+                "content": "",
+                "role": "assistant",
+                "finish_reason": "budget_exceeded",
+                "error": "成本预算超限，请求被拦截",
+                "usage": {"input_tokens": 0, "output_tokens": 0},
+            }
+
         if use_cache and not stream and not tools:
-            cached = self.cache.get(messages, self.model)
+            cached = self.cache.get(
+                messages, effective_model, system_prompt=system_prompt, tools=tools
+            )
             if cached is not None:
+                if canary_active:
+                    await safe_record_outcome(self.canary_manager, user_id, strategy_name, True, 0.0)
                 return {"content": cached, "role": "assistant", "finish_reason": "stop", "cached": True}
 
         if use_cache and not stream:
             prompt_result = self.prompt_cache.try_get_exact({
                 "system_prompt": system_prompt,
                 "messages": messages,
-                "model_name": self.model,
+                "model_name": effective_model,
             })
             if prompt_result.hit and prompt_result.value:
+                if canary_active:
+                    await safe_record_outcome(self.canary_manager, user_id, strategy_name, True, 0.0)
                 return {
                     "content": prompt_result.value,
                     "role": "assistant",
@@ -99,27 +196,40 @@ class LLMProvider:
                     "cache_match_type": prompt_result.match_type,
                 }
 
-        result = await self.queue.submit(self._do_chat, messages, tools, stream)
-
-        if use_cache and not stream and not tools and result.get("content"):
-            self.prompt_cache.store_exact(
-                {"system_prompt": system_prompt, "messages": messages, "model_name": self.model},
-                result["content"],
+        _start = time.time()
+        _success = False
+        try:
+            result = await self.queue.submit(
+                self._do_chat, messages, tools, stream, model_override=model_override
             )
+            _success = True
 
-        return result
+            if use_cache and not stream and not tools and result.get("content"):
+                self.prompt_cache.store_exact(
+                    {"system_prompt": system_prompt, "messages": messages, "model_name": effective_model},
+                    result["content"],
+                )
+
+            return result
+        finally:
+            if canary_active:
+                latency_ms = (time.time() - _start) * 1000
+                await safe_record_outcome(self.canary_manager, user_id, strategy_name, _success, latency_ms)
 
     async def _do_chat(
         self,
         messages: list[dict[str, str]],
         tools: list[dict[str, Any]] | None = None,
         stream: bool = False,
+        tool_choice: str = "auto",
+        model_override: str | None = None,
     ) -> dict[str, Any]:
-        transport = self._resolve_transport()
+        # 灰度版本切换时跳过 transport，统一走 litellm 路径
+        transport = None if model_override else self._resolve_transport()
         if transport is not None:
-            return await self._do_chat_via_transport(transport, messages, tools)
+            return await self._do_chat_via_transport(transport, messages, tools, tool_choice)
 
-        return await self._do_chat_via_litellm(messages, tools, stream)
+        return await self._do_chat_via_litellm(messages, tools, stream, model_override)
 
     def _resolve_transport(self) -> BaseTransport | None:
         primary = self.provider_manager.get_primary()
@@ -167,10 +277,12 @@ class LLMProvider:
         transport: BaseTransport,
         messages: list[dict[str, str]],
         tools: list[dict[str, Any]] | None = None,
+        tool_choice: str = "auto",
     ) -> dict[str, Any]:
+        """通过 transport 执行非流式聊天请求，返回包含 content/role/finish_reason/tool_calls/usage 的响应."""
         converted_msgs = transport.convert_messages(messages)
         converted_tools = transport.convert_tools(tools)
-        request = transport.build_request(converted_msgs, converted_tools, stream=False)
+        request = transport.build_request(converted_msgs, converted_tools, stream=False, tool_choice=tool_choice)
 
         api_key = self._resolve_api_key()
         if api_key and "Authorization" in request.headers:
@@ -200,9 +312,13 @@ class LLMProvider:
             output_tokens = transport_resp.usage.get("completion_tokens", 0)
             result["usage"] = {"input_tokens": input_tokens, "output_tokens": output_tokens}
             self.cost_guard.record_usage(self.model, input_tokens, output_tokens)
+            # 记录到 OTel LLM Token Counter（OTel 未启用时为 NoOp）
+            _record_llm_tokens(self.model, result["usage"])
 
         if not tools:
-            self.cache.set(messages, transport_resp.text, self.model)
+            self.cache.set(
+                messages, transport_resp.text, self.model, system_prompt=None, tools=tools
+            )
 
         return result
 
@@ -211,18 +327,30 @@ class LLMProvider:
         messages: list[dict[str, str]],
         tools: list[dict[str, Any]] | None = None,
         stream: bool = False,
+        model_override: str | None = None,
     ) -> dict[str, Any]:
         api_key = self._resolve_api_key()
+        # 灰度发布：优先使用灰度版本模型
+        effective_model = model_override or self.model
+
+        # Anthropic 前缀缓存：为 Claude 模型自动标记 cache_control 断点
+        # 系统提示 + 上下文文件等固定前缀会被缓存，节省 90% 前缀 token 成本
+        processed_messages, system_blocks, processed_tools = apply_anthropic_prefix_cache(
+            self.anthropic_cache_builder, messages, tools, effective_model
+        )
 
         kwargs: dict[str, Any] = {
-            "model": self.model,
-            "messages": messages,
+            "model": effective_model,
+            "messages": processed_messages,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
             "stream": stream,
         }
-        if tools:
-            kwargs["tools"] = tools
+        # Anthropic API 通过 system 参数传递系统提示
+        if system_blocks:
+            kwargs["system"] = system_blocks
+        if processed_tools:
+            kwargs["tools"] = processed_tools
         if api_key:
             kwargs["api_key"] = api_key
 
@@ -272,41 +400,98 @@ class LLMProvider:
             input_tokens = getattr(usage, "prompt_tokens", 0) or 0
             output_tokens = getattr(usage, "completion_tokens", 0) or 0
             result["usage"] = {"input_tokens": input_tokens, "output_tokens": output_tokens}
-            self.cost_guard.record_usage(self.model, input_tokens, output_tokens)
+            self.cost_guard.record_usage(effective_model, input_tokens, output_tokens)
+            # 记录到 OTel LLM Token Counter（OTel 未启用时为 NoOp）
+            _record_llm_tokens(effective_model, result["usage"])
 
         if not tools:
-            self.cache.set(messages, result["content"], self.model)
+            self.cache.set(
+                messages, result["content"], effective_model, system_prompt=None, tools=tools
+            )
 
+        return result
+
+    async def chat_with_tools(
+        self,
+        messages: list[dict[str, str]],
+        tools: list[dict[str, Any]],
+        tool_choice: str = "auto",
+    ) -> dict[str, Any]:
+        """原生 Function Calling — 使用 OpenAI tools 参数（非文本解析）.
+
+        通过 transport 或 litellm 将 tools 参数原生传递给 LLM，
+        返回结构化的 tool_calls 响应，而非文本解析。
+
+        Args:
+            messages: 消息列表.
+            tools: 工具定义列表（OpenAI tools 格式）.
+            tool_choice: 工具选择策略，可选 "auto"/"none"/具体工具.
+
+        Returns:
+            dict: 包含 content/role/finish_reason/tool_calls/usage 的响应.
+
+        Raises:
+            httpx.HTTPStatusError: LLM API 返回错误状态码时抛出.
+        """
+        if not tools:
+            # 无工具时退化为普通 chat
+            return await self.chat(messages=messages, tools=None, use_cache=False)
+
+        result = await self.queue.submit(
+            self._do_chat, messages, tools, False, tool_choice
+        )
         return result
 
     async def chat_stream(
         self,
         messages: list[dict[str, str]],
         tools: list[dict[str, Any]] | None = None,
+        user_id: str | None = None,
+        strategy_name: str | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
-        response = await self.chat(messages=messages, tools=tools, stream=True, use_cache=False)
-        async for chunk in response:
-            delta = chunk.choices[0].delta
-            data: dict[str, Any] = {"content": ""}
-            if delta.content:
-                data["content"] = delta.content
-            if hasattr(delta, "tool_calls") and delta.tool_calls:
-                data["tool_calls"] = [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.function.name if tc.function else "",
-                            "arguments": tc.function.arguments if tc.function else "",
-                        },
-                    }
-                    for tc in delta.tool_calls
-                ]
-            yield data
-            if chunk.choices[0].finish_reason:
-                data["done"] = True
-                yield data
-                break
+        """真实 SSE 流式输出 — 使用 httpx + stream=True 逐 chunk yield.
+
+        与伪流式（仅 2 chunk）不同，此方法逐行解析 SSE 数据，实时 yield chunk。
+        支持: 文本增量、tool_calls 增量、finish_reason、[DONE] 标记。
+        集成灰度发布：当传入 user_id 与 strategy_name 时，先进行哈希分桶，
+        命中灰度则跳过 transport，统一走 litellm 路径并使用灰度版本模型。
+
+        Args:
+            messages: 消息列表.
+            tools: 工具定义列表（可选）.
+            user_id: 用户 ID（用于灰度分桶，可选）.
+            strategy_name: 灰度策略名称（可选）.
+
+        Yields:
+            dict: chunk 数据（content/tool_calls/finish_reason/done）.
+
+        Raises:
+            httpx.HTTPStatusError: LLM API 返回错误状态码时抛出.
+        """
+        # 灰度发布：先做分桶判断，命中灰度则必须走 litellm 路径
+        canary_active = False
+        if self.canary_manager and user_id and strategy_name:
+            try:
+                assignment = await self.canary_manager.select_version(user_id, strategy_name)
+                if assignment.is_canary:
+                    canary_active = True
+            except Exception:
+                pass  # 灰度选择失败不影响主流程
+
+        # 非灰度场景优先使用 transport
+        if not canary_active:
+            transport = self._resolve_transport()
+            if transport is not None:
+                api_key = self._resolve_api_key()
+                async for chunk in stream_via_transport(transport, messages, tools, api_key):
+                    yield chunk
+                return
+
+        # 回退到 litellm 流式（含灰度版本选择）
+        async for chunk in stream_via_litellm(
+            self, messages, tools, user_id=user_id, strategy_name=strategy_name
+        ):
+            yield chunk
 
     async def embed(self, text: str, model: str | None = None) -> list[float] | None:
         """Generate embeddings for text using the configured provider."""
@@ -341,10 +526,13 @@ class LLMProvider:
         if self._available is not None:
             return self._available
         try:
-            await acompletion(
-                model=self.model,
-                messages=[{"role": "user", "content": "ping"}],
-                max_tokens=5,
+            await asyncio.wait_for(
+                acompletion(
+                    model=self.model,
+                    messages=[{"role": "user", "content": "ping"}],
+                    max_tokens=5,
+                ),
+                timeout=5.0,
             )
             self._available = True
         except Exception:

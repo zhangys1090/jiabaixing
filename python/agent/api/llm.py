@@ -1,4 +1,5 @@
 from fastapi import APIRouter
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Any
 
@@ -6,6 +7,70 @@ from agent.llm.credential_pool import RotationStrategy
 from agent.llm.router import ProviderConfig, ProviderManager
 
 router = APIRouter()
+core_router = APIRouter()
+
+_llm_unavailable: bool = False
+_llm_unavailable_reason: str = ""
+
+
+class ChatRequest(BaseModel):
+    message: str
+    history: list[dict[str, str]] = []
+    system_prompt: str | None = None
+
+
+class ChatWithToolsRequest(BaseModel):
+    messages: list[dict[str, Any]]
+    tools: list[dict[str, Any]] = []
+    max_tokens: int = 4096
+    tool_choice: str = "auto"
+
+
+class StreamChatRequest(BaseModel):
+    messages: list[dict[str, str]]
+    system_prompt: str | None = None
+    tools: list[dict[str, Any]] | None = None
+
+
+class MultimodalChatRequest(BaseModel):
+    message: str
+    images: list[str] = []
+    history: list[dict[str, str]] = []
+
+
+class MultimodalCodeAnalysisRequest(BaseModel):
+    user_query: str
+    images: list[str]
+    file_path: str | None = None
+
+
+class CodeAnalyzeRequest(BaseModel):
+    file_path: str
+    content: str
+    user_query: str
+
+
+class CodeModificationPlanRequest(BaseModel):
+    file_path: str
+    content: str
+    user_query: str
+
+
+class CodeModifiedContentRequest(BaseModel):
+    file_path: str
+    current_content: str
+    user_request: str
+    file_exists: bool = True
+
+
+class DevGenerateCodeRequest(BaseModel):
+    user_request: str
+    file_path: str | None = None
+    existing_content: str | None = None
+
+
+class MarkUnavailableRequest(BaseModel):
+    reason: str = ""
 
 
 class ProviderCreateRequest(BaseModel):
@@ -264,3 +329,280 @@ async def switch_transport(provider_name: str, transport_type: str):
         del engine.llm._transport_cache[cache_key_auto]
 
     return {"success": True, "provider": provider_name, "transport": transport_type}
+
+
+# ═══════════════════════════════════════════════════════════════
+# LLM 核心桥接路由 — TS LLMProvider 第一批迁移
+# chat / chatWithTools / health / model-name / mark-unavailable / reset
+# ═══════════════════════════════════════════════════════════════
+
+
+def _get_llm():
+    from agent.main import engine
+    if engine and hasattr(engine, "llm"):
+        return engine.llm
+    return None
+
+
+@core_router.post("/chat")
+async def llm_chat(req: ChatRequest):
+    global _llm_unavailable
+    llm = _get_llm()
+    if not llm:
+        return {"success": False, "error": "Engine not initialized", "content": ""}
+    if _llm_unavailable:
+        fallback = llm.provider_manager.get_fallback()
+        if fallback:
+            try:
+                result = await llm.chat(
+                    messages=[{"role": "user", "content": req.message}],
+                    system_prompt=req.system_prompt,
+                    use_cache=False,
+                )
+                return {"success": True, "content": result.get("content", "")}
+            except Exception as e:
+                return {"success": False, "error": str(e), "content": ""}
+        return {"success": False, "error": _llm_unavailable_reason, "content": ""}
+    messages: list[dict[str, str]] = []
+    if req.system_prompt:
+        messages.append({"role": "system", "content": req.system_prompt})
+    for h in req.history:
+        messages.append({"role": h.get("role", "user"), "content": h.get("content", "")})
+    messages.append({"role": "user", "content": req.message})
+    try:
+        result = await llm.chat(messages=messages, use_cache=True)
+        return {"success": True, "content": result.get("content", "")}
+    except Exception as e:
+        _llm_unavailable = True
+        return {"success": False, "error": str(e), "content": ""}
+
+
+@core_router.post("/chat-with-tools")
+async def llm_chat_with_tools(req: ChatWithToolsRequest):
+    llm = _get_llm()
+    if not llm:
+        return {"success": False, "error": "Engine not initialized"}
+    try:
+        if req.tools:
+            result = await llm.chat_with_tools(
+                messages=req.messages,
+                tools=req.tools,
+                tool_choice=req.tool_choice,
+            )
+        else:
+            result = await llm.chat(messages=req.messages, use_cache=False)
+        return {
+            "success": True,
+            "content": result.get("content", ""),
+            "tool_calls": result.get("tool_calls"),
+            "finish_reason": result.get("finish_reason", "stop"),
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@core_router.get("/health")
+async def llm_health():
+    global _llm_unavailable, _llm_unavailable_reason
+    llm = _get_llm()
+    if not llm:
+        return {"available": False, "message": "Engine not initialized"}
+    if _llm_unavailable:
+        return {"available": False, "message": _llm_unavailable_reason}
+    try:
+        ok = await llm.check_available()
+        if ok:
+            return {"available": True, "message": f"LLM available, model: {llm.model}"}
+        _llm_unavailable = True
+        _llm_unavailable_reason = "Health check failed"
+        return {"available": False, "message": "LLM health check failed"}
+    except Exception as e:
+        _llm_unavailable = True
+        _llm_unavailable_reason = str(e)
+        return {"available": False, "message": str(e)}
+
+
+@core_router.get("/model")
+async def llm_model_name():
+    llm = _get_llm()
+    if not llm:
+        return {"model": "unknown"}
+    return {"model": llm.model}
+
+
+@core_router.post("/mark-unavailable")
+async def llm_mark_unavailable(req: MarkUnavailableRequest):
+    global _llm_unavailable, _llm_unavailable_reason
+    _llm_unavailable = True
+    _llm_unavailable_reason = req.reason
+    return {"success": True}
+
+
+@core_router.post("/reset-availability")
+async def llm_reset_availability():
+    global _llm_unavailable, _llm_unavailable_reason
+    _llm_unavailable = False
+    _llm_unavailable_reason = ""
+    return {"success": True}
+
+
+# ═══════════════════════════════════════════════════════════════
+# LLM 第二批桥接路由 — stream / multimodal / code
+# ═══════════════════════════════════════════════════════════════
+
+
+@core_router.post("/stream-chat")
+async def llm_stream_chat(req: StreamChatRequest):
+    llm = _get_llm()
+    if not llm:
+        return {"success": False, "error": "Engine not initialized"}
+
+    messages: list[dict[str, str]] = []
+    if req.system_prompt:
+        messages.append({"role": "system", "content": req.system_prompt})
+    messages.extend(req.messages)
+
+    async def _sse_generator():
+        try:
+            async for chunk in llm.chat_stream(
+                messages=messages, tools=req.tools
+            ):
+                if chunk.get("done"):
+                    yield f"data: [DONE]\n\n"
+                else:
+                    import json as _json
+                    yield f"data: {_json.dumps(chunk, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            import json as _json
+            yield f"data: {_json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+            yield f"data: [DONE]\n\n"
+
+    return StreamingResponse(
+        _sse_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@core_router.post("/multimodal-chat")
+async def llm_multimodal_chat(req: MultimodalChatRequest):
+    llm = _get_llm()
+    if not llm:
+        return {"success": False, "error": "Engine not initialized", "content": ""}
+    messages: list[dict[str, Any]] = []
+    for h in req.history:
+        messages.append({"role": h.get("role", "user"), "content": h.get("content", "")})
+    content_parts: list[dict[str, Any]] = []
+    if req.images:
+        for img in req.images:
+            content_parts.append({"type": "image_url", "image_url": {"url": img}})
+    content_parts.append({"type": "text", "text": req.message})
+    messages.append({"role": "user", "content": content_parts})
+    try:
+        result = await llm.chat(messages=messages, use_cache=False)
+        return {"success": True, "content": result.get("content", "")}
+    except Exception as e:
+        return {"success": False, "error": str(e), "content": ""}
+
+
+@core_router.post("/multimodal-code-analysis")
+async def llm_multimodal_code_analysis(req: MultimodalCodeAnalysisRequest):
+    llm = _get_llm()
+    if not llm:
+        return {"success": False, "error": "Engine not initialized", "content": ""}
+    content_parts: list[dict[str, Any]] = []
+    for img in req.images:
+        content_parts.append({"type": "image_url", "image_url": {"url": img}})
+    prompt = f"分析以下代码截图，用户问题: {req.user_query}"
+    if req.file_path:
+        prompt += f"\n文件路径: {req.file_path}"
+    content_parts.append({"type": "text", "text": prompt})
+    messages = [{"role": "user", "content": content_parts}]
+    try:
+        result = await llm.chat(messages=messages, use_cache=False)
+        return {"success": True, "content": result.get("content", "")}
+    except Exception as e:
+        return {"success": False, "error": str(e), "content": ""}
+
+
+@core_router.post("/code-analyze")
+async def llm_code_analyze(req: CodeAnalyzeRequest):
+    llm = _get_llm()
+    if not llm:
+        return {"success": False, "error": "Engine not initialized", "content": ""}
+    system_prompt = "你是一个代码分析专家。请分析给定代码并回答用户的问题。"
+    user_msg = f"文件: {req.file_path}\n\n代码内容:\n```\n{req.content}\n```\n\n问题: {req.user_query}"
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_msg},
+    ]
+    try:
+        result = await llm.chat(messages=messages, use_cache=False)
+        return {"success": True, "content": result.get("content", "")}
+    except Exception as e:
+        return {"success": False, "error": str(e), "content": ""}
+
+
+@core_router.post("/code-modification-plan")
+async def llm_code_modification_plan(req: CodeModificationPlanRequest):
+    llm = _get_llm()
+    if not llm:
+        return {"success": False, "error": "Engine not initialized", "content": ""}
+    system_prompt = "你是一个代码修改规划专家。请根据用户需求，给出详细的代码修改计划。"
+    user_msg = f"文件: {req.file_path}\n\n当前代码:\n```\n{req.content}\n```\n\n修改需求: {req.user_query}"
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_msg},
+    ]
+    try:
+        result = await llm.chat(messages=messages, use_cache=False)
+        return {"success": True, "content": result.get("content", "")}
+    except Exception as e:
+        return {"success": False, "error": str(e), "content": ""}
+
+
+@core_router.post("/code-modified-content")
+async def llm_code_modified_content(req: CodeModifiedContentRequest):
+    llm = _get_llm()
+    if not llm:
+        return {"success": False, "error": "Engine not initialized", "content": ""}
+    if req.file_exists:
+        system_prompt = "你是一个代码修改专家。请根据用户需求修改代码，只输出修改后的完整文件内容，不要包含任何解释。"
+    else:
+        system_prompt = "你是一个代码生成专家。请根据用户需求生成代码，只输出完整文件内容，不要包含任何解释。"
+    user_msg = f"文件: {req.file_path}\n\n当前代码:\n```\n{req.current_content}\n```\n\n需求: {req.user_request}"
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_msg},
+    ]
+    try:
+        result = await llm.chat(messages=messages, use_cache=False)
+        return {"success": True, "content": result.get("content", "")}
+    except Exception as e:
+        return {"success": False, "error": str(e), "content": ""}
+
+
+@core_router.post("/dev-generate-code")
+async def llm_dev_generate_code(req: DevGenerateCodeRequest):
+    llm = _get_llm()
+    if not llm:
+        return {"success": False, "error": "Engine not initialized", "content": ""}
+    system_prompt = "你是一个专业的软件开发者。请根据需求直接生成可执行代码，不要包含多余的解释或称呼。"
+    user_msg = f"需求: {req.user_request}"
+    if req.file_path:
+        user_msg += f"\n目标文件: {req.file_path}"
+    if req.existing_content:
+        user_msg += f"\n\n已有代码:\n```\n{req.existing_content}\n```"
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_msg},
+    ]
+    try:
+        result = await llm.chat(messages=messages, use_cache=False)
+        return {"success": True, "content": result.get("content", "")}
+    except Exception as e:
+        return {"success": False, "error": str(e), "content": ""}

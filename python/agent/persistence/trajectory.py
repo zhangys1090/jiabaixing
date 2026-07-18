@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from agent.config import DATA_DIR
+from agent.persistence.database import get_sync_connection
 
 
 @dataclass
@@ -28,6 +29,7 @@ class ExecutionRecord:
         total_duration: 总耗时（毫秒）。
         created_at: 创建时间戳。
         updated_at: 更新时间戳。
+        task_type: 任务类型标识（用于时间预算预估分类）。
     """
 
     id: str = ""
@@ -42,6 +44,7 @@ class ExecutionRecord:
     total_duration: int = 0
     created_at: int = 0
     updated_at: int = 0
+    task_type: str | None = None
 
 
 @dataclass
@@ -194,6 +197,63 @@ class ExecutionStats:
     avg_score: float = 0.0
 
 
+@dataclass
+class ExecutionEstimate:
+    """执行时间预估结果——基于历史数据预测单次任务耗时。
+
+    修正 TS 侧 TrajectoryDatabase.estimateExecutionTime 的缺陷：
+    - 增加置信度字段（TS 侧无置信度）。
+    - task_type 真正参与 SQL 过滤（TS 侧参数被忽略）。
+
+    Attributes:
+        task_type: 任务类型标识。
+        estimated_ms: 预估耗时（毫秒，已按复杂度调整）。
+        p50: 50 分位数（中位数）。
+        p90: 90 分位数。
+        p99: 99 分位数。
+        sample_count: 样本数量。
+        confidence: 置信度（low/medium/high）。
+        complexity: 复杂度因子（0.0-1.0），None 表示未应用复杂度调整。
+    """
+
+    task_type: str
+    estimated_ms: int
+    p50: int
+    p90: int
+    p99: int
+    sample_count: int
+    confidence: str
+    complexity: float | None = None
+
+
+@dataclass
+class ToolDurationStats:
+    """工具执行耗时统计——单工具的历史调用耗时分布。
+
+    修正 TS 侧 TrajectoryDatabase.estimateToolTime 的缺陷：
+    - 增加 P99 分位数（TS 侧仅返回 p50/p90）。
+    - 增加成功率字段。
+    - 支持 success_only 过滤失败样本（TS 侧未过滤）。
+
+    Attributes:
+        tool_name: 工具名称。
+        estimated_ms: 预估耗时（毫秒，平均值）。
+        p50: 50 分位数。
+        p90: 90 分位数。
+        p99: 99 分位数。
+        sample_count: 样本数量。
+        success_rate: 成功率（0-1）。
+    """
+
+    tool_name: str
+    estimated_ms: int
+    p50: int
+    p90: int
+    p99: int
+    sample_count: int
+    success_rate: float
+
+
 class TrajectoryDatabase:
     """轨迹数据库——持久化Agent执行轨迹和统计数据。
 
@@ -214,10 +274,8 @@ class TrajectoryDatabase:
 
     def _connect(self) -> None:
         try:
-            self._conn = sqlite3.connect(str(self._path), check_same_thread=False)
+            self._conn = get_sync_connection(db_path=str(self._path), check_same_thread=False)
             self._conn.row_factory = sqlite3.Row
-            self._conn.execute("PRAGMA journal_mode=WAL")
-            self._conn.execute("PRAGMA foreign_keys=ON")
             self._init_tables()
         except Exception:
             self._conn = None
@@ -322,6 +380,17 @@ class TrajectoryDatabase:
         except sqlite3.OperationalError:
             pass
 
+        # P2 #15: 为时间预算预估新增 task_type 列（向后兼容，旧库自动补列）
+        try:
+            self._conn.execute("ALTER TABLE executions ADD COLUMN task_type TEXT")
+        except sqlite3.OperationalError:
+            pass
+
+        # 为 task_type 过滤创建索引，加速 estimate_execution_time 查询
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_exec_task_type ON executions(task_type)"
+        )
+
         self._conn.commit()
 
     def record_execution(self, rec: ExecutionRecord) -> None:
@@ -329,7 +398,7 @@ class TrajectoryDatabase:
             return
         now = int(time.time() * 1000)
         if not rec.id:
-            rec.id = f"exec_{uuid.uuid4().hex[:8]}"
+            rec.id = f"exec_{uuid.uuid4().hex}"
         if not rec.created_at:
             rec.created_at = now
         if not rec.updated_at:
@@ -338,12 +407,13 @@ class TrajectoryDatabase:
         self._conn.execute(
             """INSERT OR REPLACE INTO executions
                (id, user_id, input, response, intent, status, quality_overall,
-                loop_rounds, total_tool_calls, total_duration, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                loop_rounds, total_tool_calls, total_duration, created_at, updated_at, task_type)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 rec.id, rec.user_id, rec.input, rec.response, rec.intent,
                 rec.status, rec.quality_overall, rec.loop_rounds,
                 rec.total_tool_calls, rec.total_duration, rec.created_at, rec.updated_at,
+                rec.task_type,
             ),
         )
         self._conn.commit()
@@ -353,10 +423,17 @@ class TrajectoryDatabase:
     ) -> None:
         if not self._conn:
             return
-        self._conn.execute(
-            """UPDATE executions SET status=?, response=?, updated_at=? WHERE id=?""",
-            (status, response, int(time.time() * 1000), exec_id),
-        )
+        # 仅当 response 非 None 时才覆盖已有响应，避免清空历史响应（审计 M-08）
+        if response is None:
+            self._conn.execute(
+                """UPDATE executions SET status=?, updated_at=? WHERE id=?""",
+                (status, int(time.time() * 1000), exec_id),
+            )
+        else:
+            self._conn.execute(
+                """UPDATE executions SET status=?, response=?, updated_at=? WHERE id=?""",
+                (status, response, int(time.time() * 1000), exec_id),
+            )
         self._conn.commit()
 
     def record_tool_invocation(self, inv: ToolInvocationRecord) -> None:
@@ -607,6 +684,184 @@ class TrajectoryDatabase:
         scored.sort(key=lambda x: x["relevance_score"], reverse=True)
         return scored[:max_results]
 
+    def estimate_execution_time(
+        self,
+        task_type: str | None,
+        complexity: float | None = None,
+        limit: int = 200,
+    ) -> ExecutionEstimate | None:
+        """基于历史数据预估任务执行时间。
+
+        修正 TS 侧 TrajectoryDatabase.estimateExecutionTime 的 bug：
+        - TS 侧 SQL 无 `WHERE task_type = ?`，taskType 参数被完全忽略；
+          本实现使用 `WHERE (?1 IS NULL OR task_type = ?1)` 真正按类型过滤。
+        - TS 侧分位数用 `Math.floor` 无插值，本实现使用线性插值。
+        - TS 侧无置信度字段，本实现返回 low/medium/high 置信度。
+
+        Args:
+            task_type: 任务类型标识；传入 None 表示不按类型过滤（使用全部样本）。
+            complexity: 任务复杂度（0.0-1.0），传入 None 表示不应用复杂度调整。
+            limit: 最多采样的历史记录数，默认 200。
+
+        Returns:
+            ExecutionEstimate | None: 样本不足（<3）时返回 None，否则返回预估结果。
+
+        Raises:
+            sqlite3.Error: 数据库查询异常时向上抛出（调用方可 try/except 降级）。
+        """
+        if not self._conn:
+            return None
+
+        rows = self._conn.execute(
+            """SELECT total_duration, total_tool_calls
+               FROM executions
+               WHERE status = 'success' AND total_duration > 0
+                 AND (?1 IS NULL OR task_type = ?1)
+               ORDER BY created_at DESC
+               LIMIT ?2""",
+            (task_type, limit),
+        ).fetchall()
+
+        if len(rows) < 3:
+            return None
+
+        durations = sorted(r["total_duration"] for r in rows)
+        n = len(durations)
+
+        avg_duration = sum(durations) / n
+        estimated_ms = avg_duration
+
+        if complexity is not None and 0.0 <= complexity <= 1.0:
+            # 复杂度因子：0.5（简单）到 2.0（复杂）
+            complexity_factor = 0.5 + complexity * 1.5
+            estimated_ms = avg_duration * complexity_factor
+
+            # 工具调用因子：当历史样本含工具调用时，叠加复杂度修正
+            avg_tool_calls = sum(r["total_tool_calls"] for r in rows) / n
+            if avg_tool_calls > 0:
+                tool_call_factor = 1 + complexity * 0.3
+                estimated_ms *= tool_call_factor
+
+        # 置信度：基于样本量
+        if n < 10:
+            confidence = "low"
+        elif n < 50:
+            confidence = "medium"
+        else:
+            confidence = "high"
+
+        return ExecutionEstimate(
+            task_type=task_type or "all",
+            estimated_ms=int(round(estimated_ms)),
+            p50=int(round(self._percentile(durations, 50))),
+            p90=int(round(self._percentile(durations, 90))),
+            p99=int(round(self._percentile(durations, 99))),
+            sample_count=n,
+            confidence=confidence,
+            complexity=complexity,
+        )
+
+    def estimate_tool_time(
+        self,
+        tool_name: str,
+        success_only: bool = True,
+        limit: int = 100,
+    ) -> ToolDurationStats | None:
+        """按工具名预估单次工具调用耗时。
+
+        修正 TS 侧 TrajectoryDatabase.estimateToolTime 的 bug：
+        - TS 侧仅返回 p50/p90，本实现补齐 p99。
+        - TS 侧未过滤失败样本，本实现支持 success_only 参数。
+        - TS 侧分位数用 `Math.floor` 无插值，本实现使用线性插值。
+        - TS 侧无成功率字段，本实现返回 success_rate。
+
+        Args:
+            tool_name: 工具名称。
+            success_only: True 时仅统计成功调用（result_success=1），
+                False 时包含所有调用（含失败）。默认 True。
+            limit: 最多采样的历史记录数，默认 100。
+
+        Returns:
+            ToolDurationStats | None: 样本不足（<2）时返回 None，否则返回统计结果。
+
+        Raises:
+            sqlite3.Error: 数据库查询异常时向上抛出。
+        """
+        if not self._conn:
+            return None
+
+        if success_only:
+            rows = self._conn.execute(
+                """SELECT duration, result_success FROM tool_invocations
+                   WHERE tool_name = ? AND duration > 0 AND result_success = 1
+                   ORDER BY created_at DESC
+                   LIMIT ?""",
+                (tool_name, limit),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                """SELECT duration, result_success FROM tool_invocations
+                   WHERE tool_name = ? AND duration > 0
+                   ORDER BY created_at DESC
+                   LIMIT ?""",
+                (tool_name, limit),
+            ).fetchall()
+
+        if len(rows) < 2:
+            return None
+
+        durations = sorted(r["duration"] for r in rows)
+        n = len(durations)
+        avg = sum(durations) / n
+
+        # 成功率：基于本次采样计算
+        success_count = sum(1 for r in rows if r["result_success"] == 1)
+        success_rate = success_count / n if n > 0 else 0.0
+
+        return ToolDurationStats(
+            tool_name=tool_name,
+            estimated_ms=int(round(avg)),
+            p50=int(round(self._percentile(durations, 50))),
+            p90=int(round(self._percentile(durations, 90))),
+            p99=int(round(self._percentile(durations, 99))),
+            sample_count=n,
+            success_rate=success_rate,
+        )
+
+    @staticmethod
+    def _percentile(sorted_values: list[int], p: float) -> float:
+        """计算分位数（线性插值法）。
+
+        修正 TS 侧 `Math.floor(n * p/100)` 无插值的偏差：
+        - TS 侧对 n=5、p=90 给出 values[4]（即 max），偏差大；
+        - 本实现按 rank = (p/100) * (n-1) 做线性插值，与 numpy 默认一致。
+
+        Args:
+            sorted_values: 已升序排序的数值列表。
+            p: 百分位数（0-100）。
+
+        Returns:
+            float: 分位数值。空列表返回 0.0。
+        """
+        if not sorted_values:
+            return 0.0
+        n = len(sorted_values)
+        if n == 1:
+            return float(sorted_values[0])
+
+        # 边界处理
+        if p <= 0:
+            return float(sorted_values[0])
+        if p >= 100:
+            return float(sorted_values[-1])
+
+        # 线性插值：rank ∈ [0, n-1]
+        rank = (p / 100.0) * (n - 1)
+        lower = int(rank)
+        upper = min(lower + 1, n - 1)
+        frac = rank - lower
+        return float(sorted_values[lower] + frac * (sorted_values[upper] - sorted_values[lower]))
+
     def close(self) -> None:
         if self._conn:
             self._conn.close()
@@ -623,6 +878,9 @@ class TrajectoryDatabase:
 
     @staticmethod
     def _row_to_execution(row: sqlite3.Row) -> ExecutionRecord:
+        # task_type 列可能不存在于旧库，使用 keys() 兜底
+        keys = row.keys() if hasattr(row, "keys") else []
+        task_type = row["task_type"] if "task_type" in keys else None
         return ExecutionRecord(
             id=row["id"],
             user_id=row["user_id"],
@@ -636,6 +894,7 @@ class TrajectoryDatabase:
             total_duration=row["total_duration"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
+            task_type=task_type,
         )
 
     @staticmethod

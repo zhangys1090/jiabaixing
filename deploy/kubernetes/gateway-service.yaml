@@ -1,0 +1,20 @@
+# Gateway Service: ClusterIP
+# 用途: 为 Ingress 提供网关访问入口（稳定 DNS: jiabaixing-gateway:3111）
+apiVersion: v1
+kind: Service
+metadata:
+  name: jiabaixing-gateway
+  namespace: jiabaixing
+  labels:
+    app.kubernetes.io/name: gateway
+    app.kubernetes.io/part-of: jiabaixing
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  type: ClusterIP
+  ports:
+    - port: 3111
+      targetPort: 3111
+      name: http
+  selector:
+    app.kubernetes.io/name: gateway
+    app.kubernetes.io/part-of: jiabaixing

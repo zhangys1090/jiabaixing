@@ -1,16 +1,16 @@
 import * as readline from 'readline';
 import { Logger } from '../../utils/Logger';
 import { COLORS, c } from '../constants';
-import { getIM } from '../utils';
 import { ask } from '../repl';
 import { SubcommandOptions } from '../types';
+import { getIM } from '../utils';
 
 /**
  * 处理 /gateway 命令 — 显示网关状态（REPL 模式）
  */
 export async function handleGatewayStatus(): Promise<void> {
   const im = getIM();
-  const platforms = im.getPlatforms();
+  const platforms = await im.getPlatforms();
   Logger.info(`\n  ${COLORS.bold}网关状态${COLORS.reset}\n`, 'CLI');
   if (platforms.length === 0) {
     Logger.info(`  ${COLORS.dim}未配置任何平台连接${COLORS.reset}`, 'CLI');
@@ -153,7 +153,7 @@ export async function handleGatewayMenu(rl: readline.Interface): Promise<void> {
       }
       case 'list': {
         const im2 = getIM();
-        const platforms = im2.getPlatforms();
+        const platforms = await im2.getPlatforms();
         Logger.info('\n  平台连接状态:\n', 'CLI');
         for (const p of platforms) {
           const s = (p.status?.status as string) || 'disconnected';
@@ -191,7 +191,7 @@ export async function handleGatewayCommandCLI(
     case 'list': {
       try {
         const im = getIM();
-        const platforms = im.getPlatforms();
+        const platforms = await im.getPlatforms();
 
         if (options.json) {
           process.stdout.write(JSON.stringify(platforms, null, 2) + '\n');

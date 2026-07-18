@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -10,6 +11,16 @@ from pathlib import Path
 from typing import Any, Callable, Awaitable
 
 from agent.config import DATA_DIR
+from agent.core.logger import StructuredLogger
+from agent.infrastructure.message_queue import (
+    Message,
+    MessagePriority,
+    create_message_queue,
+)
+from agent.infrastructure.distributed_lock import create_lock
+from agent.infrastructure.sharding import LeaderElection, get_shard_count
+
+log = StructuredLogger("cron")
 
 
 @dataclass
@@ -131,14 +142,93 @@ def _scan_injection(command: str) -> tuple[bool, str]:
     return False, ""
 
 
-def _parse_interval(schedule: str) -> int | None:
-    m = re.match(r"every:(\d+)(s|m|h|d)", schedule)
-    if not m:
+def _parse_cron_field(field: str, min_val: int, max_val: int) -> set[int]:
+    """解析单个 cron 字段为匹配的整数集合。支持 `*`, `a-b`, `a/b`, `a,b` 组合。"""
+    result: set[int] = set()
+    for part in field.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        step = 1
+        if "/" in part:
+            base, step_str = part.split("/", 1)
+            step = int(step_str)
+        else:
+            base = part
+        if base == "*":
+            lo, hi = min_val, max_val
+        elif "-" in base:
+            lo_s, hi_s = base.split("-", 1)
+            lo, hi = int(lo_s), int(hi_s)
+        else:
+            lo = hi = int(base)
+        for v in range(lo, hi + 1, step):
+            if min_val <= v <= max_val:
+                result.add(v)
+    return result
+
+
+def _next_cron_run(expr: str) -> int | None:
+    """解析标准 5 段 cron 表达式（MIN HOUR DOM MONTH DOW），返回距下次触发秒数。
+
+    搜索范围上限 60 天，避免极端表达式无限循环。cron DOW 以 0=周日 计，
+    兼容 7=周日 写法。失败时返回 None（由调用方回退为固定间隔）。
+    """
+    try:
+        parts = expr.split()
+        if len(parts) != 5:
+            return None
+        minutes = _parse_cron_field(parts[0], 0, 59)
+        hours = _parse_cron_field(parts[1], 0, 23)
+        dom = _parse_cron_field(parts[2], 1, 31)
+        months = _parse_cron_field(parts[3], 1, 12)
+        dow = _parse_cron_field(parts[4], 0, 6)
+        if 7 in dow:
+            dow.discard(7)
+            dow.add(0)
+    except (ValueError, IndexError):
         return None
-    val = int(m.group(1))
-    unit = m.group(2)
-    multipliers = {"s": 1, "m": 60, "h": 3600, "d": 86400}
-    return val * multipliers.get(unit, 60)
+    now = time.time()
+    t = ((int(now) // 60) + 1) * 60  # 对齐到下一整分钟
+    for _ in range(60 * 24 * 60):
+        dt = time.localtime(t)
+        if dt.tm_mon not in months or dt.tm_mday not in dom:
+            t += 60
+            continue
+        cron_dow = (dt.tm_wday + 1) % 7  # tm_wday: 0=周一 → 转换 cron 0=周日
+        if cron_dow not in dow or dt.tm_hour not in hours or dt.tm_min not in minutes:
+            t += 60
+            continue
+        return int(t - now)
+    return None
+
+
+def _parse_interval(schedule: str) -> int | None:
+    """解析调度规则为「距下次执行的秒数」间隔。
+
+    支持: every:N{s|m|h|d}（原有）, hourly/daily/weekly/monthly（新增）,
+    cron:<5段表达式>（新增）。无法识别的规则返回 None，由调用方告警而非静默永不执行。
+    """
+    schedule = (schedule or "").strip().lower()
+    if not schedule:
+        return None
+    if schedule == "hourly":
+        return 3600
+    if schedule == "daily":
+        return 86400
+    if schedule == "weekly":
+        return 86400 * 7
+    if schedule == "monthly":
+        return 86400 * 30
+    m = re.match(r"every:(\d+)(s|m|h|d)", schedule)
+    if m:
+        val = int(m.group(1))
+        unit = m.group(2)
+        multipliers = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+        return val * multipliers.get(unit, 60)
+    if schedule.startswith("cron:"):
+        return _next_cron_run(schedule[len("cron:"):].strip())
+    return None
 
 
 class CronJobScheduler:
@@ -152,6 +242,11 @@ class CronJobScheduler:
         self._task: asyncio.Task | None = None
         self._tick_interval = 60.0
         self._handlers: dict[str, Callable[..., Awaitable[Any]]] = {}
+        self._mq: Any = None
+        # 水平扩展（审计残留）：仅 leader 副本运行调度循环并写入 jobs.json，
+        # 其余副本作为热备 + MQ 消费者执行派发任务；写锁防止同进程并发写损坏。
+        self._leader: LeaderElection | None = None
+        self._jobs_io_lock = threading.Lock()
         self._load()
 
     @classmethod
@@ -168,7 +263,13 @@ class CronJobScheduler:
 
     def register(self, job: CronJob) -> None:
         interval = _parse_interval(job.schedule)
-        if interval:
+        if interval is None:
+            # 不支持的调度规则：明确告警，避免 next_run=None 导致任务静默永不执行（审计 S-01）
+            import logging
+            logging.getLogger(__name__).warning(
+                "不支持的调度规则，任务将不会自动执行", schedule=job.schedule
+            )
+        else:
             job.next_run = time.time() + interval
         self._jobs.append(job)
         self._save()
@@ -193,16 +294,38 @@ class CronJobScheduler:
         if self._running:
             return
         self._running = True
-        self._task = asyncio.create_task(self._tick_loop())
+        # 所有副本都订阅 cron.dispatch，以便消费并执行派发来的任务
+        await self._init_mq()
+        # 领导者选举：仅 leader 副本跑调度循环（单副本下恒为 leader）
+        self._leader = LeaderElection("cron")
+        await self._leader.start()
+        if self._leader.is_leader:
+            self._task = asyncio.create_task(self._tick_loop())
+        else:
+            log.info("非 leader 副本，仅作为任务执行者待命", shard_count=get_shard_count())
 
     def stop(self) -> None:
         self._running = False
         if self._task:
             self._task.cancel()
             self._task = None
+        # 仅在运行中的事件循环内调度异步清理，避免无循环场景（如同步 teardown）崩溃
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self._leader = None
+            self._mq = None
+            return
+        if self._leader is not None:
+            loop.create_task(self._leader.stop())
+            self._leader = None
+        if self._mq is not None:
+            loop.create_task(self._mq.stop())
+            self._mq = None
 
     async def _tick_loop(self) -> None:
-        while self._running:
+        # 仅 leader 执行；若领导权在运行中转移，立即停止以避免双副本调度
+        while self._running and (self._leader is not None and self._leader.is_leader):
             try:
                 await self._tick()
             except Exception:
@@ -215,10 +338,60 @@ class CronJobScheduler:
             if not job.enabled or job.status == "running":
                 continue
             if job.next_run and job.next_run <= now:
-                asyncio.create_task(self._run_job(job))
+                # P0：调度锁防 2 副本重复触发；经 MQ 解耦执行
+                asyncio.create_task(self._safe_dispatch(job))
+
+    async def _safe_dispatch(self, job: CronJob) -> None:
+        """加调度锁后派发：仅持有者触发，另一副本抢不到即跳过。"""
+        lock = create_lock(
+            f"cron:sched:{job.id}",
+            ttl_ms=job.timeout or 60_000,
+            max_retries=0,
+            retry_interval_ms=100,
+        )
+        if await lock.acquire():
+            try:
+                await self.dispatch(job)
+            finally:
+                await lock.release()
+
+    async def _init_mq(self) -> None:
+        """惰性初始化调度用消息队列（P0-2：执行主干）。"""
+        if self._mq is None:
+            self._mq = create_message_queue()
+            await self._mq.start()
+            await self._mq.subscribe("cron.dispatch", self._on_dispatch)
+
+    async def dispatch(self, job: CronJob) -> None:
+        """派发任务：经 MQ 解耦到消费者（可跨副本）。
+
+        无 MQ 时退化为本地直接执行，保持单实例行为兼容。
+        """
+        if self._mq is None:
+            await self._init_mq()
+        await self._mq.publish(
+            "cron.dispatch",
+            job.id,
+            priority=MessagePriority.HIGH,
+            max_retries=job.max_retries or 3,
+        )
+
+    async def _on_dispatch(self, msg: Message) -> None:
+        """MQ 消费者：真正执行任务；执行锁防并发重入（含跨副本）。"""
+        job = self.get_job(msg.payload)
+        if not job:
+            return
+        async with create_lock(
+            f"cron:exec:{job.id}",
+            ttl_ms=job.timeout or 60_000,
+        ):
+            await self._run_job(job)
 
     async def _run_job(self, job: CronJob) -> CronJobResult:
         blocked, reason = _scan_injection(job.command)
+        # 命令注入扫描须覆盖 args（审计 S-03：原仅扫描 command，args 可注入任意命令）
+        if not blocked and job.args:
+            blocked, reason = _scan_injection(" ".join(job.args))
         if blocked:
             return CronJobResult(
                 job_id=job.id,
@@ -295,13 +468,27 @@ class CronJobScheduler:
             try:
                 data = json.loads(jobs_file.read_text(encoding="utf-8"))
                 self._jobs = [CronJob.from_dict(d) for d in data]
+                # 崩溃恢复（审计 S-02）：运行中崩溃的任务持久化为 "running"，
+                # 重启后会被 _tick 永久跳过；重置为 idle 以便重新调度。
+                now = time.time()
+                for job in self._jobs:
+                    if job.status == "running":
+                        job.status = "idle"
+                        if job.next_run is None and job.enabled:
+                            interval = _parse_interval(job.schedule)
+                            if interval:
+                                job.next_run = now + interval
+                self._save()
             except (json.JSONDecodeError, OSError):
                 pass
 
     def _save(self) -> None:
         jobs_file = self._data_dir / "jobs.json"
         data = [j.to_dict() for j in self._jobs]
-        jobs_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        # 写锁：leader 副本独占写入；同进程并发写（如 _run_job 与 register）不互相撕裂。
+        with self._jobs_io_lock:
+            # Windows 兼容写：直接覆写，避免 tmp.replace 跨文件系统权限问题
+            jobs_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 @dataclass

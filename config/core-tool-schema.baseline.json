@@ -1,0 +1,11 @@
+{
+  "_comment": "核心工具 schema 基线（BASE_TOOLSET）。本文件是 CI 守卫的'可信基线'：每次对 python/agent/tools/builtin_toolsets.py 中 BASE_TOOLSET 的工具增删，都会被 scripts/check-core-tool-schema.mjs 检测到。新增工具属'核心 schema 扩张'，须经评审并更新本文件（附 _comment 或提交说明）方可通过 CI；删除核心工具允许（缩小内核更安全）。可选能力（插件/技能/MCP）必须走 optional 目录，不得进入 BASE_TOOLSET。",
+  "toolset_id": "base",
+  "entries": [
+    "category:memory",
+    "category:cognition",
+    "ask_clarification",
+    "system_status",
+    "context_manage"
+  ]
+}

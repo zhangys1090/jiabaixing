@@ -7,6 +7,14 @@ from typing import Any
 
 @dataclass
 class Permission:
+    """权限定义。
+
+    Attributes:
+        name: 权限名称。
+        description: 权限描述。
+        risk_level: 风险等级（low / medium / high / critical）。
+    """
+
     name: str
     description: str = ""
     risk_level: str = "low"
@@ -46,6 +54,15 @@ _SENSITIVE_PATTERNS = [
 
 @dataclass
 class SecurityCheckResult:
+    """安全检查结果。
+
+    Attributes:
+        allowed: 是否允许操作。
+        risk_level: 风险等级。
+        warnings: 警告信息列表。
+        blocked_reasons: 阻止原因列表。
+    """
+
     allowed: bool
     risk_level: str = "low"
     warnings: list[str] = field(default_factory=list)
@@ -53,11 +70,34 @@ class SecurityCheckResult:
 
 
 class SecurityGuard:
+    """安全守卫 — 命令/输出安全检查 + 用户权限管理。
+
+    提供三层安全防护：
+    1. 命令检查：检测危险命令模式（rm -rf、远程脚本执行等）
+    2. 输出检查：检测敏感信息泄露（密码、API Key、银行卡号等）
+    3. 权限管理：基于用户的细粒度权限控制
+
+    Usage:
+        guard = SecurityGuard()
+        result = guard.check_command("rm -rf /")
+        if not result.allowed:
+            print(f"被阻止: {result.blocked_reasons}")
+    """
+
     def __init__(self) -> None:
+        """初始化安全守卫。"""
         self._user_permissions: dict[str, set[str]] = {}
         self._audit_log: list[dict[str, Any]] = []
 
     def check_command(self, command: str) -> SecurityCheckResult:
+        """检查命令安全性，检测危险命令和敏感信息。
+
+        Args:
+            command: 待检查的命令字符串。
+
+        Returns:
+            SecurityCheckResult: 检查结果，含阻止原因和警告。
+        """
         warnings: list[str] = []
         blocked: list[str] = []
 
@@ -83,6 +123,14 @@ class SecurityGuard:
         return SecurityCheckResult(allowed=True, risk_level=risk, warnings=warnings)
 
     def check_output(self, text: str) -> SecurityCheckResult:
+        """检查输出文本安全性，检测敏感信息泄露。
+
+        Args:
+            text: 待检查的输出文本。
+
+        Returns:
+            SecurityCheckResult: 检查结果，含敏感信息阻止原因。
+        """
         warnings: list[str] = []
         blocked: list[str] = []
 
@@ -101,6 +149,17 @@ class SecurityGuard:
         return SecurityCheckResult(allowed=True, risk_level="low")
 
     def check_permission(self, user_id: str, permission: str) -> bool:
+        """检查用户是否拥有指定权限。
+
+        新用户默认拥有 low 和 medium 级别的权限。
+
+        Args:
+            user_id: 用户 ID。
+            permission: 权限名称。
+
+        Returns:
+            bool: 是否拥有该权限。
+        """
         perms = self._user_permissions.get(user_id, set())
         if not perms:
             default = {p.name for p in DEFAULT_PERMISSIONS if p.risk_level in ("low", "medium")}
@@ -109,17 +168,37 @@ class SecurityGuard:
         return permission in perms
 
     def grant_permission(self, user_id: str, permission: str) -> None:
+        """授予用户指定权限。
+
+        Args:
+            user_id: 用户 ID。
+            permission: 权限名称。
+        """
         if user_id not in self._user_permissions:
             self._user_permissions[user_id] = {p.name for p in DEFAULT_PERMISSIONS if p.risk_level in ("low", "medium")}
         self._user_permissions[user_id].add(permission)
         self._audit({"action": "permission_granted", "user_id": user_id, "permission": permission})
 
     def revoke_permission(self, user_id: str, permission: str) -> None:
+        """撤销用户指定权限。
+
+        Args:
+            user_id: 用户 ID。
+            permission: 权限名称。
+        """
         if user_id in self._user_permissions:
             self._user_permissions[user_id].discard(permission)
         self._audit({"action": "permission_revoked", "user_id": user_id, "permission": permission})
 
     def get_audit_log(self, limit: int = 100) -> list[dict[str, Any]]:
+        """获取安全审计日志。
+
+        Args:
+            limit: 返回的最大条目数，默认 100。
+
+        Returns:
+            list[dict]: 审计日志条目列表（按时间倒序）。
+        """
         return self._audit_log[-limit:]
 
     def _audit(self, entry: dict[str, Any]) -> None:

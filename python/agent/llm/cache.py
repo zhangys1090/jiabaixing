@@ -21,12 +21,38 @@ class LLMCache:
         self._ttl = ttl_seconds
 
     @staticmethod
-    def _key(messages: list[dict[str, str]], model: str = "") -> str:
-        raw = model + "|" + "|".join(f"{m['role']}:{m['content']}" for m in messages)
+    def _key(
+        messages: list[dict[str, str]],
+        model: str = "",
+        system_prompt: str = "",
+        temperature: float = 0.0,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> str:
+        # 缓存键必须包含 system_prompt / temperature / tools，否则不同系统提示或
+        # 带工具/不带工具的请求会命中同一缓存键返回错误答案（审计 L-12）
+        tools_sig = ""
+        if tools:
+            try:
+                tools_sig = "|T:" + ",".join(
+                    sorted(t.get("name", "") for t in tools if isinstance(t, dict))
+                )
+            except Exception:
+                tools_sig = "|T:*"
+        raw = (
+            f"{model}|{temperature}|{system_prompt or ''}|{tools_sig}|"
+            + "|".join(f"{m['role']}:{m['content']}" for m in messages)
+        )
         return hashlib.sha256(raw.encode()).hexdigest()
 
-    def get(self, messages: list[dict[str, str]], model: str = "") -> str | None:
-        k = self._key(messages, model)
+    def get(
+        self,
+        messages: list[dict[str, str]],
+        model: str = "",
+        system_prompt: str = "",
+        temperature: float = 0.0,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> str | None:
+        k = self._key(messages, model, system_prompt, temperature, tools)
         entry = self._store.get(k)
         if entry is None:
             return None
@@ -36,8 +62,16 @@ class LLMCache:
         entry.hits += 1
         return entry.content
 
-    def set(self, messages: list[dict[str, str]], content: str, model: str = "") -> None:
-        k = self._key(messages, model)
+    def set(
+        self,
+        messages: list[dict[str, str]],
+        content: str,
+        model: str = "",
+        system_prompt: str = "",
+        temperature: float = 0.0,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> None:
+        k = self._key(messages, model, system_prompt, temperature, tools)
         if len(self._store) >= self._max_size:
             self._evict()
         self._store[k] = CacheEntry(content, time.time())

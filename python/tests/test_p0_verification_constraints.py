@@ -172,7 +172,17 @@ class TestVerificationService:
 
     @pytest.mark.asyncio
     async def test_evaluate_goal_progress_ok(self):
-        result = await self.service.evaluate_goal_progress("帮我写代码", "这是为你编写的代码示例：\n```python\nprint('hello')\n```")
+        # 达成判定依赖 LLM 评估路径（无 LLM 时按审计 V-01 故意返回未达成）。
+        # 这里注入 FakeLLM 走真实评估分支，验证"良好输出→已达成"。
+        class FakeLLM:
+            async def chat(self, prompt: str, system_prompt: str = "") -> str:
+                return '{"achieved": true, "progress": 0.9, "remainingSteps": [], "suggestedAction": "continue"}'
+
+        svc = VerificationService(deps=VerificationServiceDeps(llm=FakeLLM()))
+        result = await svc.evaluate_goal_progress(
+            "帮我写代码",
+            "这是为你编写的代码示例：\n```python\nprint('hello')\n```",
+        )
         assert result.achieved is True
         assert result.progress > 0.5
 

@@ -6,6 +6,7 @@ from typing import Any
 
 from agent.persistence.trajectory import (
     ExecutionRecord,
+    ToolDurationStats,
     ToolInvocationRecord,
     TrajectoryDatabase,
 )
@@ -165,5 +166,42 @@ class TrajectoryQueryService:
                 avg_duration=b["total_duration"] / b["count"] if b["count"] > 0 else 0.0,
                 count=b["count"],
             ))
+
+        return result
+
+    def get_tool_duration_percentiles(
+        self,
+        success_only: bool = True,
+        limit_per_tool: int = 100,
+    ) -> dict[str, ToolDurationStats]:
+        """获取所有工具的执行耗时百分位统计。
+
+        P2 #15: 遍历近期执行记录中的工具调用，按工具名聚合后调用
+        TrajectoryDatabase.estimate_tool_time 获取每个工具的 p50/p90/p99
+        耗时分布。用于时间预算预估和工具性能监控。
+
+        Args:
+            success_only: True 时仅统计成功调用，False 时包含失败调用。
+            limit_per_tool: 每个工具最多采样的历史记录数。
+
+        Returns:
+            dict[str, ToolDurationStats]: 工具名到耗时统计的映射；
+                样本不足（<2）的工具不包含在结果中。
+        """
+        recent = self.db.get_recent_executions(1000)
+        tool_names: set[str] = set()
+        for exec_rec in recent:
+            for inv in self.db.get_tool_invocations(exec_rec.id):
+                tool_names.add(inv.tool_name)
+
+        result: dict[str, ToolDurationStats] = {}
+        for name in tool_names:
+            stats = self.db.estimate_tool_time(
+                name,
+                success_only=success_only,
+                limit=limit_per_tool,
+            )
+            if stats is not None:
+                result[name] = stats
 
         return result

@@ -1,3 +1,4 @@
+try {
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
@@ -22,3 +23,6 @@ $p = [uint32]0
 [void][WAPIS]::GetWindowThreadProcessId($h, [ref]$p)
 $n = (Get-Process -Id $p -ErrorAction SilentlyContinue).ProcessName
 Write-Output "$n|$($s.ToString())"
+} catch {
+    Write-Output "Unknown|Foreground window detection failed"
+}

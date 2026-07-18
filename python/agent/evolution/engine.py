@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from agent.core.logger import StructuredLogger
+from agent.security.sensitive_detector import CheckScene, RiskLevel
 from agent.evolution.types import (
     EvolutionAction,
     EvolutionCause,
@@ -50,6 +51,7 @@ class EvolutionEngine:
         self._skill_quality_history: dict[str, list[float]] = {}
         self._data_dir = Path(data_dir) if data_dir else Path(__file__).resolve().parent.parent.parent / "data" / "evolution"
         self._state_path = self._data_dir / "engine-state.json"
+        self._used_plan_ids: set[str] = set()
         self._load_state()
 
     def _load_state(self) -> None:
@@ -72,6 +74,16 @@ class EvolutionEngine:
                 self._skill_quality_history = {k: v[-20:] for k, v in state["skill_quality_history"].items()}
             if state.get("scene_quality"):
                 self._scene_quality = {k: v[-30:] for k, v in state["scene_quality"].items()}
+            if state.get("used_plan_ids"):
+                self._used_plan_ids = set(state["used_plan_ids"][-1000:])
+            if state.get("knowledge_nudges"):
+                self._knowledge_nudges = state["knowledge_nudges"][-50:]
+            if state.get("task_success_count"):
+                self._task_success_count = state["task_success_count"]
+            if state.get("task_failure_count"):
+                self._task_failure_count = state["task_failure_count"]
+            if state.get("total_signals"):
+                self._total_signals = state["total_signals"]
             if state.get("metrics"):
                 m = state["metrics"]
                 self._metrics.total_interactions = m.get("total_interactions", 0)
@@ -96,6 +108,11 @@ class EvolutionEngine:
                 "skills": self._skills,
                 "skill_quality_history": {k: v[-20:] for k, v in self._skill_quality_history.items()},
                 "scene_quality": {k: v[-30:] for k, v in self._scene_quality.items()},
+                "used_plan_ids": list(self._used_plan_ids)[-1000:],
+                "knowledge_nudges": self._knowledge_nudges[-50:],
+                "task_success_count": self._task_success_count,
+                "task_failure_count": self._task_failure_count,
+                "total_signals": self._total_signals,
                 "metrics": {
                     "total_interactions": self._metrics.total_interactions,
                     "total_evolutions": self._metrics.total_evolutions,
@@ -111,6 +128,8 @@ class EvolutionEngine:
 
     def _process_feedback_signal(self, signal: FeedbackSignal) -> None:
         self._feedback_history.append(signal)
+        if len(self._feedback_history) > 5000:
+            self._feedback_history = self._feedback_history[-3000:]
         self._metrics.total_interactions += 1
         self._metrics.recent_quality_scores.append(signal.quality_score)
         if len(self._metrics.recent_quality_scores) > 50:
@@ -156,6 +175,24 @@ class EvolutionEngine:
     def collect_feedback_sync(self, signal: FeedbackSignal) -> None:
         self._process_feedback_signal(signal)
 
+    async def record_tool_failure(self, tool_name: str, error: str = "", **kwargs: Any) -> None:
+        """E-06: 记录工具失败事件到反馈历史，使 should_evolve 的 TOOL_FAILURE 路径生效。
+
+        Args:
+            tool_name: 失败的工具名称。
+            error: 错误信息。
+        """
+        signal = FeedbackSignal(
+            interaction_id=f"tool_fail_{int(time.time())}",
+            quality_score=0.0,
+            cause=EvolutionCause.TOOL_FAILURE.value,
+            tool_name=tool_name,
+            error=error,
+            timestamp=time.time(),
+        )
+        self._process_feedback_signal(signal)
+        log.info("Tool failure recorded for evolution", tool=tool_name, error=error[:100])
+
     async def should_evolve(self) -> EvolutionPlan | None:
         if not self._metrics.recent_quality_scores:
             return None
@@ -170,8 +207,13 @@ class EvolutionEngine:
         ]
         if len(recent_failures) >= 3:
             failed_tools = set(f.tool_name for f in recent_failures if f.tool_name)
+            plan_id = f"evo_{int(time.time())}"
+            while plan_id in self._used_plan_ids:
+                plan_id = f"evo_{int(time.time())}_{len(self._used_plan_ids)}"
+            self._used_plan_ids.add(plan_id)
+
             return EvolutionPlan(
-                plan_id=f"evo_{int(time.time())}",
+                plan_id=plan_id,
                 evolution_type=EvolutionType.TOOL_WEIGHT_ADJUSTMENT,
                 priority=EvolutionPriority.MEDIUM,
                 cause=EvolutionCause.TOOL_FAILURE,
@@ -187,8 +229,13 @@ class EvolutionEngine:
             )
 
         if avg_quality < self._quality_threshold:
+            plan_id = f"evo_{int(time.time())}"
+            while plan_id in self._used_plan_ids:
+                plan_id = f"evo_{int(time.time())}_{len(self._used_plan_ids)}"
+            self._used_plan_ids.add(plan_id)
+
             return EvolutionPlan(
-                plan_id=f"evo_{int(time.time())}",
+                plan_id=plan_id,
                 evolution_type=EvolutionType.PROMPT_OPTIMIZATION,
                 priority=EvolutionPriority.HIGH if avg_quality < 0.5 else EvolutionPriority.MEDIUM,
                 cause=EvolutionCause.LOW_QUALITY,
@@ -207,6 +254,18 @@ class EvolutionEngine:
 
     async def execute_evolution(self, plan: EvolutionPlan) -> EvolutionResult:
         import time as _time
+
+        if plan.plan_id in self._used_plan_ids:
+            executed_plan_ids = {r.plan_id for r in self._evolution_history}
+            if plan.plan_id in executed_plan_ids:
+                return EvolutionResult(
+                    plan_id=plan.plan_id,
+                    success=False,
+                    executed_actions=0,
+                    total_actions=len(plan.actions),
+                    duration_ms=0,
+                )
+
         start = _time.time()
         executed = 0
 
@@ -335,7 +394,23 @@ class EvolutionEngine:
         if has_memory_store:
             return None
 
+        try:
+            from agent.security.sensitive_detector import check_sensitive_info
+            check_result = check_sensitive_info(user_input, CheckScene.STORAGE)
+            if check_result.risk_level in (RiskLevel.MEDIUM, RiskLevel.HIGH, RiskLevel.CRITICAL):
+                log.warning("Knowledge persistence blocked by sensitive info", keyword=matched_kw, risk=check_result.risk_level.value)
+                return None
+        except Exception as exc:
+            # E-05: 检测器异常时 fail-safe 阻止持久化，避免敏感信息泄露。
+            log.warning("Sensitive detector unavailable, blocking persistence as fail-safe", error=str(exc))
+            return None
+
+        # E-05: 脱敏 snippet，移除可能的敏感模式（邮箱/电话/身份证等）。
+        import re as _re
         snippet = user_input[:80]
+        snippet = _re.sub(r'[\w.+-]+@[\w-]+\.[\w.]+', '[邮箱]', snippet)
+        snippet = _re.sub(r'1[3-9]\d{9}', '[电话]', snippet)
+        snippet = _re.sub(r'\d{6}(18|19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\d{3}[\dXx]', '[身份证]', snippet)
         nudge = (
             f"检测到用户表达了偏好/习惯（关键词: \"{matched_kw}\"），但未调用记忆存储工具。"
             f"建议将以下信息持久化: \"{snippet}\""
@@ -471,6 +546,30 @@ class EvolutionEngine:
             log.debug("Strategy signal recorded", signal_type=signal.signal_type.value)
             return
 
+        if signal.signal_type == SignalType.TOOL_SELECTION_QUALITY:
+            # R2 → EvolutionEngine：记录"工具集选择"事件（场景→工具分布学习）。
+            if not signal.tool_name:
+                return
+            stats = self._tool_signal_stats.setdefault(
+                signal.tool_name,
+                {
+                    "success_count": 0,
+                    "failure_count": 0,
+                    "avg_quality": 0.0,
+                    "last_used": 0.0,
+                    "selection_count": 0,
+                },
+            )
+            stats["selection_count"] = stats.get("selection_count", 0) + 1
+            stats["last_used"] = signal.timestamp or time.time()
+            log.debug(
+                "工具集选择信号已记录",
+                tool=signal.tool_name,
+                toolset=signal.metadata.get("toolset_id"),
+                scene=signal.metadata.get("scene"),
+            )
+            return
+
         if not signal.tool_name:
             return
 
@@ -493,6 +592,42 @@ class EvolutionEngine:
 
         stats["last_used"] = signal.timestamp or time.time()
         log.debug("Strategy tool signal recorded", tool=signal.tool_name, signal_type=signal.signal_type.value)
+
+    def record_toolset_selection(
+        self,
+        scene: str,
+        toolset_id: str,
+        tool_names: list[str],
+        method: str = "sampled",
+    ) -> None:
+        """R2 工具集采样结果 → 进化引擎。
+
+        为每个被选中的工具发一条 TOOL_SELECTION_QUALITY 信号，使进化引擎
+        积累"场景 → 工具集"分布，供后续自适应工具优先级调整使用。
+
+        Args:
+            scene: 检测出的场景（如 coding/browsing）。
+            toolset_id: 选中的工具集 id。
+            tool_names: 选中的工具名列表。
+            method: 选择方法（"sampled" 概率分发 / "deterministic" 确定性）。
+        """
+        ts = time.time()
+        for name in tool_names:
+            if not name:
+                continue
+            self.record_signal(
+                LearningSignal(
+                    signal_type=SignalType.TOOL_SELECTION_QUALITY,
+                    tool_name=name,
+                    quality=0.5,
+                    timestamp=ts,
+                    metadata={
+                        "scene": scene,
+                        "toolset_id": toolset_id,
+                        "method": method,
+                    },
+                )
+            )
 
     def get_adjusted_tool_priority(self, tools: list[str]) -> list[str]:
         def _sort_key(tool_name: str) -> float:

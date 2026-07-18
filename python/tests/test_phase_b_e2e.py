@@ -13,6 +13,7 @@ Phase B 端到端测试 — 从 3 个入口验证 Python 后端完整性
 from __future__ import annotations
 
 import pytest
+import uuid
 from httpx import ASGITransport, AsyncClient
 
 from agent.main import app
@@ -25,8 +26,15 @@ def anyio_backend():
 
 @pytest.fixture
 async def client():
+    # 每个测试使用独立的 x-forwarded-for，避免跨测试/跨文件共享全局令牌桶被耗尽
+    # （ApiGatewayMiddleware 按 client_id 限流，默认 client_id 在整轮测试中被快速耗尽触发 429，
+    #  导致本文件测试在完整 suite 中因顺序依赖而偶发失败）
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as c:
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={"x-forwarded-for": f"test-{uuid.uuid4().hex}"},
+    ) as c:
         yield c
 
 
@@ -453,24 +461,30 @@ class TestCrossEntryIntegration:
         health = await client.get("/health")
         assert health.status_code == 200
 
-        for entry_name, session_id in [
+        for idx, (entry_name, session_id) in enumerate([
             ("cli", "pipeline_cli"),
             ("gateway", "pipeline_gw"),
             ("ui", "pipeline_ui"),
-        ]:
+        ]):
+            # 每个入口使用独立的 x-forwarded-for，避免与文件内其他测试共享
+            # 全局令牌桶（同一 client_id 会被耗尽触发 429，属测试隔离问题）
+            headers = {"x-forwarded-for": f"10.0.0.{idx + 1}"}
+
             chat_resp = await client.post(
                 "/v1/chat",
                 json={
                     "message": f"Pipeline test from {entry_name}",
                     "session_id": session_id,
                 },
+                headers=headers,
             )
+            # chat 可能 502/503（取决于 LLM 后端可用性），但端点应可用（非 500）
             assert chat_resp.status_code in (200, 502, 503)
 
-            mem_resp = await client.get("/v1/memory/stats")
+            mem_resp = await client.get("/v1/memory/stats", headers=headers)
             assert mem_resp.status_code == 200
 
-            skill_resp = await client.get("/v1/skills")
+            skill_resp = await client.get("/v1/skills", headers=headers)
             assert skill_resp.status_code == 200
 
             evo_resp = await client.post(
@@ -480,5 +494,6 @@ class TestCrossEntryIntegration:
                     "quality_score": 0.85,
                     "cause": "pipeline_test",
                 },
+                headers=headers,
             )
             assert evo_resp.status_code == 200

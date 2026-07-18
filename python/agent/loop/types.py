@@ -74,6 +74,15 @@ class LoopContext:
     step_results: dict[str, StepResult] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
     trace_id: str = ""
+    # 任务取消事件：设置后主循环和 executor 会在下一个检查点中止
+    cancel_event: "asyncio.Event | None" = None
+    # 灰度发布：用户标识和策略名称，传递到 llm.chat() 用于哈希分桶选择版本
+    user_id: str | None = None
+    strategy_name: str | None = None
+
+    def is_cancelled(self) -> bool:
+        """检查任务是否已被取消"""
+        return self.cancel_event is not None and self.cancel_event.is_set()
 
 
 @dataclass
@@ -103,6 +112,7 @@ class ReporterOutput:
     steps_completed: int = 0
     steps_total: int = 0
     total_duration_ms: float = 0.0
+    quality_breakdown: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass

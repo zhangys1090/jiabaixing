@@ -10,7 +10,6 @@ module.exports = {
     '/node_modules/',
     '/tests/unit/frontend/',
     '/src/frontend/src/App.test',
-    '/tests/phase1-optimization',
     '/tests/phase2-intelligence',
     '/tests/phase3-autonomy',
     '/tests/phase4-integration',
@@ -26,13 +25,8 @@ module.exports = {
     '/tests/unit/desktop/DesktopVisionEngine',
     '/tests/unit/desktop/DesktopAgentLoop',
     '/tests/unit/core/MultiObjectiveTaskCoordinator',
-    '/tests/unit/core/JiabaixingCore',
-    '/tests/unit/multimodal/',
-    '/tests/unit/plugins/',
-    '/tests/unit/api/',
     '/tests/unit/interaction/VoiceInteractionManager',
     '/tests/shared/',
-    '/tests/coordination/',
     '/tests/integration/MemoryPersistence',
     '/tests/integration/RealInteractionTest',
     '/tests/integration/PersonaConsistency',
@@ -42,12 +36,18 @@ module.exports = {
     '/tests/integration/EvolutionVerification',
     '/tests/integration/Phase8To10Infrastructure',
     '/tests/integration/PositiveLoop',
-    '/tests/integration/complete-system-integration',
     '/tests/integration/eventbus-tracking',
     '/tests/integration/integration-layer-basic',
   ],
   transform: {
-    '^.+\.tsx?$': 'ts-jest'
+    '^.+\.tsx?$': [
+      'ts-jest',
+      {
+        // 转译不查类型：jest 是运行时闸门，类型闸门由 tsc（npm run check:ts）负责。
+        // 源码中存在预存类型错误（如 AAgentHarness.ts），不应卡住无关的测试套件。
+        isolatedModules: true,
+      },
+    ],
   },
   collectCoverage: true,
   coverageDirectory: 'coverage',
@@ -57,7 +57,7 @@ module.exports = {
   modulePaths: ['<rootDir>/src'],
   moduleDirectories: ['node_modules', 'src'],
   moduleNameMapper: {
-    '^better-sqlite3$': '<rootDir>/tests/__mocks__/better-sqlite3.ts'
+    '^better-sqlite3$': '<rootDir>/tests/__mocks__/better-sqlite3.ts',
   },
-  setupFilesAfterEnv: ['<rootDir>/tests/setup.ts']
+  setupFilesAfterEnv: ['<rootDir>/tests/setup.ts'],
 };

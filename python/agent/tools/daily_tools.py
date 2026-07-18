@@ -17,7 +17,11 @@ from agent.tools.registry import (
 TASK_MANAGE_DEF = ToolDefinition(
     name="task_manage",
     description="管理任务和待办事项。支持创建、查看、完成、删除和更新任务。适用场景：用户需要记录待办、管理任务列表、追踪任务进度。",
+    short_desc="管理待办任务",
     category=ToolCategory.DAILY,
+    tags=["task", "todo", "manage", "schedule"],
+    scenes=["daily", "work", "coding"],
+    capability_level=1,
     parameters=[
         ToolParameterDef(name="action", type="string", description="操作类型", enum=["create", "list", "complete", "delete", "update"]),
         ToolParameterDef(name="task_id", type="string", required=False, description="任务ID"),
@@ -33,7 +37,11 @@ TASK_MANAGE_DEF = ToolDefinition(
 CALENDAR_DEF = ToolDefinition(
     name="calendar",
     description="日历日程管理。支持创建日程、查看日程、设置提醒、查询日程冲突等操作。适用场景：会议安排、日程管理、时间规划。",
+    short_desc="管理日历日程",
     category=ToolCategory.DAILY,
+    tags=["calendar", "event", "schedule", "meeting"],
+    scenes=["daily", "work"],
+    capability_level=1,
     parameters=[
         ToolParameterDef(name="action", type="string", description="操作类型", enum=["create_event", "list_events", "get_today", "get_week", "delete_event"]),
         ToolParameterDef(name="event_id", type="string", required=False, description="日程ID"),
@@ -49,7 +57,11 @@ CALENDAR_DEF = ToolDefinition(
 REMINDER_SET_DEF = ToolDefinition(
     name="reminder_set",
     description='设置和管理定时提醒。仅在用户要求"定时提醒"、"到时间提醒我"等需要时间触发的场景使用。不适用：单纯记住信息（用memory_store）。',
+    short_desc="设置定时提醒",
     category=ToolCategory.DAILY,
+    tags=["reminder", "alarm", "timer", "schedule"],
+    scenes=["daily", "work"],
+    capability_level=1,
     parameters=[
         ToolParameterDef(name="action", type="string", description="操作类型", enum=["set", "list", "cancel"]),
         ToolParameterDef(name="reminder_id", type="string", required=False, description="提醒ID"),
@@ -63,7 +75,11 @@ REMINDER_SET_DEF = ToolDefinition(
 NOTE_TAKE_DEF = ToolDefinition(
     name="note_take",
     description="快速记录和管理笔记。支持写入、读取、列表、删除和搜索笔记。适用场景：用户需要快速记录想法、备忘、会议纪要等。",
+    short_desc="快速记录笔记",
     category=ToolCategory.DAILY,
+    tags=["note", "memo", "write", "record"],
+    scenes=["daily", "work", "research", "coding"],
+    capability_level=1,
     parameters=[
         ToolParameterDef(name="action", type="string", description="操作类型", enum=["write", "read", "list", "delete", "search"]),
         ToolParameterDef(name="note_id", type="string", required=False, description="笔记ID"),
@@ -78,7 +94,11 @@ NOTE_TAKE_DEF = ToolDefinition(
 SYSTEM_STATUS_DEF = ToolDefinition(
     name="system_status",
     description="查询系统各组件的运行状态。支持查看内存、工具、进化引擎等组件状态。适用场景：用户想了解系统运行情况、排查问题。",
+    short_desc="查询系统状态",
     category=ToolCategory.DAILY,
+    tags=["system", "status", "health", "monitor"],
+    scenes=["daily", "coding"],
+    capability_level=1,
     parameters=[
         ToolParameterDef(name="component", type="string", required=False, description="查询的组件", enum=["all", "memory", "tools", "evolution", "scheduler"]),
         ToolParameterDef(name="detail_level", type="string", required=False, description="详情级别", enum=["summary", "detailed"]),
@@ -89,7 +109,11 @@ SYSTEM_STATUS_DEF = ToolDefinition(
 TASK_PRIORITY_DEF = ToolDefinition(
     name="task_priority",
     description="管理任务优先级。支持提升/降低优先级、按优先级列出任务、设置截止日期等。适用场景：按优先级排序任务、处理紧急任务。",
+    short_desc="管理任务优先级",
     category=ToolCategory.DAILY,
+    tags=["task", "priority", "urgent", "schedule"],
+    scenes=["daily", "work"],
+    capability_level=2,
     parameters=[
         ToolParameterDef(name="action", type="string", description="操作类型", enum=["promote", "demote", "set", "list_by_priority", "set_deadline", "urgent"]),
         ToolParameterDef(name="task_id", type="string", required=False, description="任务ID"),
@@ -102,7 +126,11 @@ TASK_PRIORITY_DEF = ToolDefinition(
 TASK_DEPENDENCY_DEF = ToolDefinition(
     name="task_dependency",
     description="管理任务之间的依赖关系。支持设置前置任务、查看依赖链、检查阻塞状态等。适用场景：项目管理、任务编排、工作流管理。",
+    short_desc="管理任务依赖",
     category=ToolCategory.DAILY,
+    tags=["task", "dependency", "workflow", "project"],
+    scenes=["work", "coding"],
+    capability_level=2,
     parameters=[
         ToolParameterDef(name="action", type="string", description="操作类型", enum=["add_dependency", "remove_dependency", "list_dependencies", "check_blocked", "get_dependency_chain"]),
         ToolParameterDef(name="task_id", type="string", description="任务ID"),
@@ -114,7 +142,11 @@ TASK_DEPENDENCY_DEF = ToolDefinition(
 BATCH_TASK_DEF = ToolDefinition(
     name="batch_task",
     description="批量操作任务。支持批量创建、批量完成、批量删除等。适用场景：一次性处理多个任务。",
+    short_desc="批量操作任务",
     category=ToolCategory.DAILY,
+    tags=["task", "batch", "bulk"],
+    scenes=["work", "daily"],
+    capability_level=2,
     parameters=[
         ToolParameterDef(name="action", type="string", description="操作类型", enum=["create_batch", "complete_batch", "delete_batch", "list_by_status"]),
         ToolParameterDef(name="titles", type="string", required=False, description="任务标题列表(逗号分隔,create_batch时使用)"),
@@ -127,7 +159,11 @@ BATCH_TASK_DEF = ToolDefinition(
 TASK_ANALYTICS_DEF = ToolDefinition(
     name="task_analytics",
     description="任务统计分析。支持统计完成情况、生成日报/周报、分析趋势、识别瓶颈。适用场景：项目进度跟踪、效率分析。",
+    short_desc="任务统计分析",
     category=ToolCategory.DAILY,
+    tags=["task", "analytics", "report", "statistics"],
+    scenes=["work", "briefing", "daily"],
+    capability_level=2,
     parameters=[
         ToolParameterDef(name="action", type="string", description="操作类型", enum=["summary", "daily_report", "weekly_report", "trend", "bottleneck"]),
         ToolParameterDef(name="days", type="number", required=False, description="统计天数"),

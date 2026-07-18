@@ -7,6 +7,15 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from agent.core.logger import StructuredLogger
+from agent.mcp.logging import MCPLoggingManager
+from agent.mcp.progress import MCPProgressManager
+from agent.mcp.sampling import MCPSamplingManager
+from agent.mcp.transport import (
+    BaseMCPTransport,
+    MCPTransportConfig,
+    MCPTransportFactory,
+    MCPTransportType,
+)
 
 log = StructuredLogger("mcp.manager")
 
@@ -15,9 +24,31 @@ MCP_CONFIG_PATH = os.path.join(os.getcwd(), "data", "mcp-servers.json")
 REQUEST_TIMEOUT: float = 30.0
 MAX_OUTPUT_BUFFER: int = 512 * 1024
 
+# MCP Server→Client 三类内建方法名
+METHOD_SAMPLING_CREATE = "sampling/createMessage"
+METHOD_NOTIFICATION_LOG = "notifications/message"
+METHOD_NOTIFICATION_PROGRESS = "notifications/progress"
+
 
 @dataclass
 class MCPServerConfig:
+    """MCP 服务器配置.
+
+    Attributes:
+        name: 服务器唯一名称.
+        command: STDIO 模式可执行命令.
+        args: STDIO 模式命令参数.
+        env: STDIO 模式环境变量.
+        description: 服务器描述.
+        enabled: 是否启用.
+        auto_start: 是否自动启动.
+        tool_filtering: 是否启用工具过滤.
+        allowed_tools: 允许工具列表.
+        denied_tools: 禁用工具列表.
+        transport: 传输类型 ("stdio" 或 "http+sse").
+        url: HTTP/SSE 模式 SSE 端点 URL.
+        headers: HTTP/SSE 模式额外请求头.
+    """
     name: str
     command: str
     args: list[str] = field(default_factory=list)
@@ -28,6 +59,9 @@ class MCPServerConfig:
     tool_filtering: bool = False
     allowed_tools: list[str] | None = None
     denied_tools: list[str] | None = None
+    transport: str = "stdio"
+    url: str = ""
+    headers: dict[str, str] | None = None
 
 
 @dataclass
@@ -50,8 +84,14 @@ class MCPServerManager:
     def __init__(self) -> None:
         self._servers: dict[str, MCPServerConfig] = {}
         self._processes: dict[str, MCPServerProcess] = {}
+        # HTTP/SSE 传输层实例映射，键为服务器名，值为 BaseMCPTransport 实例
+        self._transports: dict[str, BaseMCPTransport] = {}
         self._message_handlers: dict[str, Callable[[dict], None]] = {}
         self._event_handlers: dict[str, list[Callable]] = {}
+        # P3-#2: MCP 三类原语管理器（Sampling/Logging/Progress）
+        self._sampling_manager = MCPSamplingManager()
+        self._logging_manager = MCPLoggingManager()
+        self._progress_manager = MCPProgressManager()
         self._initialize_default_servers()
 
     @classmethod
@@ -67,8 +107,12 @@ class MCPServerManager:
             cls._instance.stop_all_servers()
             cls._instance._servers.clear()
             cls._instance._processes.clear()
+            cls._instance._transports.clear()
             cls._instance._message_handlers.clear()
             cls._instance._event_handlers.clear()
+            # 清空三个原语管理器的订阅者，避免单例重建后订阅者泄漏
+            cls._instance._logging_manager.clear_subscribers()
+            cls._instance._progress_manager.clear_subscribers()
         cls._instance = None
 
     def on(self, event: str, handler: Callable) -> None:
@@ -144,9 +188,14 @@ class MCPServerManager:
             log.warning(f"MCP服务器已禁用: {name}")
             return False
 
-        if name in self._processes:
+        if name in self._processes or name in self._transports:
             log.warning(f"MCP服务器已在运行: {name}")
             return True
+
+        # 传输类型分发：HTTP/SSE 走传输层，STDIO 走子进程
+        transport_type = self._resolve_transport_type(config)
+        if transport_type == MCPTransportType.HTTP_SSE:
+            return await self._start_http_sse_server(name, config)
 
         try:
             log.info(f"启动MCP服务器: {name}")
@@ -187,10 +236,75 @@ class MCPServerManager:
             log.error(f"MCP服务器启动失败 [{name}]: {e}")
             return False
 
+    async def _start_http_sse_server(self, name: str, config: MCPServerConfig) -> bool:
+        """启动 HTTP/SSE 传输层的 MCP 服务器.
+
+        通过 MCPTransportFactory 创建 HttpSseMCPTransport 实例并启动，
+        跳过 stdio 子进程启动路径。传输实例存入 _transports 字典，
+        供 send_message/stop_server 委托使用。
+
+        Args:
+            name: 服务器名称.
+            config: MCP 服务器配置，必须包含 url 字段.
+
+        Returns:
+            bool: 启动成功返回 True，失败返回 False.
+        """
+        try:
+            log.info(f"启动MCP服务器(HTTP/SSE): {name} url={config.url}")
+            transport_config = MCPTransportConfig(
+                url=config.url,
+                headers=config.headers or {},
+                timeout=REQUEST_TIMEOUT,
+            )
+            transport = MCPTransportFactory.create(transport_config, MCPTransportType.HTTP_SSE)
+            await transport.start()
+            # P3-#2: 注册 Server→Client 三类内建方法的处理器
+            self._register_transport_handlers(name, transport)
+            self._transports[name] = transport
+            self._emit("serverStarted", {"name": name, "config": config})
+            log.info(f"MCP服务器(HTTP/SSE)启动成功: {name}")
+            return True
+        except Exception as e:
+            log.error(f"MCP服务器(HTTP/SSE)启动失败 [{name}]: {e}")
+            return False
+
+    def _register_transport_handlers(
+        self, name: str, transport: BaseMCPTransport
+    ) -> None:
+        """向传输层注册 Server→Client 内建方法处理器（P3-#2）.
+
+        为 HTTP/SSE 传输层注册 sampling/logging/progress 三类方法的
+        处理器，使 Server 主动发起的请求与通知能被路由到对应的管理器。
+
+        Args:
+            name: 服务器名称.
+            transport: 传输层实例.
+        """
+        # sampling/createMessage 为带 id 的请求
+        transport.on_request(
+            METHOD_SAMPLING_CREATE,
+            lambda message, _name=name: self._schedule_dispatch(_name, message),
+        )
+        # notifications/message 与 notifications/progress 为通知（无 id）
+        transport.on_notification(
+            METHOD_NOTIFICATION_LOG,
+            lambda params, _name=name: self._schedule_dispatch(
+                _name, {"jsonrpc": "2.0", "method": METHOD_NOTIFICATION_LOG, "params": params}
+            ),
+        )
+        transport.on_notification(
+            METHOD_NOTIFICATION_PROGRESS,
+            lambda params, _name=name: self._schedule_dispatch(
+                _name, {"jsonrpc": "2.0", "method": METHOD_NOTIFICATION_PROGRESS, "params": params}
+            ),
+        )
+
     async def _initialize_server(self, name: str) -> bool:
         try:
             response = await self.send_message(name, {
                 "jsonrpc": "2.0",
+                "id": 1,
                 "method": "initialize",
                 "params": {
                     "protocolVersion": "2024-11-05",
@@ -275,12 +389,136 @@ class MCPServerManager:
                         future.set_result(message)
 
                 if "method" in message:
+                    # P3-#2: 优先分发内建 MCP 原语方法
+                    method = message["method"]
+                    if method in (
+                        METHOD_SAMPLING_CREATE,
+                        METHOD_NOTIFICATION_LOG,
+                        METHOD_NOTIFICATION_PROGRESS,
+                    ):
+                        self._schedule_dispatch(name, message)
+                    # 通用 message handler 仍调用（保持向后兼容）
                     handler = self._message_handlers.get(name)
                     if handler:
                         handler(message)
                     self._emit("message", {"serverName": name, "message": message})
             except json.JSONDecodeError:
                 pass
+
+    def _schedule_dispatch(self, name: str, message: dict) -> None:
+        """将内建 MCP 原语方法分发调度到事件循环.
+
+        在同步上下文（_handle_server_output）中调用，通过
+        ``asyncio.create_task`` 调度异步分发协程。无运行中事件循环
+        时静默跳过。
+
+        Args:
+            name: 服务器名称.
+            message: 完整 JSON-RPC 消息.
+        """
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            return
+        if loop.is_running():
+            loop.create_task(self._dispatch_incoming_method(name, message))
+
+    async def _dispatch_incoming_method(
+        self, name: str, message: dict
+    ) -> None:
+        """分发 MCP Server→Client 内建方法（sampling/logging/progress）.
+
+        Args:
+            name: 服务器名称.
+            message: 完整 JSON-RPC 消息，包含 method/params/可选 id.
+        """
+        method = message.get("method", "")
+        params = message.get("params") or {}
+        msg_id = message.get("id")
+
+        try:
+            if method == METHOD_SAMPLING_CREATE:
+                # Server→Client 请求，需通过 SamplingManager 完成 LLM 调用并回响应
+                result = await self._sampling_manager.create_message(params)
+                if msg_id is not None:
+                    await self._send_response(name, msg_id, result=result)
+            elif method == METHOD_NOTIFICATION_LOG:
+                # Server→Client 通知，分发到订阅者
+                level = params.get("level", "info")
+                logger_name = params.get("logger", name)
+                data = params.get("data")
+                await self._logging_manager.send_log(level, logger_name, data)
+            elif method == METHOD_NOTIFICATION_PROGRESS:
+                # Server→Client 通知，分发到订阅者
+                progress_token = params.get("progressToken", "")
+                progress = params.get("progress", 0.0)
+                total = params.get("total")
+                prog_message = params.get("message")
+                await self._progress_manager.send_progress(
+                    progress_token, progress, total, prog_message
+                )
+        except Exception as e:
+            log.error(f"MCP 方法分发失败 [{method}]: {e}")
+            # sampling 请求失败时回 JSON-RPC 错误响应
+            if method == METHOD_SAMPLING_CREATE and msg_id is not None:
+                try:
+                    await self._send_response(
+                        name,
+                        msg_id,
+                        error={"code": -32603, "message": str(e)},
+                    )
+                except Exception as send_err:
+                    log.warning(f"sampling 错误响应发送失败: {send_err}")
+
+    async def _send_response(
+        self,
+        server_name: str,
+        msg_id: int | str,
+        result: Any = None,
+        error: dict | None = None,
+    ) -> None:
+        """向 MCP 服务器发送 JSON-RPC 响应（用于 Server→Client 请求的回包）.
+
+        Args:
+            server_name: 服务器名称.
+            msg_id: 服务器请求的 id.
+            result: 成功结果（与 error 互斥）.
+            error: 错误对象（与 result 互斥）.
+        """
+        response: dict[str, Any] = {"jsonrpc": "2.0", "id": msg_id}
+        if error is not None:
+            response["error"] = error
+        else:
+            response["result"] = result
+
+        # HTTP/SSE 路径：通过 transport.send_response 发送
+        transport = self._transports.get(server_name)
+        if transport is not None:
+            transport.send_response(msg_id, result=result, error=error)
+            return
+
+        # stdio 路径：直接写入子进程 stdin
+        server_proc = self._processes.get(server_name)
+        if not server_proc:
+            log.warning(f"无法发送响应，服务器未运行: {server_name}")
+            return
+        json_str = json.dumps(response, ensure_ascii=False) + "\n"
+        try:
+            server_proc.process.stdin.write(json_str.encode("utf-8"))
+        except Exception as e:
+            log.error(f"发送响应失败 [{server_name}]: {e}")
+
+    def get_sampling_manager(self) -> MCPSamplingManager:
+        """返回 Sampling 原语管理器实例."""
+        return self._sampling_manager
+
+    def get_logging_manager(self) -> MCPLoggingManager:
+        """返回 Logging 原语管理器实例."""
+        return self._logging_manager
+
+    def get_progress_manager(self) -> MCPProgressManager:
+        """返回 Progress 原语管理器实例."""
+        return self._progress_manager
 
     def _cleanup_server(self, name: str, server_proc: MCPServerProcess) -> None:
         for future in server_proc.pending_requests.values():
@@ -291,6 +529,29 @@ class MCPServerManager:
         self._emit("serverStopped", {"name": name})
 
     def stop_server(self, name: str) -> bool:
+        # HTTP/SSE 传输层停止路径
+        transport = self._transports.pop(name, None)
+        if transport is not None:
+            try:
+                log.info(f"停止MCP服务器(HTTP/SSE): {name}")
+                # transport.stop 是协程，需要事件循环驱动；这里通过 asyncio.run_coroutine_threadsafe
+                # 或直接 create_task 处理。为保持 stop_server 同步签名，使用事件循环调度。
+                try:
+                    loop = asyncio.get_event_loop()
+                except RuntimeError:
+                    loop = None
+                if loop and loop.is_running():
+                    loop.create_task(transport.stop())
+                else:
+                    # 无运行中事件循环时，使用 asyncio.run 同步停止
+                    asyncio.run(transport.stop())
+                self._emit("serverStopped", {"name": name})
+                log.info(f"MCP服务器(HTTP/SSE)已停止: {name}")
+                return True
+            except Exception as e:
+                log.error(f"MCP服务器(HTTP/SSE)停止失败 [{name}]: {e}")
+                return False
+
         server_proc = self._processes.get(name)
         if not server_proc:
             return False
@@ -327,11 +588,25 @@ class MCPServerManager:
 
     def stop_all_servers(self) -> None:
         log.info("停止所有MCP服务器...")
+        # 先停 stdio 子进程，再停 HTTP/SSE 传输层
         for name in list(self._processes.keys()):
+            self.stop_server(name)
+        for name in list(self._transports.keys()):
             self.stop_server(name)
         log.info("所有MCP服务器已停止")
 
     async def send_message(self, server_name: str, message: dict) -> dict:
+        # HTTP/SSE 传输层优先委托
+        transport = self._transports.get(server_name)
+        if transport is not None:
+            method = message.get("method", "")
+            params = message.get("params")
+            is_notification = "method" in message and "id" not in message
+            if is_notification:
+                transport.send_notification(method, params)
+                return {"jsonrpc": "2.0", "result": None}
+            return await transport.send_request(method, params)
+
         server_proc = self._processes.get(server_name)
         if not server_proc:
             raise RuntimeError(f"MCP服务器未运行: {server_name}")
@@ -381,6 +656,47 @@ class MCPServerManager:
             result.append(tool)
         return result
 
+    def _resolve_transport_type(self, config: MCPServerConfig) -> MCPTransportType:
+        """根据 MCPServerConfig.transport 字段解析为 MCPTransportType 枚举.
+
+        Args:
+            config: MCP 服务器配置.
+        Returns:
+            MCPTransportType: 传输类型枚举（默认 STDIO）.
+        """
+        try:
+            return MCPTransportType(config.transport or "stdio")
+        except ValueError:
+            log.warning(f"MCP服务器 {config.name} 传输类型未知: {config.transport}, 回退为 STDIO")
+            return MCPTransportType.STDIO
+
+    async def send_request(
+        self,
+        server_name: str,
+        method: str,
+        params: dict | None = None,
+    ) -> dict:
+        """发送通用 JSON-RPC 请求到 MCP 服务器（实现 MCPProvider 接口）.
+
+        委托 send_message 处理实际通信，使 MCPServerManager 与
+        MCPProvider.send_request 接口对齐，支持 resources/*、prompts/* 等
+        MCP 标准协议方法。
+
+        Args:
+            server_name: MCP 服务器名称.
+            method: JSON-RPC 方法名（如 "resources/list"）.
+            params: 请求参数字典，可选.
+        Returns:
+            dict: 完整 JSON-RPC 响应.
+        Raises:
+            RuntimeError: 服务器未运行或通信失败.
+            TimeoutError: 请求超时.
+        """
+        message: dict[str, Any] = {"jsonrpc": "2.0", "method": method}
+        if params is not None:
+            message["params"] = params
+        return await self.send_message(server_name, message)
+
     async def call_tool(
         self, server_name: str, tool_name: str, args: dict | None = None
     ) -> Any:
@@ -428,32 +744,207 @@ class MCPServerManager:
     def unregister_message_handler(self, server_name: str) -> None:
         self._message_handlers.pop(server_name, None)
 
+    async def list_resources(self, server_name: str) -> list[dict]:
+        """列出 MCP 服务器提供的资源.
+
+        MCP Protocol: resources/list
+
+        Args:
+            server_name: MCP 服务器名称.
+
+        Returns:
+            list[dict]: 资源列表；服务器未初始化或不支持 resources 时返回空列表.
+        """
+        server_proc = self._processes.get(server_name)
+        transport = self._transports.get(server_name)
+        if not server_proc and not transport:
+            log.warning(f"MCP服务器 {server_name} 未运行，无法列出资源")
+            return []
+
+        caps = None
+        if server_proc and server_proc.initialized:
+            caps = server_proc.capabilities or {}
+        elif transport:
+            caps = getattr(transport, "_capabilities", None) or {}
+
+        if not caps.get("resources"):
+            log.debug(f"MCP服务器 {server_name} 不支持 resources")
+            return []
+
+        try:
+            response = await self.send_request(server_name, "resources/list", {})
+            if response.get("error"):
+                log.warning(f"MCP资源列表获取失败: {response['error'].get('message')}")
+                return []
+            result = response.get("result") or {}
+            return result.get("resources", [])
+        except Exception as exc:
+            log.warning(f"MCP资源列表获取异常: {exc}")
+            return []
+
+    async def read_resource(self, server_name: str, uri: str) -> dict:
+        """读取 MCP 服务器提供的资源内容.
+
+        MCP Protocol: resources/read
+
+        Args:
+            server_name: MCP 服务器名称.
+            uri: 资源 URI.
+
+        Returns:
+            dict: 资源内容.
+
+        Raises:
+            RuntimeError: 服务器未运行或资源读取失败.
+        """
+        server_proc = self._processes.get(server_name)
+        transport = self._transports.get(server_name)
+        if not server_proc and not transport:
+            raise RuntimeError(f"MCP服务器 {server_name} 未运行")
+
+        response = await self.send_request(server_name, "resources/read", {"uri": uri})
+        if response.get("error"):
+            err = response["error"]
+            raise RuntimeError(f"MCP资源读取失败: {err.get('message')} ({err.get('code')})")
+        return response.get("result", {})
+
+    async def list_prompts(self, server_name: str) -> list[dict]:
+        """列出 MCP 服务器提供的提示模板.
+
+        MCP Protocol: prompts/list
+
+        Args:
+            server_name: MCP 服务器名称.
+
+        Returns:
+            list[dict]: 提示模板列表；服务器未初始化或不支持 prompts 时返回空列表.
+        """
+        server_proc = self._processes.get(server_name)
+        transport = self._transports.get(server_name)
+        if not server_proc and not transport:
+            log.warning(f"MCP服务器 {server_name} 未运行，无法列出提示模板")
+            return []
+
+        caps = None
+        if server_proc and server_proc.initialized:
+            caps = server_proc.capabilities or {}
+        elif transport:
+            caps = getattr(transport, "_capabilities", None) or {}
+
+        if not caps.get("prompts"):
+            log.debug(f"MCP服务器 {server_name} 不支持 prompts")
+            return []
+
+        try:
+            response = await self.send_request(server_name, "prompts/list", {})
+            if response.get("error"):
+                log.warning(f"MCP提示模板列表获取失败: {response['error'].get('message')}")
+                return []
+            result = response.get("result") or {}
+            return result.get("prompts", [])
+        except Exception as exc:
+            log.warning(f"MCP提示模板列表获取异常: {exc}")
+            return []
+
+    async def get_prompt(
+        self, server_name: str, name: str, args: dict[str, str] | None = None
+    ) -> dict:
+        """获取 MCP 服务器提供的提示模板内容.
+
+        MCP Protocol: prompts/get
+
+        Args:
+            server_name: MCP 服务器名称.
+            name: 提示模板名称.
+            args: 提示模板参数，可选.
+
+        Returns:
+            dict: 提示模板内容.
+
+        Raises:
+            RuntimeError: 服务器未运行或提示模板获取失败.
+        """
+        server_proc = self._processes.get(server_name)
+        transport = self._transports.get(server_name)
+        if not server_proc and not transport:
+            raise RuntimeError(f"MCP服务器 {server_name} 未运行")
+
+        response = await self.send_request(
+            server_name, "prompts/get", {"name": name, "arguments": args or {}}
+        )
+        if response.get("error"):
+            err = response["error"]
+            raise RuntimeError(f"MCP提示模板获取失败: {err.get('message')} ({err.get('code')})")
+        return response.get("result", {})
+
+    async def list_all_resources(self) -> dict[str, list[dict]]:
+        """列出所有运行中服务器上的全部资源.
+
+        Returns:
+            dict[str, list[dict]]: 服务器名 → 资源列表.
+        """
+        all_resources: dict[str, list[dict]] = {}
+        for name in self.get_running_servers():
+            try:
+                resources = await self.list_resources(name)
+                if resources:
+                    all_resources[name] = resources
+            except Exception as exc:
+                log.warning(f"列出 {name} 资源失败: {exc}")
+        return all_resources
+
+    async def list_all_prompts(self) -> dict[str, list[dict]]:
+        """列出所有运行中服务器上的全部提示模板.
+
+        Returns:
+            dict[str, list[dict]]: 服务器名 → 提示模板列表.
+        """
+        all_prompts: dict[str, list[dict]] = {}
+        for name in self.get_running_servers():
+            try:
+                prompts = await self.list_prompts(name)
+                if prompts:
+                    all_prompts[name] = prompts
+            except Exception as exc:
+                log.warning(f"列出 {name} 提示模板失败: {exc}")
+        return all_prompts
+
     def get_server_status(self, name: str) -> dict:
         server_proc = self._processes.get(name)
+        transport = self._transports.get(name)
         config = self._servers.get(name)
         return {
-            "running": server_proc is not None,
-            "initialized": server_proc.initialized if server_proc else False,
+            "running": server_proc is not None or transport is not None,
+            "initialized": server_proc.initialized if server_proc else (transport is not None),
             "config": config,
             "server_info": server_proc.server_info if server_proc else None,
             "capabilities": server_proc.capabilities if server_proc else None,
+            "transport_type": self._resolve_transport_type(config).value if config else "stdio",
         }
 
     def get_all_server_status(self) -> dict[str, dict]:
         return {name: self.get_server_status(name) for name in self._servers}
 
     def get_running_servers(self) -> list[str]:
-        return list(self._processes.keys())
+        # 合并 stdio 子进程与 HTTP/SSE 传输层
+        return list(self._processes.keys()) + list(self._transports.keys())
 
     def get_server_count(self) -> int:
         return len(self._servers)
 
     def get_running_server_count(self) -> int:
-        return len(self._processes)
+        return len(self._processes) + len(self._transports)
 
     def get_server_health(self, name: str) -> dict:
         status = self.get_server_status(name)
         server_proc = self._processes.get(name)
+        transport = self._transports.get(name)
+        # HTTP/SSE 传输层健康度由 is_running 判定
+        uptime = 0.0
+        if server_proc:
+            uptime = asyncio.get_event_loop().time() - server_proc.start_time
+        elif transport is not None:
+            uptime = 0.0
         return {
             "name": name,
             "running": status["running"],
@@ -461,11 +952,8 @@ class MCPServerManager:
             "healthy": status["running"] and status["initialized"],
             "restart_count": server_proc.restart_count if server_proc else 0,
             "last_health_check": server_proc.last_health_check if server_proc else None,
-            "uptime": (
-                asyncio.get_event_loop().time() - server_proc.start_time
-                if server_proc
-                else 0
-            ),
+            "uptime": uptime,
+            "transport_type": status.get("transport_type", "stdio"),
         }
 
     def get_all_server_health(self) -> dict[str, dict]:
@@ -489,6 +977,9 @@ class MCPServerManager:
                         tool_filtering=cfg.get("toolFiltering", False),
                         allowed_tools=cfg.get("allowedTools"),
                         denied_tools=cfg.get("deniedTools"),
+                        transport=cfg.get("transport", "stdio"),
+                        url=cfg.get("url", ""),
+                        headers=cfg.get("headers"),
                     )
             log.info(f"从文件加载了 {len(configs)} 个 MCP 服务器配置")
         except FileNotFoundError:
@@ -511,6 +1002,9 @@ class MCPServerManager:
                     "toolFiltering": s.tool_filtering,
                     "allowedTools": s.allowed_tools,
                     "deniedTools": s.denied_tools,
+                    "transport": s.transport,
+                    "url": s.url,
+                    "headers": s.headers,
                 }
                 for s in self._servers.values()
             ]

@@ -222,6 +222,56 @@ async def test_curator_review():
     assert result.reviewed >= 0
 
 
+def test_context_compressor_extract_attention_keywords():
+    compressor = ContextCompressor()
+    messages = [
+        {"role": "user", "content": "帮我写一个Python函数"},
+        {"role": "assistant", "content": "好的，我来帮你写Python代码"},
+        {"role": "user", "content": "这个Python函数需要处理异常"},
+    ]
+    keywords = compressor.extract_attention_keywords(messages)
+    assert isinstance(keywords, list)
+    assert len(keywords) > 0
+
+
+def test_context_compressor_extract_attention_keywords_empty():
+    compressor = ContextCompressor()
+    keywords = compressor.extract_attention_keywords([])
+    assert keywords == []
+
+
+def test_context_compressor_compress_with_attention_no_memory():
+    compressor = ContextCompressor(max_context_tokens=10000)
+    messages = [
+        {"role": "user", "content": "帮我写代码"},
+        {"role": "assistant", "content": "好的，我来帮你"},
+    ]
+    result = compressor.compress_with_attention(messages)
+    assert result.ratio > 0
+    assert isinstance(result.attention_keywords, list)
+
+
+def test_context_compressor_compress_with_attention_with_memory():
+    compressor = ContextCompressor(max_context_tokens=10000)
+    messages = [
+        {"role": "user", "content": "帮我写Python代码"},
+        {"role": "assistant", "content": "好的，Python代码如下"},
+    ]
+    memory_results = [
+        {"content": "Python是一种编程语言", "relevance_score": 0.8},
+        {"content": "代码调试技巧", "relevance_score": 0.5},
+    ]
+    result = compressor.compress_with_attention(messages, memory_results=memory_results)
+    assert result.ratio > 0
+    assert isinstance(result.attention_keywords, list)
+
+
+def test_context_compressor_compress_with_attention_empty():
+    compressor = ContextCompressor()
+    result = compressor.compress_with_attention([])
+    assert result.strategy == "empty"
+
+
 @pytest.mark.anyio
 async def test_curator_self_reminder():
     from agent.memory.engine import MemoryEngine

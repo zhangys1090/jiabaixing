@@ -403,7 +403,8 @@ class TestTrajectoryFlywheel:
         config = FlywheelConfig()
         assert config.analysis_window_hours == 168
         assert config.min_sample_size == 10
-        assert config.auto_apply_optimizations is False
+        # P1 修复：飞轮闭环 — auto_apply 默认改为 True
+        assert config.auto_apply_optimizations is True
 
 
 class TestTrajectoryQueryService:

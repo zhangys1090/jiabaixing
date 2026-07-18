@@ -49,6 +49,16 @@ class CredentialState:
 
 
 class CredentialPool:
+    """凭据池，管理多个 API Key 的轮换、故障隔离和用量追踪。
+
+    支持四种轮换策略：填满优先、轮询、最少使用、随机权重。
+    内置健康检查、用量统计和自动恢复能力。
+
+    Attributes:
+        provider_name: 提供商名称。
+        _usage_stats: 每个凭据的用量统计字典。
+    """
+
     def __init__(
         self,
         provider_name: str,
@@ -61,6 +71,14 @@ class CredentialPool:
             CredentialState(entry=e) for e in entries
         ]
         self._round_robin_index: int = 0
+        self._usage_stats: dict[str, dict[str, Any]] = {
+            s.entry.label or s.entry.masked: {
+                "tokens_used": 0,
+                "cost_usd": 0.0,
+                "request_count": 0,
+            }
+            for s in self._states
+        }
 
     def get_next(self) -> CredentialEntry:
         available = self._get_available()
@@ -127,6 +145,73 @@ class CredentialPool:
                 for s in self._states
             ],
         }
+
+    def health_check(self) -> dict[str, bool]:
+        """检查所有凭据是否可用。
+
+        Returns:
+            dict[str, bool]: 凭据标签/掩码 -> 是否可用。True 表示可用，False 表示不可用。
+        """
+        result: dict[str, bool] = {}
+        for s in self._states:
+            label = s.entry.label or s.entry.masked
+            result[label] = s.is_available
+        return result
+
+    def report_usage(self, key_label: str, tokens_used: int, cost_usd: float) -> None:
+        """报告凭据用量。
+
+        Args:
+            key_label: 凭据标签（entry.label）或掩码（entry.masked）。
+            tokens_used: 使用的 Token 数量。
+            cost_usd: 消耗的美元成本。
+        """
+        if key_label not in self._usage_stats:
+            self._usage_stats[key_label] = {
+                "tokens_used": 0,
+                "cost_usd": 0.0,
+                "request_count": 0,
+            }
+        self._usage_stats[key_label]["tokens_used"] += tokens_used
+        self._usage_stats[key_label]["cost_usd"] += cost_usd
+        self._usage_stats[key_label]["request_count"] += 1
+
+    def get_usage_stats(self) -> dict[str, Any]:
+        """获取用量统计。
+
+        Returns:
+            dict: 包含每个凭据的用量统计和汇总数据。结构：
+                - per_credential: 各凭据的详细用量。
+                - total_tokens: 总 Token 数。
+                - total_cost_usd: 总成本。
+                - total_requests: 总请求数。
+        """
+        total_tokens = sum(v["tokens_used"] for v in self._usage_stats.values())
+        total_cost = sum(v["cost_usd"] for v in self._usage_stats.values())
+        total_requests = sum(v["request_count"] for v in self._usage_stats.values())
+        return {
+            "provider": self.provider_name,
+            "per_credential": dict(self._usage_stats),
+            "total_tokens": total_tokens,
+            "total_cost_usd": round(total_cost, 6),
+            "total_requests": total_requests,
+        }
+
+    def auto_recover(self) -> int:
+        """自动恢复失败次数超限的凭据。
+
+        将 failure_count >= 3 的凭据重置 failure_count 为 0，
+        使其重新变为可用。
+
+        Returns:
+            int: 恢复的凭据数量。
+        """
+        recovered = 0
+        for s in self._states:
+            if s.failure_count >= 3:
+                s.failure_count = 0
+                recovered += 1
+        return recovered
 
     def _get_available(self) -> list[CredentialState]:
         return [s for s in self._states if s.is_available]
@@ -380,3 +465,364 @@ class CostGuard:
         if now - self._daily_reset > 86400:
             self._records = []
             self._daily_reset = now
+
+
+
+# =============================================================================
+# 凭据持久化与多源发现（P1 增强）
+# =============================================================================
+
+
+class CredentialPersistence:
+    """凭据池状态持久化。
+
+    将凭据池的运行时状态（failure_count/rate_limited_until/total_requests）
+    持久化到 JSON 文件，避免进程重启后状态丢失。
+
+    Attributes:
+        file_path: 持久化文件路径。
+    """
+
+    def __init__(self, file_path: Path | None = None) -> None:
+        """初始化持久化存储。
+
+        Args:
+            file_path: 持久化文件路径，默认为 DATA_DIR/credentials.json。
+        """
+        self.file_path = file_path or (DATA_DIR / "credentials.json")
+        self.file_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def save(self, manager: "CredentialPoolManager") -> None:
+        """保存所有凭据池状态到文件（原子写）。
+
+        Args:
+            manager: 凭据池管理器实例。
+        """
+        data: dict[str, Any] = {"providers": {}}
+        for provider_name, pool in manager._pools.items():
+            data["providers"][provider_name] = {
+                "strategy": pool._strategy.value,
+                "credentials": [
+                    {
+                        "key": s.entry.key,
+                        "weight": s.entry.weight,
+                        "label": s.entry.label,
+                        "failure_count": s.failure_count,
+                        "rate_limited_until": s.rate_limited_until,
+                        "total_requests": s.total_requests,
+                        "last_used": s.last_used,
+                    }
+                    for s in pool._states
+                ],
+            }
+        tmp_path = self.file_path.with_suffix(".tmp")
+        with tmp_path.open("w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        tmp_path.replace(self.file_path)
+
+    def load(self) -> dict[str, Any]:
+        """从文件加载状态。
+
+        Returns:
+            dict: 持久化的状态字典，结构如 save() 中所述。文件不存在时返回空字典。
+        """
+        if not self.file_path.exists():
+            return {"providers": {}}
+        try:
+            with self.file_path.open("r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            return {"providers": {}}
+
+    def apply(self, manager: "CredentialPoolManager") -> int:
+        """将持久化状态应用到管理器中的凭据池。
+
+        Args:
+            manager: 凭据池管理器实例。
+
+        Returns:
+            int: 成功恢复状态的凭据数量。
+        """
+        data = self.load()
+        restored = 0
+        for provider_name, pdata in data.get("providers", {}).items():
+            pool = manager._pools.get(provider_name)
+            if not pool:
+                continue
+            for cred_data in pdata.get("credentials", []):
+                state = pool._find_by_key(cred_data.get("key", ""))
+                if state:
+                    state.failure_count = cred_data.get("failure_count", 0)
+                    state.rate_limited_until = cred_data.get("rate_limited_until", 0.0)
+                    state.total_requests = cred_data.get("total_requests", 0)
+                    state.last_used = cred_data.get("last_used", 0.0)
+                    restored += 1
+        return restored
+
+
+class CredentialSources:
+    """凭据多源发现器。
+
+    从环境变量、凭据文件等多种来源发现 API Key，支持多 Key 轮换。
+
+    支持的环境变量模式：
+        - OPENAI_API_KEY / OPENAI_API_KEY_2 / OPENAI_API_KEY_3 ...
+        - ANTHROPIC_API_KEY / ANTHROPIC_API_KEY_2 ...
+        - 逗号分隔：OPENAI_API_KEY="key1,key2,key3"
+
+    支持的凭据文件：
+        - ~/.jiabaixing/credentials/{provider}.txt （每行一个 key）
+        - /etc/jiabaixing/credentials/{provider}.txt （系统级）
+    """
+
+    # 提供商 -> 环境变量名列表
+    _ENV_MAP: dict[str, list[str]] = {
+        "openai": ["OPENAI_API_KEY"],
+        "anthropic": ["ANTHROPIC_API_KEY"],
+        "gemini": ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
+        "deepseek": ["DEEPSEEK_API_KEY"],
+        "qwen": ["QWEN_API_KEY", "DASHSCOPE_API_KEY"],
+        "glm": ["GLM_API_KEY", "ZHIPU_API_KEY"],
+        "mimo": ["MIMO_API_KEY"],
+        "azure": ["AZURE_OPENAI_API_KEY"],
+    }
+
+    # 凭据文件搜索路径
+    _FILE_PATHS: list[Path] = [
+        Path.home() / ".jiabaixing" / "credentials",
+        Path("/etc/jiabaixing/credentials"),
+    ]
+
+    @classmethod
+    def discover(
+        cls,
+        provider: str,
+        env: dict[str, str] | None = None,
+    ) -> list[CredentialEntry]:
+        """发现指定提供商的所有可用 API Key。
+
+        优先级：环境变量 > 凭据文件。会去重。
+
+        Args:
+            provider: 提供商名称（小写）。
+            env: 环境变量字典，默认使用 os.environ。
+
+        Returns:
+            list[CredentialEntry]: 发现的凭据条目列表。
+        """
+        import os
+
+        env = env if env is not None else dict(os.environ)
+        keys: list[str] = []
+        seen: set[str] = set()
+
+        # 1. 从环境变量发现
+        for env_name in cls._ENV_MAP.get(provider, []):
+            # 主变量
+            value = env.get(env_name, "").strip()
+            if value:
+                for k in value.split(","):
+                    k = k.strip()
+                    if k and k not in seen:
+                        keys.append(k)
+                        seen.add(k)
+            # 编号后缀变量 _2, _3, ...
+            i = 2
+            while True:
+                v = env.get(f"{env_name}_{i}", "").strip()
+                if not v:
+                    break
+                if v not in seen:
+                    keys.append(v)
+                    seen.add(v)
+                i += 1
+
+        # 2. 从凭据文件发现
+        for cred_dir in cls._FILE_PATHS:
+            cred_file = cred_dir / f"{provider}.txt"
+            if cred_file.exists():
+                try:
+                    with cred_file.open("r", encoding="utf-8") as f:
+                        for line in f:
+                            k = line.strip()
+                            if k and not k.startswith("#") and k not in seen:
+                                keys.append(k)
+                                seen.add(k)
+                except OSError:
+                    continue
+
+        return [CredentialEntry(key=k, label=f"{provider}-{i}") for i, k in enumerate(keys, 1)]
+
+    @classmethod
+    def discover_all(cls) -> dict[str, list[CredentialEntry]]:
+        """发现所有提供商的凭据。
+
+        Returns:
+            dict: 提供商名称 -> 凭据条目列表。
+        """
+        result: dict[str, list[CredentialEntry]] = {}
+        for provider in cls._ENV_MAP:
+            entries = cls.discover(provider)
+            if entries:
+                result[provider] = entries
+        return result
+
+
+class CredentialPoolManager:
+    """多提供商凭据池管理器。
+
+    统一管理多个提供商的凭据池，支持自动发现、持久化和轮换策略。
+
+    Attributes:
+        _pools: 提供商名称 -> CredentialPool 映射。
+        _persistence: 持久化实例。
+    """
+
+    def __init__(
+        self,
+        persistence: CredentialPersistence | None = None,
+        auto_discover: bool = True,
+    ) -> None:
+        """初始化凭据池管理器。
+
+        Args:
+            persistence: 持久化实例，传入 None 则禁用持久化。
+            auto_discover: 是否自动从环境变量和文件发现凭据。
+        """
+        self._pools: dict[str, CredentialPool] = {}
+        self._persistence = persistence
+
+        if auto_discover:
+            discovered = CredentialSources.discover_all()
+            for provider, entries in discovered.items():
+                self.setup_provider(provider, entries)
+
+        if self._persistence:
+            restored = self._persistence.apply(self)
+            if restored > 0:
+                import logging
+                logging.getLogger(__name__).info(
+                    "Credential pool state restored", extra={"restored": restored}
+                )
+
+    def setup_provider(
+        self,
+        provider: str,
+        entries: list[CredentialEntry],
+        strategy: RotationStrategy = RotationStrategy.ROUND_ROBIN,
+    ) -> CredentialPool:
+        """设置或替换提供商的凭据池。
+
+        Args:
+            provider: 提供商名称（小写）。
+            entries: 凭据条目列表。
+            strategy: 轮换策略，默认 ROUND_ROBIN。
+
+        Returns:
+            CredentialPool: 创建/替换后的凭据池实例。
+        """
+        pool = CredentialPool(provider, entries, strategy)
+        self._pools[provider] = pool
+        return pool
+
+    def get_pool(self, provider: str) -> CredentialPool | None:
+        """获取提供商的凭据池。
+
+        Args:
+            provider: 提供商名称。
+
+        Returns:
+            CredentialPool | None: 凭据池实例，不存在时返回 None。
+        """
+        return self._pools.get(provider)
+
+    def get_next(self, provider: str) -> CredentialEntry | None:
+        """获取下一个可用凭据。
+
+        Args:
+            provider: 提供商名称。
+
+        Returns:
+            CredentialEntry | None: 凭据条目，无可用凭据时返回 None。
+        """
+        pool = self._pools.get(provider)
+        if not pool:
+            return None
+        try:
+            return pool.get_next()
+        except IndexError:
+            return None
+
+    def report_success(self, provider: str, key: str) -> None:
+        """报告凭据调用成功。
+
+        Args:
+            provider: 提供商名称。
+            key: API Key。
+        """
+        pool = self._pools.get(provider)
+        if pool:
+            pool.report_success(key)
+
+    def report_failure(self, provider: str, key: str) -> None:
+        """报告凭据调用失败。
+
+        Args:
+            provider: 提供商名称。
+            key: API Key。
+        """
+        pool = self._pools.get(provider)
+        if pool:
+            pool.report_failure(key)
+
+    def report_rate_limit(
+        self,
+        provider: str,
+        key: str,
+        retry_after: float | None = None,
+    ) -> None:
+        """报告凭据被限流。
+
+        Args:
+            provider: 提供商名称。
+            key: API Key。
+            retry_after: 限流恢复时间戳，None 则默认 60 秒后。
+        """
+        pool = self._pools.get(provider)
+        if pool:
+            pool.report_rate_limit(key, retry_after)
+
+    def persist_all(self) -> bool:
+        """持久化所有凭据池状态。
+
+        Returns:
+            bool: 是否成功持久化（未配置持久化时返回 False）。
+        """
+        if not self._persistence:
+            return False
+        self._persistence.save(self)
+        return True
+
+    def get_all_stats(self) -> dict[str, Any]:
+        """获取所有凭据池的统计信息。
+
+        Returns:
+            dict: 提供商名称 -> 统计信息。
+        """
+        return {name: pool.get_stats() for name, pool in self._pools.items()}
+
+    @property
+    def providers(self) -> list[str]:
+        """已配置的提供商列表。"""
+        return list(self._pools.keys())
+
+    def has_provider(self, provider: str) -> bool:
+        """是否配置了指定提供商。
+
+        Args:
+            provider: 提供商名称。
+
+        Returns:
+            bool: 是否已配置。
+        """
+        return provider in self._pools

@@ -329,10 +329,13 @@ def test_generate_skill_short_input_rejected():
 
 
 def test_generate_skill_duplicate_returns_existing():
+    """测试同名skill已存在时直接返回,不重复生成"""
     tmp = tempfile.mkdtemp()
     tracker = _fresh_tracker(tmp)
-    generator = SkillAutoGenerator(tracker, skills_dir=Path(tmp) / "skills")
+    skills_dir = Path(tmp) / "skills"
+    generator = SkillAutoGenerator(tracker, skills_dir=skills_dir)
 
+    # 第一次生成
     params = SkillGenerationParams(
         input="帮我写一个Python函数",
         quality_score=0.85,
@@ -341,14 +344,41 @@ def test_generate_skill_duplicate_returns_existing():
     result1 = generator.generate(params)
     assert result1 is not None
 
+    # 第二次相同输入,语义去重触发,应该返回None(不再生成)
+    # 这是预期的新行为 - 防止重复生成相同输入
     params2 = SkillGenerationParams(
         input="帮我写一个Python函数",
         quality_score=0.9,
         response="更好的代码",
     )
     result2 = generator.generate(params2)
-    assert result2 is not None
-    assert result1 == result2
+    # 语义去重后,不会重复生成
+    assert result2 is None
+
+
+def test_generate_skill_semantic_duplication():
+    """测试语义去重:相似输入不应该重复生成skill"""
+    tmp = tempfile.mkdtemp()
+    tracker = _fresh_tracker(tmp)
+    generator = SkillAutoGenerator(tracker, skills_dir=Path(tmp) / "skills")
+
+    # 第一次生成
+    params1 = SkillGenerationParams(
+        input="用一句话介绍你自己",
+        quality_score=0.85,
+        response="我是家百星AI助手...",
+    )
+    result1 = generator.generate(params1)
+    assert result1 is not None
+
+    # 第二次高度相似输入,语义去重触发
+    params2 = SkillGenerationParams(
+        input="你好请用一句话介绍你自己",
+        quality_score=0.9,
+        response="我是家百星AI助手,很高兴为您服务...",
+    )
+    result2 = generator.generate(params2)
+    assert result2 is None
 
 
 def test_generate_skill_no_tools():

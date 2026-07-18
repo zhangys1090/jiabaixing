@@ -16,7 +16,11 @@ from agent.tools.registry import (
 CODE_GENERATE_DEF = ToolDefinition(
     name="code_generate",
     description="根据需求描述生成代码。适用场景：用户需要新建函数、类、模块、脚本等代码。不适用：修改已有代码（用 file_edit）、分析代码（用 code_analyze）。",
+    short_desc="生成代码",
     category=ToolCategory.CODE,
+    tags=["code", "generate", "create", "write"],
+    scenes=["coding", "development"],
+    capability_level=2,
     parameters=[
         ToolParameterDef(name="requirements", type="string", description="代码需求描述"),
         ToolParameterDef(name="language", type="string", description="目标编程语言"),
@@ -29,7 +33,11 @@ CODE_GENERATE_DEF = ToolDefinition(
 CODE_ANALYZE_DEF = ToolDefinition(
     name="code_analyze",
     description="分析代码的结构、质量、潜在问题。适用场景：代码审查、查找bug、性能分析。不适用：生成代码（用 code_generate）、修改代码（用 file_edit）。",
+    short_desc="分析代码质量",
     category=ToolCategory.CODE,
+    tags=["code", "analyze", "review", "quality", "debug"],
+    scenes=["coding", "development"],
+    capability_level=2,
     parameters=[
         ToolParameterDef(name="file_path", type="string", description="要分析的文件路径"),
         ToolParameterDef(name="analysis_type", type="string", required=False, description="分析类型: structure/quality/security/performance", enum=["structure", "quality", "security", "performance"]),
@@ -40,7 +48,11 @@ CODE_ANALYZE_DEF = ToolDefinition(
 CODE_FIX_DEF = ToolDefinition(
     name="code_fix",
     description="自动修复代码中的问题。适用场景：修复语法错误、修复lint警告、修复已知bug。不适用：重构代码（用 code_generate + file_edit）。",
+    short_desc="修复代码问题",
     category=ToolCategory.CODE,
+    tags=["code", "fix", "debug", "repair"],
+    scenes=["coding", "development"],
+    capability_level=2,
     parameters=[
         ToolParameterDef(name="file_path", type="string", description="要修复的文件路径"),
         ToolParameterDef(name="error_description", type="string", required=False, description="错误描述"),
@@ -52,7 +64,11 @@ CODE_FIX_DEF = ToolDefinition(
 SHELL_EXEC_DEF = ToolDefinition(
     name="shell_exec",
     description="Shell命令执行工具。在系统终端中执行命令并返回输出。适用场景：运行脚本、管理系统、安装依赖。不适用：需要交互式输入的命令。",
+    short_desc="执行Shell命令",
     category=ToolCategory.SYSTEM,
+    tags=["shell", "exec", "command", "terminal", "system"],
+    scenes=["coding", "development"],
+    capability_level=3,
     parameters=[
         ToolParameterDef(name="command", type="string", description="要执行的命令"),
         ToolParameterDef(name="timeout", type="number", required=False, description="超时时间（毫秒）"),
@@ -67,6 +83,55 @@ _FORBIDDEN_COMMANDS = [
     "shutdown", "restart", "reg delete", "reg add HKLM",
     "net user", "net localgroup", "cipher /w", "diskpart",
     "bcdedit", "taskkill /f /im svchost",
+    "rm -r /", "rm -r /*", "chmod -r 000", "chmod -R 000",
+    "dd if=", "mkfs", "fdisk", "parted",
+    ":(){ :|:& };:", "fork bomb",
+    "wget", "curl -o /", "curl > /",
+    "cat /etc/shadow", "cat /etc/passwd",
+    "chmod 777 /", "chown -R root /",
+    "sysctl -w", "iptables -F", "route -n flush",
+]
+
+_FORBIDDEN_PATTERNS = [
+    r"rm\s+-[rRf]", r"chmod\s+-[rR]\s+0", r"dd\s+if=",
+    r"mkfs\b", r"fdisk\b", r"parted\b",
+    r">\s*/dev/sd", r"shred\s+", r"wipefs\s+",
+    r"format\s+[A-Za-z]:", r"del\s+/[sfq]",
+    r"shutdown\b", r"reboot\b", r"halt\b",
+    r"reg\s+(add|delete)\s+", r"net\s+(user|localgroup)\s+",
+    r"cipher\s+/w", r"diskpart\b", r"bcdedit\b",
+    r"taskkill\s+/f", r"sysctl\s+-w", r"iptables\s+-F",
+    r"chmod\s+777\s+/", r"chown\s+-R\s+root\s+/",
+    r":\(\)\s*\{:\|:&\};:", r"fork\s+bomb",
+    r"wget\b.*-O\s+/", r"curl\b.*-o\s+/",
+    r"cat\s+/etc/(shadow|passwd)", r">\s*/etc/",
+    r"systemctl\s+(stop|disable|mask)\s+",
+    r"service\s+\w+\s+stop",
+    r"pip\s+install\s+--user", r"npm\s+install\s+-g",
+    r"python\s+-c\s+.*__import__", r"perl\s+-e",
+    r"bash\s+-c\s+.*rm", r"sh\s+-c\s+.*rm",
+    r"nohup\b", r"screen\b", r"tmux\b",
+    r"crontab\b", r"at\b",
+    r"mount\b", r"umount\b",
+    r"chroot\b", r"su\b", r"sudo\b",
+    r"kill\s+-9\s+1\b", r"killall\b",
+]
+
+_ALLOWED_COMMAND_PREFIXES = [
+    "ls", "dir", "pwd", "cd", "echo", "cat", "head", "tail",
+    "grep", "find", "wc", "sort", "uniq", "diff", "cmp",
+    "python", "python3", "node", "ruby", "perl",
+    "git", "npm", "pip", "yarn", "pnpm",
+    "mkdir", "cp", "mv", "touch", "chmod", "chown",
+    "tar", "zip", "unzip", "gzip", "gunzip",
+    "curl", "wget",
+    "which", "where", "type", "env", "printenv",
+    "date", "cal", "whoami", "hostname", "uname",
+    "df", "du", "free", "top", "ps",
+    "ping", "traceroute", "nslookup", "dig",
+    "docker", "kubectl",
+    "pytest", "jest", "mocha", "eslint", "ruff",
+    "make", "cmake", "cargo", "go",
 ]
 
 
@@ -216,6 +281,7 @@ async def code_fix_executor(params: dict[str, Any]) -> ToolResult:
 
 
 async def shell_exec_executor(params: dict[str, Any]) -> ToolResult:
+    import re
     import time
     start = time.time()
     command = str(params.get("command", ""))
@@ -230,12 +296,54 @@ async def shell_exec_executor(params: dict[str, Any]) -> ToolResult:
         if forbidden.lower() in cmd_lower:
             return ToolResult(success=False, error=f"禁止执行的命令: {forbidden}")
 
-    timeout_sec = min(timeout_ms / 1000, 60)
+    for pattern in _FORBIDDEN_PATTERNS:
+        if re.search(pattern, command, re.IGNORECASE):
+            return ToolResult(
+                success=False,
+                error=f"命令匹配禁止模式: {pattern}",
+                metadata={"security_violation": True},
+            )
+
+    # T-02: 命令白名单检查——提取首个命令词，必须匹配允许列表
+    first_token = command.strip().split()[0] if command.strip() else ""
+    first_token_name = Path(first_token).name if first_token else ""
+    if first_token_name and _ALLOWED_COMMAND_PREFIXES:
+        if first_token_name not in _ALLOWED_COMMAND_PREFIXES:
+            return ToolResult(
+                success=False,
+                error=f"命令 '{first_token_name}' 不在允许列表中，被安全策略拒绝",
+                metadata={"security_violation": True, "allowed_commands": _ALLOWED_COMMAND_PREFIXES[:20]},
+            )
+
+    # T-02: 通过 SandboxExecutor 做安全预检
+    try:
+        from agent.sandbox.executor import SandboxExecutor, SandboxConfig
+        from agent.sandbox.types import SecurityLevel
+        sandbox = SandboxExecutor(SandboxConfig(security_level=SecurityLevel.HIGH))
+        pre_check = sandbox._pre_check_code(command, "shell")
+        if not pre_check.allowed:
+            return ToolResult(
+                success=False,
+                error=f"沙箱安全检查拒绝: {pre_check.reason}",
+                metadata={"security_violation": True},
+            )
+    except Exception:
+        pass
+
+    timeout_sec = timeout_ms / 1000 if timeout_ms > 0 else 60
+    timeout_sec = min(timeout_sec, 60)
+
+    # T-02: 使用 shell=False + shlex.split 避免shell注入
+    import shlex
+    try:
+        cmd_parts = shlex.split(command, posix=True)
+    except ValueError:
+        cmd_parts = [command]
 
     try:
         result = subprocess.run(
-            command,
-            shell=True,
+            cmd_parts,
+            shell=False,
             capture_output=True,
             text=True,
             timeout=timeout_sec,
@@ -268,7 +376,11 @@ async def shell_exec_executor(params: dict[str, Any]) -> ToolResult:
 CODE_REVIEW_DEF = ToolDefinition(
     name="code_review",
     description='审查代码文件，从语法、逻辑、安全、性能四个维度分析问题。适用场景：代码审查、找bug、安全检查、代码质量分析。不适用：修改代码（用code_fix）或生成新代码（用code_generate）。返回结构化审查报告。',
+    short_desc="审查代码质量",
     category=ToolCategory.CODE,
+    tags=["code", "review", "security", "quality", "audit"],
+    scenes=["coding", "development"],
+    capability_level=2,
     parameters=[
         ToolParameterDef(name="file_path", type="string", description="要审查的文件路径"),
         ToolParameterDef(name="focus", type="string", required=False, description="审查重点", enum=["all", "security", "performance", "quality"]),
@@ -279,7 +391,11 @@ CODE_REVIEW_DEF = ToolDefinition(
 CSV_ANALYZE_DEF = ToolDefinition(
     name="csv_analyze",
     description='分析CSV文件，生成统计摘要和关键洞察。适用场景：分析数据、查看CSV内容、生成数据报告。不适用：读取普通文本文件（用file_read）。返回行数、列数、每列统计、数据质量提示。',
+    short_desc="分析CSV数据",
     category=ToolCategory.CODE,
+    tags=["csv", "data", "analyze", "statistics"],
+    scenes=["coding", "research", "daily"],
+    capability_level=2,
     parameters=[
         ToolParameterDef(name="file_path", type="string", description="CSV文件路径"),
         ToolParameterDef(name="max_rows", type="number", required=False, description="最大读取行数"),

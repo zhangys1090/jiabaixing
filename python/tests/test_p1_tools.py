@@ -33,7 +33,7 @@ class TestToolRegistration:
             assert registry.get(name) is not None, f"{name} not registered"
 
     def test_network_tools_registered(self, registry: ToolRegistry):
-        for name in ["web_search", "web_fetch", "tts_speak", "chart_generate"]:
+        for name in ["web_search", "web_fetch", "chart_generate"]:
             assert registry.get(name) is not None, f"{name} not registered"
 
     def test_cognition_tools_registered(self, registry: ToolRegistry):

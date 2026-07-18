@@ -110,6 +110,26 @@ BROWSER_GET_TEXT_DEF = ToolDefinition(
 )
 
 
+BROWSER_FILL_FORM_DEF = ToolDefinition(
+    name="browser_fill_form",
+    description='语义化表单填写——根据字段描述自动匹配并填写表单。策略：1.label文本匹配 2.placeholder匹配 3.name属性匹配 4.输入框类型推断。支持iframe内表单、动态加载表单。适用场景：需要填写登录表单、搜索表单、注册表单等。不适用：单个输入框（用browser_type）。',
+    short_desc="语义化表单填写",
+    category=ToolCategory.DESKTOP,
+    tags=["browser", "form", "fill", "semantic", "auto", "iframe"],
+    scenes=["desktop", "daily", "research"],
+    capability_level=2,
+    parameters=[
+        ToolParameterDef(name="url", type="string", required=False, description="页面URL，不填则在当前页面操作"),
+        ToolParameterDef(name="fields", type="string", description="表单字段JSON，如 {\"用户名\": \"zhangsan\", \"密码\": \"xxx\", \"邮箱\": \"a@b.com\"}"),
+        ToolParameterDef(name="submit", type="boolean", required=False, description="填写完成后是否自动提交表单，默认false"),
+        ToolParameterDef(name="headless", type="boolean", required=False, description="是否无头模式，默认true"),
+        ToolParameterDef(name="iframe", type="string", required=False, description="iframe的CSS选择器，表单在iframe内时填写"),
+        ToolParameterDef(name="wait_for", type="string", required=False, description="等待表单出现的CSS选择器（动态加载表单），最多等5秒"),
+    ],
+    risk_level="medium",
+)
+
+
 # ─────────────────────────────────────────────────────────────
 # 浏览器会话管理（单例）
 # ─────────────────────────────────────────────────────────────
@@ -444,3 +464,262 @@ async def browser_get_text_executor(params: dict[str, Any]) -> ToolResult:
         )
     except Exception as e:
         return ToolResult(success=False, error=f"获取文本失败: {e}", duration=time.time() - start)
+
+
+async def browser_fill_form_executor(params: dict[str, Any]) -> ToolResult:
+    """语义化表单填写执行器 — 支持 iframe / 动态加载"""
+    start = time.time()
+    url = str(params.get("url", ""))
+    fields_str = str(params.get("fields", ""))
+    do_submit = bool(params.get("submit", False))
+    headless = bool(params.get("headless", True))
+    iframe_selector = str(params.get("iframe", ""))
+    wait_for_selector = str(params.get("wait_for", ""))
+
+    if not fields_str:
+        return ToolResult(success=False, error="请提供表单字段JSON", duration=time.time() - start)
+
+    import json
+    try:
+        fields = json.loads(fields_str)
+    except json.JSONDecodeError:
+        return ToolResult(success=False, error="fields参数必须是合法JSON，如 {\"用户名\": \"zhangsan\"}", duration=time.time() - start)
+
+    if not isinstance(fields, dict) or not fields:
+        return ToolResult(success=False, error="fields必须是非空JSON对象", duration=time.time() - start)
+
+    try:
+        config = BrowserConfig(
+            connection_mode=BrowserConnectionMode.LOCAL,
+            headless=headless,
+        )
+        browser = BrowserAutomation(config)
+        session_id = await browser.launch()
+
+        try:
+            if url:
+                await browser.navigate(session_id, url)
+
+            page = await browser._get_or_create_page(session_id)
+
+            # ─── 等待动态加载 ───
+            if wait_for_selector:
+                try:
+                    await page.wait_for_selector(wait_for_selector, timeout=5000)
+                except Exception:
+                    pass
+
+            # ─── iframe 处理 ───
+            fill_context: Any = page
+            if iframe_selector:
+                try:
+                    frame_locator = page.frame_locator(iframe_selector)
+                    fill_context = frame_locator
+                except Exception:
+                    pass
+
+            results: dict[str, bool] = {}
+
+            # ─── CAPTCHA 检测 ───
+            captcha_info = await _detect_captcha(fill_context if iframe_selector else page)
+            if captcha_info["detected"]:
+                return ToolResult(
+                    success=False,
+                    output=f"检测到验证码（{captcha_info['type']}），需要人工处理或使用专用工具。\n提示：可先手动完成验证码，再调用此工具填写表单。",
+                    duration=time.time() - start,
+                    metadata={"captcha_detected": True, "captcha_type": captcha_info["type"], "captcha_info": captcha_info},
+                )
+
+            for desc, value in fields.items():
+                selector = await _find_input_selector(fill_context, desc, is_frame=bool(iframe_selector))
+                if selector:
+                    try:
+                        if iframe_selector and fill_context is not page:
+                            fill_context.locator(selector).fill(str(value))
+                        else:
+                            await page.fill(selector, str(value))
+                        results[desc] = True
+                    except Exception:
+                        results[desc] = False
+                else:
+                    results[desc] = False
+
+            if do_submit:
+                try:
+                    submit_sel = 'button[type="submit"], input[type="submit"]'
+                    if iframe_selector and fill_context is not page:
+                        btn = fill_context.locator(submit_sel).first
+                        if await btn.count() > 0:
+                            await btn.click()
+                    else:
+                        submit_btn = page.locator(submit_sel).first
+                        if await submit_btn.count() > 0:
+                            await submit_btn.click()
+                except Exception:
+                    pass
+
+            filled = sum(1 for v in results.values() if v)
+            total = len(results)
+            lines = [f"表单填写完成: {filled}/{total} 个字段成功"]
+            if iframe_selector:
+                lines.append(f"  (iframe: {iframe_selector})")
+            for desc, ok in results.items():
+                icon = "✅" if ok else "❌"
+                lines.append(f"  {icon} {desc}")
+
+            return ToolResult(
+                success=filled > 0,
+                output="\n".join(lines),
+                duration=time.time() - start,
+                metadata=results,
+            )
+        finally:
+            await browser.close(session_id)
+
+    except ImportError:
+        return ToolResult(
+            success=False,
+            error="Playwright 未安装。请运行: pip install playwright && playwright install chromium",
+            duration=time.time() - start,
+        )
+    except Exception as e:
+        return ToolResult(success=False, error=f"表单填写失败: {e}", duration=time.time() - start)
+
+
+async def _detect_captcha(page: Any) -> dict[str, Any]:
+    """检测页面中的验证码（CAPTCHA）"""
+    captcha_selectors = {
+        "recaptcha": [
+            'iframe[src*="google.com/recaptcha"]',
+            'div.g-recaptcha',
+            '.g-recaptcha',
+        ],
+        "hcaptcha": [
+            'iframe[src*="hcaptcha.com"]',
+            '#hcaptcha-widget',
+            '[data-hcaptcha-widget]',
+        ],
+        "image_captcha": [
+            'img[alt*="captcha" i]',
+            'img[alt*="验证码" i]',
+            'img.captcha',
+            '.captcha-image img',
+            'img[src*="captcha" i]',
+        ],
+        "slider_captcha": [
+            '.slider-verify',
+            '.drag-verify',
+            '[class*="slider"] [class*="verify"]',
+            '[class*="drag"] [class*="verify"]',
+        ],
+    }
+
+    result: dict[str, Any] = {
+        "detected": False,
+        "type": None,
+        "selector": None,
+        "hint": "",
+    }
+
+    for captcha_type, selectors in captcha_selectors.items():
+        for sel in selectors:
+            try:
+                elem = page.locator(sel).first
+                if await elem.count() > 0:
+                    is_visible = await elem.is_visible()
+                    if is_visible:
+                        result["detected"] = True
+                        result["type"] = captcha_type
+                        result["selector"] = sel
+                        if captcha_type == "recaptcha":
+                            result["hint"] = "Google reCAPTCHA，可能需要点击复选框或完成图片选择"
+                        elif captcha_type == "hcaptcha":
+                            result["hint"] = "hCaptcha 验证码"
+                        elif captcha_type == "image_captcha":
+                            result["hint"] = "图片验证码，需要输入文字"
+                        elif captcha_type == "slider_captcha":
+                            result["hint"] = "滑块验证码，需要拖动滑块到正确位置"
+                        return result
+            except Exception:
+                continue
+
+    return result
+
+
+async def _find_input_selector(page: Any, description: str, is_frame: bool = False) -> str | None:
+    """根据字段描述自动匹配输入框选择器
+
+    策略优先级：
+    1. label文本匹配 → for属性
+    2. placeholder匹配
+    3. name属性匹配
+    4. 输入框类型推断（密码/邮箱/搜索等）
+    5. aria-label 匹配
+    """
+    desc_lower = description.lower()
+
+    type_hints: dict[str, str] = {
+        "密码": "input[type='password']",
+        "password": "input[type='password']",
+        "邮箱": "input[type='email']",
+        "email": "input[type='email']",
+        "搜索": "input[type='search']",
+        "search": "input[type='search']",
+        "电话": "input[type='tel']",
+        "phone": "input[type='tel']",
+        "网址": "input[type='url']",
+        "url": "input[type='url']",
+        "手机": "input[type='tel']",
+        "日期": "input[type='date']",
+        "date": "input[type='date']",
+    }
+
+    # 策略1: label文本匹配
+    try:
+        label = page.locator(f'label:has-text("{description}")').first
+        if await label.count() > 0:
+            if not is_frame:
+                for_attr = await label.get_attribute("for")
+                if for_attr:
+                    return f"#{for_attr}"
+            input_inside = label.locator("input, textarea, select").first
+            if await input_inside.count() > 0:
+                return "input, textarea, select"
+    except Exception:
+        pass
+
+    # 策略2: placeholder匹配
+    try:
+        by_placeholder = page.locator(f'[placeholder*="{description}" i]').first
+        if await by_placeholder.count() > 0:
+            return f'[placeholder*="{description}" i]'
+    except Exception:
+        pass
+
+    # 策略3: name属性匹配
+    try:
+        by_name = page.locator(f'[name*="{desc_lower}" i]').first
+        if await by_name.count() > 0:
+            return f'[name*="{desc_lower}" i]'
+    except Exception:
+        pass
+
+    # 策略4: aria-label 匹配
+    try:
+        by_aria = page.locator(f'[aria-label*="{description}" i]').first
+        if await by_aria.count() > 0:
+            return f'[aria-label*="{description}" i]'
+    except Exception:
+        pass
+
+    # 策略5: 类型推断
+    for hint, selector in type_hints.items():
+        if hint in desc_lower:
+            try:
+                elem = page.locator(selector).first
+                if await elem.count() > 0:
+                    return selector
+            except Exception:
+                pass
+
+    return None

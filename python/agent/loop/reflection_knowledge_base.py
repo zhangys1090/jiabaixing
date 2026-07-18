@@ -57,9 +57,9 @@ class ReflectionKnowledgeBase:
             db_path = DATA_DIR / "reflection_kb.db"
         self._path = Path(db_path)
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(self._path))
+        from agent.persistence.database import get_sync_connection
+        self._conn = get_sync_connection(db_path=str(self._path))
         self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA journal_mode=WAL")
         self._init_tables()
         self._cache: OrderedDict[str, ReflectionExperience] = OrderedDict()
 

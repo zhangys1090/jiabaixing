@@ -1,3 +1,4 @@
+from dataclasses import asdict
 from fastapi import APIRouter
 from typing import Any
 
@@ -63,6 +64,32 @@ async def evolution_status():
         evolution_cycles=metrics.total_evolutions,
         last_evolution=None,
     )
+
+
+@router.get("/metrics")
+async def get_evolution_metrics():
+    """进化引擎指标（Python 主实现，替代已删除的 TS EvolutionEngine.getMetrics）。"""
+    evo = get_evolution()
+    if not evo:
+        return {"available": False, "metrics": {}, "tool_weights": {}}
+    return {
+        "available": True,
+        "metrics": asdict(evo.get_metrics()),
+        "tool_weights": evo.get_tool_weights(),
+    }
+
+
+@router.get("/insights")
+async def get_evolution_insights():
+    """进化引擎洞察（Python 主实现，替代已删除的 TS EvolutionEngine.getInsights）。"""
+    evo = get_evolution()
+    if not evo:
+        return {"available": False, "insights": [], "recommendations": []}
+    return {
+        "available": True,
+        "insights": evo.get_insights(),
+        "recommendations": evo.get_tool_recommendations(),
+    }
 
 
 @router.get("/correction-rules")

@@ -6,12 +6,15 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Protocol
 
+from agent.core.logger import StructuredLogger
 from agent.security.sensitive_detector import (
     CheckScene,
     RiskLevel,
     check_dangerous_command,
     check_sensitive_info,
 )
+
+log = StructuredLogger("constraints")
 
 
 class ConstraintLevel(str, Enum):
@@ -91,6 +94,7 @@ class BudgetState:
 @dataclass
 class BudgetCheckResult:
     within_budget: bool = True
+    hard_limit_exceeded: bool = False
     warnings: list[str] = field(default_factory=list)
     remaining: dict[str, int | float] = field(default_factory=dict)
 
@@ -111,10 +115,25 @@ class ConstraintDefinition:
 
 @dataclass
 class BudgetAllocation:
+    """预算分配方案——单次任务执行的资源上限。
+
+    P2 #15: 增加 estimated_ms 和 confidence 字段，支持基于历史数据的时间预算预估。
+
+    Attributes:
+        max_rounds: 最大循环轮次。
+        max_tool_calls: 最大工具调用次数。
+        max_tokens: 最大 Token 数。
+        max_duration_ms: 最大执行时长（毫秒）。
+        estimated_ms: 基于历史数据的预估耗时（毫秒），无历史数据时为 None。
+        confidence: 预估置信度（low/medium/high），无历史数据时为 None。
+    """
+
     max_rounds: int = 5
     max_tool_calls: int = 10
     max_tokens: int = 5000
     max_duration_ms: int = 60000
+    estimated_ms: int | None = None
+    confidence: str | None = None
 
 
 @dataclass
@@ -182,26 +201,35 @@ class ConstraintsService:
 
     def check_budget(self, state: BudgetState) -> BudgetCheckResult:
         warnings: list[str] = []
+        hard_exceeded = False
+        soft_exceeded = False
 
         if state.rounds_used >= state.hard_round_limit:
             warnings.append(f"轮次已达硬限制 {state.hard_round_limit}")
+            hard_exceeded = True
         elif state.rounds_used >= state.soft_round_limit:
             warnings.append(f"轮次已达软限制 {state.soft_round_limit}/{state.hard_round_limit}")
+            soft_exceeded = True
 
         if state.tokens_used >= state.token_hard_limit:
             warnings.append(f"Token 已达硬限制 {state.token_hard_limit}")
+            hard_exceeded = True
         elif state.tokens_used >= state.token_warning_limit:
             warnings.append(f"Token 接近限制 {state.token_warning_limit}/{state.token_hard_limit}")
+            soft_exceeded = True
 
         if state.tool_calls_used >= state.max_tool_calls:
             warnings.append(f"工具调用已达上限 {state.max_tool_calls}")
+            hard_exceeded = True
 
         elapsed = (time.time() - state.start_time) * 1000 if state.start_time else 0
         if elapsed >= state.max_duration_ms:
             warnings.append(f"时间已达上限 {state.max_duration_ms}ms")
+            hard_exceeded = True
 
         return BudgetCheckResult(
-            within_budget=len(warnings) == 0,
+            within_budget=not (hard_exceeded or soft_exceeded),
+            hard_limit_exceeded=hard_exceeded,
             warnings=warnings,
             remaining={
                 "rounds": max(0, state.hard_round_limit - state.rounds_used),
@@ -251,8 +279,18 @@ class ConstraintsService:
                     return result
                 if result.modified_params and context.params is not None:
                     context.params.update(result.modified_params)
-            except Exception:
-                pass
+            except Exception as exc:
+                from agent.core.logger import StructuredLogger
+                log = StructuredLogger("constraints")
+                log.error(
+                    "钩子执行异常，拒绝继续",
+                    event=event.value if hasattr(event, "value") else str(event),
+                    hook=hook.__name__ if hasattr(hook, "__name__") else str(hook),
+                    exception_type=type(exc).__name__,
+                    exception_module=type(exc).__module__,
+                    error=str(exc),
+                )
+                return HookResult(proceed=False, reason=f"{type(exc).__name__}: {exc}")
         return HookResult(proceed=True)
 
     def enforce_behavior_constraint(self, constraint: str, context: Any | None = None) -> dict[str, Any]:
@@ -356,11 +394,15 @@ class ConstraintsService:
         result = self.enforce_behavior_constraint(constraint, context)
         level = self.get_constraint_level(constraint)
 
+        if not result.get("compliant", True) and level == ConstraintLevel.HARD:
+            return {**result, "level": level.value, "blocked": True}
+
         if not result.get("compliant", True) and level == ConstraintLevel.SOFT:
-            return {"compliant": True, "level": level.value}
+            log.warning("SOFT constraint violated", constraint=constraint, violation=result.get("violation", ""))
+            return {"compliant": True, "level": level.value, "soft_violation": result.get("violation", "")}
 
         if not result.get("compliant", True) and level == ConstraintLevel.ADVISORY:
-            return {"compliant": True, "level": level.value}
+            return {"compliant": True, "level": level.value, "advisory_violation": result.get("violation", "")}
 
         return {**result, "level": level.value}
 
@@ -388,7 +430,24 @@ class ConstraintsService:
         self,
         complexity: str = "moderate",
         enable_creative: bool = False,
+        historical_estimate: Any | None = None,
     ) -> BudgetAllocation:
+        """解析自适应预算分配方案。
+
+        P2 #15: 新增 historical_estimate 参数。当提供历史预预估时，
+        使用 estimated_ms * 1.2 替代静态 max_duration_ms，并填充
+        estimated_ms 和 confidence 字段，供调用方（如 LoopController）
+        做更精准的时间预算决策。样本不足时降级到静态 AdaptiveBudgetConfig。
+
+        Args:
+            complexity: 任务复杂度（simple/moderate/complex）。
+            enable_creative: 是否启用创造性探索附加预算。
+            historical_estimate: 历史执行时间预估（ExecutionEstimate），
+                传入 None 表示无历史数据，降级到静态配置。
+
+        Returns:
+            BudgetAllocation: 预算分配方案，含 max_duration_ms 和（如有）预估信息。
+        """
         budget = self.get_adaptive_budget()
         base_map = {
             "simple": budget.simple,
@@ -397,20 +456,29 @@ class ConstraintsService:
         }
         base = base_map.get(complexity, budget.moderate)
 
-        if not enable_creative or not self.get_creative_config().enabled:
-            return BudgetAllocation(
-                max_rounds=base.max_rounds,
-                max_tool_calls=base.max_tool_calls,
-                max_tokens=base.max_tokens,
-                max_duration_ms=base.max_duration_ms,
-            )
+        # 计算创造性探索附加预算
+        bonus = budget.creative_bonus if (enable_creative and self.get_creative_config().enabled) else None
 
-        bonus = budget.creative_bonus
+        # P2 #15: 历史预估优先 — 用 estimated_ms * 1.2 替代静态 max_duration_ms
+        if historical_estimate is not None:
+            estimated_ms = historical_estimate.estimated_ms
+            max_duration_ms = int(estimated_ms * 1.2)
+            confidence = historical_estimate.confidence
+        else:
+            estimated_ms = None
+            confidence = None
+            max_duration_ms = base.max_duration_ms
+
+        if bonus is not None:
+            max_duration_ms += bonus.max_duration_ms
+
         return BudgetAllocation(
-            max_rounds=base.max_rounds + bonus.max_rounds,
-            max_tool_calls=base.max_tool_calls + bonus.max_tool_calls,
-            max_tokens=base.max_tokens + bonus.max_tokens,
-            max_duration_ms=base.max_duration_ms + bonus.max_duration_ms,
+            max_rounds=base.max_rounds + (bonus.max_rounds if bonus else 0),
+            max_tool_calls=base.max_tool_calls + (bonus.max_tool_calls if bonus else 0),
+            max_tokens=base.max_tokens + (bonus.max_tokens if bonus else 0),
+            max_duration_ms=max_duration_ms,
+            estimated_ms=estimated_ms,
+            confidence=confidence,
         )
 
     def can_explore_creatively(self, current_quality: float, budget_state: BudgetState) -> dict[str, Any]:

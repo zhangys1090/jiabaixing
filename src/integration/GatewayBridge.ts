@@ -141,21 +141,21 @@ export class GatewayBridge {
     )) as SendMessageResponse;
   }
 
-  getPlatforms(): IntegrationPlatformInfo[] {
+  async getPlatforms(): Promise<IntegrationPlatformInfo[]> {
     if (!this.isWorkerAlive()) {
       return this.getOfflinePlatforms();
     }
 
-    const syncResult = this.sendSyncRequest('getPlatforms');
+    const syncResult = await this.sendSyncRequest('getPlatforms');
     return (
       (syncResult?.data as { platforms: IntegrationPlatformInfo[] })
         ?.platforms ?? this.getOfflinePlatforms()
     );
   }
 
-  getPlatformStatus(
+  async getPlatformStatus(
     platform: IntegrationPlatform
-  ): IntegrationStatus | undefined {
+  ): Promise<IntegrationStatus | undefined> {
     if (!this.isWorkerAlive()) {
       return {
         platform,
@@ -165,18 +165,18 @@ export class GatewayBridge {
       };
     }
 
-    const syncResult = this.sendSyncRequest('getStatus', { platform });
+    const syncResult = await this.sendSyncRequest('getStatus', { platform });
     return syncResult?.data as IntegrationStatus | undefined;
   }
 
-  getWeChatQRState(): {
+  async getWeChatQRState(): Promise<{
     qrCodeBase64: string | null;
     status: string;
     botNickname: string | null;
-  } | null {
+  } | null> {
     if (!this.isWorkerAlive()) return null;
 
-    const syncResult = this.sendSyncRequest('getWeChatQRState');
+    const syncResult = await this.sendSyncRequest('getWeChatQRState');
     return syncResult?.data as {
       qrCodeBase64: string | null;
       status: string;
@@ -374,36 +374,42 @@ export class GatewayBridge {
 
       this.pendingRequests.set(id, { resolve, reject, timer });
 
-      this.worker.send!({ id, type, payload });
+      try {
+        this.worker.send!({ id, type, payload });
+      } catch (err) {
+        clearTimeout(timer);
+        this.pendingRequests.delete(id);
+        reject(new Error(`发送请求失败 (${type}): ${(err as Error).message}`));
+      }
     });
   }
 
-  private sendSyncRequest(
+  private async sendSyncRequest(
     type: string,
     payload?: unknown
-  ): { data?: unknown } | null {
+  ): Promise<{ data?: unknown } | null> {
     if (!this.worker || !this.workerReady) return null;
 
-    let result: { data?: unknown } | null = null;
     const id = `sync_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-    const tempHandler = (msg: unknown) => {
-      const ipcMsg = msg as { id?: string; data?: unknown };
-      if (ipcMsg.id === id) {
-        result = { data: ipcMsg.data };
-      }
-    };
+    return new Promise<{ data?: unknown } | null>((resolve) => {
+      const timer = setTimeout(() => {
+        this.worker?.off('message', tempHandler);
+        resolve(null);
+      }, 5000);
 
-    this.worker.on('message', tempHandler);
-    this.worker.send!({ id, type, payload });
+      const tempHandler = (msg: unknown) => {
+        const ipcMsg = msg as { id?: string; data?: unknown };
+        if (ipcMsg.id === id) {
+          clearTimeout(timer);
+          this.worker?.off('message', tempHandler);
+          resolve({ data: ipcMsg.data });
+        }
+      };
 
-    const deadline = Date.now() + 5000;
-    while (!result && Date.now() < deadline) {
-      continue;
-    }
-
-    this.worker.off('message', tempHandler);
-    return result;
+      this.worker!.on('message', tempHandler);
+      this.worker!.send!({ id, type, payload });
+    });
   }
 
   private scheduleRestart(): void {
@@ -435,8 +441,11 @@ export class GatewayBridge {
       try {
         await this.spawnWorker();
         Logger.info('✅ Gateway Worker 重启成功', 'GatewayBridge');
-      } catch {
-        Logger.warn('Gateway Worker 重启失败，将再次尝试', 'GatewayBridge');
+      } catch (err) {
+        Logger.warn(
+          `Gateway Worker 重启失败: ${(err as Error).message}，将再次尝试`,
+          'GatewayBridge'
+        );
         this.scheduleRestart();
       }
     }, delay);

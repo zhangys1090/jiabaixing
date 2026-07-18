@@ -9,6 +9,15 @@ from pathlib import Path
 from typing import Any
 
 from agent.config import DATA_DIR
+from agent.persistence.database import get_sync_connection
+
+# P1 修复：FTS5 中文分词 — jieba 可选加载，失败则回退空格分词
+_jieba_available = False
+try:
+    import jieba
+    _jieba_available = True
+except ImportError:
+    pass
 
 
 @dataclass
@@ -44,8 +53,7 @@ class SessionSearchEngine:
     def __init__(self, db_path: str | Path | None = None) -> None:
         self._path = Path(db_path) if db_path else DATA_DIR / "session_search.db"
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(self._path))
-        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn = get_sync_connection(db_path=str(self._path), check_same_thread=False)
         self._init_tables()
 
     def _init_tables(self) -> None:
@@ -231,7 +239,13 @@ class SessionSearchEngine:
 
     @staticmethod
     def _build_fts_query(query: str) -> str:
-        tokens = query.strip().split()
+        # P1 修复：使用 jieba 中文分词，此前 split() 对中文整句只产生一个 token
+        tokens: list[str] = []
+        if _jieba_available:
+            tokens = [t.strip() for t in jieba.cut(query) if t.strip() and len(t.strip()) > 0]
+        if not tokens:
+            tokens = query.strip().split()
+
         escaped = [t.replace('"', '""') for t in tokens if t]
         if not escaped:
             return ""
@@ -266,6 +280,7 @@ class SessionStore:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._sessions: dict[str, Session] = {}
         self._search_engine: SessionSearchEngine | None = None
+        self._search_index: Any = None
         self._load()
 
     def _load(self) -> None:
@@ -351,6 +366,8 @@ class SessionStore:
         self._save()
         if self._search_engine:
             self._search_engine.index_message(session_id, role, content, now)
+        if self._search_index:
+            self._search_index.index_message(session_id, role, content, now)
         return True
 
     def get_messages(
@@ -373,6 +390,8 @@ class SessionStore:
         self._save()
         if self._search_engine:
             self._search_engine.delete_session(session_id)
+        if self._search_index:
+            self._search_index.delete_session(session_id)
         return True
 
     def get_stats(self) -> dict[str, Any]:
@@ -390,6 +409,9 @@ class SessionStore:
             self._search_engine = SessionSearchEngine()
             for sid, session in self._sessions.items():
                 self._search_engine.index_session_messages(sid, session.messages)
+
+    def set_search_index(self, index: Any) -> None:
+        self._search_index = index
 
     def search(
         self,

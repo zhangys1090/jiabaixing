@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
@@ -21,6 +21,7 @@ class ToolCategory(str, Enum):
     DAILY = "daily"
     NETWORK = "network"
     IOT = "iot"
+    PERCEPTION = "perception"
 
 
 @dataclass
@@ -48,8 +49,12 @@ class ToolDefinition:
 
     Attributes:
         name: 工具唯一名称。
-        description: 工具功能描述。
+        description: 工具功能描述（完整描述）。
+        short_desc: 简短描述（渐进式披露 Level 1: 一句话概括）。
         category: 工具分类。
+        tags: 语义标签列表（如 'git', 'search', 'file', 'code', 'debug'）。
+        scenes: 适用场景列表（如 'coding', 'desktop', 'daily', 'research'）。
+        capability_level: 工具能力等级 1=基础 2=中级 3=高级。
         parameters: 参数定义列表。
         risk_level: 风险等级。
         permissions: 所需权限列表。
@@ -57,7 +62,11 @@ class ToolDefinition:
 
     name: str
     description: str
+    short_desc: str = ""
     category: ToolCategory = ToolCategory.SYSTEM
+    tags: list[str] = field(default_factory=list)
+    scenes: list[str] = field(default_factory=list)
+    capability_level: int = 1  # 1=基础 2=中级 3=高级
     parameters: list[ToolParameterDef] = field(default_factory=list)
     risk_level: str = "low"
     permissions: list[str] = field(default_factory=list)
@@ -100,6 +109,14 @@ class ToolRegistry:
         self._tools: dict[str, tuple[ToolDefinition, ToolExecutor]] = {}
 
     def register(self, definition: ToolDefinition, executor: ToolExecutor) -> None:
+        if definition.name in self._tools:
+            from agent.core.logger import StructuredLogger
+            log = StructuredLogger("tool_registry")
+            log.warning(
+                "工具注册覆盖已有同名工具",
+                tool_name=definition.name,
+                hint="检查是否存在重复注册或工具名冲突",
+            )
         self._tools[definition.name] = (definition, executor)
 
     def unregister(self, name: str) -> bool:
@@ -124,6 +141,79 @@ class ToolRegistry:
     def get_by_category(self, category: ToolCategory) -> list[ToolDefinition]:
         return [d for d, _ in self._tools.values() if d.category == category]
 
+    def filter_tools(self, names: set[str] | None) -> list[ToolDefinition]:
+        """仅保留 names 中的工具定义（活跃工具集过滤）。
+
+        Args:
+            names: 允许保留的工具名集合；为 None / 空集合时返回全部（不裁剪）。
+
+        Returns:
+            list[ToolDefinition]: 过滤后的工具定义列表（保持注册顺序）。
+        """
+        if not names:
+            return [d for d, _ in self._tools.values()]
+        name_set = {n for n in names if n}
+        return [d for n, (d, _) in self._tools.items() if n in name_set]
+
+    def get_by_tags(self, tags: list[str]) -> list[ToolDefinition]:
+        """按语义标签过滤工具（交集匹配）。"""
+        if not tags:
+            return []
+        tag_set = {t.lower() for t in tags}
+        return [
+            d for d, _ in self._tools.values()
+            if d.tags and tag_set & {t.lower() for t in d.tags}
+        ]
+
+    def get_by_scene(self, scene: str) -> list[ToolDefinition]:
+        """按适用场景过滤工具。"""
+        s = scene.lower()
+        return [
+            d for d, _ in self._tools.values()
+            if d.scenes and s in {sc.lower() for sc in d.scenes}
+        ]
+
+    def get_by_capability_level(self, max_level: int = 3) -> list[ToolDefinition]:
+        """按能力等级过滤（渐进式披露）。max_level: 1=基础 2=中级 3=高级。"""
+        return [
+            d for d, _ in self._tools.values()
+            if d.capability_level <= max_level
+        ]
+
+    def filter_by(
+        self,
+        *,
+        tags: list[str] | None = None,
+        scene: str | None = None,
+        max_capability_level: int | None = None,
+        exclude_categories: list[ToolCategory] | None = None,
+    ) -> list[ToolDefinition]:
+        """多条件组合过滤：标签 + 场景 + 能力等级 + 排除分类。"""
+        results = [d for d, _ in self._tools.values()]
+
+        if tags:
+            tag_set = {t.lower() for t in tags}
+            results = [
+                d for d in results
+                if d.tags and tag_set & {t.lower() for t in d.tags}
+            ]
+
+        if scene:
+            s = scene.lower()
+            results = [
+                d for d in results
+                if d.scenes and s in {sc.lower() for sc in d.scenes}
+            ]
+
+        if max_capability_level is not None:
+            results = [d for d in results if d.capability_level <= max_capability_level]
+
+        if exclude_categories:
+            cat_set = set(exclude_categories)
+            results = [d for d in results if d.category not in cat_set]
+
+        return results
+
     def get_all_definitions(self) -> list[ToolDefinition]:
         return [d for d, _ in self._tools.values()]
 
@@ -137,8 +227,23 @@ class ToolRegistry:
         from agent.config import TOOL_EXECUTE_TIMEOUT
         start = time.monotonic()
         try:
-            result = await asyncio.wait_for(executor(params or {}), timeout=TOOL_EXECUTE_TIMEOUT)
+            # timeout<=0 视为不设置超时（审计 T-07：wait_for(..., timeout=0) 会立即抛 TimeoutError）
+            _timeout = TOOL_EXECUTE_TIMEOUT if TOOL_EXECUTE_TIMEOUT and TOOL_EXECUTE_TIMEOUT > 0 else None
+            result = await asyncio.wait_for(executor(params or {}), timeout=_timeout)
             result.duration = time.monotonic() - start
+            # 输出大小限制（仅成功时截断）
+            if result.success and result.output:
+                from agent.tools.output_limiter import get_output_limiter
+                limiter = get_output_limiter()
+                truncated = limiter.limit(name, result.output)
+                if truncated.was_truncated:
+                    result.output = truncated.output + f"\n\n{truncated.truncation_note}"
+                    result.metadata = result.metadata or {}
+                    result.metadata["truncated"] = True
+                    result.metadata["original_chars"] = truncated.original_chars
+                    result.metadata["truncated_chars"] = truncated.truncated_chars
+                    result.metadata["original_lines"] = truncated.original_lines
+                    result.metadata["truncated_lines"] = truncated.truncated_lines
             return result
         except asyncio.TimeoutError:
             return ToolResult(
@@ -147,7 +252,12 @@ class ToolRegistry:
                 duration=time.monotonic() - start,
             )
         except Exception as e:
-            return ToolResult(success=False, error=str(e), duration=time.monotonic() - start)
+            return ToolResult(
+                success=False,
+                error=f"{type(e).__name__}: {e}",
+                duration=time.monotonic() - start,
+                metadata={"exception_type": type(e).__name__, "exception_module": type(e).__module__},
+            )
 
     def to_openai_tools(self) -> list[dict[str, Any]]:
         tools = []
@@ -177,7 +287,7 @@ class ToolRegistry:
         return tools
 
 
-def register_default_tools(registry: ToolRegistry) -> int:
+def register_default_tools(registry: ToolRegistry, session_store: Any = None) -> int:
     count = 0
 
     from agent.tools.file_tools import (
@@ -198,6 +308,30 @@ def register_default_tools(registry: ToolRegistry) -> int:
     ]:
         registry.register(definition, executor)
         count += 1
+
+    # ===== 多模态文件解析工具 =====
+    from agent.tools.file_parse_tools import (
+        PDF_PARSE_DEF, XLSX_PARSE_DEF, DOCX_PARSE_DEF,
+        OCR_EXTRACT_DEF,
+        pdf_parse_executor, xlsx_parse_executor, docx_parse_executor,
+        ocr_extract_executor,
+    )
+    for definition, executor in [
+        (PDF_PARSE_DEF, pdf_parse_executor),
+        (XLSX_PARSE_DEF, xlsx_parse_executor),
+        (DOCX_PARSE_DEF, docx_parse_executor),
+        (OCR_EXTRACT_DEF, ocr_extract_executor),
+    ]:
+        registry.register(definition, executor)
+        count += 1
+
+    # ===== Vision工具 =====
+    from agent.tools.vision_tools import (
+        VISION_UNDERSTAND_DEF,
+        vision_understand_executor,
+    )
+    registry.register(VISION_UNDERSTAND_DEF, vision_understand_executor)
+    count += 1
 
     from agent.tools.memory_tools import (
         MEMORY_RECALL_DEF, MEMORY_SEARCH_DEF, MEMORY_STORE_DEF, KNOWLEDGE_QUERY_DEF,
@@ -232,14 +366,13 @@ def register_default_tools(registry: ToolRegistry) -> int:
         count += 1
 
     from agent.tools.network_tools import (
-        WEB_SEARCH_DEF, WEB_FETCH_DEF, TTS_SPEAK_DEF, CHART_GENERATE_DEF,
+        WEB_SEARCH_DEF, WEB_FETCH_DEF, CHART_GENERATE_DEF,
         web_search_executor, web_fetch_executor,
-        tts_speak_executor, chart_generate_executor,
+        chart_generate_executor,
     )
     for definition, executor in [
         (WEB_SEARCH_DEF, web_search_executor),
         (WEB_FETCH_DEF, web_fetch_executor),
-        (TTS_SPEAK_DEF, tts_speak_executor),
         (CHART_GENERATE_DEF, chart_generate_executor),
     ]:
         registry.register(definition, executor)
@@ -312,16 +445,15 @@ def register_default_tools(registry: ToolRegistry) -> int:
 
     from agent.tools.desktop_tools import (
         DESKTOP_AUTOMATE_DEF, DESKTOP_SCREENSHOT_DEF,
-        DESKTOP_WINDOW_DEF, DESKTOP_CLIPBOARD_DEF, DESKTOP_SHELL_DEF,
+        DESKTOP_WINDOW_DEF, DESKTOP_CLIPBOARD_DEF,
         desktop_automate_executor, desktop_screenshot_executor,
-        desktop_window_executor, desktop_clipboard_executor, desktop_shell_executor,
+        desktop_window_executor, desktop_clipboard_executor,
     )
     for definition, executor in [
         (DESKTOP_AUTOMATE_DEF, desktop_automate_executor),
         (DESKTOP_SCREENSHOT_DEF, desktop_screenshot_executor),
         (DESKTOP_WINDOW_DEF, desktop_window_executor),
         (DESKTOP_CLIPBOARD_DEF, desktop_clipboard_executor),
-        (DESKTOP_SHELL_DEF, desktop_shell_executor),
     ]:
         registry.register(definition, executor)
         count += 1
@@ -329,8 +461,10 @@ def register_default_tools(registry: ToolRegistry) -> int:
     from agent.tools.browser_tools import (
         BROWSER_AGENT_DEF, BROWSER_NAVIGATE_DEF, BROWSER_SCREENSHOT_DEF,
         BROWSER_CLICK_DEF, BROWSER_TYPE_DEF, BROWSER_GET_TEXT_DEF,
+        BROWSER_FILL_FORM_DEF,
         browser_agent_executor, browser_navigate_executor, browser_screenshot_executor,
         browser_click_executor, browser_type_executor, browser_get_text_executor,
+        browser_fill_form_executor,
     )
     for definition, executor in [
         (BROWSER_AGENT_DEF, browser_agent_executor),
@@ -339,6 +473,22 @@ def register_default_tools(registry: ToolRegistry) -> int:
         (BROWSER_CLICK_DEF, browser_click_executor),
         (BROWSER_TYPE_DEF, browser_type_executor),
         (BROWSER_GET_TEXT_DEF, browser_get_text_executor),
+        (BROWSER_FILL_FORM_DEF, browser_fill_form_executor),
+    ]:
+        registry.register(definition, executor)
+        count += 1
+
+    # ===== 感知工具（五感：视觉解析/语音识别/操作验证/智能等待） =====
+    from agent.tools.perception_tools import (
+        SCREEN_PARSE_DEF, ACTION_VERIFY_DEF, SMART_WAIT_DEF, SPEECH_TRANSCRIBE_DEF,
+        screen_parse_executor, action_verify_executor,
+        smart_wait_executor, speech_transcribe_executor,
+    )
+    for definition, executor in [
+        (SCREEN_PARSE_DEF, screen_parse_executor),
+        (ACTION_VERIFY_DEF, action_verify_executor),
+        (SMART_WAIT_DEF, smart_wait_executor),
+        (SPEECH_TRANSCRIBE_DEF, speech_transcribe_executor),
     ]:
         registry.register(definition, executor)
         count += 1
@@ -369,16 +519,15 @@ def register_default_tools(registry: ToolRegistry) -> int:
 
     from agent.tools.system_tools import (
         FILE_DEDUP_DEF, LOG_VIEW_DEF, SHELL_GENERATE_DEF,
-        VOICE_INTERACT_DEF, DELEGATE_TASK_DEF, GET_ACTIVE_FILE_DEF,
+        VOICE_INTERACT_DEF, GET_ACTIVE_FILE_DEF,
         file_dedup_executor, log_view_executor, shell_generate_executor,
-        voice_interact_executor, delegate_task_executor, get_active_file_executor,
+        voice_interact_executor, get_active_file_executor,
     )
     for definition, executor in [
         (FILE_DEDUP_DEF, file_dedup_executor),
         (LOG_VIEW_DEF, log_view_executor),
         (SHELL_GENERATE_DEF, shell_generate_executor),
         (VOICE_INTERACT_DEF, voice_interact_executor),
-        (DELEGATE_TASK_DEF, delegate_task_executor),
         (GET_ACTIVE_FILE_DEF, get_active_file_executor),
     ]:
         registry.register(definition, executor)
@@ -396,4 +545,245 @@ def register_default_tools(registry: ToolRegistry) -> int:
         registry.register(definition, executor)
         count += 1
 
+    # ===== 会话搜索工具（FTS5 全文搜索过往对话） =====
+    if session_store is not None:
+        from agent.tools.session_search_tool import register_session_search_tool
+        register_session_search_tool(registry, session_store)
+        count += 1
+
+    # ===== 用户体验工具（澄清/TODO/写入审批） =====
+    from agent.tools.clarify_tool import register_clarify_tool
+    from agent.tools.todo_tool import register_todo_tool
+    from agent.tools.write_approval_tool import register_write_approval_tool
+    register_clarify_tool(registry)
+    count += 1
+    register_todo_tool(registry)
+    count += 1
+    register_write_approval_tool(registry)
+    count += 1
+
+    # ===== 高级工具（代码执行/子Agent委派） =====
+    from agent.tools.code_execution_tool import register_code_execution_tool
+    from agent.tools.delegate_tool import register_delegate_tool
+    register_code_execution_tool(registry)
+    count += 1
+    register_delegate_tool(registry)
+    count += 1
+
+    # ===== 语音对话模式工具（VoiceMode 状态机） =====
+    from agent.tools.voice_mode_tool import register_voice_mode_tool
+    register_voice_mode_tool(registry)
+    count += 1
+
+    # ===== Sanbao AGI 群论推理工具（0 token，不依赖LLM） =====
+    from agent.tools.sanbao_tools import (
+        SANBAO_ASK_DEF, SANBAO_PREDICT_DEF, SANBAO_DIAGNOSE_DEF,
+        SANBAO_TRAIN_DEF, SANBAO_FEEDBACK_DEF, SANBAO_STATUS_DEF,
+        sanbao_ask_executor, sanbao_predict_executor, sanbao_diagnose_executor,
+        sanbao_train_executor, sanbao_feedback_executor, sanbao_status_executor,
+    )
+    for definition, executor in [
+        (SANBAO_ASK_DEF, sanbao_ask_executor),
+        (SANBAO_PREDICT_DEF, sanbao_predict_executor),
+        (SANBAO_DIAGNOSE_DEF, sanbao_diagnose_executor),
+        (SANBAO_TRAIN_DEF, sanbao_train_executor),
+        (SANBAO_FEEDBACK_DEF, sanbao_feedback_executor),
+        (SANBAO_STATUS_DEF, sanbao_status_executor),
+    ]:
+        registry.register(definition, executor)
+        count += 1
+
     return count
+
+
+# ==================== 工具可靠性追踪器 ====================
+
+
+@dataclass
+class ToolCallStats:
+    """工具调用统计。
+
+    Attributes:
+        calls: 总调用次数。
+        successes: 成功次数。
+        total_duration: 总耗时（秒）。
+        last_error: 最近一次错误信息。
+    """
+
+    calls: int = 0
+    successes: int = 0
+    total_duration: float = 0.0
+    last_error: str | None = None
+
+
+class ToolReliabilityTracker:
+    """工具可靠性追踪器。
+
+    记录工具调用结果，计算成功率和综合评分，
+    支持进化权重调整，用于工具推荐排序。
+    """
+
+    def __init__(self) -> None:
+        self._stats: dict[str, ToolCallStats] = {}
+        self._evolution_weights: dict[str, float] = {}
+
+    def record_call(
+        self,
+        tool_name: str,
+        success: bool,
+        duration: float,
+        error: str | None = None,
+    ) -> None:
+        """记录工具调用结果。"""
+        existing = self._stats.get(tool_name)
+        if existing:
+            existing.calls += 1
+            if success:
+                existing.successes += 1
+            existing.total_duration += duration
+            if error:
+                existing.last_error = error
+        else:
+            self._stats[tool_name] = ToolCallStats(
+                calls=1,
+                successes=1 if success else 0,
+                total_duration=duration,
+                last_error=error,
+            )
+
+    def get_success_rate(self, tool_name: str) -> float:
+        """获取工具成功率。"""
+        stats = self._stats.get(tool_name)
+        if not stats or stats.calls == 0:
+            return 1.0
+        return stats.successes / stats.calls
+
+    def get_avg_duration(self, tool_name: str) -> float:
+        """获取工具平均耗时。"""
+        stats = self._stats.get(tool_name)
+        if not stats or stats.calls == 0:
+            return 0.0
+        return stats.total_duration / stats.calls
+
+    def apply_evolution_weights(self, weights: dict[str, float]) -> None:
+        """应用进化引擎产出的技能权重调整。"""
+        for tool_name, weight in weights.items():
+            self._evolution_weights[tool_name] = weight
+
+    def get_evolution_weight(self, tool_name: str) -> float:
+        """获取工具的进化权重。"""
+        return self._evolution_weights.get(tool_name, 1.0)
+
+    def get_composite_score(self, tool_name: str) -> float:
+        """获取综合评分（成功率 × 进化权重）。"""
+        success_rate = self.get_success_rate(tool_name)
+        weight = self.get_evolution_weight(tool_name)
+        return success_rate * weight
+
+    def get_stats(self, tool_name: str) -> ToolCallStats | None:
+        """获取工具调用统计。"""
+        return self._stats.get(tool_name)
+
+    def get_all_stats(self) -> dict[str, ToolCallStats]:
+        """获取所有工具的调用统计。"""
+        return dict(self._stats)
+
+
+# ==================== 工具推荐引擎 ====================
+
+
+class ToolRecommendationEngine:
+    """工具推荐引擎。
+
+    统一排序模块：场景检测 + 可靠性评分 + 进化权重 + 用户历史
+    → 推荐工具列表。
+    """
+
+    def __init__(
+        self,
+        tool_registry: ToolRegistry,
+        reliability_tracker: ToolReliabilityTracker | None = None,
+        scene_mapper: "SceneToToolsetMapper | None" = None,
+    ) -> None:
+        self._registry = tool_registry
+        self._tracker = reliability_tracker or ToolReliabilityTracker()
+        self._scene_mapper = scene_mapper
+
+    def recommend(
+        self,
+        input_text: str,
+        env: str | None = None,
+        max_tools: int = 15,
+    ) -> list[dict[str, Any]]:
+        """根据输入推荐工具列表。
+
+        Args:
+            input_text: 用户输入。
+            env: 环境状态。
+            max_tools: 最大推荐数量。
+
+        Returns:
+            排序后的工具推荐列表，每项包含 name, score, reason。
+        """
+        if self._scene_mapper:
+            resolution = self._scene_mapper.resolve(input_text, env)
+            scene = resolution["scene"]
+            tags = resolution.get("tags", [])
+            disclosure_level = resolution.get("disclosure_level", 2)
+            exclude_categories = resolution.get("exclude_categories", [])
+        else:
+            scene = "daily"
+            tags = []
+            disclosure_level = 2
+            exclude_categories = []
+
+        exclude_cats = []
+        for cat_name in exclude_categories:
+            try:
+                exclude_cats.append(ToolCategory(cat_name))
+            except ValueError:
+                pass
+
+        candidates = self._registry.filter_by(
+            tags=tags if tags else None,
+            scene=scene,
+            max_capability_level=disclosure_level,
+            exclude_categories=exclude_cats if exclude_cats else None,
+        )
+
+        if not candidates:
+            candidates = self._registry.get_by_capability_level(disclosure_level)
+
+        scored: list[dict[str, Any]] = []
+        for tool_def in candidates:
+            composite = self._tracker.get_composite_score(tool_def.name)
+            scene_match = 1.0 if tool_def.scenes and scene in {
+                s.lower() for s in tool_def.scenes
+            } else 0.5
+            tag_match = 0.0
+            if tags and tool_def.tags:
+                overlap = len(set(tags) & {t.lower() for t in tool_def.tags})
+                tag_match = min(overlap / max(len(tags), 1), 1.0)
+
+            final_score = composite * 0.4 + scene_match * 0.3 + tag_match * 0.3
+
+            reason_parts = []
+            if scene_match > 0.8:
+                reason_parts.append(f"场景匹配({scene})")
+            if tag_match > 0:
+                reason_parts.append(f"标签匹配({tag_match:.0%})")
+            if composite > 1.0:
+                reason_parts.append("进化加权")
+            elif composite < 0.8:
+                reason_parts.append("可靠性较低")
+
+            scored.append({
+                "name": tool_def.name,
+                "score": round(final_score, 3),
+                "reason": " + ".join(reason_parts) if reason_parts else "默认推荐",
+                "short_desc": tool_def.short_desc or tool_def.description[:50],
+                "capability_level": tool_def.capability_level,
+            })
+
+        scored.sort(key=lambda x: x["score"], reverse=True)
+        return scored[:max_tools]

@@ -1,0 +1,12 @@
+# Namespace: 家百星生产命名空间
+# 用途: 隔离生产环境所有资源
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: jiabaixing
+  labels:
+    name: jiabaixing
+    environment: production
+    app.kubernetes.io/name: jiabaixing
+    app.kubernetes.io/part-of: jiabaixing
+    app.kubernetes.io/managed-by: kubectl

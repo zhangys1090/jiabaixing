@@ -38,6 +38,7 @@ class ToolResult:
     success: bool = True
     error: str | None = None
     duration: float = 0.0
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -79,24 +80,65 @@ class TurnContext:
 
 @dataclass
 class IterationBudget:
+    """迭代预算管理，控制对话循环的轮数、Token 和连续失败上限。
+
+    Attributes:
+        max_tool_rounds: 最大工具调用轮数。
+        current_round: 当前已执行的轮数。
+        max_tokens_per_round: 每轮最大 Token 数。
+        total_tokens_used: 已使用的 Token 总数。
+        max_total_tokens: Token 总量上限。
+        max_consecutive_failures: 允许的连续失败次数上限。
+        consecutive_failures: 当前连续失败计数。
+    """
+
     max_tool_rounds: int = 10
     current_round: int = 0
     max_tokens_per_round: int = 4000
     total_tokens_used: int = 0
+    max_total_tokens: int = 50000
+    max_consecutive_failures: int = 3
+    consecutive_failures: int = 0
 
     @property
     def remaining_rounds(self) -> int:
+        """剩余可用轮数。"""
         return max(0, self.max_tool_rounds - self.current_round)
 
     @property
     def is_exhausted(self) -> bool:
+        """轮数是否已耗尽。"""
         return self.current_round >= self.max_tool_rounds
 
+    @property
+    def is_token_exhausted(self) -> bool:
+        """Token 总量是否已耗尽。"""
+        return self.total_tokens_used >= self.max_total_tokens
+
+    @property
+    def is_failure_exhausted(self) -> bool:
+        """连续失败次数是否已达上限。"""
+        return self.consecutive_failures >= self.max_consecutive_failures
+
     def increment(self) -> None:
+        """递增当前轮数。"""
         self.current_round += 1
 
     def add_tokens(self, count: int) -> None:
+        """累加已使用的 Token 数。
+
+        Args:
+            count: 本轮消耗的 Token 数量。
+        """
         self.total_tokens_used += count
+
+    def record_failure(self) -> None:
+        """记录一次连续失败，递增 consecutive_failures。"""
+        self.consecutive_failures += 1
+
+    def reset_failure_streak(self) -> None:
+        """重置连续失败计数为 0，在成功后调用。"""
+        self.consecutive_failures = 0
 
 
 @dataclass

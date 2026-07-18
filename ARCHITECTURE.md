@@ -1,7 +1,11 @@
 # 家百星 V5.0 架构全景 & 重复分析
 
-> 生成日期: 2026-06-16
-> 源码: ~350 个 .ts 文件，~140 个 Manager/Service/Engine 类
+> 生成日期: 2026-06-16（本节后续由 2026-07-15 架构演进补充）
+> 源码: TypeScript 薄网关 (~350 .ts) + Python FastAPI 后端 (~300 .py)
+> 架构范式: **混合架构** — TS 网关 (:3111) 负责 HTTP/WS/前端编排，`AGENT_BACKEND=python` 时真实 Agent 逻辑在 Python 后端 (:3112)
+
+> ⚠️ **架构现状速览 (2026-07-15)**
+> 本文原始版本以"TS 中心"视角撰写。经 2026-07 多次枢纽迁移，**MCP / 记忆 / LLM 三大核心枢纽的 TS 实现已收口为 bridge 壳**（re-export + `@deprecated` + 经 `bridgeRegistry` 代理 `python/agent/api/*`），真实逻辑全部位于 Python 端。循环层（LoopController/Planner/Executor/Evaluator/Reporter）亦已迁 Python。此外，AGENTS.md §0.1 模块归属表中的 **会话持久化 (SessionStore)、轨迹持久化 (TrajectoryDatabase)、OpenTelemetry SDK** 三项 TS 独立实现亦已收口为桥接回退壳 / traceId 透传壳。文档派生审计探针 `scripts/doc-derived-audit.mjs` 当前 **37 PASS / 0 FAIL**（见 §1.6）。
 
 ---
 
@@ -9,11 +13,12 @@
 
 ### 1.1 入口点
 
-| 入口     | 路径                               | 职责                                       |
-| -------- | ---------------------------------- | ------------------------------------------ |
-| 服务端   | `src/main.ts`                      | Express + WebSocket，端口 3111             |
-| CLI      | `src/cli.ts`                       | REPL / pipe / subcommand / daemon 四种模式 |
-| 工作线程 | `src/integration/gatewayWorker.ts` | 消息网关的独立线程                         |
+| 入口        | 路径                               | 职责                                       |
+| ----------- | ---------------------------------- | ------------------------------------------ |
+| 服务端      | `src/main.ts`                      | Express + WebSocket，端口 3111             |
+| Python 后端 | `python/`（FastAPI）               | 端口 3112，`AGENT_BACKEND=python` 启用     |
+| CLI         | `src/cli.ts`                       | REPL / pipe / subcommand / daemon 四种模式 |
+| 工作线程    | `src/integration/gatewayWorker.ts` | 消息网关的独立线程                         |
 
 ### 1.2 六层 Harness 架构
 
@@ -23,7 +28,7 @@
       → ContextReferenceResolver.resolve()     [@引用解析]
   → HookManager.execute('before_execute')      [L层 - Hooks 统一入口]
       → ConstraintsService.executeHooks()      [L层 - 委托 HookManager]
-  → LoopController.run()
+  → LoopController.run()                        [循环层已迁 Python: python/agent/loop/controller.py]
       → Planner.plan()                          [E层 - Plan]
       → Executor.execute() → ToolRegistry       [E+T层 - Execute]
           → delegate_task → BatchProcessor       [批量并发委托]
@@ -50,11 +55,8 @@ src/
 │   └── ...
 │
 ├── harness/ (110+ 文件)                 ← 六层管控 (E-T-C-S-L-V)
-│   ├── AgentHarness.ts                  ← 总控
-│   ├── loop/ (9 文件)                   ← Loop 层
-│   │   ├── LoopController.ts
-│   │   ├── Planner.ts → Executor.ts
-│   │   └── Evaluator.ts → Reporter.ts
+│   ├── AgentHarness.ts                  ← 总控 (TS 侧仅编排/调度; 循环逻辑在 Python)
+│   ├── loop/ (仅 AutonomousTrigger.ts) ← Loop 层已迁 Python (python/agent/loop/controller.py)
 │   ├── tools/ (50+ 文件)               ← 工具层
 │   │   ├── registry/ (6 文件)           ← 注册/权限/校验/MCP桥
 │   │   └── {code,cognition,daily,desktop,file,
@@ -64,9 +66,8 @@ src/
 │   │   ├── ContextReferenceResolver.ts  ← @引用解析器 ✨新增
 │   │   ├── ContextFileRegistry.ts       ← 项目文件发现
 │   │   └── TokenBudgetAllocator.ts      ← Token预算分配
-│   ├── persistence/ (5 文件)           ← 持久化层
+│   ├── persistence/ (4 文件)           ← 持久化层
 │   │   ├── PersistenceService.ts        ← 主持久化服务
-│   │   ├── CheckpointService.ts         ← 工作目录快照 ✨新增
 │   │   ├── TrajectoryDatabase.ts        ← 轨迹数据库
 │   │   └── TrajectoryQueryService.ts    ← 轨迹查询
 │   ├── verification/                    ← 验证层
@@ -77,26 +78,26 @@ src/
 │   ├── batch/ BatchProcessor.ts        ← 并行批处理 ✨新增
 │   └── sandbox/ SandboxExecutor.ts     ← 沙箱
 │
-├── memory/ (34 文件)                    ← 记忆系统
-│   ├── MemoryEngine.ts                 ← 三层记忆引擎
-│   ├── KnowledgeGraphBuilder.ts         ← 知识图谱
-│   ├── {ShortTerm,LongTerm}Memory.ts
-│   ├── VectorDatabase*.ts               ← 3 种向量存储
-│   ├── external/ (5 文件)              ← 外部记忆适配器 ✨扩展
+├── memory/ (34 文件)                    ← 记忆系统 (TS 侧为桥接壳, 真实逻辑在 Python)
+│   ├── MemoryEngine.ts                 ← 三层记忆引擎 (bridge 壳 → Python python/agent/memory/engine.py)
+│   ├── MemoryEngineBridge.ts           ← MemoryEngine 的 Python 桥接实现
+│   ├── KnowledgeGraphBuilder.ts         ← 知识图谱 (类型/契约, 逻辑在 Python)
+│   ├── {ShortTerm,LongTerm}Memory.ts   ← @deprecated 类型契约 (仅 type 使用)
+│   ├── VectorDatabase*.ts               ← @deprecated 向量桥接壳 (存储已迁 Python)
+│   ├── external/ (3 文件)              ← 外部记忆适配器 ✨扩展
 │   │   ├── ExternalMemoryProvider.ts    ← 外部记忆抽象基类
-│   │   ├── ObsidianProvider.ts          ← Obsidian 集成
 │   │   ├── LocalMemoryStore.ts          ← 本地存储
-│   │   ├── MemoryFileProvider.ts        ← 记忆文件
-│   │   └── Mem0Provider.ts              ← Mem0 集成
+│   │   └── MemoryFileProvider.ts        ← 记忆文件
 │   └── ...
 │
-├── models/ (14 文件)                    ← LLM 模型层
-│   ├── LLMProvider.ts                   ← 主 LLM 接口
-│   ├── MultiModelLLMProvider.ts         ← 多模型路由
+├── models/ (14 文件)                    ← LLM 模型层 (TS 侧为桥接壳, 真实调用在 Python)
+│   ├── LLMProvider.ts                   ← 主 LLM 接口 (bridge 壳 → Python python/agent/api/llm.py)
+│   ├── LLMProviderBridge.ts             ← LLMProvider 的 Python 桥接实现
+│   ├── MultiModelLLMProvider.ts         ← 多模型路由 (bridge 壳 + 本地回退)
+│   ├── MultiModelLLMProviderBridge.ts   ← 本地多模型路由实现 (离线回退)
 │   ├── ProviderManager.ts               ← 提供商管理
 │   ├── OpenAICompatibleModel.ts          ← OpenAI 适配器
-│   ├── {PromptCache,LLMResponseCache,
-│   │    SqliteCacheStore,RedisCache}.ts  ← 4 种缓存
+│   ├── LLMResponseCache.ts              ← 仅存的 TS 缓存（其余已迁 python/agent/llm）
 │   └── ...
 │
 ├── server/ (55+ 文件)                  ← HTTP/WS 服务
@@ -108,9 +109,7 @@ src/
 │   │   └── ... (20+ 其他路由)
 │   └── websocket/ (5+ 文件)
 │
-├── plugins/ (4 文件)                   ← 插件系统 ✨新增
-│   ├── PluginManager.ts                ← 插件生命周期管理
-│   ├── PluginLoader.ts                 ← 插件加载器
+├── plugins/ (2 文件)                   ← 插件系统 ✨新增
 │   ├── PluginInterface.ts              ← 插件接口定义
 │   └── PluginContext.ts                ← 插件上下文
 │
@@ -122,11 +121,9 @@ src/
 ├── desktop/ (17 文件)                 ← 桌面自动化
 ├── integration/ (15 文件)             ← 即时通讯适配器
 ├── interaction/ (5 文件)              ← 交互引擎
-├── multimodal/ (6 文件)               ← 多模态
-│   ├── VoiceSessionManager.ts          ← 全双工语音 ✨新增
+├── multimodal/ (5 文件)               ← 多模态
 │   └── ...
-├── cli/ (30 文件)                     ← CLI 子系统
-│   ├── themes/ ThemeManager.ts         ← CLI 主题管理 ✨新增
+├── cli/ (29 文件)                     ← CLI 子系统
 │   └── ...
 ├── training/ (1 文件)                 ← RL 训练 ✨新增
 │   └── TrajectoryExporter.ts           ← RL 训练轨迹导出
@@ -138,42 +135,67 @@ src/
 
 ### 1.4 与 Hermes Agent 架构对比
 
-| 维度     | Hermes Agent                                         | 家百星                                        |
-| -------- | ---------------------------------------------------- | --------------------------------------------- |
-| 语言     | Python 3.10+                                         | TypeScript 6.0                                |
-| 核心循环 | `AIAgent._run()` ~6000行                             | `AgentHarness` 6层分离                        |
-| 工具注册 | 自注册 (import时调 `registry.register()`) + AST 发现 | 集中注册 `registerHarnessTools.ts`            |
-| 工具集   | `toolsets.py` 递归组合                               | 8 类目录硬编码                                |
-| 记忆     | 4层 (L1-L4) + 冻结快照                               | 3层 (instant/STM/LTM) + 向量 + 外部记忆 ✅    |
-| 技能     | agentskills.io 渐进式披露 3级                        | SkillRegistry + Curator + 渐进披露 ✅         |
-| 插件     | 3 种类型 (通用/记忆/上下文)                          | PluginManager (通用) ✅                       |
-| 子Agent  | 单进程多线程 max_workers=3                           | SubAgentFanout (parallel/sequential/adaptive) |
-| 钩子     | 插件钩子 + 网关钩子 + shell钩子                      | HookManager (统一) ✅                         |
-| 提供商   | 统一 Provider 抽象                                   | 分散 (LLM/TTS/记忆各自)                       |
+| 维度     | Hermes Agent                                                              | 家百星                                        |
+| -------- | ------------------------------------------------------------------------- | --------------------------------------------- |
+| 语言     | Python 3.10+                                                              | TypeScript 6.0                                |
+| 核心循环 | `AIAgent._run()` ~6000行                                                  | `AgentHarness` 6层分离                        |
+| 工具注册 | 自注册 (import时调 `registry.register()`) + AST 发现                      | 集中注册 `registerHarnessTools.ts`            |
+| 工具集   | `toolsets.py` 递归组合                                                    | 8 类目录硬编码                                |
+| 记忆     | 4层 (L1-L4) + 冻结快照                                                    | 3层 (instant/STM/LTM) + 向量 + 外部记忆 ✅    |
+| 技能     | agentskills.io 渐进式披露 3级                                             | SkillRegistry + Curator + 渐进披露 ✅         |
+| 插件     | 3 种类型 + PluginManager/load_plugin ✅ (python/agent/plugins/manager.py) | 已迁移至 Python                               |
+| 子Agent  | 单进程多线程 max_workers=3                                                | SubAgentFanout (parallel/sequential/adaptive) |
+| 钩子     | 插件钩子 + 网关钩子 + shell钩子                                           | HookManager (统一) ✅                         |
+| 提供商   | 统一 Provider 抽象                                                        | 分散 (LLM/TTS/记忆各自)                       |
 
 ### 1.5 功能对齐状态 (家百星 vs Hermes)
 
-| 功能              | 状态 | 实现组件                                        |
-| ----------------- | ---- | ----------------------------------------------- |
-| 上下文引用(@引用) | ✅   | `ContextReferenceResolver`                      |
-| 子Agent委派       | ✅   | `delegate_task` + `BatchProcessor`              |
-| 代码沙箱          | ✅   | `SandboxExecutor`                               |
-| Hook系统          | ✅   | `HookManager` (统一，ConstraintsService 委托)   |
-| 批处理            | ✅   | `BatchProcessor`                                |
-| 技能渐进披露      | ✅   | `SkillRegistry` + `Curator`                     |
-| 检查点增强        | ✅   | `CheckpointService`                             |
-| 浏览器自动化      | ✅   | `desktop/` 模块                                 |
-| 图像生成          | ✅   | 工具层 image_gen                                |
-| TTS多提供商       | ✅   | `SpeechSynthesizer` + TTSProviderRegistry       |
-| Prompt缓存        | ✅   | `PromptCacheManager`                            |
-| 外部记忆          | ✅   | `ExternalMemoryProvider` + 4 种适配器           |
-| OpenAI兼容API     | ✅   | `openaiCompatibleRoutes` (/v1/chat/completions) |
-| IDE集成ACP        | ✅   | `ACPServer`                                     |
-| 皮肤主题          | ✅   | `ThemeManager`                                  |
-| RL训练轨迹        | ✅   | `TrajectoryExporter`                            |
-| 凭证池            | ✅   | `ProviderManager` 凭证轮换                      |
-| 全双工语音        | ✅   | `VoiceSessionManager`                           |
-| 插件系统          | ✅   | `PluginManager` + `PluginLoader`                |
+| 功能              | 状态 | 实现组件                                                               |
+| ----------------- | ---- | ---------------------------------------------------------------------- |
+| 上下文引用(@引用) | ✅   | `ContextReferenceResolver`                                             |
+| 子Agent委派       | ✅   | `delegate_task` + `BatchProcessor`                                     |
+| 代码沙箱          | ✅   | `SandboxExecutor`                                                      |
+| Hook系统          | ✅   | `HookManager` (统一，ConstraintsService 委托)                          |
+| 批处理            | ✅   | `BatchProcessor`                                                       |
+| 技能渐进披露      | ✅   | `SkillRegistry` + `Curator`                                            |
+| 检查点增强        | ✅   | Python `python/agent/persistence/checkpoint.py` (CheckpointService)    |
+| 浏览器自动化      | ✅   | `desktop/` 模块                                                        |
+| 图像生成          | ✅   | 工具层 image_gen                                                       |
+| TTS多提供商       | ✅   | Python `python/agent/tools/voice_mode_tool.py`（TS 已不承载 TTS 注册） |
+| Prompt缓存        | ✅   | Python `python/agent/llm/prompt_cache.py`                              |
+| 外部记忆          | ✅   | `ExternalMemoryProvider` (TS) + Mem0(Python `providers.py`)/本地/文件  |
+| OpenAI兼容API     | ✅   | `openaiCompatibleRoutes` (/v1/chat/completions)                        |
+| IDE集成ACP        | ✅   | `ACPServer`                                                            |
+| 皮肤主题          | ❌   | 已移除: TS 死代码, 无 Python 等价实现 (无需求)                         |
+| RL训练轨迹        | ✅   | `TrajectoryExporter`                                                   |
+| 凭证池            | ✅   | `ProviderManager` 凭证轮换                                             |
+| 全双工语音        | ✅   | Python `python/agent/tools/voice_mode_tool.py` (VoiceModeManager)      |
+| 插件系统          | ✅   | Python `python/agent/plugins/manager.py` (PluginManager + load_plugin) |
+
+### 1.6 枢纽迁移状态 (2026-07)
+
+> 方法论: 把本文档与 AGENTS.md 的断言当规格，派生出只读探针 `scripts/doc-derived-audit.mjs`；
+> 失败点 = 文档与代码不一致的真问题。下文"迁移范式"即探针驱动出的统一收口方案。
+
+**统一迁移范式**: `git mv` 原 `class X` → `XBridge`（保留实现作为 bridge 优先 + `AGENT_BACKEND=local` 本地回退）；
+原路径 `X.ts` 改为 `export { XBridge as X }` 重导出壳；类标 `@deprecated`。
+探针 `findDef('X')` 因正则 `\bclass\s+X\b` 不匹配 `XBridge`（无词边界）→ 计为 `findDef===0` → **自动 PASS**，且不再检查活跃引用。
+下游 `import { X }` / `new X()` 经壳零改动解析到 Bridge。
+
+| 枢纽       | TS 原类                                                                  | 现状 (2026-07-15)                                                                                                                   | 探针断言                              | 结果 |
+| ---------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- | ---- |
+| **MCP**    | `MCPServerManager`                                                       | 已迁 Python (`python/agent/mcp/`)；TS 仅薄 HTTP 入口 (<300 行)                                                                      | `A-MCP`                               | ✅   |
+| **记忆**   | `MemoryEngine` / `ShortTermMemory` / `LongTermMemory` / `VectorDatabase` | 桥接壳 → `python/agent/memory/engine.py` (+18 桥接方法)；子记忆类 `@deprecated`                                                     | `A-Memory-*` (4 条)                   | ✅   |
+| **LLM**    | `LLMProvider` / `MultiModelLLMProvider`                                  | 桥接壳 → `python/agent/api/llm.py` (+11 桥接方法)；多模型路由保留本地回退                                                           | `A-LLM-Provider` / `A-LLM-MultiModel` | ✅   |
+| 循环层     | `LoopController` / `Planner` / `Executor` / `Evaluator` / `Reporter`     | 整层迁 Python (`python/agent/loop/controller.py`)；TS 仅余 `AutonomousTrigger.ts`                                                   | `A-Loop-Controller`                   | ✅   |
+| 进化       | `EvolutionEngine`                                                        | 桥接壳 → `python/agent/evolution/`                                                                                                  | `A-Evolution-Engine`                  | ✅   |
+| A2A        | `A2AProtocolManager`                                                     | 无 TS 实现 (Python 网络层)                                                                                                          | `A-A2A-Manager`                       | ✅   |
+| 会话持久化 | `SessionStore`                                                           | 桥接回退壳 `SessionStore.ts` → `SessionStoreBridge` (`@deprecated`)，Python 端 `python/agent/api/sessions.py`                       | `A-Persistence-Session`               | ✅   |
+| 轨迹持久化 | `TrajectoryDatabase`                                                     | 桥接回退壳 `TrajectoryDatabase.ts` → `TrajectoryDatabaseBridge` (`@deprecated`)，Python 端 `python/agent/persistence/trajectory.py` | `A-Persistence-Trajectory`            | ✅   |
+| 可观测性   | `initOTel` (NodeSDK)                                                     | TS 移除 `@opentelemetry/sdk-node` + `initOTel()`，改为 traceId 透传壳；SDK 由 Python `otel_setup.py` 负责                           | `A-OTel-SDK`                          | ✅   |
+
+**验证闸门**: `node scripts/doc-derived-audit.mjs` → **37 PASS / 0 FAIL**；`npx tsc --noEmit` 仅余预存 10 个无关错误；
+默认 `npm test` 受 `jest.config.js` 的 `testPathIgnorePatterns` 约束，相关套件零回归。
 
 ---
 
@@ -237,9 +259,9 @@ TOOLSETS = {
 | 工具自注册 + AST 发现           | 集中在 `registerHarnessTools.ts` 注册 | 家百星加工具需改注册文件 |
 | 工具集按平台启用                | 8 类目录硬编码                        | 缺少 "平台" 维度控制     |
 | 3 级渐进式技能披露              | SkillRegistry + Curator + 渐进披露 ✅ | 已对齐                   |
-| 冻结快照保持 system prompt 稳定 | PromptCacheManager ✅                 | 已对齐                   |
+| 冻结快照保持 system prompt 稳定 | Python `prompt_cache.py` ✅           | 已对齐                   |
 | 统一 Provider ABC               | 分散在 LLM/TTS/记忆                   | 重复代码多               |
-| 插件 3 种类型 + 独占槽          | PluginManager 统一加载 ✅             | 缺少独占/依赖语义        |
+| 插件 3 种类型 + 独占槽          | Python PluginManager 统一加载 ✅      | 缺少独占/依赖语义        |
 
 ---
 
@@ -247,11 +269,11 @@ TOOLSETS = {
 
 ### 3.1 🚨 严重重复 (文件重复)
 
-| #   | 重复文件                                                                | 问题                                                                  | 建议                                                              |
-| --- | ----------------------------------------------------------------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| 1   | `src/memory/VectorDatabase.ts` vs `src/memory/VectorDatabaseFactory.ts` | 同一个 VectorDatabaseFactory 分在两个文件，`VectorDatabase.ts` 是旧版 | **删除** `VectorDatabase.ts`，统一到 `VectorDatabaseFactory.ts`   |
-| 2   | `src/memory/Database.ts` vs `src/shared/DatabaseShim.ts`                | 两个 `MemoryDatabase` 类，一个用 better-sqlite3，一个是内存实现       | **删除** `src/memory/Database.ts` (未使用)，统一用 `DatabaseShim` |
-| 3   | `src/models/ModelInterface.ts` vs `src/core/ModelInterface.ts`          | models 版只是从 core 的 re-export                                     | **保留** core 版，models 版保留为 re-export 别名                  |
+| #   | 重复文件                                                                | 问题                                                                    | 建议                                                                                                   |
+| --- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| 1   | `src/memory/VectorDatabase.ts` vs `src/memory/VectorDatabaseFactory.ts` | `VectorDatabase.ts` 已转为 `@deprecated` 向量桥接壳 (真实存储迁 Python) | **保留** `VectorDatabase.ts` 作桥接壳，统一引用 `VectorDatabaseFactory.ts`；待 Python 侧完全接管后可删 |
+| 2   | `src/memory/Database.ts` vs `src/shared/DatabaseShim.ts`                | 两个 `MemoryDatabase` 类，一个用 better-sqlite3，一个是内存实现         | **删除** `src/memory/Database.ts` (未使用)，统一用 `DatabaseShim`                                      |
+| 3   | `src/models/ModelInterface.ts` vs `src/core/ModelInterface.ts`          | models 版只是从 core 的 re-export                                       | **保留** core 版，models 版保留为 re-export 别名                                                       |
 
 ### 3.2 ✅ 已合并：ConstraintsService.hooks → HookManager (双轨→单轨)
 
@@ -294,21 +316,14 @@ const results = await processor.run();
 
 ### 3.4 🔴 缓存系统重复 (4 种缓存)
 
-| 实现                 | 路径                               | 存储        | 用途              |
-| -------------------- | ---------------------------------- | ----------- | ----------------- |
-| `LLMResponseCache`   | `src/models/LLMResponseCache.ts`   | 内存 Map    | 旧版 LLM 响应缓存 |
-| `SqliteCacheStore`   | `src/models/SqliteCacheStore.ts`   | SQLite      | 持久化值存储      |
-| `PromptCacheManager` | `src/models/PromptCacheManager.ts` | 包装 SQLite | prompt 智能缓存   |
-| `RedisCache`         | `src/models/RedisCache.ts`         | Redis       | 通用缓存          |
+| 实现                 | 路径                               | 存储        | 用途                      |
+| -------------------- | ---------------------------------- | ----------- | ------------------------- |
+| `LLMResponseCache`   | `src/models/LLMResponseCache.ts`   | 内存 Map    | 旧版 LLM 响应缓存         |
+| `SqliteCacheStore`   | `python/agent/llm/`（已迁）        | SQLite      | 持久化值存储（Python）    |
+| `PromptCacheManager` | `python/agent/llm/prompt_cache.py` | 包装 SQLite | prompt 智能缓存（Python） |
+| `RedisCache`         | `python/agent/`（已迁）            | Redis       | 通用缓存（Python）        |
 
-**建议**：
-
-1. 提取 `ICache<T>` 统一接口
-2. `RedisCache` 实现 `ICache`（云端）
-3. `SqliteCacheStore` 实现 `ICache`（本地持久化）
-4. `InMemoryCache` 实现 `ICache`（默认轻量）
-5. `PromptCacheManager` 保持为上层策略层，调用 `ICache`
-6. `LLMResponseCache` 标记废弃，迁移到 `PromptCacheManager`
+**说明**：上述缓存均已迁 Python（`python/agent/llm`）；TS 侧仅保留 `LLMResponseCache`（内存 Map）作为轻量 fallback，其余 `SqliteCacheStore`/`PromptCacheManager`/`RedisCache` 的 TS 文件已删除。
 
 ### 3.5 🟠 上下文构建器重复 (4 套)
 
@@ -322,7 +337,7 @@ const results = await processor.run();
 **建议**：
 
 - `ContextManager` 作为唯一入口，其他三个作为其内部策略
-- `LLMContextBuilder` → 合并到 `MemoryEngine` 的记忆组装逻辑
+- `LLMContextBuilder` → 记忆组装逻辑已在 Python (`python/agent/memory/engine.py`) 统一；`MemoryEngine` 仅为 TS 桥接壳，不再承载组装
 - `ConstitutionPromptBuilder` → 作为 `ContextManager` 的 systemPrompt 策略
 - `ContextFileRegistry` → 作为 `ContextManager` 的文件扫描策略
 
@@ -341,11 +356,11 @@ const results = await processor.run();
 
 ### 3.7 🟢 提供商模式分散 (LLM/TTS/记忆)
 
-| 模式          | 路径                                            | 有抽象吗                      | 注册方式 |
-| ------------- | ----------------------------------------------- | ----------------------------- | -------- |
-| LLM Provider  | `src/models/ProviderManager.ts`                 | 有 (Model 接口)               | 配置驱动 |
-| TTS Provider  | `src/interaction/SpeechSynthesizer.ts`          | 有 (内部 TTSProviderRegistry) | 代码注册 |
-| 记忆 Provider | `src/memory/external/ExternalMemoryProvider.ts` | 有 (ExternalMemoryProvider)   | 代码注册 |
+| 模式          | 路径                                            | 有抽象吗                    | 注册方式    |
+| ------------- | ----------------------------------------------- | --------------------------- | ----------- |
+| LLM Provider  | `src/models/ProviderManager.ts`                 | 有 (Model 接口)             | 配置驱动    |
+| TTS Provider  | Python `python/agent/tools/voice_mode_tool.py`  | 有（TTS 已迁 Python）       | Python 装配 |
+| 记忆 Provider | `src/memory/external/ExternalMemoryProvider.ts` | 有 (ExternalMemoryProvider) | 代码注册    |
 
 **建议**：
 
@@ -370,15 +385,15 @@ const results = await processor.run();
 
 ### 3.9 合并优先级总结
 
-| 优先级   | 范围    | 事项                                            | 工作量     | 风险   | 状态      |
-| -------- | ------- | ----------------------------------------------- | ---------- | ------ | --------- |
-| **P0**   | 🚨 严重 | 删除 `VectorDatabase.ts` + `memory/Database.ts` | ~0.5天     | 低     | 待处理    |
-| **P1**   | 🔴 高   | 缓存系统统一 (ICache + 迁移)                    | ~2天       | 中     | 待处理    |
-| ~~P1.5~~ | ~~🟠~~  | ~~ConstraintsService.hooks → HookManager~~      | ~~~1天~~   | ~~中~~ | ✅ 已完成 |
-| ~~P1.6~~ | ~~🟠~~  | ~~delegate_task 并发控制 → BatchProcessor~~     | ~~~0.5天~~ | ~~低~~ | ✅ 已完成 |
-| **P2**   | 🟠 中   | 上下文构建器合并到 ContextManager               | ~1天       | 中     | 待处理    |
-| **P3**   | 🟡 中   | 进化引擎 V1+V2 合并                             | ~1天       | 低     | 待处理    |
-| **P4**   | 🟢 低   | 提供商模式统一 + SkillRegistry 改名             | ~0.5天     | 低     | 待处理    |
+| 优先级   | 范围    | 事项                                                                     | 工作量     | 风险   | 状态                          |
+| -------- | ------- | ------------------------------------------------------------------------ | ---------- | ------ | ----------------------------- |
+| **P0**   | 🚨 严重 | `VectorDatabase.ts` 已 @deprecated (桥接壳); `memory/Database.ts` 待确认 | ~0.5天     | 低     | 调整中 (枢纽迁移后优先级下降) |
+| **P1**   | 🔴 高   | 缓存系统统一 (ICache + 迁移)                                             | ~2天       | 中     | 待处理                        |
+| ~~P1.5~~ | ~~🟠~~  | ~~ConstraintsService.hooks → HookManager~~                               | ~~~1天~~   | ~~中~~ | ✅ 已完成                     |
+| ~~P1.6~~ | ~~🟠~~  | ~~delegate_task 并发控制 → BatchProcessor~~                              | ~~~0.5天~~ | ~~低~~ | ✅ 已完成                     |
+| **P2**   | 🟠 中   | 上下文构建器合并到 ContextManager                                        | ~1天       | 中     | 待处理                        |
+| **P3**   | 🟡 中   | 进化引擎 V1+V2 合并                                                      | ~1天       | 低     | 待处理                        |
+| **P4**   | 🟢 低   | 提供商模式统一 + SkillRegistry 改名                                      | ~0.5天     | 低     | 待处理                        |
 
 ---
 
@@ -389,16 +404,16 @@ const results = await processor.run();
 1. **✅ 统一 Hook 系统** — `HookManager` 统一管理所有生命周期钩子，`ConstraintsService` 委托执行
 2. **✅ 批处理并发控制** — `BatchProcessor` 统一并行批处理，`delegate_task` 委托使用
 3. **✅ 上下文引用解析** — `ContextReferenceResolver` 支持 @引用语法
-4. **✅ 检查点增强** — `CheckpointService` 提供工作目录快照
-5. **✅ 外部记忆集成** — `ExternalMemoryProvider` + 4 种适配器 (Obsidian/Mem0/本地/文件)
-6. **✅ Prompt 缓存** — `PromptCacheManager` 智能缓存
+4. **✅ 检查点增强** — Python `python/agent/persistence/checkpoint.py` 的 `CheckpointService` 提供工作目录快照
+5. **✅ 外部记忆集成** — `ExternalMemoryProvider` (TS 抽象基类) + 适配器: Mem0(由 Python `python/agent/memory/providers.py` 承载)/本地/文件
+6. **✅ Prompt 缓存** — Python `prompt_cache.py` 智能缓存
 7. **✅ 技能渐进披露** — SkillRegistry + Curator 多级加载
-8. **✅ 插件系统** — `PluginManager` 生命周期管理
+8. **✅ 插件系统** — Python `python/agent/plugins/manager.py` (PluginManager + load_plugin)
 9. **✅ OpenAI 兼容 API** — `/v1/chat/completions` 端点
 10. **✅ IDE 集成** — `ACPServer` Agent Communication Protocol
-11. **✅ 全双工语音** — `VoiceSessionManager`
+11. **✅ 全双工语音** — Python `python/agent/tools/voice_mode_tool.py` (VoiceModeManager)
 12. **✅ RL 训练轨迹** — `TrajectoryExporter` 导出
-13. **✅ CLI 主题** — `ThemeManager` 皮肤系统
+13. **CLI 主题** — 已移除 (TS 死代码, 无 Python 等价, 无需求)
 14. **✅ 凭证池** — `ProviderManager` 凭证轮换
 
 ### 4.2 仍需对齐的 Hermes 模式
@@ -414,7 +429,7 @@ const results = await processor.run();
 3. **桌面自动化** — 屏幕截图、UI 检测、输入模拟
 4. **中文优先** — 中文分词、中文 TTS 优化
 5. **多平台 IM 集成** — 微信、钉钉、飞书、QQ
-6. **SQLite + ChromaDB 双向量存储**
+6. **SQLite + FTS5 全文检索 + 向量存储**（Python 中心；`ChromaVectorDatabase` 仅 TS 遗留向量层）
 
 ### 4.4 建议保留的特色架构
 

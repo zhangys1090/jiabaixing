@@ -1,0 +1,49 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: jiabaixing
+  namespace: jiabaixing
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: 'true'
+    nginx.ingress.kubernetes.io/proxy-body-size: '50m'
+    nginx.ingress.kubernetes.io/proxy-read-timeout: '300'
+    nginx.ingress.kubernetes.io/proxy-send-timeout: '300'
+    nginx.ingress.kubernetes.io/websocket-services: 'jiabaixing-gateway'
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - jiabaixing.example.com
+      secretName: jiabaixing-tls
+  rules:
+    - host: jiabaixing.example.com
+      http:
+        paths:
+          - path: /v1
+            pathType: Prefix
+            backend:
+              service:
+                name: jiabaixing-python
+                port:
+                  number: 8765
+          - path: /health
+            pathType: Prefix
+            backend:
+              service:
+                name: jiabaixing-python
+                port:
+                  number: 8765
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: jiabaixing-gateway
+                port:
+                  number: 3111
+          - path: /ws
+            pathType: Prefix
+            backend:
+              service:
+                name: jiabaixing-gateway
+                port:
+                  number: 3111
