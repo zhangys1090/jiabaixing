@@ -10,11 +10,14 @@
 import { Logger } from '../utils/Logger';
 
 // 尝试导入 electron，如果不存在则降级
-let electronScreen: any = null;
+let electronScreen: {
+  getPrimaryDisplay?: () => { workAreaSize: { width: number; height: number } };
+} | null = null;
 try {
-  electronScreen = require('electron').screen;
+  electronScreen = require('electron')?.screen || null;
 } catch {
   // 非 Electron 环境，使用降级方案
+  electronScreen = null;
 }
 
 export interface NormalizedPoint {
@@ -65,13 +68,22 @@ export class NormalizedCoordinateSystem {
    */
   public refreshScreenInfo(): void {
     try {
-      if (electronScreen) {
+      if (
+        electronScreen &&
+        typeof electronScreen.getPrimaryDisplay === 'function'
+      ) {
         // Electron 环境
         const primaryDisplay = electronScreen.getPrimaryDisplay();
-        const { width, height } = primaryDisplay.workAreaSize;
+        const workAreaSize = primaryDisplay?.workAreaSize || {
+          width: 1920,
+          height: 1080,
+        };
+        const { width, height } = workAreaSize;
         this.screenWidth = width;
         this.screenHeight = height;
-        this.scaleFactor = primaryDisplay.scaleFactor || 1;
+        this.scaleFactor =
+          (primaryDisplay as unknown as { scaleFactor?: number })
+            ?.scaleFactor || 1;
         Logger.info(
           `📐 屏幕信息: ${width}x${height}, 缩放: ${this.scaleFactor}`,
           'NormalizedCoords'

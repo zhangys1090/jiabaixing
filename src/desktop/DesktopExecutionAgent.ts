@@ -23,7 +23,9 @@ import {
 } from './DesktopSkillRegistry';
 import { NormalizedCoordinateSystem } from './NormalizedCoordinates';
 import { DesktopVisionEngine, DesktopObservation } from './DesktopVisionEngine';
-import { LLMProvider } from '../models/LLMProvider';
+// F3: 桌面执行规划不再独立持有 TS LLMProvider（违反 AGENTS.md §0.1），
+// 改为路由到 Python 后端的 LLM（经 PythonAgentBridge）。
+import { getPythonBridge } from '../server/bootstrap';
 import { Logger } from '../utils/Logger';
 
 export interface ExecutionAgentConfig {
@@ -65,7 +67,6 @@ export class DesktopExecutionAgent extends EventEmitter {
   private skillRegistry: DesktopSkillRegistry;
   private coords: NormalizedCoordinateSystem;
   private visionEngine: DesktopVisionEngine;
-  private llmProvider: LLMProvider | null = null;
 
   // 状态
   private initialized: boolean = false;
@@ -107,19 +108,12 @@ export class DesktopExecutionAgent extends EventEmitter {
     await this.visionEngine.initialize();
     this.coords.refreshScreenInfo();
 
-    // 初始化LLM
-    if (this.config.enableLLMPlanning) {
-      try {
-        this.llmProvider = new LLMProvider();
-        await this.llmProvider.initialize();
-        Logger.info('🧠 LLM规划引擎已就绪', 'ExecAgent');
-      } catch (err) {
-        Logger.warn(
-          `⚠️ LLM初始化失败，降级为技能模式: ${(err as Error).message}`,
-          'ExecAgent'
-        );
-        this.llmProvider = null;
-      }
+    // F3: 不再初始化本地 LLMProvider；决策经 Python LLM（Bridge）。
+    if (this.config.enableLLMPlanning && this._bridgeLlmAvailable()) {
+      Logger.info(
+        '🧠 桌面执行规划将路由到 Python LLM（经 Bridge）',
+        'ExecAgent'
+      );
     }
 
     // 设置安全回调
@@ -182,8 +176,8 @@ export class DesktopExecutionAgent extends EventEmitter {
         }
       }
 
-      // 2. 使用LLM规划执行
-      if (this.config.enableLLMPlanning && this.llmProvider) {
+      // 2. 使用LLM规划执行（决策经 Python LLM，F3）
+      if (this.config.enableLLMPlanning && this._bridgeLlmAvailable()) {
         Logger.info('🧠 使用LLM规划执行', 'ExecAgent');
         result = await this.executeWithLLMPlanning(
           taskDescription,
@@ -334,9 +328,9 @@ export class DesktopExecutionAgent extends EventEmitter {
             const observation = await this.visionEngine.observe();
             observations.push(observation);
             this.eventStream.emitObservation(
-              observation.screenshotBase64,
-              observation.screenWidth,
-              observation.screenHeight
+              observation.screenshotBase64 ?? '',
+              observation.screenWidth ?? 0,
+              observation.screenHeight ?? 0
             );
             break;
 
@@ -391,9 +385,9 @@ export class DesktopExecutionAgent extends EventEmitter {
     const initialObs = await this.visionEngine.observe();
     observations.push(initialObs);
     this.eventStream.emitObservation(
-      initialObs.screenshotBase64,
-      initialObs.screenWidth,
-      initialObs.screenHeight
+      initialObs.screenshotBase64 ?? '',
+      initialObs.screenWidth ?? 0,
+      initialObs.screenHeight ?? 0
     );
 
     // 获取可用工具列表
@@ -425,9 +419,9 @@ export class DesktopExecutionAgent extends EventEmitter {
 
       this.eventStream.emitStatusChange('planning');
 
-      const llmResponse = await this.llmProvider!.chat(
+      // F3: 决策经 Python LLM（Bridge），不再使用本地 LLMProvider。
+      const llmResponse = await this._bridgeChat(
         planPrompt,
-        [],
         this.getSystemPrompt()
       );
 
@@ -490,9 +484,9 @@ export class DesktopExecutionAgent extends EventEmitter {
         currentObservation = await this.visionEngine.observe();
         observations.push(currentObservation);
         this.eventStream.emitObservation(
-          currentObservation.screenshotBase64,
-          currentObservation.screenWidth,
-          currentObservation.screenHeight
+          currentObservation.screenshotBase64 ?? '',
+          currentObservation.screenWidth ?? 0,
+          currentObservation.screenHeight ?? 0
         );
       }
 
@@ -536,9 +530,9 @@ export class DesktopExecutionAgent extends EventEmitter {
     const observation = await this.visionEngine.observe();
     observations.push(observation);
     this.eventStream.emitObservation(
-      observation.screenshotBase64,
-      observation.screenWidth,
-      observation.screenHeight
+      observation.screenshotBase64 ?? '',
+      observation.screenWidth ?? 0,
+      observation.screenHeight ?? 0
     );
 
     const duration = Date.now() - startTime;
@@ -653,6 +647,29 @@ ${toolsDesc}
     }
 
     return null;
+  }
+
+  /**
+   * F3: 经 PythonAgentBridge 调用 Python 端 LLM 做文本规划。
+   * Bridge 不可用时抛出，由调用方 try/catch 降级为技能/基础模式（保持原有鲁棒性）。
+   */
+  private _bridgeLlmAvailable(): boolean {
+    try {
+      return getPythonBridge() != null;
+    } catch {
+      return false;
+    }
+  }
+
+  private async _bridgeChat(
+    planPrompt: string,
+    systemPrompt: string
+  ): Promise<string> {
+    const bridge = getPythonBridge();
+    if (!bridge) {
+      throw new Error('Python Bridge 不可用，无法执行 LLM 规划');
+    }
+    return await bridge.llmChat(planPrompt, [], systemPrompt);
   }
 
   private ensureInitialized(): void {

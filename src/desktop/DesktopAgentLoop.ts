@@ -17,7 +17,9 @@ import { SystemInput } from './SystemInput';
 import { DesktopUIInspector } from './DesktopUIInspector';
 import { StateSnapshotManager } from './StateSnapshotManager';
 import { Logger } from '../utils/Logger';
-import { LLMProvider } from '../models/LLMProvider';
+// F3: 桌面决策不再独立持有 TS LLMProvider（违反 AGENTS.md §0.1），
+// 改为路由到 Python 后端的 LLM（经 PythonAgentBridge）。
+import { getPythonBridge } from '../server/bootstrap';
 
 export interface DesktopAgentConfig {
   maxRetries?: number;
@@ -84,7 +86,6 @@ export class DesktopAgentLoop {
   private systemInput: SystemInput;
   private uiInspector: DesktopUIInspector;
   private snapshotManager: StateSnapshotManager;
-  private llmProvider: LLMProvider | null;
   private manifest: DesktopManifest;
   private config: Required<DesktopAgentConfig>;
   private initialized: boolean = false;
@@ -98,11 +99,6 @@ export class DesktopAgentLoop {
     this.systemInput = SystemInput.getInstance();
     this.uiInspector = DesktopUIInspector.getInstance();
     this.snapshotManager = StateSnapshotManager.getInstance();
-    try {
-      this.llmProvider = new LLMProvider();
-    } catch {
-      this.llmProvider = null;
-    }
     this.manifest = { ...DEFAULT_MANIFEST };
     this.config = {
       maxRetries: config?.maxRetries ?? 3,
@@ -134,20 +130,11 @@ export class DesktopAgentLoop {
     await this.uiInspector.initialize();
     await this.snapshotManager.initialize();
 
-    if (this.llmProvider) {
-      try {
-        await this.llmProvider.initialize();
-        Logger.info(
-          '🤖 DesktopAgentLoop LLM 决策引擎已就绪',
-          'DesktopAgentLoop'
-        );
-      } catch (err) {
-        Logger.warn(
-          `⚠️ LLM 初始化失败，降级为正则模式: ${(err as Error).message}`,
-          'DesktopAgentLoop'
-        );
-        this.llmProvider = null;
-      }
+    if (this.config.enableLLMPlanning && this._bridgeLlmAvailable()) {
+      Logger.info(
+        '🤖 DesktopAgentLoop 决策将路由到 Python LLM（经 Bridge）',
+        'DesktopAgentLoop'
+      );
     }
 
     this.initialized = true;
@@ -199,7 +186,7 @@ export class DesktopAgentLoop {
         Logger.info('🧠 阶段2: 决策规划', 'DesktopAgentLoop');
         let actions: DesktopAction[];
 
-        if (this.config.enableLLMPlanning && this.llmProvider?.isAvailable()) {
+        if (this.config.enableLLMPlanning && this._bridgeLlmAvailable()) {
           actions = await this.llmPlanActions(userInput, observation);
         } else {
           actions = this.planActions(userInput, observation);
@@ -399,7 +386,9 @@ export class DesktopAgentLoop {
     userInput: string,
     observation: DesktopObservation
   ): Promise<DesktopAction[]> {
-    if (!this.llmProvider) return this.planActions(userInput, observation);
+    if (!this._bridgeLlmAvailable()) {
+      return this.planActions(userInput, observation);
+    }
 
     try {
       const screenshotBase64 = observation.screenshot.success
@@ -445,14 +434,12 @@ ${observation.visionAnalysis.description ? `\n视觉分析: ${observation.vision
 
       const images = screenshotBase64
         ? [`data:image/png;base64,${screenshotBase64}`]
-        : undefined;
+        : [];
 
-      const llmResponse = await this.llmProvider.multimodalChat(
-        userPrompt,
-        images
-      );
+      // F3: 决策经 Python LLM（Bridge），不再使用本地 LLMProvider。
+      const llmResponse = await this._bridgePlan(userPrompt, images);
 
-      const actions = this.parseLLMActions(llmResponse);
+      const actions = llmResponse ? this.parseLLMActions(llmResponse) : [];
       if (actions.length > 0) {
         Logger.info(
           `🧠 LLM 规划了 ${actions.length} 个动作`,
@@ -469,6 +456,36 @@ ${observation.visionAnalysis.description ? `\n视觉分析: ${observation.vision
         'DesktopAgentLoop'
       );
       return this.planActions(userInput, observation);
+    }
+  }
+
+  /**
+   * F3: 经 PythonAgentBridge 调用 Python 端多模态 LLM 做桌面动作规划。
+   * Bridge 不可用时返回 null，由调用方降级为正则模式。
+   */
+  private _bridgeLlmAvailable(): boolean {
+    try {
+      return getPythonBridge() != null;
+    } catch {
+      return false;
+    }
+  }
+
+  private async _bridgePlan(
+    userPrompt: string,
+    images: string[]
+  ): Promise<string | null> {
+    try {
+      const bridge = getPythonBridge();
+      if (!bridge) return null;
+      const result = await bridge.llmMultimodalChat(userPrompt, images);
+      return result && result.trim() ? result : null;
+    } catch (error) {
+      Logger.warn(
+        `⚠️ Bridge 规划调用失败，降级正则模式: ${(error as Error).message}`,
+        'DesktopAgentLoop'
+      );
+      return null;
     }
   }
 

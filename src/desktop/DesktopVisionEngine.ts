@@ -8,7 +8,9 @@
 import { Logger } from '../utils/Logger';
 import { ScreenCapture, ScreenshotResult } from './ScreenCapture';
 import { WindowInfo, WindowManager } from './WindowManager';
-import { LLMProvider } from '../models/LLMProvider';
+// F3: 桌面视觉理解不再独立持有 TS LLMProvider（违反 AGENTS.md §0.1），
+// 改为路由到 Python 后端的 LLM（经 PythonAgentBridge）。
+import { getPythonBridge } from '../server/bootstrap';
 
 export interface VisionAnalysisResult {
   success: boolean;
@@ -47,7 +49,6 @@ export class DesktopVisionEngine {
   private static instance: DesktopVisionEngine | null = null;
   private screenCapture: ScreenCapture;
   private windowManager: WindowManager;
-  private llmProvider: LLMProvider | null;
   private config: Required<DesktopVisionConfig>;
   private initialized: boolean = false;
   private observationHistory: DesktopObservation[] = [];
@@ -56,11 +57,6 @@ export class DesktopVisionEngine {
   private constructor(config?: DesktopVisionConfig) {
     this.screenCapture = ScreenCapture.getInstance();
     this.windowManager = WindowManager.getInstance();
-    try {
-      this.llmProvider = new LLMProvider();
-    } catch {
-      this.llmProvider = null;
-    }
     this.config = {
       captureIntervalMs: config?.captureIntervalMs || 5000,
       visionPrompt:
@@ -93,20 +89,11 @@ export class DesktopVisionEngine {
     await this.screenCapture.initialize();
     await this.windowManager.initialize();
 
-    if (this.llmProvider && this.config.enableLLMVision) {
-      try {
-        await this.llmProvider.initialize();
-        Logger.info(
-          '👁️ DesktopVisionEngine LLM 视觉理解已就绪',
-          'DesktopVisionEngine'
-        );
-      } catch (err) {
-        Logger.warn(
-          `⚠️ LLM 视觉初始化失败，降级为本地描述: ${(err as Error).message}`,
-          'DesktopVisionEngine'
-        );
-        this.llmProvider = null;
-      }
+    if (this.config.enableLLMVision && this._bridgeLlmAvailable()) {
+      Logger.info(
+        '👁️ DesktopVisionEngine 视觉理解将路由到 Python LLM（经 Bridge）',
+        'DesktopVisionEngine'
+      );
     }
 
     this.initialized = true;
@@ -128,7 +115,7 @@ export class DesktopVisionEngine {
 
     let visionAnalysis: VisionAnalysisResult;
 
-    if (this.config.enableLLMVision && this.llmProvider?.isAvailable()) {
+    if (this.config.enableLLMVision && this._bridgeLlmAvailable()) {
       visionAnalysis = await this.analyzeWithLLM(screenshot, windows);
     } else {
       visionAnalysis = {
@@ -184,15 +171,24 @@ export class DesktopVisionEngine {
 
       const prompt = `${this.config.visionPrompt}\n\n已知窗口列表: ${windowContext || '无可见窗口'}`;
 
-      const llmDescription = await this.llmProvider!.multimodalChat(prompt, [
-        imageDataUrl,
-      ]);
+      // F3: 视觉理解经 Python LLM（Bridge），不再使用本地 LLMProvider。
+      const llmDescription = await this._bridgeVision(prompt, imageDataUrl);
 
+      if (llmDescription) {
+        return {
+          success: true,
+          description: llmDescription,
+          processingTime: Date.now() - startTime,
+          llmAnalyzed: true,
+        };
+      }
+
+      // Bridge 不可用或返回空 → 降级本地描述（保持原有鲁棒性）
       return {
         success: true,
-        description: llmDescription || this.generateLocalDescription(windows),
+        description: this.generateLocalDescription(windows),
         processingTime: Date.now() - startTime,
-        llmAnalyzed: true,
+        llmAnalyzed: false,
       };
     } catch (error) {
       Logger.warn(
@@ -205,6 +201,36 @@ export class DesktopVisionEngine {
         processingTime: Date.now() - startTime,
         llmAnalyzed: false,
       };
+    }
+  }
+
+  /**
+   * F3: 经 PythonAgentBridge 调用 Python 端多模态 LLM 做视觉理解。
+   * Bridge 不可用时返回 null，由调用方降级为本地描述。
+   */
+  private _bridgeLlmAvailable(): boolean {
+    try {
+      return getPythonBridge() != null;
+    } catch {
+      return false;
+    }
+  }
+
+  private async _bridgeVision(
+    prompt: string,
+    imageDataUrl: string
+  ): Promise<string | null> {
+    try {
+      const bridge = getPythonBridge();
+      if (!bridge) return null;
+      const result = await bridge.llmMultimodalChat(prompt, [imageDataUrl]);
+      return result && result.trim() ? result : null;
+    } catch (error) {
+      Logger.warn(
+        `⚠️ Bridge 视觉理解调用失败，降级本地描述: ${(error as Error).message}`,
+        'DesktopVisionEngine'
+      );
+      return null;
     }
   }
 
