@@ -30,6 +30,7 @@ from agent.tools.registry import (
     ToolResult,
     ToolRegistry,
 )
+from agent.core.logger import log_ignored
 
 
 # ==================== 枚举与数据类 ====================
@@ -104,6 +105,8 @@ class VoiceModeManager:
         self._listening_text: str = ""
         self._session_start: float | None = None
         self._turn_count: int = 0
+        # D2: 最近一次合成出的音频文件路径（供调用方/前端播放）；无引擎时为 None。
+        self._last_audio_path: str | None = None
 
     async def start_listening(self) -> str | None:
         """开始录音（状态管理+接口定义）。
@@ -140,35 +143,104 @@ class VoiceModeManager:
         self._state = VoiceModeState.PROCESSING
         return self._listening_text
 
-    async def speak(self, text: str) -> None:
-        """语音合成（使用 edge-tts 或系统 TTS）。
+    async def speak(self, text: str) -> str | None:
+        """语音合成（edge-tts → 本地 MP3，回退系统 TTS）。
 
-        优先尝试 edge-tts（免费），回退到系统 TTS（macOS say /
-        Windows pyttsx3），最终降级为无操作。
+        优先尝试 edge-tts（免费，产出可播放的 MP3 文件并返回其路径），
+        回退到系统 TTS（macOS say / Windows pyttsx3，直接播放，不产出文件）。
+        若所有引擎均不可用，则退回 LISTENING 并返回 None（降级，不抛错），
+        由调用方决定是否提示前端接管播放。
 
         Args:
             text: 需要合成语音的文本内容。
+
+        Returns:
+            str | None: edge-tts 合成成功时返回音频文件路径；否则返回 None。
         """
         if not text:
-            return
+            return None
 
         self._state = VoiceModeState.SPEAKING
         self._turn_count += 1
 
         try:
-            await self._speak_edge_tts(text)
-            return
-        except Exception:
-            pass
+            path = await self._speak_edge_tts(text)
+            self._last_audio_path = path
+            return path
+        except Exception as _exc:
+            log_ignored(None, "voice_mode_tool.VoiceModeManager.speak.edge", _exc)
 
         try:
             self._speak_system_tts(text)
-            return
-        except Exception:
-            pass
+            # 系统 TTS 直接播放，不产出文件
+            self._last_audio_path = None
+            return None
+        except Exception as _exc:
+            log_ignored(None, "voice_mode_tool.VoiceModeManager.speak.system", _exc)
 
         # 降级：无 TTS 引擎可用，仅更新状态
         self._state = VoiceModeState.LISTENING
+        self._last_audio_path = None
+        return None
+
+    def last_audio_path(self) -> str | None:
+        """返回最近一次合成的音频文件路径（供前端播放）。"""
+        return self._last_audio_path
+
+    async def transcribe(self, audio_data: bytes) -> str | None:
+        """后端 STT（可选，尽最大努力）。
+
+        若安装了 faster-whisper / whisper，则在 Python 端直接转录音频；
+        否则返回 None，表示转录由前端完成。**原始麦克风采集本身也由前端负责**
+        （Python 后端不持有音频设备访问），这是明确的架构边界，而非缺失实现。
+
+        whisper / faster-whisper 的 ``transcribe()`` 接受文件路径或二进制流，
+        **不接受裸 bytes**，因此这里先把音频落盘为临时文件再传路径，转录完成
+        后清理，避免把 bytes 直接传入导致运行时报错。
+
+        Args:
+            audio_data: 前端传来的音频二进制（WAV/MP3 等）。
+
+        Returns:
+            str | None: 识别文本；无可用 STT 引擎或转录失败时返回 None。
+        """
+        if not audio_data:
+            return None
+
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tf:
+            tf.write(audio_data)
+            audio_path = tf.name
+        try:
+            try:
+                import faster_whisper  # type: ignore
+
+                model = faster_whisper.WhisperModel("base")
+                segments, _ = model.transcribe(audio_path)  # type: ignore[arg-type]
+                return "".join(getattr(s, "text", "") for s in segments).strip()
+            except ImportError:
+                pass
+            except Exception as _exc:
+                log_ignored(None, "voice_mode_tool.VoiceModeManager.transcribe.faster", _exc)
+
+            try:
+                import whisper  # type: ignore
+
+                model = whisper.load_model("base")  # type: ignore[attr-defined]
+                result = model.transcribe(audio_path)  # type: ignore[arg-type]
+                return (result.get("text") if isinstance(result, dict) else "") or None
+            except ImportError:
+                pass
+            except Exception as _exc:
+                log_ignored(None, "voice_mode_tool.VoiceModeManager.transcribe.whisper", _exc)
+        finally:
+            try:
+                os.unlink(audio_path)
+            except OSError:
+                pass
+
+        return None
 
     async def process_voice_input(
         self,
@@ -249,8 +321,8 @@ class VoiceModeManager:
         try:
             import edge_tts  # noqa: F401
             return True
-        except ImportError:
-            pass
+        except ImportError as _exc:
+            log_ignored(None, "voice_mode_tool.VoiceModeManager.is_available", _exc)
 
         system = platform.system().lower()
         if system == "darwin":
@@ -261,15 +333,15 @@ class VoiceModeManager:
                     timeout=2,
                 )
                 return True
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(None, "voice_mode_tool.VoiceModeManager.is_available", _exc)
 
         if system == "windows":
             try:
                 import pyttsx3  # noqa: F401
                 return True
-            except ImportError:
-                pass
+            except ImportError as _exc:
+                log_ignored(None, "voice_mode_tool.VoiceModeManager.is_available", _exc)
 
         return False
 
@@ -295,11 +367,14 @@ class VoiceModeManager:
 
     # ==================== 私有方法 ====================
 
-    async def _speak_edge_tts(self, text: str) -> None:
-        """使用 edge-tts 进行语音合成。
+    async def _speak_edge_tts(self, text: str) -> str:
+        """使用 edge-tts 进行语音合成，返回音频文件路径。
 
         Args:
             text: 待合成文本。
+
+        Returns:
+            str: 合成出的 MP3 文件路径。
 
         Raises:
             ImportError: edge-tts 未安装。
@@ -326,6 +401,7 @@ class VoiceModeManager:
 
         # 合成完成后回到 LISTENING 状态
         self._state = VoiceModeState.LISTENING
+        return str(audio_file)
 
     def _speak_system_tts(self, text: str) -> None:
         """使用系统 TTS 进行语音合成。
@@ -491,17 +567,29 @@ async def voice_mode_executor(params: dict[str, Any]) -> ToolResult:
 
         state_before = manager.get_state().value
         try:
-            await manager.speak(text)
+            audio_path = await manager.speak(text)
             state_after = manager.get_state().value
+            # D2: 若后端 TTS（edge-tts）合成成功，audio_path 为可播放的 MP3 路径；
+            # 系统 TTS / 无引擎时为 None（由前端接管播放）。如实回传，不静默丢弃。
+            metadata: dict[str, Any] = {
+                "state": state_after,
+                "engine": manager.get_config().tts_engine,
+                "text_length": len(text),
+                "audio_path": audio_path,
+                "backend_tts": audio_path is not None,
+            }
+            output_parts = [
+                f"语音合成完成（状态: {state_before} → {state_after}）: \"{text[:50]}\"",
+            ]
+            if audio_path:
+                output_parts.append(f"后端已合成音频文件: {audio_path}")
+            else:
+                output_parts.append("未产出后端音频文件（系统 TTS 直播或前端接管）")
             return ToolResult(
                 success=True,
-                output=f"语音合成完成（状态: {state_before} → {state_after}）: \"{text[:50]}\"",
+                output="\n".join(output_parts),
                 duration=time.time() - start,
-                metadata={
-                    "state": state_after,
-                    "engine": manager.get_config().tts_engine,
-                    "text_length": len(text),
-                },
+                metadata=metadata,
             )
         except Exception as e:
             return ToolResult(
