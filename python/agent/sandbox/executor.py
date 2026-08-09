@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
+import subprocess
 import sys
 import tempfile
 import time
@@ -9,6 +11,13 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any
+from agent.core.logger import StructuredLogger, log_ignored
+from agent.sandbox.windows_hard import (
+    WindowsHardSandbox,
+    hard_windows_enabled,
+)
+
+log = StructuredLogger("sandbox.executor")
 
 
 class SecurityLevel(str, Enum):
@@ -273,44 +282,114 @@ class SandboxExecutor:
         except (ImportError, AttributeError):
             return None
 
+    async def _kill_process_tree(self, proc: asyncio.subprocess.Process) -> None:
+        """E2: 跨平台进程树终止，避免超时/kill 遗留孤儿子进程。
+
+        - Windows: ``taskkill /T /F /PID`` 递归强制终止整棵进程树
+          （asyncio 的 ``proc.kill()`` 在 Windows 仅杀直接子进程，子进程会孤儿化）。
+        - POSIX: 子进程经 ``preexec_fn=setsid`` 成为进程组首，``os.killpg`` 杀整组。
+        任何异常均吞掉（进程可能已退出），最后再对直接子进程兜底 kill。
+        """
+        pid = proc.pid
+        try:
+            if sys.platform == "win32":
+                subprocess.run(
+                    ["taskkill", "/T", "/F", "/PID", str(pid)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=5.0,
+                )
+            else:
+                import signal as _signal
+                try:
+                    pgid = os.getpgid(pid)
+                    os.killpg(pgid, _signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    os.kill(pid, _signal.SIGKILL)
+        except Exception as _exc:
+            log_ignored(log, "executor.SandboxExecutor._kill_process_tree", _exc)
+        # 兜底：直接杀死直接子进程（已退出时会抛 ProcessLookupError，忽略）。
+        try:
+            proc.kill()
+        except (ProcessLookupError, OSError):
+            pass
+
+    def _harden_windows(self, proc: asyncio.subprocess.Process) -> None:
+        """E2: 可选 Windows 硬隔离（Job Object）。
+
+        仅当 ``SANDBOX_HARD_WINDOWS`` 启用且 pywin32 可用时，将子进程纳入 Job Object；
+        任何失败（含子进程已处于不可脱离的父作业）均安全降级为软沙箱，不抛错。
+        """
+        if not hard_windows_enabled() or sys.platform != "win32":
+            return
+        try:
+            if not WindowsHardSandbox.is_available():
+                log.warning(
+                    "SANDBOX_HARD_WINDOWS 已启用但 pywin32 不可用，退回软沙箱"
+                )
+                return
+            handle = getattr(getattr(proc, "_proc", None), "_handle", None)
+            if handle is None:
+                return
+            sandbox = WindowsHardSandbox()
+            sandbox.assign(int(handle))
+            log.info("子进程已纳入 Windows Job Object 硬隔离", pid=proc.pid)
+        except Exception as _exc:
+            log_ignored(log, "executor.SandboxExecutor._harden_windows", _exc)
+
     async def _monitor_resources(self, proc: asyncio.subprocess.Process, timeout_sec: float) -> tuple[bytes, bytes] | None:
         """T-10: 带资源监控的进程等待。
 
         周期性检查子进程内存占用，超限时终止。
         返回 None 表示因资源超限被终止。
+
+        关键正确性约束：``proc.communicate()`` **只调用一次**。原实现在循环内反复
+        调用 ``communicate()``，超时分支会并发二次读取同一管道，在 Windows proactor
+        事件循环下偶发相邻用例 stdout/stderr 变空。此处改为「单次 communicate + 并发
+        内存监控任务」，既保留内存超限返回 None 的契约，又消除管道竞态。
         """
         max_memory_bytes = self.config.max_memory_mb * 1024 * 1024
-        check_interval = 0.5
-        elapsed = 0.0
+        memory_exceeded = False
 
-        try:
-            import psutil
-            has_psutil = True
-        except ImportError:
-            has_psutil = False
-
-        while elapsed < timeout_sec:
+        async def _watch() -> None:
+            nonlocal memory_exceeded
             try:
-                stdout, stderr = await asyncio.wait_for(
-                    proc.communicate(), timeout=min(check_interval, timeout_sec - elapsed),
-                )
-                return stdout, stderr
-            except asyncio.TimeoutError:
-                if has_psutil and proc.pid:
-                    try:
-                        p = psutil.Process(proc.pid)
-                        mem_info = p.memory_info()
-                        if mem_info.rss > max_memory_bytes:
-                            proc.kill()
-                            await proc.wait()
-                            return None
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        pass
-                elapsed += check_interval
+                import psutil
+            except ImportError:
+                return
+            while proc.returncode is None:
+                await asyncio.sleep(0.5)
+                try:
+                    p = psutil.Process(proc.pid)
+                    if p.memory_info().rss > max_memory_bytes:
+                        memory_exceeded = True
+                        await self._kill_process_tree(proc)
+                        return
+                except (psutil.NoSuchProcess, psutil.AccessDenied) as _exc:
+                    log_ignored(None, "executor.SandboxExecutor._monitor_resources.watch", _exc)
+                    return
 
-        proc.kill()
-        await proc.wait()
-        raise asyncio.TimeoutError()
+        watcher = asyncio.create_task(_watch())
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=timeout_sec
+            )
+        except asyncio.TimeoutError:
+            await self._kill_process_tree(proc)
+            await proc.wait()
+            watcher.cancel()
+            raise
+        finally:
+            if not watcher.done():
+                watcher.cancel()
+            try:
+                await watcher
+            except asyncio.CancelledError:
+                pass
+
+        if memory_exceeded:
+            return None
+        return stdout, stderr
 
     async def _execute_python(
         self, code: str, timeout_sec: float, start: float
@@ -330,6 +409,7 @@ class SandboxExecutor:
                 stderr=asyncio.subprocess.PIPE,
                 preexec_fn=preexec_fn,
             )
+            self._harden_windows(proc)
 
             try:
                 if preexec_fn is None and self.config.max_memory_mb > 0:
@@ -349,10 +429,7 @@ class SandboxExecutor:
             except asyncio.TimeoutError:
                 # 进程可能已由 _monitor_resources 的超时路径先行终止（max_memory_mb>0 时），
                 # 此时再次 kill 会抛 ProcessLookupError / OSError，忽略即可。
-                try:
-                    proc.kill()
-                except (ProcessLookupError, OSError):
-                    pass
+                await self._kill_process_tree(proc)
                 return SandboxExecutionResult(
                     success=False,
                     error=f"执行超时 ({timeout_sec}秒)",
@@ -390,8 +467,20 @@ class SandboxExecutor:
         finally:
             try:
                 Path(tmp).unlink()
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(None, "executor.SandboxExecutor._execute_python", _exc)
+            # Windows proactor：显式关闭子进程管道传输层，避免残留状态污染下一个
+            # 子进程（表现为相邻用例 stdout/stderr 变空或挂起）。关闭已关闭的管道为无操作。
+            _proc = locals().get("proc")
+            if _proc is not None:
+                for _pipe in (_proc.stdout, _proc.stderr):
+                    if _pipe is not None:
+                        try:
+                            _pipe.close()
+                        except Exception as _exc:
+                            # 关闭已关闭的管道会抛 ValueError/OSError，属无害残留；
+                            # 但仍须记账而非裸 pass，避免掩盖真实管道关闭故障。
+                            log_ignored(None, "executor.SandboxExecutor._execute_python.pipe_close", _exc)
 
     async def _execute_javascript(
         self, code: str, timeout_sec: float, start: float
@@ -411,6 +500,7 @@ class SandboxExecutor:
                 stderr=asyncio.subprocess.PIPE,
                 preexec_fn=preexec_fn,
             )
+            self._harden_windows(proc)
 
             try:
                 if preexec_fn is None and self.config.max_memory_mb > 0:
@@ -430,10 +520,7 @@ class SandboxExecutor:
             except asyncio.TimeoutError:
                 # 进程可能已由 _monitor_resources 的超时路径先行终止（max_memory_mb>0 时），
                 # 此时再次 kill 会抛 ProcessLookupError / OSError，忽略即可。
-                try:
-                    proc.kill()
-                except (ProcessLookupError, OSError):
-                    pass
+                await self._kill_process_tree(proc)
                 return SandboxExecutionResult(
                     success=False,
                     error=f"执行超时 ({timeout_sec}秒)",
@@ -472,8 +559,8 @@ class SandboxExecutor:
         finally:
             try:
                 Path(tmp).unlink()
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(None, "executor.SandboxExecutor._execute_javascript", _exc)
 
     async def _execute_shell(
         self, code: str, timeout_sec: float, start: float
@@ -486,6 +573,7 @@ class SandboxExecutor:
                 stderr=asyncio.subprocess.PIPE,
                 preexec_fn=preexec_fn,
             )
+            self._harden_windows(proc)
 
             try:
                 if preexec_fn is None and self.config.max_memory_mb > 0:
@@ -505,10 +593,7 @@ class SandboxExecutor:
             except asyncio.TimeoutError:
                 # 进程可能已由 _monitor_resources 的超时路径先行终止（max_memory_mb>0 时），
                 # 此时再次 kill 会抛 ProcessLookupError / OSError，忽略即可。
-                try:
-                    proc.kill()
-                except (ProcessLookupError, OSError):
-                    pass
+                await self._kill_process_tree(proc)
                 return SandboxExecutionResult(
                     success=False,
                     error=f"执行超时 ({timeout_sec}秒)",
