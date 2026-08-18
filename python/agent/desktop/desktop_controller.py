@@ -24,6 +24,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
+from agent.config import DATA_ROOT
+from agent.core.logger import log_ignored
+
 
 # ─────────────────────────────────────────────────────────────
 # 数据结构定义
@@ -100,7 +103,7 @@ class DesktopController:
     """
 
     def __init__(self, data_dir: str | None = None):
-        self._data_dir = Path(data_dir or os.environ.get("DATA_DIR", "data"))
+        self._data_dir = Path(data_dir) if data_dir else Path(os.environ.get("DATA_DIR", str(DATA_ROOT)))
         self._screenshot_dir = self._data_dir / "screenshots"
         self._screenshot_dir.mkdir(parents=True, exist_ok=True)
 
@@ -560,8 +563,8 @@ class DesktopController:
                                 is_visible=True,
                                 is_minimized=is_minimized,
                             ))
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            log_ignored(None, "desktop_controller.DesktopController.list_windows.enum_callback", _exc)
 
             win32gui.EnumWindows(enum_callback, None)
         elif self._is_windows:
@@ -594,8 +597,8 @@ class DesktopController:
                     return True
 
                 user32.EnumWindows(WNDENUMPROC(enum_callback), 0)
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(None, "desktop_controller.DesktopController.list_windows", _exc)
 
         return windows
 
@@ -888,13 +891,49 @@ class DesktopController:
     # Shell 命令执行
     # ─────────────────────────────────────────────────────────
 
+    # 危险命令黑名单 — 禁止通过 shell_exec 执行
+    _DANGEROUS_COMMANDS = {
+        "rm -rf /", "del /f /s /q c:\\", "format ", "mkfs.",
+        "dd if=", ":(){ :|:& };:", "shutdown", "reboot",
+    }
+
     def shell_exec(self, command: str, timeout: int = 30) -> ActionResult:
-        """执行Shell命令"""
+        """执行Shell命令（安全加固：shlex 解析 + 危险命令黑名单 + shell=False）。
+
+        安全约束：
+        - 始终以 shell=False 执行（argv 列表），杜绝 Shell 元字符注入；
+        - shlex 解析失败时**拒绝执行**（fail-closed），绝不全文回退到 shell=True；
+        - 危险命令黑名单仅作纵深防御，不能替代 shell=False 这一根本防线。
+        """
         start = time.time()
         try:
+            # 危险命令检测（纵深防御）
+            cmd_lower = command.lower().strip()
+            for dangerous in self._DANGEROUS_COMMANDS:
+                if dangerous in cmd_lower:
+                    return ActionResult(
+                        success=False,
+                        action="shell_exec",
+                        error=f"命令被安全策略拒绝: 包含危险模式 '{dangerous}'",
+                        duration=time.time() - start,
+                    )
+
+            # 安全解析：shlex.split + shell=False（Windows 下用 posix=False 保留路径）
+            import shlex
+            try:
+                args = shlex.split(command, posix=not self._is_windows)
+            except ValueError as e:
+                # 解析失败：拒绝执行，绝不回退到 shell=True（避免命令注入）
+                return ActionResult(
+                    success=False,
+                    action="shell_exec",
+                    error=f"命令解析失败，已拒绝执行: {e}",
+                    duration=time.time() - start,
+                )
+
             result = subprocess.run(
-                command,
-                shell=True,
+                args,
+                shell=False,
                 capture_output=True,
                 text=True,
                 timeout=timeout,
@@ -925,11 +964,11 @@ class DesktopController:
             )
 
     def open_app(self, app_name: str) -> ActionResult:
-        """打开应用程序"""
+        """打开应用程序（安全加固：使用 os.startfile 替代 shell=True）。"""
         start = time.time()
         try:
             if self._is_windows:
-                subprocess.Popen(["start", "", app_name], shell=True)
+                os.startfile(app_name)
                 return ActionResult(
                     success=True,
                     action="open_app",
