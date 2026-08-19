@@ -282,10 +282,15 @@ ${taskSummaries}
       try {
         const response = await llm.chat(prompt);
         const parsed = JSON.parse(response);
+        const rawWinner = parsed?.winnerTaskId;
+        const winnerTaskId =
+          typeof rawWinner === 'string' && conflict.involvedTasks.includes(rawWinner)
+            ? rawWinner
+            : conflict.involvedTasks[0];
         resolutions.push({
           conflict,
-          winnerTaskId: parsed.winnerTaskId,
-          resolution: `${parsed.winnerTaskId}: ${parsed.reasoning || ''}`,
+          winnerTaskId,
+          resolution: `${winnerTaskId}: ${parsed?.reasoning || ''}`,
         });
       } catch (err) {
         Logger.warn(

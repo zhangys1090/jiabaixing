@@ -8,6 +8,7 @@
 import * as WebSocket from 'ws';
 import { JiabaixingCore, ProcessInputResult } from '../../core/JiabaixingCore';
 import { EvolutionOrchestrator } from '../../evolution/EvolutionOrchestrator';
+import { getActivePythonBridge } from '../../ide/bridgeRegistry';
 import { Logger } from '../../utils/Logger';
 import { WsCircuitBreaker } from './WsRateLimit';
 import * as WsRetry from './WsRetry';
@@ -134,47 +135,76 @@ export async function processInputOnce(
     }
 
     if (ws.readyState === WebSocket.OPEN) {
-      Logger.info(
-        `✅ 处理完成, traceId: ${result.traceId}（响应由 streamResponse + eventBusSetup 统一广播）`,
-        'WsProcessor'
-      );
+      const isPythonMode =
+        (process.env.AGENT_BACKEND ?? 'python') === 'python' &&
+        core?.getPythonBridgeResolver?.()?.() != null;
 
-      // 流式推送由 JiabaixingCore.streamResponse 通过 EventBus 广播
-      // 但流式推送是异步的（setTimeout 分块），存在事件丢失风险
-      // 发送 response_ready 作为安全兜底：前端已实现去重逻辑
-      // 如果 stream_start 已到达（hasRespondedOnceRef=true），前端会跳过 response_ready
-      // 如果流式事件丢失，response_ready 确保用户能看到响应
-      setTimeout(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(
-            JSON.stringify({
-              type: 'response_ready',
-              data: {
-                response: result.response,
-                traceId: result.traceId || traceId,
-                success: true,
-              },
-            })
-          );
-        }
-      }, 500);
+      if (isPythonMode) {
+        Logger.info(
+          `✅ 处理完成, traceId: ${result.traceId}（Python 后端模式：响应由 EventBus WS 通道推送，跳过 response_ready）`,
+          'WsProcessor'
+        );
+      } else {
+        Logger.info(
+          `✅ 处理完成, traceId: ${result.traceId}（TS 本地模式：发送 response_ready 兜底）`,
+          'WsProcessor'
+        );
 
-      // 记录交互数据到进化编排器，积累真实用户数据
+        setTimeout(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(
+              JSON.stringify({
+                type: 'response_ready',
+                data: {
+                  response: result.response,
+                  traceId: result.traceId || traceId,
+                  success: true,
+                  quality: result.quality ?? 0.7,
+                  loopRounds: result.loopRounds,
+                  toolCallsCount: result.toolCallsCount,
+                },
+              })
+            );
+          }
+        }, 500);
+      }
+
+      // 记录交互数据到进化引擎（python 模式经 PythonAgentBridge 委派；local 模式用 TS 编排器）
       try {
-        const orchestrator = EvolutionOrchestrator.getInstance();
-        orchestrator.recordInteraction({
-          traceId: result.traceId || traceId,
-          input,
-          response: result.response,
-          success: true,
-          qualityScore:
-            ((result as unknown as Record<string, unknown>)
-              .quality as number) || 0.7,
-          executionDuration: 0,
-          toolCalls: [],
-          scene: 'websocket',
-          userId,
-        });
+        const bridge = getActivePythonBridge();
+        if (bridge) {
+          void bridge
+            .submitFeedback({
+              kind: 'interaction',
+              traceId: result.traceId || traceId,
+              input,
+              response: result.response,
+              success: true,
+              qualityScore:
+                ((result as unknown as Record<string, unknown>).quality as number) || 0.7,
+              executionDuration: 0,
+              toolCalls: [],
+              scene: 'websocket',
+              userId,
+            })
+            .catch((err) =>
+              Logger.warn('记录交互到进化引擎失败', err as Error, 'WsProcessor')
+            );
+        } else {
+          const orchestrator = EvolutionOrchestrator.getInstance();
+          orchestrator.recordInteraction({
+            traceId: result.traceId || traceId,
+            input,
+            response: result.response,
+            success: true,
+            qualityScore:
+              ((result as unknown as Record<string, unknown>).quality as number) || 0.7,
+            executionDuration: 0,
+            toolCalls: [],
+            scene: 'websocket',
+            userId,
+          });
+        }
       } catch {
         Logger.debug('进化数据记录失败(WS)', 'WsProcessor');
       }

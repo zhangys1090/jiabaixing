@@ -1,11 +1,19 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 import uuid
 from typing import Any, Callable
 
 from agent.core.error_classifier import ClassifiedError, ErrorClassifier
+from agent.core.tool_executor import (
+    FailurePolicy,
+    ParallelExecConfig,
+    ParallelToolExecutor,
+    ToolCallItem,
+    ToolCallResult,
+)
 from agent.core.logger import StructuredLogger
 from agent.core.think_scrubber import ThinkScrubber
 from agent.core.turn_finalizer import TurnFinalizer
@@ -27,6 +35,9 @@ from agent.tools.permission_guard import (
     ToolContext,
 )
 from agent.tools.registry import ToolRegistry
+
+# D2 (P2 第4轮回灌): 会话级认知信号(情绪/反思)注入 ReAct 循环 LLM 上下文
+from agent.core.cognition_buffer import inject_cognition_into_messages
 
 log = StructuredLogger("conversation_loop")
 
@@ -63,6 +74,7 @@ class ConversationLoop:
         turn_finalizer: TurnFinalizer | None = None,
         prompt_caching: Any = None,
         tool_selector: "Callable[[str], list[dict[str, Any]]] | None" = None,
+        verification_loop: Any = None,
     ) -> None:
         """初始化对话循环。
 
@@ -78,6 +90,7 @@ class ConversationLoop:
             hook_manager: 钩子管理器，None 时跳过钩子触发。
             turn_finalizer: 回合终态处理器，None 时使用默认实例。
             prompt_caching: Prompt 前缀缓存管理器，None 时禁用缓存断点标记。
+            verification_loop: 验证闭环，None 时跳过工具结果验证与自动纠错回灌。
         """
         self._llm = llm
         self._tool_registry = tool_registry
@@ -96,6 +109,184 @@ class ConversationLoop:
         # 对输入做场景检测 → 工具集过滤，再生成 OpenAI 工具 schema）。
         # 为 None 时退化为全量工具（旧版行为，零回归）。
         self._tool_selector = tool_selector
+
+        # D8（审计 §1.7）：此前 VerificationLoop.verify_tool_result 与
+        # build_correction_prompt 均为零调用点死方法 —— RETRY 动作根本不会产生，
+        # 「验证闭环」实为开环。此处接入工具结果验证，失败时把纠错提示回灌到
+        # tool 消息，由 ReAct 下一轮自然重试，形成真正闭环。
+        self._verification_loop = verification_loop
+        self._correction_rounds_used = 0
+
+        # P1-6: 接线此前孤立的 ParallelToolExecutor。
+        # 本轮回合无依赖工具数 > 1 时并发执行，最大幅度降低多工具调用延迟。
+        # 失败策略 CONTINUE：单工具失败不中断同轮其他工具，等价于历史串行语义。
+        # 可用环境变量 PARALLEL_TOOL_EXECUTION=false 关闭（回退串行），
+        # MAX_PARALLEL_TOOLS 调整并发度（默认 8）。
+        self._parallel_executor = self._build_parallel_executor()
+
+    @staticmethod
+    def _build_parallel_executor() -> "ParallelToolExecutor | None":
+        """按环境变量构建并行执行器；关闭或配置异常时返回 None（回退串行）。"""
+        enabled = os.environ.get("PARALLEL_TOOL_EXECUTION", "true").lower() != "false"
+        if not enabled:
+            return None
+        try:
+            max_parallel = int(os.environ.get("MAX_PARALLEL_TOOLS", "8"))
+        except ValueError:
+            max_parallel = 8
+        if max_parallel < 1:
+            max_parallel = 1
+        return ParallelToolExecutor(
+            ParallelExecConfig(
+                max_parallel=max_parallel,
+                default_timeout=30.0,
+                failure_policy=FailurePolicy.CONTINUE,
+                enabled=True,
+            )
+        )
+
+    @staticmethod
+    def _safe_parse_args(raw: "str | dict[str, Any]") -> dict[str, Any]:
+        try:
+            parsed = json.loads(raw) if isinstance(raw, str) else raw
+            return parsed if isinstance(parsed, dict) else {}
+        except (ValueError, TypeError):
+            return {}
+
+    def _verify_and_correct(self, tool_result: ToolResult) -> str:
+        """D8：验证工具结果，必要时把纠错提示回灌进 tool 消息。
+
+        闭环方式：不额外发起 LLM 调用，而是把 ``build_correction_prompt`` 生成的
+        纠错文本追加到本条 tool 消息里。ReAct 主循环下一轮会带着该提示重新决策，
+        等价于「验证失败 → 自我修正 → 重试」，且不会破坏工具调用配对。
+
+        纠错回灌次数受 ``VerificationLoop.max_correction_rounds`` 限制，避免
+        单回合内无限追加。验证器自身异常一律降级为「不改写输出」，绝不阻断主链路。
+
+        Returns:
+            str: 应写入 tool 消息的输出（原样或追加纠错提示后的文本）。
+        """
+        vloop = self._verification_loop
+        if vloop is None:
+            return tool_result.output
+
+        try:
+            step = vloop.verify_tool_result(
+                tool_name=tool_result.name,
+                output=tool_result.output,
+                success=tool_result.success,
+                error=tool_result.error or None,
+            )
+            vloop.record_step(step)
+
+            action = getattr(step, "action", None)
+            action_value = getattr(action, "value", action)
+            if action_value not in ("retry", "warn"):
+                return tool_result.output
+
+            max_rounds = getattr(vloop, "_max_correction_rounds", 2)
+            if self._correction_rounds_used >= max_rounds:
+                log.warning(
+                    "纠错轮次已达上限，不再回灌纠错提示",
+                    tool=tool_result.name,
+                    used=self._correction_rounds_used,
+                    max_rounds=max_rounds,
+                )
+                return tool_result.output
+
+            correction = vloop.build_correction_prompt(step, tool_result.output)
+            if not correction:
+                return tool_result.output
+
+            self._correction_rounds_used += 1
+            log.info(
+                "验证未通过，回灌纠错提示",
+                tool=tool_result.name,
+                action=action_value,
+                round=self._correction_rounds_used,
+            )
+            return f"{tool_result.output}\n\n[验证反馈]\n{correction}"
+        except Exception as exc:
+            # 验证是增强能力而非安全边界，异常不得阻断工具主链路；
+            # 但必须留下 error 日志，禁止静默（对齐 D2/D6 治理口径）。
+            log.error(
+                "工具结果验证异常，跳过纠错回灌",
+                tool=tool_result.name,
+                error=str(exc),
+            )
+            return tool_result.output
+
+    async def _dispatch_tool_calls(
+        self,
+        round_calls: list[ToolCall],
+        turn: TurnContext,
+        budget: IterationBudget,
+    ) -> None:
+        """执行本轮全部工具调用。
+
+        并行执行器启用且本轮工具数 > 1 时，无依赖工具并发执行（性能收益最大）；
+        否则逐条串行，完全等价于旧行为。失败策略 CONTINUE 保证单工具失败不
+        中断同轮其他工具，与历史串行语义一致。结果顺序与原 LLM 返回顺序一致。
+        """
+        if not round_calls:
+            return
+
+        if self._parallel_executor is None or len(round_calls) <= 1:
+            for tc in round_calls:
+                tool_result = await self._execute_tool_with_retry(tc)
+                turn.tool_results.append(tool_result)
+                turn.add_tool_result_message(tc.id, self._verify_and_correct(tool_result))
+                if not tool_result.success:
+                    budget.record_failure()
+                else:
+                    budget.reset_failure_streak()
+            return
+
+        call_by_id = {tc.id: tc for tc in round_calls}
+        items = [
+            ToolCallItem(
+                id=tc.id,
+                name=tc.name,
+                arguments=self._safe_parse_args(tc.arguments),
+            )
+            for tc in round_calls
+        ]
+
+        async def _exec_one(item: ToolCallItem) -> ToolCallResult:
+            dom = call_by_id[item.id]
+            dom_result = await self._execute_tool_with_retry(dom)
+            return ToolCallResult(
+                id=item.id,
+                name=item.name,
+                success=dom_result.success,
+                output=dom_result.output,
+                error=dom_result.error or "",
+            )
+
+        results, stats = await self._parallel_executor.execute(items, _exec_one)
+        for r in results:
+            tc = call_by_id.get(r.id)
+            if tc is None:
+                continue
+            dom_result = ToolResult(
+                tool_call_id=r.id,
+                name=r.name,
+                output=r.output,
+                success=r.success,
+                error=r.error or "",
+            )
+            turn.tool_results.append(dom_result)
+            turn.add_tool_result_message(tc.id, self._verify_and_correct(dom_result))
+            if not r.success:
+                budget.record_failure()
+            else:
+                budget.reset_failure_streak()
+        log.info(
+            "Parallel tool execution dispatched",
+            count=len(results),
+            parallel_groups=stats.parallel_groups,
+            speedup=round(stats.speedup_ratio, 2),
+        )
 
     def _build_tools_schema(
         self,
@@ -130,6 +321,7 @@ class ConversationLoop:
         system_prompt: str | None = None,
         history: list[dict[str, str]] | None = None,
         use_tools: bool = True,
+        images: list[dict[str, Any]] | None = None,
     ) -> ConversationResult:
         """执行完整对话循环，返回最终结果。
 
@@ -142,6 +334,7 @@ class ConversationLoop:
             system_prompt: 系统提示，None 时不含系统消息。
             history: 历史消息列表，None 时无历史。
             use_tools: 是否启用工具调用。
+            images: 多模态图片列表，每项为 {"data": base64, "mime_type": "image/png"}。
 
         Returns:
             ConversationResult: 包含最终内容、工具调用统计和元数据。
@@ -162,8 +355,29 @@ class ConversationLoop:
             messages.append({"role": "system", "content": system_prompt})
         if history:
             messages.extend(history)
-        messages.append({"role": "user", "content": user_input})
+
+        user_message: dict[str, Any] = {"role": "user", "content": user_input}
+        if images:
+            content_parts: list[dict[str, Any]] = [{"type": "text", "text": user_input}]
+            for img in images:
+                content_parts.append({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:{img.get('mime_type', 'image/png')};base64,{img['data']}",
+                        "detail": img.get("detail", "auto"),
+                    },
+                })
+            user_message = {"role": "user", "content": content_parts}
+
+        messages.append(user_message)
         turn.messages = list(messages)
+
+        # D2 (P2 第4轮回灌): 把会话级认知信号(情绪/反思)注入本轮 LLM 上下文(元认知回灌)。
+        # 注入一次(整轮共享), 不每轮重复插入, 避免上下文膨胀。
+        try:
+            inject_cognition_into_messages(session_id, turn.messages)
+        except Exception as exc:
+            log.warning("D2 认知信号注入失败(已跳过, 不影响主链路)", error=str(exc))
 
         budget = IterationBudget(max_tool_rounds=self._max_tool_rounds)
         retry_state = TurnRetryState()
@@ -172,8 +386,10 @@ class ConversationLoop:
         if self._tool_call_guard and hasattr(self._tool_call_guard, "reset_round"):
             try:
                 self._tool_call_guard.reset_round()
-            except Exception:
-                pass
+            except Exception as exc:
+                # D2（审计 §1.7）：重置失败会让上一轮的去重窗口与速率计数残留，
+                # 可能误拦本轮合法调用；不阻断主链路，但禁止静默。
+                log.error("工具守卫轮次重置失败，去重/限速窗口可能残留", error=str(exc))
 
         tools_schema = self._build_tools_schema(user_input, use_tools)
 
@@ -182,6 +398,10 @@ class ConversationLoop:
 
         while not budget.is_exhausted and not budget.is_token_exhausted and not budget.is_failure_exhausted:
             budget.increment()
+            # OTel追踪：记录循环迭代span
+            from agent.core.tracing import get_tracing_manager
+            _tracing = get_tracing_manager()
+            _iter_span = _tracing.start_span("loop.iteration", {"round": budget.current_round, "trace_id": trace_id})
 
             try:
                 llm_messages = turn.messages
@@ -210,6 +430,7 @@ class ConversationLoop:
                         retry_delay=classified.retry_delay,
                         error=str(e),
                     )
+                    _tracing.end_span(_iter_span)
                     continue
                 retry_state.record_attempt(success=False)
                 budget.record_failure()
@@ -217,11 +438,18 @@ class ConversationLoop:
                 turn.error = str(e)
                 final_content = classified.user_message
                 finish_reason = "error"
+                _tracing.end_span(_iter_span)
                 break
 
             content = response.get("content", "")
             tool_calls_raw = response.get("tool_calls")
             finish_reason = response.get("finish_reason", "stop")
+
+            usage = response.get("usage", {})
+            if usage and isinstance(usage, dict):
+                tokens_used = usage.get("total_tokens", 0)
+                if tokens_used:
+                    budget.add_tokens(tokens_used)
 
             # LLM 调用成功，重置重试状态
             retry_state.record_attempt(success=True)
@@ -233,6 +461,7 @@ class ConversationLoop:
             if not tool_calls_raw:
                 final_content = content
                 turn.state = TurnState.COMPLETED
+                _tracing.end_span(_iter_span)
                 break
 
             turn.state = TurnState.TOOL_CALLING
@@ -241,6 +470,7 @@ class ConversationLoop:
             assistant_msg["tool_calls"] = tool_calls_raw
             turn.messages.append(assistant_msg)
 
+            round_calls: list[ToolCall] = []
             for tc_raw in tool_calls_raw:
                 fn = tc_raw.get("function", {})
                 tc = ToolCall(
@@ -248,16 +478,12 @@ class ConversationLoop:
                     name=fn.get("name", ""),
                     arguments=fn.get("arguments", "{}"),
                 )
+                round_calls.append(tc)
                 turn.tool_calls.append(tc)
 
-                tool_result = await self._execute_tool_with_retry(tc)
-                turn.tool_results.append(tool_result)
-                turn.add_tool_result_message(tc.id, tool_result.output)
-
-                if not tool_result.success:
-                    budget.record_failure()
-                else:
-                    budget.reset_failure_streak()
+            # P1-6: 优先并行执行（无依赖工具并发），回退串行；语义与原行为一致。
+            await self._dispatch_tool_calls(round_calls, turn, budget)
+            _tracing.end_span(_iter_span)
 
         if not final_content and turn.messages:
             for msg in reversed(turn.messages):
@@ -276,7 +502,8 @@ class ConversationLoop:
                 final_content = "处理完成，但未生成有效响应。"
 
         turn.end_time = time.time()
-        turn.state = TurnState.COMPLETED
+        if turn.state != TurnState.FAILED:
+            turn.state = TurnState.COMPLETED
 
         tool_results_for_finalizer = [
             {"name": tr.name, "result": tr.output, "success": tr.success, "error": tr.error or ""}
@@ -293,6 +520,12 @@ class ConversationLoop:
         )
         final_content = finalized.final_response or final_content
 
+        _tool_successes = sum(1 for tr in turn.tool_results if tr.success)
+        _tool_total = max(len(turn.tool_results), 1)
+        _initial_quality = 0.7 if finish_reason == "stop" else 0.4
+        if turn.tool_results:
+            _initial_quality = _tool_successes / _tool_total
+
         return ConversationResult(
             content=final_content,
             session_id=session_id,
@@ -303,6 +536,7 @@ class ConversationLoop:
             total_tokens=budget.total_tokens_used,
             duration=turn.duration,
             finish_reason=finish_reason,
+            quality_score=round(_initial_quality, 4),
             metadata={
                 "tool_calls": [
                     {"name": tc.name, "id": tc.id}
@@ -428,7 +662,16 @@ class ConversationLoop:
                         )
                     params = sv_result.sanitized_params
             except Exception as exc:
-                log.warning("Schema校验异常，跳过校验继续执行", tool=tool_call.name, error=str(exc))
+                # D6（审计 §1.7）：Schema 校验异常不得静默放行，改为 fail-closed 拦截。
+                log.error("Schema校验异常，拒绝执行", tool=tool_call.name, error=str(exc))
+                return ToolResult(
+                    tool_call_id=tool_call.id,
+                    name=tool_call.name,
+                    output=f"参数校验异常，已拒绝执行: {exc}",
+                    success=False,
+                    error="schema_validation_error",
+                    duration=time.time() - start,
+                )
 
         # T-04: 工具调用守卫——去重/缓存/限速检查。
         if self._tool_call_guard:
@@ -447,7 +690,16 @@ class ConversationLoop:
                         metadata={**guard_meta, "guard_blocked": True, "guard_reason": guard_result.reason},
                     )
             except Exception as exc:
-                log.warning("工具调用守卫异常，跳过守卫继续执行", tool=tool_call.name, error=str(exc))
+                # D6（审计 §1.7）：守卫检查异常不得静默放行（fail-open），改为 fail-closed 拦截。
+                log.error("工具调用守卫异常，拒绝执行", tool=tool_call.name, error=str(exc))
+                return ToolResult(
+                    tool_call_id=tool_call.id,
+                    name=tool_call.name,
+                    output=f"工具调用守卫异常，已拒绝执行: {exc}",
+                    success=False,
+                    error="tool_guard_error",
+                    duration=time.time() - start,
+                )
 
         # 工具声明的风险等级与所需权限（供权限检查与审批共用），修复 T-03 风险硬编码。
         risk, required_permissions = self._tool_risk_and_permissions(tool_call.name)
@@ -483,8 +735,17 @@ class ConversationLoop:
                         error="approval_denied",
                         duration=time.time() - start,
                     )
-            except Exception:
-                pass
+            except Exception as exc:
+                # D4（审计 §1.7）：审批请求异常不得静默放行（fail-open），改为 fail-closed 默认拒绝。
+                log.error("审批请求异常，拒绝执行", tool=tool_call.name, error=str(exc))
+                return ToolResult(
+                    tool_call_id=tool_call.id,
+                    name=tool_call.name,
+                    output=f"审批请求异常，已拒绝执行: {exc}",
+                    success=False,
+                    error="approval_error",
+                    duration=time.time() - start,
+                )
 
         if self._hook_manager:
             await self._hook_manager.trigger(
@@ -502,8 +763,14 @@ class ConversationLoop:
                     tool_call.name, params,
                     {"success": result.success, "output": result.output or "", "error": result.error, "metadata": dict(getattr(result, "metadata", {}) or {})},
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                # D2（审计 §1.7）：记录失败 → 去重历史缺失，同参数工具可能被反复
+                # 重复调用（死循环风险）。不阻断主链路，但必须留痕。
+                log.error(
+                    "工具守卫记录失败，去重历史未更新",
+                    tool=tool_call.name,
+                    error=str(exc),
+                )
 
         if self._hook_manager:
             await self._hook_manager.trigger(
@@ -566,17 +833,8 @@ class ConversationLoop:
             corrected_params = reflection.get("corrected_params")
             if corrected_params:
                 log.info("Retrying with corrected params", tool=tool_call.name, attempt=attempt)
-                start = time.time()
-                if self._tool_registry:
-                    retry_result = await self._tool_registry.execute(tool_call.name, corrected_params)
-                    result = ToolResult(
-                        tool_call_id=tool_call.id,
-                        name=tool_call.name,
-                        output=retry_result.output or "",
-                        success=retry_result.success,
-                        error=retry_result.error,
-                        duration=time.time() - start,
-                    )
+                corrected_call = ToolCall(id=tool_call.id, name=tool_call.name, arguments=json.dumps(corrected_params))
+                result = await self._execute_tool(corrected_call)
                 if result.success:
                     log.info("Tool retry succeeded", tool=tool_call.name, attempt=attempt)
                     return result
@@ -620,15 +878,13 @@ class ConversationLoop:
             path_val = corrected["path"]
             if not path_val.startswith("/"):
                 import os
-                candidates = [
-                    os.path.join(os.getcwd(), path_val),
-                    os.path.join(os.getcwd(), "src", path_val),
-                    os.path.join(os.getcwd(), "python", path_val),
-                ]
-                for candidate in candidates:
-                    if os.path.exists(candidate):
-                        corrected["path"] = candidate
-                        return {"should_retry": True, "corrected_params": corrected}
+                candidate = os.path.realpath(os.path.join(os.getcwd(), path_val))
+                cwd_real = os.path.realpath(os.getcwd())
+                if not candidate.startswith(cwd_real + os.sep) and candidate != cwd_real:
+                    return {"should_retry": False, "reason": "path traversal detected"}
+                if os.path.exists(candidate):
+                    corrected["path"] = candidate
+                    return {"should_retry": True, "corrected_params": corrected}
 
         if "timeout" in error_lower or "timed out" in error_lower:
             return {"should_retry": True, "corrected_params": corrected}
@@ -645,32 +901,88 @@ class ConversationLoop:
         system_prompt: str | None = None,
         history: list[dict[str, str]] | None = None,
         use_tools: bool = True,
+        images: list[dict[str, Any]] | None = None,
     ):
-        """P0-1/P1-4: 流式 ReAct 循环 — 支持 streaming tokens + thinking 事件。
+        """P0-1/P1-4: 流式 ReAct 循环 — 富类型流式事件。
 
         每一轮 LLM 调用都使用 chat_stream 进行实时 token 输出，
         同时通过 ThinkScrubber 分离思考过程并 yield thinking 事件。
 
+        事件类型:
+        - stream_start: 流开始
+        - progress: 进度更新 (current_round, total_rounds)
+        - plan: 生成的执行计划
+        - thinking: LLM 思考过程
+        - token: 文本 token 增量
+        - tool_start: 工具调用开始
+        - tool_end: 工具调用结束（含结果摘要）
+        - reflection: 中间评估结果
+        - stream_done: 流结束（含汇总元数据）
+        - error: 错误
+
         Yields:
-            dict 事件: {"type": "token"|"thinking"|"tool_start"|"tool_end"|"done", ...}
+            dict 事件: {"type": str, "content": str, "metadata": {...}, ...}
         """
         import uuid
         import time as _t
 
         trace_id = f"conv_{uuid.uuid4().hex[:8]}"
         start_time = _t.time()
+        tool_call_count = 0
+        tool_success_count = 0
+        total_tool_duration_ms = 0.0
 
         messages: list[dict[str, Any]] = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         if history:
             messages.extend(history)
-        messages.append({"role": "user", "content": user_input})
+
+        user_message: dict[str, Any] = {"role": "user", "content": user_input}
+        if images:
+            content_parts: list[dict[str, Any]] = [{"type": "text", "text": user_input}]
+            for img in images:
+                content_parts.append({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:{img.get('mime_type', 'image/png')};base64,{img['data']}",
+                        "detail": img.get("detail", "auto"),
+                    },
+                })
+            user_message = {"role": "user", "content": content_parts}
+        messages.append(user_message)
+
+        # D2 (P2 第4轮回灌): 注入会话级认知信号到本轮 LLM 上下文(流式路径)。
+        try:
+            inject_cognition_into_messages(session_id, messages)
+        except Exception as exc:
+            log.warning("D2 认知信号注入失败(已跳过)", error=str(exc))
 
         tools_schema = self._build_tools_schema(user_input, use_tools)
-
         max_rounds = self._max_tool_rounds
+        stream_budget = IterationBudget(max_tool_rounds=max_rounds)
+        consecutive_failures = 0
+        max_consecutive_failures = 3
+
+        yield {
+            "type": "stream_start",
+            "content": "",
+            "trace_id": trace_id,
+            "session_id": session_id,
+            "metadata": {"max_rounds": max_rounds, "has_tools": bool(tools_schema)},
+        }
+
         for round_idx in range(max_rounds):
+            yield {
+                "type": "progress",
+                "content": "",
+                "metadata": {
+                    "current_round": round_idx + 1,
+                    "total_rounds": max_rounds,
+                    "tool_calls_so_far": tool_call_count,
+                },
+            }
+
             try:
                 response = await self._llm.chat(
                     messages=messages,
@@ -679,24 +991,90 @@ class ConversationLoop:
                 )
             except Exception as e:
                 classified = self._error_classifier.classify_llm_error(e)
-                yield {"type": "error", "content": classified.user_message, "category": classified.category.value}
+                consecutive_failures += 1
+                if consecutive_failures >= max_consecutive_failures:
+                    yield {
+                        "type": "error",
+                        "content": classified.user_message,
+                        "metadata": {
+                            "category": classified.category.value,
+                            "consecutive_failures": consecutive_failures,
+                        },
+                    }
+                    return
+                yield {
+                    "type": "error",
+                    "content": classified.user_message,
+                    "metadata": {"category": classified.category.value},
+                }
                 return
 
             content = response.get("content", "")
             tool_calls_raw = response.get("tool_calls")
 
-            # P1-4: 使用 ThinkScrubber 分离思考过程
+            usage = response.get("usage", {})
+            if usage and isinstance(usage, dict):
+                tokens_used = usage.get("total_tokens", 0)
+                if tokens_used:
+                    stream_budget.add_tokens(tokens_used)
+
+            if stream_budget.is_token_exhausted:
+                _qs = tool_success_count / max(tool_call_count, 1) if tool_call_count > 0 else 0.0
+                _dur_ms = int((_t.time() - start_time) * 1000)
+                yield {
+                    "type": "stream_done",
+                    "content": "",
+                    "trace_id": trace_id,
+                    "session_id": session_id,
+                    "quality_score": round(_qs * 0.7, 4),
+                    "rounds_used": round_idx + 1,
+                    "duration": _dur_ms / 1000.0,
+                    "finish_reason": "token_budget_exhausted",
+                    "metadata": {
+                        "total_rounds": round_idx + 1,
+                        "tool_calls": tool_call_count,
+                        "tool_successes": tool_success_count,
+                        "duration_ms": _dur_ms,
+                        "tool_duration_ms": int(total_tool_duration_ms),
+                        "finish_reason": "token_budget_exhausted",
+                    },
+                }
+                return
+
             scrub_result = self._think_scrubber.scrub(content)
+            if scrub_result.thinking:
+                yield {
+                    "type": "thinking",
+                    "content": scrub_result.thinking,
+                    "metadata": {"round": round_idx + 1},
+                }
             content = scrub_result.cleaned
 
             if not tool_calls_raw:
-                # 无工具调用，流式输出最终回复
                 for i in range(0, len(content), 10):
                     yield {"type": "token", "content": content[i:i + 10]}
-                yield {"type": "done", "trace_id": trace_id}
+                _qs = 0.7 if content else 0.3
+                _dur_ms = int((_t.time() - start_time) * 1000)
+                yield {
+                    "type": "stream_done",
+                    "content": "",
+                    "trace_id": trace_id,
+                    "session_id": session_id,
+                    "quality_score": _qs,
+                    "rounds_used": round_idx + 1,
+                    "duration": _dur_ms / 1000.0,
+                    "finish_reason": "complete",
+                    "metadata": {
+                        "total_rounds": round_idx + 1,
+                        "tool_calls": tool_call_count,
+                        "tool_successes": tool_success_count,
+                        "duration_ms": _dur_ms,
+                        "tool_duration_ms": int(total_tool_duration_ms),
+                        "finish_reason": "complete",
+                    },
+                }
                 return
 
-            # 有工具调用
             yield {"type": "token", "content": content or ""}
 
             assistant_msg: dict[str, Any] = {"role": "assistant", "content": content or ""}
@@ -713,19 +1091,57 @@ class ConversationLoop:
 
                 yield {
                     "type": "tool_start",
-                    "tool_name": tc.name,
-                    "tool_args": tc.parse_arguments(),
+                    "content": tc.name,
+                    "metadata": {
+                        "tool_name": tc.name,
+                        "tool_args": tc.parse_arguments(),
+                        "round": round_idx + 1,
+                    },
                 }
 
+                tool_start = _t.time()
                 tool_result = await self._execute_tool_with_retry(tc)
+                tool_duration = (_t.time() - tool_start) * 1000
+                total_tool_duration_ms += tool_duration
+                tool_call_count += 1
+                if tool_result.success:
+                    tool_success_count += 1
+                    consecutive_failures = 0
+                else:
+                    consecutive_failures += 1
+                    if consecutive_failures >= max_consecutive_failures:
+                        _qs = tool_success_count / max(tool_call_count, 1) if tool_call_count > 0 else 0.0
+                        _dur_ms = int((_t.time() - start_time) * 1000)
+                        yield {
+                            "type": "stream_done",
+                            "content": "",
+                            "trace_id": trace_id,
+                            "session_id": session_id,
+                            "quality_score": round(_qs * 0.5, 4),
+                            "rounds_used": round_idx + 1,
+                            "duration": _dur_ms / 1000.0,
+                            "finish_reason": "failure_exhausted",
+                            "metadata": {
+                                "total_rounds": round_idx + 1,
+                                "tool_calls": tool_call_count,
+                                "tool_successes": tool_success_count,
+                                "duration_ms": _dur_ms,
+                                "tool_duration_ms": int(total_tool_duration_ms),
+                                "finish_reason": "failure_exhausted",
+                            },
+                        }
+                        return
 
                 yield {
                     "type": "tool_end",
-                    "tool_name": tc.name,
-                    "success": tool_result.success,
-                    "result": tool_result.output[:300] if tool_result.output else "",
-                    "error": tool_result.error,
-                    "duration_ms": int(tool_result.duration * 1000) if tool_result.duration else 0,
+                    "content": tool_result.output[:300] if tool_result.output else "",
+                    "metadata": {
+                        "tool_name": tc.name,
+                        "success": tool_result.success,
+                        "error": tool_result.error,
+                        "duration_ms": int(tool_duration),
+                        "round": round_idx + 1,
+                    },
                 }
 
                 messages.append({
@@ -734,4 +1150,23 @@ class ConversationLoop:
                     "content": tool_result.output[:1000] if tool_result.output else "",
                 })
 
-        yield {"type": "done", "trace_id": trace_id}
+        _qs = tool_success_count / max(tool_call_count, 1) if tool_call_count > 0 else 0.5
+        _dur_ms = int((_t.time() - start_time) * 1000)
+        yield {
+            "type": "stream_done",
+            "content": "",
+            "trace_id": trace_id,
+            "session_id": session_id,
+            "quality_score": round(_qs, 4),
+            "rounds_used": max_rounds,
+            "duration": _dur_ms / 1000.0,
+            "finish_reason": "max_rounds",
+            "metadata": {
+                "total_rounds": max_rounds,
+                "tool_calls": tool_call_count,
+                "tool_successes": tool_success_count,
+                "duration_ms": _dur_ms,
+                "tool_duration_ms": int(total_tool_duration_ms),
+                "finish_reason": "max_rounds",
+            },
+        }

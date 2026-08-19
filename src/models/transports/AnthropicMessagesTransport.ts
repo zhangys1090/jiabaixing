@@ -1,4 +1,7 @@
 /**
+ * @deprecated TS 本地 LLM 传输层（AGENT_BACKEND=local 回退）。
+ * AGENT_BACKEND=python（默认）经 PythonAgentBridge /v1/llm/* 委派 Python agent.llm，不再使用本层。
+ *
  * Anthropic Messages API 传输层
  *
  * 适配 Anthropic Claude 原生 API（非 OpenAI 兼容模式）

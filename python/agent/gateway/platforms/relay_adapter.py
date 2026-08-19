@@ -35,6 +35,7 @@ from typing import Any, AsyncIterator
 
 from agent.gateway.base import Message, PlatformAdapter
 from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
 
 log = StructuredLogger("gateway.relay_adapter")
 
@@ -97,8 +98,8 @@ class RelayAdapter(PlatformAdapter):
 
     async def start(self) -> None:
         if not self._config.url:
-            log.warning("中继 URL 未配置，适配器以模拟模式运行")
-            self._connected = True
+            log.warning("中继 URL 未配置，适配器以模拟模式运行（不会真实连接）")
+            self._enter_simulated()
             return
 
         await self._connect()
@@ -129,8 +130,8 @@ class RelayAdapter(PlatformAdapter):
             self._recv_task = asyncio.create_task(self._recv_loop())
             log.info("WebSocket 已连接", url=self._config.url)
         except ImportError:
-            log.warning("websockets 未安装，中继适配器以模拟模式运行")
-            self._connected = True
+            log.warning("websockets 未安装，中继适配器以模拟模式运行（不会真实连接）")
+            self._enter_simulated()
         except Exception as e:
             log.error("WebSocket 连接失败", error=str(e))
             self._connected = False
@@ -145,7 +146,8 @@ class RelayAdapter(PlatformAdapter):
                 await self._connect()
                 if self._connected:
                     return
-            except Exception:
+            except Exception as e:
+                log.warning("重连异常", error=str(e))
                 continue
         log.error("重连次数超限", max=self._config.max_reconnect_attempts)
 
@@ -174,8 +176,8 @@ class RelayAdapter(PlatformAdapter):
                 except Exception as e:
                     log.error("中继消息处理失败", error=str(e))
                     self._stats["errors"] += 1
-        except asyncio.CancelledError:
-            pass
+        except asyncio.CancelledError as _exc:
+            log_ignored(log, "relay_adapter.RelayAdapter._recv_loop", _exc)
         except Exception as e:
             log.error("WebSocket 接收循环异常", error=str(e))
             self._connected = False
@@ -225,15 +227,15 @@ class RelayAdapter(PlatformAdapter):
         if self._ws:
             try:
                 await self._ws.close()
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "relay_adapter.RelayAdapter.stop", _exc)
         log.info("中继适配器已停止")
 
     async def send_message(self, chat_id: str, text: str) -> bool:
         if self._ws is None:
-            log.debug("中继模拟发送", chat_id=chat_id, text=text[:50])
-            self._stats["sent"] += 1
-            return True
+            # 诚实化：模拟态未真实发送，不谎报成功，也不计入已发送
+            log.warning("中继适配器未连接，消息未真实发送", chat_id=chat_id)
+            return False
 
         data = {
             "type": "message",

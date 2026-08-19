@@ -21,9 +21,11 @@ import asyncio
 import os
 import time
 import uuid
+from abc import ABC, abstractmethod
 from typing import Any
 
 from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
 
 log = StructuredLogger("distributed_lock")
 
@@ -61,10 +63,10 @@ def _lock_auto_extend() -> bool:
     return os.environ.get("LOCK_AUTO_EXTEND", "true").lower() in ("true", "1", "yes")
 
 
-class DistributedLock:
-    """分布式锁抽象。
+class DistributedLock(ABC):
+    """分布式锁抽象基类。
 
-    子类实现 acquire/release；支持 async with 上下文管理器。
+    子类必须实现 acquire/release；支持 async with 上下文管理器。
     若 `acquire()` 在重试耗尽后仍失败，`async with` 会抛出 RuntimeError，
     调用方需自行决定跳过或重试。
     """
@@ -73,11 +75,13 @@ class DistributedLock:
         self._name = name
         self._acquired = False
 
+    @abstractmethod
     async def acquire(self, ttl_ms: int | None = None) -> bool:
-        raise NotImplementedError
+        """获取分布式锁。子类必须实现。"""
 
+    @abstractmethod
     async def release(self) -> None:
-        raise NotImplementedError
+        """释放分布式锁。子类必须实现。"""
 
     def held(self) -> bool:
         """当前是否持有锁（用于领导者选举的持锁探测）。"""
@@ -165,8 +169,8 @@ class RedisLock(DistributedLock):
                     await self._redis.set(self._key, self._token, xx=True, px=ttl_ms)
                 except Exception:
                     break
-        except asyncio.CancelledError:
-            pass
+        except asyncio.CancelledError as _exc:
+            log_ignored(log, "distributed_lock.RedisLock._extend_loop", _exc)
 
     async def release(self) -> None:
         if not self._acquired:
@@ -180,12 +184,17 @@ class RedisLock(DistributedLock):
             await r.eval(RedisLock._RELEASE_LUA, 1, self._key, self._token)
         except Exception as exc:
             log.warning("lock release error", name=self._name, error=str(exc))
-        finally:
+
+    async def close(self) -> None:
+        """显式关闭 Redis 连接，供应用关闭时调用。"""
+        if self._extend_task is not None:
+            self._extend_task.cancel()
+            self._extend_task = None
+        if self._redis is not None:
             try:
-                if self._redis is not None:
-                    await self._redis.aclose()
-            except Exception:
-                pass
+                await self._redis.aclose()
+            except Exception as _exc:
+                log_ignored(log, "distributed_lock.RedisLock.close", _exc)
             self._redis = None
 
 
@@ -214,6 +223,7 @@ class LocalLock(DistributedLock):
         ttl_ms: int | None = None,
         max_retries: int | None = None,
         retry_interval_ms: int | None = None,
+        **kwargs: Any,
     ) -> None:
         super().__init__(name)
         loop_locks = LocalLock._registry.setdefault(name, {})
@@ -259,8 +269,8 @@ class LocalLock(DistributedLock):
         if tok == self._token:
             try:
                 self._lock.release()
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "distributed_lock.LocalLock.release", _exc)
 
 
 def create_lock(name: str, **kwargs: Any) -> DistributedLock:

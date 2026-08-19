@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import type { ModuleId } from '../components/layout/LeftRail';
+import type { ModuleId } from '../types/chat';
 
 // 面板状态接口
 interface PanelState {

@@ -144,13 +144,14 @@ class MCPToolBridge:
                         permissions=self._infer_permissions(server_name, tool_name),
                     )
 
-                    server_name_capture = server_name
-                    tool_name_capture = tool_name
-
-                    async def executor(params: dict[str, Any] | None = None) -> ToolResult:
-                        return await self._execute_mcp_tool(
-                            server_name_capture, tool_name_capture, params or {}
-                        )
+                    # 必须用默认参数绑定：普通赋值仍属循环作用域，闭包晚绑定会让
+                    # 所有已注册工具都指向循环最后一次迭代的 server/tool（严重路由错乱）。
+                    async def executor(
+                        params: dict[str, Any] | None = None,
+                        _server: str = server_name,
+                        _tool: str = tool_name,
+                    ) -> ToolResult:
+                        return await self._execute_mcp_tool(_server, _tool, params or {})
 
                     registry.register(definition, executor)
                     self._bridged_tools[bridged_name] = f"{server_name}/{tool_name}"

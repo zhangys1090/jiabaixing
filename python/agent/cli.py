@@ -32,7 +32,7 @@ def cmd_chat(args: argparse.Namespace) -> None:
         from agent.core.engine import AgentEngine
 
         engine = AgentEngine()
-        await engine.initialize()
+        await engine.initialize_v2()
         print("\n  🎯 家百星 Agent 对话模式")
         print("  " + "─" * 40)
         print("  输入消息开始对话，/quit 退出\n")

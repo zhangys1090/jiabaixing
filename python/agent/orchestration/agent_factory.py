@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+import sqlite3
 import time
 import uuid
+import json as _json
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Awaitable, Callable, Protocol
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Protocol
 
+if TYPE_CHECKING:  # 仅供类型注解使用，避免 fanout ↔ agent_factory 循环导入
+    from agent.orchestration.fanout import TaskNode
+
+from agent.config import DATA_ROOT
 from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("agent_factory")
@@ -346,6 +353,7 @@ class MultiAgentOrchestrator:
                         duration_ms=duration,
                     )
                 ],
+                quality_score=1.0,
             )
         except Exception as e:
             duration = (time.time() - start) * 1000
@@ -365,6 +373,7 @@ class MultiAgentOrchestrator:
                         duration_ms=duration,
                     )
                 ],
+                quality_score=0.0,
             )
 
         self._history.append(aggregated)
@@ -409,6 +418,7 @@ class MultiAgentOrchestrator:
                     failed += 1
 
         duration = (time.time() - start) * 1000
+        _total = max(len(sub_results), 1)
         aggregated = AggregatedResult(
             success=failed == 0,
             summary=f"目标{'完成' if failed == 0 else '部分完成'}: {goal[:60]}",
@@ -417,6 +427,7 @@ class MultiAgentOrchestrator:
             failed_tasks=failed,
             duration_ms=duration,
             sub_results=sub_results,
+            quality_score=round(completed / _total, 4),
         )
 
         self._history.append(aggregated)
@@ -504,6 +515,165 @@ class MultiAgentOrchestrator:
 
         return self._decompose_goal(goal, complexity)
 
+    async def _decompose_goal_with_deps(
+        self,
+        goal: str,
+        complexity: TaskComplexity,
+        llm: Any | None = None,
+    ) -> list[dict[str, Any]]:
+        """DAG感知的目标分解: 将复杂目标分解为带依赖关系的子任务。
+
+        使用 LLM 推断子任务之间的依赖关系，返回包含 id/goal/dependencies 的字典列表。
+
+        Args:
+            goal: 原始目标。
+            complexity: 复杂度分析结果。
+            llm: 可选的 LLM 提供者。
+
+        Returns:
+            list[dict]: 每个元素包含 id(str), goal(str), dependencies(list[str])。
+        """
+        if not llm:
+            sub_goals = self._decompose_goal(goal, complexity)
+            return [{"id": f"sg_{i}", "goal": sg, "dependencies": []} for i, sg in enumerate(sub_goals)]
+
+        try:
+            prompt = (
+                "将以下任务分解为子任务，并标注依赖关系。\n"
+                "要求:\n"
+                "1. 每个子任务应该是可独立执行的\n"
+                "2. 如果子任务之间有依赖关系，在 dependencies 中列出依赖的子任务序号\n"
+                f"3. 最多分解为 {complexity.recommended_agents} 个子任务\n"
+                "4. 输出严格 JSON 格式: [{\"goal\": \"子任务1\", \"dependencies\": []}, ...]\n\n"
+                f"原始任务: {goal}"
+            )
+            result = await llm.chat(
+                messages=[{"role": "user", "content": prompt}],
+                use_cache=True,
+            )
+            content = result.get("content", "").strip()
+
+            json_start = content.find("[")
+            json_end = content.rfind("]") + 1
+            if json_start >= 0 and json_end > json_start:
+                content = content[json_start:json_end]
+
+            sub_tasks = _json.loads(content)
+            if isinstance(sub_tasks, list) and len(sub_tasks) > 0:
+                tasks: list[dict[str, Any]] = []
+                for i, task in enumerate(sub_tasks):
+                    if isinstance(task, dict):
+                        tasks.append({
+                            "id": f"sg_{i}",
+                            "goal": task.get("goal", f"子任务{i}"),
+                            "dependencies": [f"sg_{d}" for d in task.get("dependencies", [])],
+                        })
+                if tasks:
+                    return tasks[:complexity.recommended_agents]
+        except Exception as e:
+            log.warning("DAG decomposition failed, falling back to flat", error=str(e))
+
+        sub_goals = self._decompose_goal(goal, complexity)
+        return [{"id": f"sg_{i}", "goal": sg, "dependencies": []} for i, sg in enumerate(sub_goals)]
+
+    async def process_goal_with_dag(
+        self,
+        goal: str,
+        context: dict[str, Any] | None = None,
+    ) -> AggregatedResult:
+        """DAG感知的目标处理: 分解后按依赖关系编排执行。
+
+        当 LLM 可用时，自动推断子任务依赖关系，通过 OrchestrationExecutor
+        按 DAG 拓扑顺序执行子任务。
+
+        Args:
+            goal: 用户目标。
+            context: 上下文。
+
+        Returns:
+            AggregatedResult: 聚合结果。
+        """
+        from agent.orchestration.executor import OrchestrationConfig, OrchestrationExecutor, TaskPriority
+
+        start = time.time()
+        log.info("Processing goal with DAG", goal=goal[:80])
+
+        complexity = self._complexity_analyzer.analyze(goal)
+        log.info(
+            "Complexity analyzed",
+            level=complexity.complexity,
+            steps=complexity.estimated_steps,
+            parallelizable=complexity.parallelizable,
+        )
+
+        if not complexity.parallelizable or complexity.recommended_agents <= 1:
+            return await self._process_simple(goal, context, start)
+
+        sub_tasks = await self._decompose_goal_with_deps(goal, complexity, self._llm)
+        log.info(
+            "DAG decomposition done",
+            sub_task_count=len(sub_tasks),
+            has_dependencies=any(t.get("dependencies") for t in sub_tasks),
+        )
+
+        orch = OrchestrationExecutor(
+            OrchestrationConfig(
+                max_concurrent=complexity.recommended_agents,
+                default_timeout_ms=60000,
+                fail_fast=False,
+                collect_results=True,
+            )
+        )
+
+        for task_def in sub_tasks:
+            sub_goal = task_def["goal"]
+            agent = self._factory.select_agent_by_goal(sub_goal)
+            dep_ids = [f"dag_{d}" for d in task_def.get("dependencies", [])]
+            task_id = f"dag_{task_def['id']}"
+
+            async def _make_executor(_agent: BaseAgent, _goal: str) -> Any:
+                async def _exec(completed_results: dict | None = None) -> Any:
+                    return await _agent.execute(_goal, context)
+                return _exec
+
+            orch.add_task_with_id(
+                task_id=task_id,
+                name=sub_goal[:80],
+                executor=await _make_executor(agent, sub_goal),
+                dependencies=dep_ids,
+                priority=TaskPriority.NORMAL,
+                timeout_ms=60000,
+            )
+
+        orch_result = await orch.execute()
+
+        sub_results: list[SubTaskResult] = []
+        for task_id, node in orch_result.tasks.items():
+            sub_results.append(SubTaskResult(
+                task_id=task_id,
+                agent_name=node.name,
+                success=node.status.value == "completed",
+                result=node.result,
+                error=node.error,
+                duration_ms=float(node.duration_ms),
+            ))
+
+        duration = (time.time() - start) * 1000
+        _total = max(orch_result.completed_count + orch_result.failed_count, 1)
+        aggregated = AggregatedResult(
+            success=orch_result.status.value in ("completed", "partially_completed"),
+            summary=f"目标{'完成' if orch_result.failed_count == 0 else '部分完成'}: {goal[:60]}",
+            total_tasks=orch_result.completed_count + orch_result.failed_count + orch_result.skipped_count,
+            completed_tasks=orch_result.completed_count,
+            failed_tasks=orch_result.failed_count,
+            duration_ms=duration,
+            sub_results=sub_results,
+            quality_score=round(orch_result.completed_count / _total, 4),
+        )
+
+        self._history.append(aggregated)
+        return aggregated
+
     async def process_goal_with_loop(
         self,
         goal: str,
@@ -573,6 +743,7 @@ class MultiAgentOrchestrator:
                             duration_ms=duration,
                         )
                     ],
+                    quality_score=0.0,
                 )
 
         sub_goals = await self._decompose_goal_semantic(
@@ -609,6 +780,8 @@ class MultiAgentOrchestrator:
                     failed += 1
 
         duration = (_t.time() - start) * 1000
+        _total = max(len(sub_results), 1)
+        _agg_quality = round(completed / _total, 4) if _total > 0 else 0.0
         aggregated = AggregatedResult(
             success=failed == 0,
             summary=f"目标{'完成' if failed == 0 else '部分完成'}: {goal[:60]}",
@@ -617,6 +790,7 @@ class MultiAgentOrchestrator:
             failed_tasks=failed,
             duration_ms=duration,
             sub_results=sub_results,
+            quality_score=_agg_quality,
         )
         self._history.append(aggregated)
         return aggregated
@@ -671,26 +845,164 @@ class MultiAgentOrchestrator:
         }
 
 
+@dataclass
+class NegotiationProposal:
+    """W4-4: 协商提案。
+
+    Attributes:
+        proposal_id: 提案唯一 ID。
+        proposer: 提案方 Agent 名称。
+        task_description: 任务描述。
+        requirements: 需求列表。
+        constraints: 约束条件。
+        priority: 优先级（1-10）。
+        deadline_ms: 截止时间（毫秒），0 表示无限制。
+        status: 提案状态（pending/accepted/rejected/counter_offered/expired）。
+        created_at: 创建时间戳。
+    """
+
+    proposal_id: str = ""
+    proposer: str = ""
+    task_description: str = ""
+    requirements: list[str] = field(default_factory=list)
+    constraints: list[str] = field(default_factory=list)
+    priority: int = 5
+    deadline_ms: float = 0.0
+    status: str = "pending"
+    created_at: float = 0.0
+
+
+@dataclass
+class NegotiationResponse:
+    """W4-4: 协商响应。
+
+    Attributes:
+        response_id: 响应唯一 ID。
+        proposal_id: 对应的提案 ID。
+        responder: 响应方 Agent 名称。
+        accepted: 是否接受。
+        partial: 是否部分接受。
+        counter_offer: 反向提案（当拒绝时可提出替代方案）。
+        conditions: 接受条件列表。
+        modified_requirements: 修改后的需求列表。
+        reason: 拒绝或修改原因。
+        created_at: 创建时间戳。
+    """
+
+    response_id: str = ""
+    proposal_id: str = ""
+    responder: str = ""
+    accepted: bool = False
+    partial: bool = False
+    counter_offer: str = ""
+    conditions: list[str] = field(default_factory=list)
+    modified_requirements: list[str] = field(default_factory=list)
+    reason: str = ""
+    created_at: float = 0.0
+
+
+@dataclass
+class NegotiationRound:
+    """W4-4: 协商轮次记录。
+
+    Attributes:
+        round_number: 轮次编号。
+        proposal: 本轮提案。
+        responses: 本轮所有响应。
+        consensus_reached: 是否达成共识。
+        final_agreement: 最终协议内容。
+    """
+
+    round_number: int = 1
+    proposal: NegotiationProposal | None = None
+    responses: list[NegotiationResponse] = field(default_factory=list)
+    consensus_reached: bool = False
+    final_agreement: str = ""
+
+
 class AgentRegistry:
-    """Agent注册中心——管理Agent的注册、发现、状态跟踪和健康检查。
+    """Agent注册中心——管理Agent的注册、发现、状态跟踪、健康检查和协商协议。
 
     单例模式，支持按名称、场景和能力匹配查找Agent。
     追踪每个Agent的运行状态（idle/busy/error），提供健康检查。
+    W4-4: 增强协商协议，支持多轮协商、条件接受和部分接受。
 
     Usage:
         registry = AgentRegistry.get_instance()
         registry.register("code_agent", agent, scene=AgentScene.CODING)
         agent = registry.find_by_capability("代码生成")
         status = registry.get_status("code_agent")
+        # W4-4: 协商
+        proposal = registry.create_proposal("code_agent", "重构模块", requirements=["测试覆盖"])
+        result = await registry.negotiate(proposal)
     """
 
     _instance: AgentRegistry | None = None
 
-    def __init__(self) -> None:
+    def __init__(self, db_path: str | None = None) -> None:
         self._agents: dict[str, BaseAgent] = {}
         self._agent_scenes: dict[str, AgentScene] = {}
         self._agent_states: dict[str, str] = {}
         self._agent_health: dict[str, dict[str, Any]] = {}
+        self._negotiation_history: list[dict[str, Any]] = []
+        self._max_negotiation_rounds: int = 3
+        self._db_path = db_path or str(DATA_ROOT / "orchestration" / "negotiation.db")
+        Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
+        self._init_negotiation_db()
+        self._load_negotiation_history()
+
+    def _init_negotiation_db(self) -> None:
+        with sqlite3.connect(self._db_path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS negotiation_records (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    proposal_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    consensus INTEGER NOT NULL DEFAULT 0,
+                    rounds INTEGER NOT NULL DEFAULT 0,
+                    agreement TEXT NOT NULL DEFAULT '',
+                    result_json TEXT NOT NULL DEFAULT '{}',
+                    created_at REAL NOT NULL
+                )
+            """)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_negotiation_proposal_id ON negotiation_records(proposal_id)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_negotiation_created_at ON negotiation_records(created_at)"
+            )
+
+    def _load_negotiation_history(self) -> None:
+        with sqlite3.connect(self._db_path) as conn:
+            rows = conn.execute(
+                "SELECT result_json FROM negotiation_records ORDER BY created_at ASC"
+            ).fetchall()
+        self._negotiation_history = []
+        for (result_json,) in rows:
+            try:
+                self._negotiation_history.append(_json.loads(result_json))
+            except (_json.JSONDecodeError, TypeError):
+                continue
+
+    def _persist_negotiation_result(self, result: dict[str, Any]) -> None:
+        try:
+            with sqlite3.connect(self._db_path) as conn:
+                conn.execute(
+                    """INSERT INTO negotiation_records
+                       (proposal_id, status, consensus, rounds, agreement, result_json, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        result.get("proposal_id", ""),
+                        result.get("status", ""),
+                        1 if result.get("consensus") else 0,
+                        result.get("rounds", 0),
+                        result.get("agreement", ""),
+                        _json.dumps(result, ensure_ascii=False, default=str),
+                        time.time(),
+                    ),
+                )
+        except Exception as _exc:
+            log.warning("协商历史持久化失败", error=str(_exc))
 
     @classmethod
     def get_instance(cls) -> AgentRegistry:
@@ -899,6 +1211,313 @@ class AgentRegistry:
             int: Agent数量。
         """
         return len(self._agents)
+
+    def create_proposal(
+        self,
+        proposer: str,
+        task_description: str,
+        requirements: list[str] | None = None,
+        constraints: list[str] | None = None,
+        priority: int = 5,
+        deadline_ms: float = 0.0,
+    ) -> NegotiationProposal:
+        """W4-4: 创建协商提案。
+
+        Args:
+            proposer: 提案方 Agent 名称。
+            task_description: 任务描述。
+            requirements: 需求列表。
+            constraints: 约束条件。
+            priority: 优先级（1-10）。
+            deadline_ms: 截止时间（毫秒）。
+
+        Returns:
+            NegotiationProposal: 新创建的提案。
+        """
+        proposal = NegotiationProposal(
+            proposal_id=f"prop_{uuid.uuid4().hex[:8]}",
+            proposer=proposer,
+            task_description=task_description,
+            requirements=requirements or [],
+            constraints=constraints or [],
+            priority=max(1, min(10, priority)),
+            deadline_ms=deadline_ms,
+            status="pending",
+            created_at=time.time(),
+        )
+        log.info(
+            "W4-4: 创建协商提案",
+            proposal_id=proposal.proposal_id,
+            proposer=proposer,
+            task=task_description[:60],
+        )
+        return proposal
+
+    def create_response(
+        self,
+        proposal_id: str,
+        responder: str,
+        accepted: bool = False,
+        partial: bool = False,
+        counter_offer: str = "",
+        conditions: list[str] | None = None,
+        modified_requirements: list[str] | None = None,
+        reason: str = "",
+    ) -> NegotiationResponse:
+        """W4-4: 创建协商响应。
+
+        Args:
+            proposal_id: 对应的提案 ID。
+            responder: 响应方 Agent 名称。
+            accepted: 是否接受。
+            partial: 是否部分接受。
+            counter_offer: 反向提案。
+            conditions: 接受条件。
+            modified_requirements: 修改后的需求。
+            reason: 原因说明。
+
+        Returns:
+            NegotiationResponse: 新创建的响应。
+        """
+        response = NegotiationResponse(
+            response_id=f"resp_{uuid.uuid4().hex[:8]}",
+            proposal_id=proposal_id,
+            responder=responder,
+            accepted=accepted,
+            partial=partial,
+            counter_offer=counter_offer,
+            conditions=conditions or [],
+            modified_requirements=modified_requirements or [],
+            reason=reason,
+            created_at=time.time(),
+        )
+        log.info(
+            "W4-4: 创建协商响应",
+            response_id=response.response_id,
+            proposal_id=proposal_id,
+            responder=responder,
+            accepted=accepted,
+            partial=partial,
+        )
+        return response
+
+    async def negotiate(
+        self,
+        proposal: NegotiationProposal,
+        target_agents: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """W4-4: 多轮协商协议。
+
+        向目标 Agent 发起协商，支持多轮协商直到达成共识或达到最大轮次。
+        协商流程：
+        1. 提案方发出初始提案
+        2. 响应方评估并返回接受/拒绝/部分接受/反向提案
+        3. 如有反向提案或部分接受，进入下一轮协商
+        4. 达成共识或达到最大轮次后结束
+
+        Args:
+            proposal: 协商提案。
+            target_agents: 目标 Agent 名称列表，None 则按能力匹配。
+
+        Returns:
+            dict: 协商结果，包含 rounds/consensus/agreement 等字段。
+        """
+        if target_agents is None:
+            agent = self.find_by_capability(proposal.task_description)
+            target_agents = [agent.name] if agent else []
+
+        if not target_agents:
+            result = {
+                "proposal_id": proposal.proposal_id,
+                "status": "no_targets",
+                "rounds": [],
+                "consensus": False,
+                "agreement": "",
+            }
+            self._negotiation_history.append(result)
+            self._persist_negotiation_result(result)
+            return result
+
+        rounds: list[NegotiationRound] = []
+        current_proposal = proposal
+        consensus = False
+        final_agreement = ""
+
+        for round_num in range(1, self._max_negotiation_rounds + 1):
+            round_record = NegotiationRound(round_number=round_num, proposal=current_proposal)
+
+            for agent_name in target_agents:
+                agent = self._agents.get(agent_name)
+                if not agent:
+                    continue
+
+                response = await self._evaluate_proposal(agent, current_proposal)
+                round_record.responses.append(response)
+
+                if response.accepted and not response.partial:
+                    consensus = True
+                    final_agreement = current_proposal.task_description
+                    if response.conditions:
+                        final_agreement += f" (条件: {', '.join(response.conditions)})"
+                elif response.partial:
+                    current_proposal = self._create_counter_proposal(
+                        current_proposal, response
+                    )
+                elif response.counter_offer:
+                    current_proposal = self._create_counter_proposal(
+                        current_proposal, response
+                    )
+
+            round_record.consensus_reached = consensus
+            round_record.final_agreement = final_agreement
+            rounds.append(round_record)
+
+            if consensus:
+                break
+
+        current_proposal.status = "accepted" if consensus else "expired"
+
+        result = {
+            "proposal_id": proposal.proposal_id,
+            "status": "consensus" if consensus else "no_consensus",
+            "rounds": len(rounds),
+            "consensus": consensus,
+            "agreement": final_agreement,
+            "final_proposal": {
+                "task": current_proposal.task_description,
+                "requirements": current_proposal.requirements,
+                "constraints": current_proposal.constraints,
+            },
+        }
+        self._negotiation_history.append(result)
+        self._persist_negotiation_result(result)
+        log.info(
+            "W4-4: 协商完成",
+            proposal_id=proposal.proposal_id,
+            consensus=consensus,
+            rounds=len(rounds),
+        )
+        return result
+
+    async def _evaluate_proposal(
+        self,
+        agent: BaseAgent,
+        proposal: NegotiationProposal,
+    ) -> NegotiationResponse:
+        """W4-4: Agent 评估提案并生成响应。
+
+        根据 Agent 的能力、当前状态和负载评估提案可行性。
+
+        Args:
+            agent: 评估提案的 Agent。
+            proposal: 待评估的提案。
+
+        Returns:
+            NegotiationResponse: 评估响应。
+        """
+        agent_name = agent.name
+        agent_state = self._agent_states.get(agent_name, "unknown")
+        health = self._agent_health.get(agent_name, {})
+        is_healthy = health.get("status") == "healthy"
+        error_count = health.get("error_count", 0)
+
+        capability_match = False
+        for cap in agent.config.capabilities:
+            if any(
+                kw in proposal.task_description.lower()
+                for kw in [cap.name.lower(), (cap.description or "").lower()[:20]]
+            ):
+                capability_match = True
+                break
+
+        if not is_healthy or agent_state == "error":
+            return self.create_response(
+                proposal_id=proposal.proposal_id,
+                responder=agent_name,
+                accepted=False,
+                reason=f"Agent 状态异常: state={agent_state}, errors={error_count}",
+            )
+
+        if agent_state == "busy":
+            return self.create_response(
+                proposal_id=proposal.proposal_id,
+                responder=agent_name,
+                accepted=False,
+                partial=True,
+                counter_offer="稍后可接受，当前忙碌",
+                conditions=["等待当前任务完成"],
+                reason="Agent 正在执行其他任务",
+            )
+
+        if not capability_match:
+            return self.create_response(
+                proposal_id=proposal.proposal_id,
+                responder=agent_name,
+                accepted=False,
+                reason="能力不匹配",
+            )
+
+        if proposal.constraints:
+            unmet = [c for c in proposal.constraints if "不可" in c or "禁止" in c]
+            if unmet:
+                return self.create_response(
+                    proposal_id=proposal.proposal_id,
+                    responder=agent_name,
+                    accepted=True,
+                    partial=True,
+                    conditions=[f"需调整约束: {c}" for c in unmet],
+                    modified_requirements=proposal.requirements,
+                    reason=f"部分约束需协商: {unmet}",
+                )
+
+        return self.create_response(
+            proposal_id=proposal.proposal_id,
+            responder=agent_name,
+            accepted=True,
+        )
+
+    def _create_counter_proposal(
+        self,
+        original: NegotiationProposal,
+        response: NegotiationResponse,
+    ) -> NegotiationProposal:
+        """W4-4: 根据响应创建反向提案。
+
+        Args:
+            original: 原始提案。
+            response: 响应方反馈。
+
+        Returns:
+            NegotiationProposal: 修改后的新提案。
+        """
+        new_requirements = response.modified_requirements or original.requirements
+        new_constraints = original.constraints[:]
+        if response.conditions:
+            new_constraints.extend(response.conditions)
+
+        counter = NegotiationProposal(
+            proposal_id=f"prop_{uuid.uuid4().hex[:8]}",
+            proposer=original.proposer,
+            task_description=response.counter_offer or original.task_description,
+            requirements=new_requirements,
+            constraints=new_constraints,
+            priority=original.priority,
+            deadline_ms=original.deadline_ms,
+            status="counter_offered",
+            created_at=time.time(),
+        )
+        return counter
+
+    def get_negotiation_history(self, limit: int = 50) -> list[dict[str, Any]]:
+        """W4-4: 获取协商历史记录。
+
+        Args:
+            limit: 返回最大数量。
+
+        Returns:
+            list[dict]: 协商历史记录列表。
+        """
+        return self._negotiation_history[-limit:]
 
 
 class OrchestratorAgent:

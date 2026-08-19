@@ -174,6 +174,10 @@ export class ContextManager {
   private compressionConfig: CompressionThresholdConfig;
   private lruAccessMap: Map<string, number> = new Map();
 
+  private delegatePipeline: {
+    buildContext(input: UserInput): Promise<ChatMessage[]>;
+  } | null = null;
+
   constructor(deps: ContextManagerDeps, totalBudget: number = 8000) {
     this.deps = deps;
     this.allocator = new TokenBudgetAllocator(totalBudget);
@@ -187,6 +191,16 @@ export class ContextManager {
    * 构建完整的上下文消息
    */
   async buildContext(input: UserInput): Promise<ChatMessage[]> {
+    if (this.delegatePipeline) {
+      try {
+        return await this.delegatePipeline.buildContext(input);
+      } catch (err) {
+        Logger.warn(
+          `UnifiedContextPipeline 委托失败，回退到 TS 本地实现: ${(err as Error).message}`,
+          'ContextManager'
+        );
+      }
+    }
     this.entries = [];
     const allocation = this.allocator.allocate();
     const messages: ChatMessage[] = [];
@@ -682,6 +696,13 @@ export class ContextManager {
    */
   getEntries(): ContextEntry[] {
     return [...this.entries];
+  }
+
+  setDelegatePipeline(pipeline: { buildContext(input: UserInput): Promise<ChatMessage[]> } | null): void {
+    this.delegatePipeline = pipeline;
+    if (pipeline) {
+      Logger.info('ContextManager: 已设置 UnifiedContextPipeline 委托', 'ContextManager');
+    }
   }
 
   /**

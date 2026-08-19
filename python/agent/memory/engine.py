@@ -6,6 +6,7 @@ import time
 from typing import Any, Optional
 
 from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
 from agent.memory.multimodal_encoder import (
     EncodedVector,
     ModalityType,
@@ -42,18 +43,19 @@ class MemoryEngine:
         _multimodal_encoder: 多模态编码器实例（惰性初始化，默认降级模式）。
     """
 
-    def __init__(self, db_path: str | None = None, llm: Any = None) -> None:
+    def __init__(self, db_path: str | None = None, llm: Any = None, vector_store: Any = None) -> None:
         """初始化记忆引擎。
 
         Args:
             db_path: SQLite 数据库路径，默认使用 MemoryStore 内部默认路径。
             llm: 可选的 LLM 实例，用于语义引擎增强。
+            vector_store: 可选的 VectorStore 实例，用于混合检索增强。
         """
         # 惰性导入以打破循环依赖：agent.memory.store → agent.persistence
         # → agent.persistence.service → agent.memory.engine → agent.memory.store
         from agent.memory.store import MemoryStore
 
-        self._store = MemoryStore(db_path=db_path) if db_path else MemoryStore()
+        self._store = MemoryStore(db_path=db_path, vector_store=vector_store) if (db_path or vector_store) else MemoryStore()
         self._episodic_store: Any | None = None
         # 仅当环境变量启用时挂载 Redis 缓存层
         self._redis_cache: Optional[RedisCache] = (
@@ -103,11 +105,31 @@ class MemoryEngine:
         emotion: str = "neutral",
         metadata: dict[str, Any] | None = None,
     ) -> str:
-        """写入记忆到 SQLite，并同步回填 Redis 缓存（若启用）。"""
+        """写入记忆到 SQLite，并同步回填 Redis 缓存（若启用）。
+
+        审计 P0-2：写入审批门开启时，暂存到 pending_writes，需人工审批。
+        """
         if not content or not content.strip():
             raise ValueError("记忆内容不能为空")
         if len(content) > 500000:
             raise ValueError(f"记忆内容过长: {len(content)} > 500000 字符")
+
+        # ─── 审计 P0-2：写入审批门 ───
+        if self._write_gate_enabled:
+            import uuid as _uuid
+            write_id = _uuid.uuid4().hex[:12]
+            self._pending_writes.append({
+                "id": write_id,
+                "content": content,
+                "memory_type": memory_type,
+                "scene": scene,
+                "emotion": emotion,
+                "metadata": metadata,
+                "submitted_at": time.time(),
+            })
+            log.info("记忆写入已暂存待审批", write_id=write_id, memory_type=memory_type)
+            return write_id
+
         mem_id = self._store.store(content, memory_type, scene, emotion, metadata)
         # 写入 SQLite 后同步写入 Redis 缓存
         if self._redis_cache is not None and mem_id:
@@ -216,6 +238,76 @@ class MemoryEngine:
 
         return results
 
+    async def search_hybrid(
+        self,
+        query: str,
+        limit: int = 10,
+        memory_type: str | None = None,
+        min_relevance: float = 0.0,
+        scene_filter: str | None = None,
+        time_weight: float = 0.0,
+        recent_hours: float = 0.0,
+        user_id: str | None = None,
+        rrf_k: int = 60,
+    ) -> list[dict[str, Any]]:
+        """混合检索：FTS5 + ChromaDB 向量检索，RRF 融合排序。
+
+        先查 Redis 缓存，未命中再执行混合检索并回填。
+        当 VectorStore 不可用时回退到纯 FTS5 搜索。
+
+        Args:
+            query: 搜索查询文本。
+            limit: 最大返回数量。
+            memory_type: 记忆类型过滤。
+            min_relevance: 最小相关度阈值。
+            scene_filter: 场景过滤。
+            time_weight: 时间权重。
+            recent_hours: 仅搜索最近 N 小时。
+            user_id: 用户 ID 过滤。
+            rrf_k: RRF 平滑常数，默认 60。
+
+        Returns:
+            按混合相关性排序的记忆列表。
+        """
+        # Redis 缓存：先查
+        cache_key: Optional[str] = None
+        if self._redis_cache is not None:
+            try:
+                cache_key = self._build_search_cache_key(
+                    _SEARCH_CACHE_PREFIX,
+                    "hybrid",
+                    query,
+                    limit,
+                    memory_type,
+                    min_relevance,
+                    scene_filter,
+                    rrf_k,
+                )
+                cached = await self._redis_cache.get(cache_key)
+                if cached is not None:
+                    log.debug("Redis 缓存命中 hybrid search", query=query[:50])
+                    return cached
+            except Exception as exc:
+                log.warning("Redis 缓存读取失败", error=str(exc))
+
+        results = await self._store.search_hybrid(
+            query=query, limit=limit, memory_type=memory_type,
+            min_relevance=min_relevance, scene_filter=scene_filter,
+            time_weight=time_weight, recent_hours=recent_hours,
+            user_id=user_id, rrf_k=rrf_k,
+        )
+
+        # Redis 缓存：未命中则回填
+        if self._redis_cache is not None and cache_key and results:
+            try:
+                await self._redis_cache.set(
+                    cache_key, results, ttl=_SEARCH_CACHE_TTL
+                )
+            except Exception as exc:
+                log.warning("Redis 缓存回填失败", error=str(exc))
+
+        return results
+
     async def search_with_context(
         self,
         query: str,
@@ -277,11 +369,24 @@ class MemoryEngine:
             except Exception as exc:
                 log.warning("Redis 缓存读取失败", error=str(exc))
 
-        fts_results = self._store.search(
-            query, limit=limit * 2, scene_filter=scene, recent_hours=recent_hours,
-            time_weight=fts_time_weight if recent_hours > 0 else 0.0,
-        )
-        semantic_results = self._store.search_semantic(query, limit=limit * 2)
+        # 混合检索：VectorStore 可用时用 hybrid_search，否则回退到 FTS + semantic
+        fts_results: list[dict[str, Any]] = []
+        semantic_results: list[dict[str, Any]] = []
+        if self._store._vector_store and self._store._vector_store.is_available():
+            # 混合检索路径：FTS5 + ChromaDB 向量，RRF 融合
+            fts_results = await self._store.search_hybrid(
+                query, limit=limit * 2, scene_filter=scene,
+                recent_hours=recent_hours,
+                time_weight=fts_time_weight if recent_hours > 0 else 0.0,
+            )
+            # 混合检索已融合语义信息，semantic_results 置空避免重复
+        else:
+            # 原始路径：FTS + 语义搜索分别召回
+            fts_results = self._store.search(
+                query, limit=limit * 2, scene_filter=scene, recent_hours=recent_hours,
+                time_weight=fts_time_weight if recent_hours > 0 else 0.0,
+            )
+            semantic_results = self._store.search_semantic(query, limit=limit * 2)
         episodic_results: list[dict[str, Any]] = []
         if scene != "episodic":
             try:
@@ -289,8 +394,8 @@ class MemoryEngine:
                     query, limit=3, scene_filter="episodic",
                     time_weight=episodic_time_weight,
                 )
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "engine.MemoryEngine.search_with_context", _exc)
 
         # P2-3: 同时查询 EpisodicMemoryStore (情景记忆)
         if self._episodic_store:
@@ -311,8 +416,8 @@ class MemoryEngine:
                         "relevance_score": episodic_relevance,
                         "source": "episodic_store",
                     })
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "engine.MemoryEngine.search_with_context", _exc)
 
         merged: dict[str, dict[str, Any]] = {}
         for item in fts_results:
@@ -369,6 +474,13 @@ class MemoryEngine:
                 deduped.append(r)
         results = deduped
 
+        # ─── 审计 D-01：TTL 过期过滤 — 即时/短期记忆按 expires_at 过滤 ───
+        now = time.time()
+        results = [
+            r for r in results
+            if self._is_memory_fresh(r, now)
+        ]
+
         # P1-3: 时效衰减 — 近期记忆获得权重提升
         if use_recency_decay and results:
             now = time.time()
@@ -398,8 +510,8 @@ class MemoryEngine:
                         kg_entry["relevance_score"] = kg_entry.get("relevance_score", 0.4) * kg_relevance_factor
                         kg_entry["source"] = "knowledge_graph"
                         results.append(kg_entry)
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "engine.MemoryEngine.search_with_context", _exc)
 
         for r in results[:limit]:
             log.debug(
@@ -411,6 +523,9 @@ class MemoryEngine:
             )
 
         final_results = results[:limit]
+
+        # 审计 P1-4：快照冻结 — 追加 frozen_at 时间戳
+        final_results = self._with_frozen_at(final_results)
 
         # Redis 缓存：未命中则回填
         if self._redis_cache is not None and cache_key and final_results:
@@ -579,18 +694,167 @@ class MemoryEngine:
             try:
                 episodic_stats = self._episodic_store.get_stats()
                 stats["episodic"] = episodic_stats
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "engine.MemoryEngine.get_stats", _exc)
         return stats
 
+    # ─── 记忆 TTL 配置（审计 D-01：即时/短期记忆边界模糊） ───
+    _MEMORY_TTL_MAP: dict[str, int] = {
+        "instant": 300,       # 即时记忆：5 分钟
+        "short_term": 86400,  # 短期记忆：24 小时
+        "long_term": 0,       # 长期记忆：永不过期（0 = 无 TTL）
+    }
+
+    # ─── 审计 P0-2：记忆写入审批门 ───
+    _write_gate_enabled: bool = False
+    _pending_writes: list[dict[str, Any]] = []
+
+    @classmethod
+    def enable_write_gate(cls) -> None:
+        """开启写入审批门。Agent 写入暂存，需人工审批。"""
+        cls._write_gate_enabled = True
+        log.info("记忆写入审批门已开启")
+
+    @classmethod
+    def disable_write_gate(cls) -> None:
+        """关闭写入审批门。Agent 写入直通。"""
+        cls._write_gate_enabled = False
+        cls._pending_writes.clear()
+        log.info("记忆写入审批门已关闭")
+
+    @classmethod
+    def is_write_gate_enabled(cls) -> bool:
+        return cls._write_gate_enabled
+
+    @classmethod
+    def get_pending_writes(cls) -> list[dict[str, Any]]:
+        """获取待审批的写入列表。"""
+        return list(cls._pending_writes)
+
+    @classmethod
+    def approve_write(cls, write_id: str) -> dict[str, Any] | None:
+        """审批通过一条写入。"""
+        for i, w in enumerate(cls._pending_writes):
+            if w.get("id") == write_id:
+                return cls._pending_writes.pop(i)
+        return None
+
+    @classmethod
+    def reject_write(cls, write_id: str, reason: str = "") -> dict[str, Any] | None:
+        """拒绝一条写入。"""
+        for i, w in enumerate(cls._pending_writes):
+            if w.get("id") == write_id:
+                rejected = cls._pending_writes.pop(i)
+                log.info("记忆写入被拒绝", write_id=write_id, reason=reason)
+                return rejected
+        return None
+
+    @classmethod
+    def approve_all_writes(cls) -> list[dict[str, Any]]:
+        """审批通过所有待审批写入。"""
+        approved = list(cls._pending_writes)
+        cls._pending_writes.clear()
+        return approved
+
+    @staticmethod
+    def _is_memory_fresh(item: dict[str, Any], now: float) -> bool:
+        """检查记忆是否在 TTL 内有效。"""
+        metadata = item.get("metadata")
+        if not metadata:
+            return True
+        if isinstance(metadata, str):
+            import json
+            try:
+                metadata = json.loads(metadata)
+            except (json.JSONDecodeError, TypeError):
+                return True
+        expires_at = metadata.get("expires_at")
+        if expires_at is None:
+            return True
+        return now < float(expires_at)
+
+    # ─── 审计 P1-2：批量原子记忆操作 ───
+
+    async def store_batch(
+        self,
+        items: list[dict[str, Any]],
+    ) -> list[str]:
+        """批量原子写入记忆。全部成功或全部回滚。
+
+        Args:
+            items: 记忆列表，每项含 content/memory_type/scene/emotion/metadata。
+
+        Returns:
+            写入成功的记忆 ID 列表。
+
+        Raises:
+            ValueError: 当 items 为空或某条 content 为空时。
+        """
+        if not items:
+            raise ValueError("批量写入列表不能为空")
+
+        for item in items:
+            if not item.get("content", "").strip():
+                raise ValueError("批量写入中某条记忆内容为空")
+
+        ids = []
+        try:
+            for item in items:
+                mem_id = await self.store(
+                    content=item["content"],
+                    memory_type=item.get("memory_type", "short_term"),
+                    scene=item.get("scene", ""),
+                    emotion=item.get("emotion", "neutral"),
+                    metadata=item.get("metadata"),
+                )
+                ids.append(mem_id)
+            log.info("批量记忆写入成功", count=len(ids))
+            return ids
+        except Exception:
+            # 删除已写入的条目
+            for mid in ids:
+                try:
+                    self._store.delete_by_id(mid)
+                except Exception as _exc:
+                    log_ignored(log, "engine.MemoryEngine.store_batch", _exc)
+            raise
+
+    # ─── 审计 P1-4：记忆快照冻结 ───
+
+    _snapshot_frozen_at: float | None = None
+
+    @classmethod
+    def freeze_snapshot(cls) -> None:
+        """冻结当前记忆快照。后续修改不影响已搜索的结果。"""
+        cls._snapshot_frozen_at = time.time()
+        log.info("记忆快照已冻结", frozen_at=cls._snapshot_frozen_at)
+
+    @classmethod
+    def unfreeze_snapshot(cls) -> None:
+        """解冻快照。"""
+        cls._snapshot_frozen_at = None
+        log.info("记忆快照已解冻")
+
+    @classmethod
+    def _with_frozen_at(cls, results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """为搜索结果追加冻结时间戳。"""
+        if cls._snapshot_frozen_at is not None:
+            for r in results:
+                r["frozen_at"] = cls._snapshot_frozen_at
+        return results
+
     async def store_short_term(self, content: str, scene: str = "", emotion: str = "neutral") -> str:
-        return self._store.store(content, "short_term", scene, emotion)
+        ttl = self._MEMORY_TTL_MAP.get("short_term", 0)
+        meta = {"ttl_seconds": ttl, "expires_at": int(time.time() + ttl)} if ttl else {}
+        return self._store.store(content, "short_term", scene, emotion, metadata=meta if meta else None)
 
     async def store_long_term(self, content: str, scene: str = "", emotion: str = "neutral") -> str:
         return self._store.store(content, "long_term", scene, emotion)
 
     async def store_instant(self, content: str, scene: str = "", emotion: str = "neutral") -> str:
-        return self._store.store(content, "instant", scene, emotion)
+        ttl = self._MEMORY_TTL_MAP.get("instant", 0)
+        meta = {"ttl_seconds": ttl, "expires_at": int(time.time() + ttl)}
+        return self._store.store(content, "instant", scene, emotion, metadata=meta)
 
     async def update(
         self,
@@ -910,8 +1174,8 @@ class MemoryEngine:
                 try:
                     await self.store_long_term(r.get("content", ""), r.get("scene", ""), r.get("emotion", "neutral"))
                     consolidated += 1
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    log_ignored(log, "engine.MemoryEngine._dream_consolidation", _exc)
         return consolidated
 
     async def _dream_cleanup(self) -> int:

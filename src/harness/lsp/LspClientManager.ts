@@ -9,18 +9,18 @@ import { EventEmitter } from 'events';
 import { Logger } from '../../utils/Logger';
 import { LspTransport } from './LspTransport';
 import type {
-  LspConnectionState,
-  LspDiagnostic,
-  LspDocumentSymbol,
-  LspHover,
-  LspLocation,
-  LspPosition,
-  LspPublishDiagnosticsParams,
-  LspServerCapabilities,
-  LspServerConfig,
-  LspTextDocumentItem,
-  LspVersionedTextDocumentIdentifier,
-  LspWorkspaceConfig,
+    LspConnectionState,
+    LspDiagnostic,
+    LspDocumentSymbol,
+    LspHover,
+    LspLocation,
+    LspPosition,
+    LspPublishDiagnosticsParams,
+    LspServerCapabilities,
+    LspServerConfig,
+    LspTextDocumentItem,
+    LspVersionedTextDocumentIdentifier,
+    LspWorkspaceConfig,
 } from './types';
 import { LspTextDocumentSyncKind } from './types';
 
@@ -91,6 +91,10 @@ export class LspClientManager extends EventEmitter {
 
   private constructor() {
     super();
+  }
+
+  static create(): LspClientManager {
+    return new LspClientManager();
   }
 
   static getInstance(): LspClientManager {

@@ -1,20 +1,20 @@
 import express, { Request, Response } from 'express';
-import { Logger } from '../../utils/Logger';
-import {
-  IntegrationPlatform,
-  ConnectRequest,
-  SendMessageRequest,
-  ApiResponse,
-  IntegrationStatusResponse,
-  PlatformConnectResponse,
-  PlatformDisconnectResponse,
-  SendMessageResponse,
-} from '../../shared/contracts';
+import { GatewayBridge } from '../../integration/GatewayBridge';
 import {
   IntegrationManager,
   WebhookEndpoint,
 } from '../../integration/IntegrationManager';
-import { GatewayBridge } from '../../integration/GatewayBridge';
+import {
+  ApiResponse,
+  ConnectRequest,
+  IntegrationPlatform,
+  IntegrationStatusResponse,
+  PlatformConnectResponse,
+  PlatformDisconnectResponse,
+  SendMessageRequest,
+  SendMessageResponse,
+} from '../../shared/contracts';
+import { Logger } from '../../utils/Logger';
 
 const router = express.Router();
 
@@ -36,7 +36,7 @@ router.get('/wechat/qrcode', async (_req: Request, res: Response) => {
   try {
     const gateway = getGateway();
     const qrState = isBridge(gateway)
-      ? gateway.getWeChatQRState()
+      ? await gateway.getWeChatQRState()
       : gateway.getWeChatQRState();
 
     if (!qrState) {
@@ -116,7 +116,7 @@ router.post('/:platform/connect', async (req: Request, res: Response) => {
       result === true ||
       (typeof result === 'object' &&
         result !== null &&
-        (result as any).status === 'connected');
+        (result as Record<string, unknown>).status === 'connected');
 
     const response: ApiResponse<PlatformConnectResponse> = {
       success: connected,

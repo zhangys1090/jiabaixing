@@ -9,14 +9,26 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { defaultConfig, DefaultConfig } from './default.config';
 import { Logger } from '../utils/Logger';
+import { defaultConfig, DefaultConfig } from './default.config';
 
 type DeepPartial<T> = {
   [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K];
 };
 
-let yamlModule: typeof import('js-yaml');
+let yamlModule: typeof import('js-yaml') | null | undefined;
+
+/** 懒加载 js-yaml 模块（可选依赖） */
+function getYamlModule(): typeof import('js-yaml') | null {
+  if (yamlModule !== undefined) return yamlModule ?? null;
+  try {
+    // 同步 require，避免在 load() 中引入异步
+    yamlModule = require('js-yaml');
+  } catch {
+    yamlModule = null;
+  }
+  return yamlModule ?? null;
+}
 
 /**
  * 递归展开对象中的 ${ENV_VAR} 占位符
@@ -138,7 +150,11 @@ export class YamlConfigParser {
       unknown
     >;
     for (let i = 0; i < keys.length - 1; i++) {
-      current = current[keys[i]] ??= {};
+      const next = current[keys[i]] as Record<string, unknown> | undefined;
+      if (!next || typeof next !== 'object') {
+        current[keys[i]] = {};
+      }
+      current = current[keys[i]] as Record<string, unknown>;
     }
     current[keys[keys.length - 1]] = value;
     this.notifyListeners();
@@ -147,7 +163,7 @@ export class YamlConfigParser {
   // ---- 内部方法 ----
 
   private load(): void {
-    const yaml = yamlModule;
+    const yaml = getYamlModule();
 
     // 1. 基础 = 默认配置
     let merged = { ...defaultConfig } as Record<string, unknown>;
@@ -184,7 +200,7 @@ export class YamlConfigParser {
     if (yaml && fs.existsSync(this.configPath)) {
       try {
         const yamlContent = fs.readFileSync(this.configPath, 'utf-8');
-        const parsed = yaml.load(yamlContent) as Record<string, unknown>;
+        const parsed = yaml.safeLoad(yamlContent) as Record<string, unknown>;
         if (parsed && typeof parsed === 'object') {
           merged = deepMerge(merged, parsed);
         }
@@ -196,9 +212,9 @@ export class YamlConfigParser {
     }
 
     // 4. 环境变量覆盖（优先级最高）
-    merged = expandEnvVars(merged);
+    merged = expandEnvVars(merged) as Record<string, unknown>;
 
-    this.mergedConfig = merged;
+    this.mergedConfig = merged as unknown as DefaultConfig;
     try {
       this.lastMtime = fs.statSync(this.configPath).mtimeMs;
     } catch {
@@ -213,7 +229,7 @@ export class YamlConfigParser {
    * DATABASE_HOST=db.local -> database.host = "db.local"
    */
   private applyEnvToConfig(
-    config: Record<string, any>,
+    config: Record<string, unknown>,
     envKey: string,
     value: string
   ): void {
@@ -250,7 +266,7 @@ export class YamlConfigParser {
       let current = config;
       for (const key of keys) {
         if (!(key in current)) current[key] = {};
-        current = current[key];
+        current = current[key] as Record<string, unknown>;
       }
       current[keys[keys.length - 1]] = this.coerceValue(value);
     }

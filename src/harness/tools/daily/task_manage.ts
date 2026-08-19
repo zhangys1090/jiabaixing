@@ -4,6 +4,7 @@
 
 import type { ToolContext, ToolDefinition, ToolResult } from '../../types';
 import { Permission, ToolCategory } from '../../types';
+import { withStoreLock } from './storeLock';
 
 export interface TaskEntry {
   id: string;
@@ -88,14 +89,24 @@ function formatTaskList(tasks: TaskEntry[]): string {
       return `${icon} [${t.id}] ${t.title}${tagStr}${due} ${priority}`;
     })
     .join('\n');
-}
-
+} /** 创建 task_manage 执行器 */
 export function createTaskManageExecutor(deps: TaskManageDeps) {
   return async (
     params: Record<string, unknown>,
     _context?: ToolContext
   ): Promise<ToolResult> => {
     const action = String(params.action || '');
+
+    if (!deps.taskStore) {
+      return {
+        success: false,
+        output: null,
+        error:
+          'task_manage 不可用: taskStore 未注入，请在 initHarness 中配置任务存储依赖',
+        duration: 0,
+        validated: false,
+      };
+    }
 
     try {
       switch (action) {
@@ -122,22 +133,40 @@ export function createTaskManageExecutor(deps: TaskManageDeps) {
             tags: Array.isArray(params.tags) ? params.tags.map(String) : [],
             createdAt: Date.now(),
           };
-          await deps.taskStore.saveTask(task);
-          return {
-            success: true,
-            output: `任务已创建: [${task.id}] ${task.title}`,
-            duration: 0,
-            validated: false,
-          };
+          return withStoreLock(deps.taskStore, async () => {
+            await deps.taskStore.saveTask(task);
+            return {
+              success: true,
+              output: `任务已创建: [${task.id}] ${task.title}`,
+              duration: 0,
+              validated: false,
+            };
+          });
         }
 
         case 'list': {
-          const tasks = await deps.taskStore.getTasks();
+          let tasks = await deps.taskStore.getTasks();
+          const statusFilter = params.status as string | undefined;
+          if (statusFilter && ['pending', 'completed'].includes(statusFilter)) {
+            tasks = tasks.filter((t) => t.status === statusFilter);
+          }
+          const priorityOrder = { high: 0, medium: 1, low: 2 };
+          tasks.sort(
+            (a, b) =>
+              (priorityOrder[a.priority as keyof typeof priorityOrder] ?? 1) -
+              (priorityOrder[b.priority as keyof typeof priorityOrder] ?? 1)
+          );
+          const summary = `共 ${tasks.length} 个任务${statusFilter ? ` (筛选: ${statusFilter})` : ''}`;
           return {
             success: true,
-            output: formatTaskList(tasks),
+            output: `${summary}\n${formatTaskList(tasks)}`,
             duration: 0,
             validated: false,
+            metadata: {
+              total: tasks.length,
+              pending: tasks.filter((t) => t.status === 'pending').length,
+              completed: tasks.filter((t) => t.status === 'completed').length,
+            },
           };
         }
 
@@ -152,26 +181,28 @@ export function createTaskManageExecutor(deps: TaskManageDeps) {
               validated: false,
             };
           }
-          const tasks = await deps.taskStore.getTasks();
-          const task = tasks.find((t) => t.id === taskId);
-          if (!task) {
+          return withStoreLock(deps.taskStore, async () => {
+            const tasks = await deps.taskStore.getTasks();
+            const task = tasks.find((t) => t.id === taskId);
+            if (!task) {
+              return {
+                success: false,
+                output: null,
+                error: `任务不存在: ${taskId}`,
+                duration: 0,
+                validated: false,
+              };
+            }
+            task.status = 'completed';
+            task.completedAt = Date.now();
+            await deps.taskStore.saveTask(task);
             return {
-              success: false,
-              output: null,
-              error: `任务不存在: ${taskId}`,
+              success: true,
+              output: `任务已完成: [${task.id}] ${task.title}`,
               duration: 0,
               validated: false,
             };
-          }
-          task.status = 'completed';
-          task.completedAt = Date.now();
-          await deps.taskStore.saveTask(task);
-          return {
-            success: true,
-            output: `任务已完成: [${task.id}] ${task.title}`,
-            duration: 0,
-            validated: false,
-          };
+          });
         }
 
         case 'delete': {
@@ -185,13 +216,15 @@ export function createTaskManageExecutor(deps: TaskManageDeps) {
               validated: false,
             };
           }
-          await deps.taskStore.deleteTask(taskId);
-          return {
-            success: true,
-            output: `任务已删除: ${taskId}`,
-            duration: 0,
-            validated: false,
-          };
+          return withStoreLock(deps.taskStore, async () => {
+            await deps.taskStore.deleteTask(taskId);
+            return {
+              success: true,
+              output: `任务已删除: ${taskId}`,
+              duration: 0,
+              validated: false,
+            };
+          });
         }
 
         case 'update': {
@@ -205,29 +238,31 @@ export function createTaskManageExecutor(deps: TaskManageDeps) {
               validated: false,
             };
           }
-          const tasks = await deps.taskStore.getTasks();
-          const task = tasks.find((t) => t.id === taskId);
-          if (!task) {
+          return withStoreLock(deps.taskStore, async () => {
+            const tasks = await deps.taskStore.getTasks();
+            const task = tasks.find((t) => t.id === taskId);
+            if (!task) {
+              return {
+                success: false,
+                output: null,
+                error: `任务不存在: ${taskId}`,
+                duration: 0,
+                validated: false,
+              };
+            }
+            if (params.title) task.title = String(params.title);
+            if (params.description) task.description = String(params.description);
+            if (params.priority) task.priority = String(params.priority);
+            if (params.due_date) task.dueDate = String(params.due_date);
+            if (Array.isArray(params.tags)) task.tags = params.tags.map(String);
+            await deps.taskStore.saveTask(task);
             return {
-              success: false,
-              output: null,
-              error: `任务不存在: ${taskId}`,
+              success: true,
+              output: `任务已更新: [${task.id}] ${task.title}`,
               duration: 0,
               validated: false,
             };
-          }
-          if (params.title) task.title = String(params.title);
-          if (params.description) task.description = String(params.description);
-          if (params.priority) task.priority = String(params.priority);
-          if (params.due_date) task.dueDate = String(params.due_date);
-          if (Array.isArray(params.tags)) task.tags = params.tags.map(String);
-          await deps.taskStore.saveTask(task);
-          return {
-            success: true,
-            output: `任务已更新: [${task.id}] ${task.title}`,
-            duration: 0,
-            validated: false,
-          };
+          });
         }
 
         default:

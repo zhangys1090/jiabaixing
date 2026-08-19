@@ -163,7 +163,8 @@ def _known_catalog() -> list[ProviderSpec]:
             default_base_url="https://api.deepseek.com/v1",
             auth=ProviderAuth.API_KEY,
             oauth_supported=False,
-            default_models=["deepseek-chat", "deepseek-reasoner"],
+            default_models=["deepseek-v4-flash", "deepseek-v4-pro"],
+            notes="V4 Flash 具备原生 Agent 能力；deepseek-chat/deepseek-reasoner 已于 2026-07-24 下架",
         ),
         ProviderSpec(
             id="zhipu",

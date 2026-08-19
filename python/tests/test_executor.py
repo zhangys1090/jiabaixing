@@ -20,6 +20,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from agent.loop.executor import Executor, _DEFAULT_TOOL_TIMEOUT, _DEFAULT_LLM_TIMEOUT
+from agent.tools.registry import ToolResult
 from agent.loop.robustness import ErrorType, RobustnessConfig, RobustnessManager
 from agent.loop.types import (
     ExecutorOutput,
@@ -113,6 +114,84 @@ def simple_step():
         tool_name="test_tool",
         tool_params={"query": "hello"},
     )
+
+
+@pytest.fixture
+def guarded_executor(mock_llm, mock_tool_registry, mock_reflection, robustness_manager):
+    """C1: 注入真实 SchemaValidator / ToolCallGuard 的 Executor，验证 step 级防护生效。"""
+    from agent.tools.schema_validator import SchemaValidator
+    from agent.tools.tool_call_guard import ToolCallGuard
+
+    return Executor(
+        llm=mock_llm,
+        tool_registry=mock_tool_registry,
+        reflection=mock_reflection,
+        robustness_manager=robustness_manager,
+        schema_validator=SchemaValidator(),
+        tool_call_guard=ToolCallGuard(),
+    )
+
+
+def _def_with_required_param(name: str = "query"):
+    """构造带一个必填字符串参数的工具定义 mock。"""
+    mock_def = MagicMock()
+    param = MagicMock()
+    param.name = name
+    param.type = "string"
+    param.description = "查询"
+    param.required = True
+    param.enum = None
+    param.default = None
+    mock_def.parameters = [param]
+    return mock_def
+
+
+class TestGuardWiring:
+    """C1 回归：防护串主路径（LoopController→Executor）在 guards 注入后必须真正生效。"""
+
+    @pytest.mark.asyncio
+    async def test_schema_validation_missing_required_blocks_execution(
+        self, guarded_executor, mock_tool_registry, loop_context
+    ):
+        mock_tool_registry.get_definition = MagicMock(return_value=_def_with_required_param())
+        step = PlanStep(step_id="s1", description="d", tool_name="t", tool_params={})
+        result = await guarded_executor._execute_with_tool(step, loop_context)
+        assert result.success is False
+        assert result.metadata.get("schema_validation_failed") is True
+        # 被 schema 拦截后不应真正执行工具
+        mock_tool_registry.execute.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_guard_dedup_blocks_identical_repeat_call(
+        self, guarded_executor, mock_tool_registry, loop_context
+    ):
+        mock_tool_registry.get_definition = MagicMock(return_value=MagicMock(parameters=[]))
+        mock_tool_registry.execute = AsyncMock(
+            return_value=ToolResult(success=True, output="ok")
+        )
+        step1 = PlanStep(step_id="s1", description="d", tool_name="t", tool_params={"q": "x"})
+        r1 = await guarded_executor._execute_with_tool(step1, loop_context)
+        assert r1.success is True
+
+        step2 = PlanStep(step_id="s2", description="d", tool_name="t", tool_params={"q": "x"})
+        r2 = await guarded_executor._execute_with_tool(step2, loop_context)
+        assert r2.metadata.get("guard_blocked") is True
+        # 第二次被去重拦截 —— 真实 execute 只被调用一次
+        assert mock_tool_registry.execute.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_no_guard_when_not_injected_legacy_behavior(
+        self, executor, mock_tool_registry, loop_context
+    ):
+        """缺省（未注入守卫）时保持 C1 前行为：不拦截、正常执行。"""
+        mock_tool_registry.get_definition = MagicMock(return_value=MagicMock(parameters=[]))
+        mock_tool_registry.execute = AsyncMock(
+            return_value=ToolResult(success=True, output="ok")
+        )
+        step = PlanStep(step_id="s1", description="d", tool_name="t", tool_params={})
+        result = await executor._execute_with_tool(step, loop_context)
+        assert result.success is True
+        assert result.metadata is None or "guard_blocked" not in (result.metadata or {})
 
 
 # ─────────────────────────────────────────────

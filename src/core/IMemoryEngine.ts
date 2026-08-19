@@ -48,12 +48,12 @@ export interface IMemoryEngine {
     includeBehaviorPatterns?: boolean;
   }): Promise<unknown[]>;
   /** 精确混合检索 — 支持场景/情绪过滤的语义检索 */
-  preciseHybridRetrieval?(query: {
-    query: string;
-    scene?: string;
-    emotion?: string;
-    topK?: number;
-  }): Promise<unknown[]>;
+  preciseHybridRetrieval?(
+    query: string,
+    scene?: string,
+    emotion?: string,
+    topK?: number
+  ): Promise<unknown[]>;
   getUserProfileSummary?(userId: string): Promise<{
     name?: string;
     preferredLanguage?: string;

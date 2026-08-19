@@ -35,13 +35,15 @@
  * @since 2026-06-24
  */
 
-import { Logger } from '../../utils/Logger';
-import type { ChatMessage, UserInput } from '../types';
 import type { ConstitutionPromptBuilder } from '../../core/ConstitutionPromptBuilder';
 import type {
-  UnifiedContextPipeline,
-  UnifiedContext,
+    UnifiedContext,
+    UnifiedContextPipeline,
 } from '../../core/UnifiedContextPipeline';
+import { Logger } from '../../utils/Logger';
+import type { ChatMessage, UserInput } from '../types';
+import type { ContextFileRegistry } from './ContextFileRegistry';
+import type { ContextReferenceResolver } from './ContextReferenceResolver';
 import type { ContextWindowManager } from './ContextWindowManager';
 
 // ========== 常量定义 ==========
@@ -140,8 +142,21 @@ export class UnifiedContextBuilder {
   /** 总耗时 */
   private totalBuildTime = 0;
 
+  /** 引用计数 */
+  private referenceCountTotal = 0;
+
+  /** 缓存命中计数 */
+  private cacheHits = 0;
+
+  /** 缓存检查计数 */
+  private cacheChecks = 0;
+
   private constructor() {
     Logger.info('🧩 统一上下文构建器已初始化', 'ContextBuilder');
+  }
+
+  static create(): UnifiedContextBuilder {
+    return new UnifiedContextBuilder();
   }
 
   static getInstance(): UnifiedContextBuilder {
@@ -161,7 +176,7 @@ export class UnifiedContextBuilder {
    */
   static resetInstance(): void {
     if (UnifiedContextBuilder.instance) {
-      UnifiedContextBuilder.instance = null as any;
+      UnifiedContextBuilder.instance = null as unknown as UnifiedContextBuilder;
     }
   }
 
@@ -234,12 +249,25 @@ export class UnifiedContextBuilder {
     }
 
     // ========== 2. 解析 @引用 ==========
+    let resolvedReferences: number = 0;
     if (options.resolveReferences !== false) {
       totalComponents++;
       try {
-        // TODO: 集成 ContextReferenceResolver
-        // const references = await this.resolveReferences(options);
-        Logger.debug('引用解析: 功能待实现', 'ContextBuilder');
+        const references = await this.resolveReferences(options);
+        resolvedReferences = references.references.length;
+        this.referenceCountTotal += resolvedReferences;
+
+        if (references.resolvedContent) {
+          // 注入解析后的引用内容到消息中
+          messages.push({
+            role: 'user',
+            content: `--- 解析的引用内容 ---\n${references.resolvedContent}\n--- 引用结束 ---`,
+          });
+          Logger.debug(
+            `引用解析成功: ${resolvedReferences} 个`,
+            'ContextBuilder'
+          );
+        }
       } catch (error) {
         failedComponents++;
         const errorMsg = error instanceof Error ? error.message : String(error);
@@ -256,8 +284,14 @@ export class UnifiedContextBuilder {
       totalComponents++;
       try {
         memories = await this.loadMemories(options);
-        // TODO: 将记忆注入到上下文中
-        Logger.debug(`记忆加载完成: ${memories.length} 条`, 'ContextBuilder');
+        // 将记忆注入到上下文中
+        for (const memory of memories) {
+          messages.push({
+            role: 'user',
+            content: `[记忆注入] ${memory}`,
+          });
+        }
+        Logger.debug(`记忆注入完成: ${memories.length} 条`, 'ContextBuilder');
       } catch (error) {
         failedComponents++;
         const errorMsg = error instanceof Error ? error.message : String(error);
@@ -270,12 +304,27 @@ export class UnifiedContextBuilder {
     }
 
     // ========== 4. 加载项目文件上下文 ==========
+    let fileContextCount: number = 0;
     if (options.includeFileContext !== false) {
       totalComponents++;
       try {
-        // TODO: 集成 ContextFileRegistry
-        // const fileContext = await this.loadFileContext(options);
-        Logger.debug('文件上下文: 功能待实现', 'ContextBuilder');
+        const fileEntries = await this.loadFileContext(options);
+        fileContextCount = fileEntries.length;
+
+        if (fileEntries.length > 0) {
+          const fileContextText = fileEntries
+            .map((entry) => `[${entry.fileName}]\n${entry.content}`)
+            .join('\n\n');
+
+          messages.push({
+            role: 'system',
+            content: `--- 项目上下文 ---\n${fileContextText}\n--- 上下文结束 ---`,
+          });
+          Logger.debug(
+            `文件上下文注入完成: ${fileContextCount} 个文件`,
+            'ContextBuilder'
+          );
+        }
       } catch (error) {
         failedComponents++;
         const errorMsg = error instanceof Error ? error.message : String(error);
@@ -332,8 +381,8 @@ export class UnifiedContextBuilder {
       totalMessages: messages.length,
       estimatedTokens: this.estimateTokens(messages),
       memoryCount: memories.length,
-      fileContextCount: 0, // TODO: 实际统计
-      referenceCount: 0, // TODO: 实际统计
+      fileContextCount: fileContextCount,
+      referenceCount: resolvedReferences,
       buildTime,
     };
 
@@ -369,11 +418,13 @@ export class UnifiedContextBuilder {
     options: ContextBuildOptions
   ): Promise<string> {
     // 检查缓存
+    this.cacheChecks++;
     if (
       this.cacheEnabled &&
       this.systemPromptCache &&
       Date.now() - this.cacheTimestamp < this.cacheTTL
     ) {
+      this.cacheHits++;
       Logger.debug('使用缓存的系统 Prompt', 'ContextBuilder');
       return this.systemPromptCache;
     }
@@ -552,7 +603,8 @@ export class UnifiedContextBuilder {
       totalBuilds: this.buildCount,
       averageBuildTime:
         this.buildCount > 0 ? this.totalBuildTime / this.buildCount : 0,
-      cacheHitRate: 0, // TODO: 实际统计
+      cacheHitRate:
+        this.cacheChecks > 0 ? this.cacheHits / this.cacheChecks : 0,
     };
   }
 
@@ -591,6 +643,12 @@ export class UnifiedContextBuilder {
   /** 上下文窗口管理器 */
   private windowManager: ContextWindowManager | null = null;
 
+  /** 上下文引用解析器 */
+  private referenceResolver: ContextReferenceResolver | null = null;
+
+  /** 上下文文件注册表 */
+  private fileRegistry: ContextFileRegistry | null = null;
+
   /**
    * 注入 ConstitutionPromptBuilder
    * 用于生成符合宪法原则的系统 Prompt
@@ -620,13 +678,33 @@ export class UnifiedContextBuilder {
   }
 
   /**
+   * 注入 ContextReferenceResolver
+   * 用于解析用户输入中的 @ 引用
+   */
+  setReferenceResolver(resolver: ContextReferenceResolver): void {
+    this.referenceResolver = resolver;
+    Logger.info('ContextReferenceResolver 已注入', 'ContextBuilder');
+  }
+
+  /**
+   * 注入 ContextFileRegistry
+   * 用于加载项目上下文文件
+   */
+  setFileRegistry(registry: ContextFileRegistry): void {
+    this.fileRegistry = registry;
+    Logger.info('ContextFileRegistry 已注入', 'ContextBuilder');
+  }
+
+  /**
    * 检查所有关键组件是否已注入
    */
   isFullyIntegrated(): boolean {
     return (
       this.constitutionPromptBuilder !== null &&
       this.contextPipeline !== null &&
-      this.windowManager !== null
+      this.windowManager !== null &&
+      this.referenceResolver !== null &&
+      this.fileRegistry !== null
     );
   }
 
@@ -638,7 +716,86 @@ export class UnifiedContextBuilder {
       constitutionPromptBuilder: this.constitutionPromptBuilder !== null,
       contextPipeline: this.contextPipeline !== null,
       windowManager: this.windowManager !== null,
+      referenceResolver: this.referenceResolver !== null,
+      fileRegistry: this.fileRegistry !== null,
     };
+  }
+
+  // ========== 私有方法 ==========
+
+  /**
+   * 解析 @ 引用
+   */
+  private async resolveReferences(options: ContextBuildOptions): Promise<{
+    hasReferences: boolean;
+    references: Array<{
+      type: string;
+      target: string;
+      content?: string;
+      error?: string;
+    }>;
+    resolvedContent: string;
+    cleanedInput: string;
+  }> {
+    if (!this.referenceResolver || !options.input.text) {
+      return {
+        hasReferences: false,
+        references: [],
+        resolvedContent: '',
+        cleanedInput: options.input.text || '',
+      };
+    }
+
+    try {
+      const result = await this.referenceResolver.resolve(options.input.text);
+      return {
+        hasReferences: result.hasReferences,
+        references: result.references.map((ref) => ({
+          type: ref.type,
+          target: ref.target,
+          content: ref.content,
+          error: ref.error,
+        })),
+        resolvedContent: result.resolvedContent,
+        cleanedInput: result.cleanedInput,
+      };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      Logger.warn(`引用解析失败: ${errorMsg}`, 'ContextBuilder');
+      return {
+        hasReferences: false,
+        references: [],
+        resolvedContent: '',
+        cleanedInput: options.input.text || '',
+      };
+    }
+  }
+
+  /**
+   * 加载项目文件上下文
+   */
+  private async loadFileContext(_options: ContextBuildOptions): Promise<
+    Array<{
+      fileName: string;
+      content: string;
+      loadedAt: number;
+      source: 'project' | 'soul';
+      charCount: number;
+      truncated: boolean;
+    }>
+  > {
+    if (!this.fileRegistry) {
+      return [];
+    }
+
+    try {
+      const entries = await this.fileRegistry.loadAll();
+      return entries;
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      Logger.warn(`文件上下文加载失败: ${errorMsg}`, 'ContextBuilder');
+      return [];
+    }
   }
 }
 

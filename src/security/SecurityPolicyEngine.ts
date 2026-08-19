@@ -1,5 +1,5 @@
-import type { User, RiskLevel, RiskAssessment } from './types';
 import { Logger } from '../utils/Logger';
+import type { RiskAssessment, RiskLevel, User } from './types';
 
 export type CircuitState = 'closed' | 'open' | 'half_open';
 
@@ -205,6 +205,10 @@ export class SecurityPolicyEngine {
 
   private constructor() {
     this.slidingWindowLimiter = new SlidingWindowRateLimiter(60, 60000);
+  }
+
+  static create(): SecurityPolicyEngine {
+    return new SecurityPolicyEngine();
   }
 
   static getInstance(): SecurityPolicyEngine {

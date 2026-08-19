@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Any, Callable, Awaitable
 
 from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
 
 log = StructuredLogger("gateway.restart")
 
@@ -129,8 +130,8 @@ class HotReloader:
             self._watch_task.cancel()
             try:
                 await self._watch_task
-            except asyncio.CancelledError:
-                pass
+            except asyncio.CancelledError as _exc:
+                log_ignored(log, "restart.HotReloader.stop", _exc)
         log.info("热重载监听已停止")
 
     async def _watch_loop(self) -> None:

@@ -235,6 +235,80 @@ class A2AClient:
             return []
 
     # ───────────────────────────────────────────────────────────
+    # P2-3: A2A 服务发现（mDNS / DNS-SD）
+    # ───────────────────────────────────────────────────────────
+
+    @staticmethod
+    async def discover_via_mdns(
+        service_type: str = "_a2a._tcp.local.",
+        timeout: float = 5.0,
+    ) -> List[Dict[str, Any]]:
+        """P2-3: 通过 mDNS/DNS-SD 发现局域网内的 A2A Agent.
+
+        使用 zeroconf 库在局域网内广播和发现 A2A 服务，
+        无需预先知道目标 Agent 的 URL。
+
+        Args:
+            service_type: mDNS 服务类型，默认 _a2a._tcp.local.
+            timeout: 发现超时（秒）.
+
+        Returns:
+            List[Dict]: 发现的服务列表 [{name, host, port, properties}].
+        """
+        try:
+            from zeroconf import Zeroconf, ServiceBrowser, ServiceStateChange
+            import socket
+
+            discovered: List[Dict[str, Any]] = []
+            zc = Zeroconf()
+
+            def on_service_state_change(
+                zeroconf: Zeroconf,
+                service_type: str,
+                name: str,
+                state_change: ServiceStateChange,
+            ) -> None:
+                if state_change == ServiceStateChange.Added:
+                    info = zeroconf.get_service_info(service_type, name)
+                    if info:
+                        addresses = [
+                            socket.inet_ntoa(addr) for addr in info.addresses
+                        ]
+                        discovered.append({
+                            "name": name,
+                            "host": addresses[0] if addresses else "",
+                            "port": info.port,
+                            "properties": {
+                                k.decode(): v.decode() if isinstance(v, bytes) else v
+                                for k, v in (info.properties or {}).items()
+                            },
+                        })
+
+            browser = ServiceBrowser(zc, service_type, handlers=[on_service_state_change])
+
+            import asyncio
+            await asyncio.sleep(timeout)
+
+            browser.cancel()
+            zc.close()
+
+            logger.info(
+                "P2-3: mDNS 发现 %d 个 A2A 服务 (timeout=%.1fs)",
+                len(discovered), timeout,
+            )
+            return discovered
+
+        except ImportError:
+            logger.warning(
+                "P2-3: zeroconf 未安装，mDNS 发现不可用。"
+                "安装: pip install zeroconf"
+            )
+            return []
+        except Exception as e:
+            logger.warning("P2-3: mDNS 发现失败: %s", e)
+            return []
+
+    # ───────────────────────────────────────────────────────────
     # Task 生命周期
     # ───────────────────────────────────────────────────────────
 

@@ -1,3 +1,4 @@
+import { Logger } from '../../../utils/Logger';
 import type { ToolContext, ToolDefinition, ToolResult } from '../../types';
 import { Permission, ToolCategory } from '../../types';
 import type { TaskEntry, TaskManageDeps } from './task_manage';
@@ -18,6 +19,7 @@ export const TASK_PRIORITY_DEF: ToolDefinition = {
         'list_by_priority',
         'set_deadline',
         'urgent',
+        'dynamic_score',
       ],
     },
     task_id: {
@@ -334,6 +336,51 @@ export function createTaskPriorityExecutor(deps: TaskPriorityDeps) {
           };
         }
 
+        case 'dynamic_score': {
+          const tasks = await deps.taskStore.getTasks();
+          const pendingTasks = tasks.filter((t) => t.status === 'pending');
+
+          if (pendingTasks.length === 0) {
+            return {
+              success: true,
+              output: '暂无待办任务需要动态评分',
+              duration: 0,
+              validated: false,
+            };
+          }
+
+          const scored = dynamicPriorityScore(pendingTasks);
+          let changed = 0;
+          for (const item of scored) {
+            if (item.task.priority !== item.suggestedPriority) {
+              const oldP = item.task.priority;
+              item.task.priority = item.suggestedPriority;
+              await deps.taskStore.saveTask(item.task);
+              changed++;
+              Logger.debug(
+                `动态优先级: [${item.task.id}] ${item.task.title} (${oldP} → ${item.suggestedPriority}, score=${item.score.toFixed(2)})`,
+                'TaskPriority'
+              );
+            }
+          }
+
+          const summary = scored
+            .sort((a, b) => b.score - a.score)
+            .slice(0, 10)
+            .map(
+              (s, i) =>
+                `${i + 1}. [${s.task.id}] ${s.task.title} → ${s.suggestedPriority} (score=${s.score.toFixed(2)}, urgency=${s.factors.urgency.toFixed(2)}, impact=${s.factors.impact.toFixed(2)})`
+            )
+            .join('\n');
+
+          return {
+            success: true,
+            output: `动态优先级评分完成: ${pendingTasks.length} 个任务, ${changed} 个优先级调整\n\n${summary}`,
+            duration: 0,
+            validated: false,
+          };
+        }
+
         default:
           return {
             success: false,
@@ -353,4 +400,80 @@ export function createTaskPriorityExecutor(deps: TaskPriorityDeps) {
       };
     }
   };
+}
+
+/**
+ * P1 #10: 动态优先级评分 — 基于多因子规则约束的智能排序
+ * 因子：紧急度(截止日期)、影响力(依赖数)、等待时长、原始优先级
+ */
+export interface DynamicScoreFactors {
+  urgency: number;
+  impact: number;
+  waitTime: number;
+  basePriority: number;
+}
+
+export interface DynamicScoreResult {
+  task: TaskEntry;
+  score: number;
+  suggestedPriority: string;
+  factors: DynamicScoreFactors;
+}
+
+export function dynamicPriorityScore(tasks: TaskEntry[]): DynamicScoreResult[] {
+  const now = Date.now();
+
+  return tasks.map((task) => {
+    const factors = computeScoreFactors(task, now);
+    const score =
+      factors.urgency * 0.35 +
+      factors.impact * 0.25 +
+      factors.waitTime * 0.15 +
+      factors.basePriority * 0.25;
+
+    let suggestedPriority: string;
+    if (score >= 0.75) suggestedPriority = 'urgent';
+    else if (score >= 0.55) suggestedPriority = 'high';
+    else if (score >= 0.35) suggestedPriority = 'medium';
+    else suggestedPriority = 'low';
+
+    return { task, score, suggestedPriority, factors };
+  });
+}
+
+function computeScoreFactors(
+  task: TaskEntry,
+  now: number
+): DynamicScoreFactors {
+  // 紧急度：基于截止日期
+  let urgency = 0.3;
+  if (task.dueDate) {
+    const dueTime = new Date(task.dueDate).getTime();
+    const timeUntilDue = dueTime - now;
+    if (timeUntilDue <= 0) urgency = 1.0;
+    else if (timeUntilDue <= 3600000) urgency = 0.9;
+    else if (timeUntilDue <= 86400000) urgency = 0.7;
+    else if (timeUntilDue <= 259200000) urgency = 0.5;
+    else urgency = 0.3;
+  }
+
+  // 影响力：基于依赖数（暂用 tags 数量作为代理指标）
+  const tagCount = task.tags?.length || 0;
+  const impact = Math.min(1, tagCount / 5 + 0.2);
+
+  // 等待时长：创建越久越需要关注
+  const createdTime = task.createdAt ? new Date(task.createdAt).getTime() : now;
+  const waitDays = (now - createdTime) / 86400000;
+  const waitTime = Math.min(1, waitDays / 7);
+
+  // 原始优先级
+  const priorityMap: Record<string, number> = {
+    urgent: 1.0,
+    high: 0.75,
+    medium: 0.5,
+    low: 0.25,
+  };
+  const basePriority = priorityMap[task.priority] ?? 0.5;
+
+  return { urgency, impact, waitTime, basePriority };
 }

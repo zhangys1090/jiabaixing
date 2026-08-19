@@ -2,9 +2,9 @@ name: Backend CI/CD
 
 on:
   push:
-    branches: [ main, master, develop ]
+    branches: [main, master, develop]
   pull_request:
-    branches: [ main, master, develop ]
+    branches: [main, master, develop]
   workflow_dispatch:
 
 jobs:
@@ -17,7 +17,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
           cache: 'npm'
 
       - name: Install dependencies
@@ -29,8 +29,156 @@ jobs:
       - name: Run Prettier check
         run: npm run format:check
 
+      - name: Run tautology test guard
+        run: node scripts/check-no-tautology-tests.mjs
+
+      - name: Run core tool schema review guard
+        run: node scripts/check-core-tool-schema.mjs
+
+      - name: Run doc-derived audit gate (any FAIL exits 1)
+        run: node scripts/doc-derived-audit.mjs
+
       - name: Run TypeScript type check
         run: npx tsc --noEmit
+
+  # ─────────────────────────────────────────────────────────────
+  # 端到端 E2E（Python）：仅跑标记 e2e/boundary 的离线用例（无需真实 LLM 密钥）
+  # 验证「用户输入 → 路由 → 引擎 → 输出」完整链路 + 边界健壮性。
+  # 产物：coverage.xml（Codecov 消费）+ e2e-report.json（PR 评论/审计）+ htmlcov（调试）
+  # ─────────────────────────────────────────────────────────────
+  e2e-python:
+    runs-on: ubuntu-latest
+    needs: lint-and-typecheck
+    defaults:
+      run:
+        working-directory: python
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install Python dependencies (runtime + test extras)
+        run: |
+          python -m pip install --upgrade pip
+          pip install --prefer-binary -e ".[test]"
+
+      # --cov=agent：按 [tool.coverage] 配置统计 agent 包分支覆盖率（信息性，不阻断）
+      # --cov-report=xml：产出 coverage.xml 供 Codecov 上传（flags=e2e 区分于全量）
+      # --cov-report=term-missing：终端展示未覆盖行，便于 PR 日志快速定位
+      # --json-report：产出 e2e-report.json，含每个用例耗时/状态，供审计与回归追踪
+      # -p no:cacheprovider：CI 每次全量跑，避免缓存导致用例遗漏
+      # 注意：E2E 仅跑 e2e/boundary 标记子集，覆盖率天然低于全量门禁。
+      # 覆盖率阻断阈值由全量 python-test job 负责，此处仅采集趋势数据。
+      - name: Run E2E + boundary suite (offline, no LLM keys, with coverage)
+        run: |
+          python -m pytest -m "e2e or boundary" -n auto -q \
+            --cov=agent \
+            --cov-report=xml \
+            --cov-report=term-missing \
+            --cov-report=html \
+            --cov-fail-under=0 \
+            --json-report --json-report-file=e2e-report.json \
+            -p no:cacheprovider
+
+      - name: Upload coverage XML to Codecov
+        if: always()
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./python/coverage.xml
+          flags: e2e
+          fail_ci_if_error: false
+
+      - name: Upload E2E test report (JSON)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-test-report
+          path: python/e2e-report.json
+          retention-days: 30
+
+      - name: Upload HTML coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-htmlcov
+          path: python/htmlcov/
+          retention-days: 14
+
+  # ─────────────────────────────────────────────────────────────
+  # 端到端 E2E（TS 网关）：跑离线 Mock LLM 的网关特性 E2E（无需运行中的服务）
+  # ─────────────────────────────────────────────────────────────
+  e2e-ts:
+    runs-on: ubuntu-latest
+    needs: lint-and-typecheck
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run gateway E2E (offline mock-LLM Hermes features)
+        # 单文件离线 E2E：必须 --coverage=false，否则 jest 全局阈值(50%)会按全仓
+        # 覆盖率口径报错（单文件只能覆盖 ~18%）并以 exit 1 让 CI 误判失败。
+        run: npx jest tests/e2e/HermesFeatures.e2e.test.ts --silent --coverage=false
+
+  # ─────────────────────────────────────────────────────────────
+  # 能力端到端 E2E（TS 工具链）：覆盖 jiabaixing 九大核心能力的完整链路
+  # 验证「工具注册 → Schema 校验 → 权限检查 → 执行器 → 输出」全链路 + 边界场景。
+  # 三个测试套件：
+  #   1. tool-chain.e2e.test.ts      — 九大能力（能记/能搜/能抓/能说/能画/能写/能管/能思/能控）正向链路
+  #   2. security-boundary.e2e.test.ts — 权限守卫 + 危险命令拦截 + Schema 注入防护 + 路径边界
+  #   3. user-scenarios.e2e.test.ts   — 真实用户场景多工具协作（知识助手/内容创作/任务管理/多模态/情绪感知）
+  # 全部离线运行（mock 依赖），无需 LLM 密钥或外部服务。
+  # ─────────────────────────────────────────────────────────────
+  e2e-capabilities:
+    runs-on: ubuntu-latest
+    needs: lint-and-typecheck
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run capabilities E2E (nine core abilities, offline mock deps)
+        # --coverage=false：单文件 E2E 覆盖率口径低于全仓阈值，避免 CI 误判
+        # --silent：减少 CI 日志噪声（失败时 Jest 仍会打印详情）
+        run: npx jest tests/e2e/capabilities/ --silent --coverage=false
+
+  # ─────────────────────────────────────────────────────────────
+  # 跨服务 E2E：docker compose 启动「网关 + Python(离线 Mock LLM)」，
+  # 验证「用户输入 → 网关 → Python → 输出」完整链路（需 Docker，仅推送主干时跑）。
+  # ─────────────────────────────────────────────────────────────
+  service-e2e:
+    runs-on: ubuntu-latest
+    needs: [lint-and-typecheck]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/develop')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Run cross-service E2E (gateway + python, offline mock LLM)
+        run: bash scripts/e2e-cross-service.sh
 
   test:
     runs-on: ubuntu-latest
@@ -42,7 +190,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
           cache: 'npm'
 
       - name: Install dependencies
@@ -63,6 +211,56 @@ jobs:
           files: ./coverage/lcov.info
           fail_ci_if_error: false
 
+  python-test:
+    # 全量 Python pytest 门禁：装齐依赖（含 pytest-asyncio / fastapi）后跑完整测试。
+    runs-on: ubuntu-latest
+    needs: lint-and-typecheck
+    defaults:
+      run:
+        working-directory: python
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install Python dependencies (runtime + test extras)
+        run: |
+          python -m pip install --upgrade pip
+          # --prefer-binary: 优先使用预编译 wheel，避免从 sdist 编译
+          # （如 litellm 新版含 Rust 扩展，无工具链时编译会失败）。
+          pip install --prefer-binary -e ".[test]"
+
+      # P-P6 性能：xdist 并行（-n auto 按 runner vCPU 自动分片），将全量从 ~33min 压到 <10min。
+      # 各 worker 为独立子进程，全局单例/模块级状态天然隔离，比线程更安全；
+      # 本机 Windows 的 proactor 管道抖动属环境噪声（Linux CI 无此问题），不影响门禁。
+      - name: Run Python test gate (full suite, parallel)
+        run: python -m pytest -n auto -q
+
+      - name: Run import-scan red line (catch critical=False silent defects)
+        run: python scripts/check_import_scan.py
+
+      # P2-1：静默吞异常零容忍。基线已于 2026-08-02 从 352 收紧至 0，
+      # 任何新增的 `except X: pass` 都会让本步骤 exit 1。
+      # 正确写法：`except X as _exc: log_ignored(log, "<qualname>", _exc)`。
+      - name: Run silent-except red line (zero tolerance)
+        run: python scripts/check_silent_except.py
+
+      # P0-3 防回潮（双保险）：ruff 静默异常静态规则 E722(裸 except) / S112(try-except-pass)。
+      # 与 check_silent_except.py 的 AST 扫描互补——本步在编辑期即可拦住新增静默吞异常，
+      # 任何 E722 / S112 命中都会让 CI exit 1。规则以 python/pyproject.toml [tool.ruff.lint] 为准。
+      - name: Run ruff silent-except guard (E722, S112)
+        run: python -m ruff check agent/ --select E722,S112
+
+      # 静态缺陷红线：抓「模块能导入、但分支一执行就崩」或「静默行为错误」的缺陷。
+      # 2026-08-02 首次接入时抓到 6 类真实生产 bug（未定义 log、重复类定义静默覆盖、
+      # MCP 工具闭包晚绑定全部路由到最后一个工具等）。只收录零告警高信噪比规则。
+      - name: Run static-defect red line (F821/F811/B023 etc, zero tolerance)
+        run: python scripts/check_static_defects.py
+
   build:
     runs-on: ubuntu-latest
     needs: test
@@ -73,7 +271,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
           cache: 'npm'
 
       - name: Install dependencies
@@ -96,9 +294,77 @@ jobs:
             dist/**
             src/frontend/build/**
 
+  docker-build-push:
+    # 部署链路最后一公里：此前 deploy-* 直接 kubectl apply，但从未构建/推送镜像，
+    # K8s 只能去拉不存在的 jiabaixing/gateway:latest 与 jiabaixing/python-backend:latest，
+    # 必然 ImagePullBackOff。本 job 构建两个镜像并推送到 GHCR，供 deploy-* 消费。
+    # PR 场景只构建不推送（验证 Dockerfile 可用性，不污染 registry）。
+    runs-on: ubuntu-latest
+    needs: [build, python-test]
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      gateway_image: ${{ steps.meta.outputs.gateway_image }}
+      python_image: ${{ steps.meta.outputs.python_image }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Compute image coordinates
+        id: meta
+        run: |
+          # GHCR 要求小写仓库名
+          OWNER="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          TAG="sha-${GITHUB_SHA::12}"
+          echo "gateway_image=ghcr.io/${OWNER}/jiabaixing-gateway:${TAG}" >> "$GITHUB_OUTPUT"
+          echo "python_image=ghcr.io/${OWNER}/jiabaixing-python-backend:${TAG}" >> "$GITHUB_OUTPUT"
+          echo "owner=${OWNER}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push gateway image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: ${{ github.event_name == 'push' }}
+          tags: |
+            ${{ steps.meta.outputs.gateway_image }}
+            ghcr.io/${{ steps.meta.outputs.owner }}/jiabaixing-gateway:latest
+          cache-from: type=gha,scope=gateway
+          cache-to: type=gha,mode=max,scope=gateway
+
+      - name: Build and push python-backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./python
+          file: ./python/Dockerfile
+          push: ${{ github.event_name == 'push' }}
+          tags: |
+            ${{ steps.meta.outputs.python_image }}
+            ghcr.io/${{ steps.meta.outputs.owner }}/jiabaixing-python-backend:latest
+          cache-from: type=gha,scope=python
+          cache-to: type=gha,mode=max,scope=python
+
+      - name: Report pushed images
+        run: |
+          echo "gateway: ${{ steps.meta.outputs.gateway_image }}"
+          echo "python : ${{ steps.meta.outputs.python_image }}"
+
   deploy-staging:
     runs-on: ubuntu-latest
-    needs: build
+    needs: [build, python-test, docker-build-push, e2e-python, e2e-capabilities]
     if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
     environment:
       name: staging
@@ -111,27 +377,90 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: build-artifacts
-          path: |
+
+      - name: Configure kubeconfig (staging)
+        id: kubecfg
+        run: |
+          # 需在仓库 Secrets 中配置 KUBE_CONFIG_STAGING（base64 或原始 kubeconfig 文本）
+          # 注意：此前这里只 `exit 0`，仅结束当前 step，后续 kubectl 步骤仍会执行并因
+          # 无 kubeconfig 而失败——"跳过部署"从未真正生效。改为输出 skip 标志供后续 step 判断。
+          if [ -z "${{ secrets.KUBE_CONFIG_STAGING }}" ]; then
+            echo "::warning::未配置 KUBE_CONFIG_STAGING，跳过 staging 部署"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          printf '%s' "${{ secrets.KUBE_CONFIG_STAGING }}" > "${{ runner.temp }}/kubeconfig-staging"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "kubeconfig 已写入（$(wc -c < "${{ runner.temp }}/kubeconfig-staging") bytes）"
+
+      - name: Set up Kustomize
+        if: steps.kubecfg.outputs.skip != 'true'
+        run: |
+          curl -sfLo kustomize.tar.gz \
+            https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz
+          tar -xzf kustomize.tar.gz && sudo mv kustomize /usr/local/bin/
+          kustomize version
+
+      - name: Ensure GHCR pull secret (staging)
+        if: steps.kubecfg.outputs.skip != 'true'
+        run: |
+          export KUBECONFIG="${{ runner.temp }}/kubeconfig-staging"
+          kubectl create namespace jiabaixing --dry-run=client -o yaml | kubectl apply -f -
+          # GITHUB_TOKEN 仅在本次 workflow 运行期间有效，不能用作长期 pull secret
+          # （Pod 重启时会因凭据过期而 ImagePullBackOff）。因此要求配置长期 PAT。
+          if [ -z "${{ secrets.GHCR_PULL_TOKEN }}" ]; then
+            echo "::warning::未配置 GHCR_PULL_TOKEN，跳过创建 pull secret。"
+            echo "::warning::此时必须将 GHCR package 设为 public，否则 Pod 会 ImagePullBackOff。"
+          else
+            kubectl -n jiabaixing create secret docker-registry ghcr-pull \
+              --docker-server=ghcr.io \
+              --docker-username='${{ github.actor }}' \
+              --docker-password='${{ secrets.GHCR_PULL_TOKEN }}' \
+              --dry-run=client -o yaml | kubectl apply -f -
+            kubectl -n jiabaixing patch serviceaccount default \
+              -p '{"imagePullSecrets":[{"name":"ghcr-pull"}]}'
+          fi
 
       - name: Deploy to staging server
+        if: steps.kubecfg.outputs.skip != 'true'
         run: |
-          echo "Deploying to staging server..."
-          # 在这里添加部署到预发布环境的脚本
-          # 例如：scp, rsync, kubectl, docker等
+          export KUBECONFIG="${{ runner.temp }}/kubeconfig-staging"
+          # 把清单里的占位镜像替换为本次实际推送的不可变 sha tag，
+          # 否则 K8s 会去拉根本不存在的 jiabaixing/*:latest。
+          cd deploy/kubernetes
+          kustomize edit set image \
+            jiabaixing/gateway=${{ needs.docker-build-push.outputs.gateway_image }} \
+            jiabaixing/python-backend=${{ needs.docker-build-push.outputs.python_image }}
+          cd -
+          kubectl apply -k deploy/kubernetes/
+          kubectl -n jiabaixing rollout status deployment/jiabaixing-gateway --timeout=180s
+          kubectl -n jiabaixing rollout status deployment/jiabaixing-python --timeout=180s
 
       - name: Run smoke tests
+        if: steps.kubecfg.outputs.skip != 'true'
         run: |
           echo "Running smoke tests..."
-          # 在这里添加冒烟测试脚本
           curl -f https://staging.jiabaixing.example.com/api/health || exit 1
 
       - name: Notify deployment
         run: |
-          echo "Deployment to staging completed!"
+          if [ "${{ steps.kubecfg.outputs.skip }}" = "true" ]; then
+            echo "Staging deployment skipped (no KUBE_CONFIG_STAGING)."
+          else
+            echo "Deployment to staging completed!"
+          fi
 
   deploy-production:
     runs-on: ubuntu-latest
-    needs: build
+    needs:
+      [
+        build,
+        python-test,
+        docker-build-push,
+        e2e-python,
+        e2e-capabilities,
+        service-e2e,
+      ]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     environment:
       name: production
@@ -144,13 +473,53 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: build-artifacts
-          path: |
+
+      - name: Configure kubeconfig (production)
+        run: |
+          # 需在仓库 Secrets 中配置 KUBE_CONFIG_PROD（base64 或原始 kubeconfig 文本）
+          if [ -z "${{ secrets.KUBE_CONFIG_PROD }}" ]; then
+            echo "::error::未配置 KUBE_CONFIG_PROD，生产部署中止"; exit 1
+          fi
+          printf '%s' "${{ secrets.KUBE_CONFIG_PROD }}" > "${{ runner.temp }}/kubeconfig-prod"
+          echo "kubeconfig 已写入（$(wc -c < "${{ runner.temp }}/kubeconfig-prod") bytes）"
+
+      - name: Set up Kustomize
+        run: |
+          curl -sfLo kustomize.tar.gz \
+            https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz
+          tar -xzf kustomize.tar.gz && sudo mv kustomize /usr/local/bin/
+          kustomize version
+
+      - name: Ensure GHCR pull secret (production)
+        run: |
+          export KUBECONFIG="${{ runner.temp }}/kubeconfig-prod"
+          kubectl create namespace jiabaixing --dry-run=client -o yaml | kubectl apply -f -
+          # 生产环境不允许静默降级为匿名拉取：未配置长期 PAT 直接失败。
+          if [ -z "${{ secrets.GHCR_PULL_TOKEN }}" ]; then
+            echo "::error::未配置 GHCR_PULL_TOKEN，生产部署中止（避免 ImagePullBackOff）。"
+            echo "::error::请配置长期 PAT（read:packages），或将 GHCR package 设为 public 后移除本步骤。"
+            exit 1
+          fi
+          kubectl -n jiabaixing create secret docker-registry ghcr-pull \
+            --docker-server=ghcr.io \
+            --docker-username='${{ github.actor }}' \
+            --docker-password='${{ secrets.GHCR_PULL_TOKEN }}' \
+            --dry-run=client -o yaml | kubectl apply -f -
+          kubectl -n jiabaixing patch serviceaccount default \
+            -p '{"imagePullSecrets":[{"name":"ghcr-pull"}]}'
 
       - name: Deploy to production server
         run: |
-          echo "Deploying to production server..."
-          # 在这里添加部署到生产环境的脚本
-          # 例如：scp, rsync, kubectl, docker等
+          export KUBECONFIG="${{ runner.temp }}/kubeconfig-prod"
+          # 同 staging：注入本次构建的不可变 sha tag，杜绝 ImagePullBackOff。
+          cd deploy/kubernetes
+          kustomize edit set image \
+            jiabaixing/gateway=${{ needs.docker-build-push.outputs.gateway_image }} \
+            jiabaixing/python-backend=${{ needs.docker-build-push.outputs.python_image }}
+          cd -
+          kubectl apply -k deploy/kubernetes/
+          kubectl -n jiabaixing rollout status deployment/jiabaixing-gateway --timeout=300s
+          kubectl -n jiabaixing rollout status deployment/jiabaixing-python --timeout=300s
 
       - name: Run smoke tests
         run: |

@@ -30,11 +30,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from agent.config import DATA_ROOT
 from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("profile_manager")
 
-_PROFILES_DIR = Path("data/profiles")
+_PROFILES_DIR = DATA_ROOT / "profiles"
 
 
 @dataclass

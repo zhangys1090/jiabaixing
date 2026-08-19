@@ -172,9 +172,10 @@ export class SecurityGuard {
     // 私有构造函数，使用单例模式
   }
 
-  /**
-   * 获取单例实例
-   */
+  public static create(): SecurityGuard {
+    return new SecurityGuard();
+  }
+
   public static getInstance(): SecurityGuard {
     if (!SecurityGuard.instance) {
       SecurityGuard.instance = new SecurityGuard();

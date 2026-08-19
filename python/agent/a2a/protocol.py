@@ -17,6 +17,7 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from agent.a2a.types import A2AAgentCard, A2ATaskStatus
+from agent.core.logger import log_ignored
 
 logger = logging.getLogger(__name__)
 
@@ -271,8 +272,8 @@ class A2ATaskManager:
         for client in self._client_cache.values():
             try:
                 await client.close()
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(logger, "protocol.A2ATaskManager.close", _exc)
         self._client_cache.clear()
 
 

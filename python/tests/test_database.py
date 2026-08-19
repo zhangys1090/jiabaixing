@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -26,18 +27,46 @@ from agent.persistence.database import (
 )
 
 
+@contextmanager
+def _no_db_url():
+    """临时移除 DATABASE_URL。
+
+    不用 patch.dict 是因为 Windows 上若进程环境变量存在超过 32767 字符的项，
+    patch.dict 在还原时会抛 ValueError（无法 set 超长变量），导致无关的测试被拖垮。
+    """
+    saved = os.environ.pop("DATABASE_URL", None)
+    try:
+        yield
+    finally:
+        if saved is not None:
+            os.environ["DATABASE_URL"] = saved
+
+
+@contextmanager
+def _with_db_url(url: str):
+    """临时设置 DATABASE_URL（同样规避 patch.dict 的 Windows 超长变量还原问题）。"""
+    saved = os.environ.get("DATABASE_URL")
+    os.environ["DATABASE_URL"] = url
+    try:
+        yield
+    finally:
+        if saved is None:
+            os.environ.pop("DATABASE_URL", None)
+        else:
+            os.environ["DATABASE_URL"] = saved
+
+
 class TestGetDatabaseBackend:
     def test_sqlite_default(self):
-        with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("DATABASE_URL", None)
+        with _no_db_url():
             assert get_database_backend() == "sqlite"
 
     def test_postgres_url(self):
-        with patch.dict(os.environ, {"DATABASE_URL": "postgresql://user:pass@localhost/db"}):
+        with _with_db_url("postgresql://user:pass@localhost/db"):
             assert get_database_backend() == "postgres"
 
     def test_postgres_async_url(self):
-        with patch.dict(os.environ, {"DATABASE_URL": "postgresql+asyncpg://user:pass@localhost/db"}):
+        with _with_db_url("postgresql+asyncpg://user:pass@localhost/db"):
             assert get_database_backend() == "postgres"
 
 
@@ -71,7 +100,7 @@ class TestGetSyncConnection:
         conn.close()
 
     def test_postgres_url_fallback_to_sqlite(self, tmp_path):
-        with patch.dict(os.environ, {"DATABASE_URL": "postgresql://user:pass@localhost/db"}):
+        with _with_db_url("postgresql://user:pass@localhost/db"):
             db_path = tmp_path / "fallback.db"
             conn = get_sync_connection(db_path=str(db_path))
             assert isinstance(conn, sqlite3.Connection)
@@ -80,14 +109,13 @@ class TestGetSyncConnection:
 
 class TestGetAsyncEngine:
     def test_sqlite_async_engine(self):
-        with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("DATABASE_URL", None)
+        with _no_db_url():
             engine = get_async_engine()
             assert engine is not None
             assert "sqlite" in str(engine.url)
 
     def test_postgres_async_engine_url_conversion(self):
-        with patch.dict(os.environ, {"DATABASE_URL": "postgresql://user:pass@localhost/mydb"}):
+        with _with_db_url("postgresql://user:pass@localhost/mydb"):
             engine = get_async_engine()
             assert engine is not None
             url_str = str(engine.url)
@@ -97,8 +125,7 @@ class TestGetAsyncEngine:
 
 class TestGetSyncEngine:
     def test_sqlite_sync_engine(self):
-        with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("DATABASE_URL", None)
+        with _no_db_url():
             engine = get_sync_engine()
             assert engine is not None
             assert "sqlite" in str(engine.url)

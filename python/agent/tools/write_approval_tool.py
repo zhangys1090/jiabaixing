@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from agent.core.logger import log_ignored
+
 from agent.tools.registry import (
     ToolCategory,
     ToolDefinition,
@@ -285,6 +287,14 @@ class WriteApprovalManager:
 
 _global_write_approval_manager: WriteApprovalManager | None = None
 
+_safety_net: Any | None = None
+
+
+def set_safety_net(safety_net: Any) -> None:
+    """注入 SafetyNet 实例，用于写入操作审计和还原点保护。"""
+    global _safety_net
+    _safety_net = safety_net
+
 
 def _get_write_approval_manager() -> WriteApprovalManager:
     """获取全局 WriteApprovalManager 单例。
@@ -382,6 +392,17 @@ async def write_approval_executor(params: dict[str, Any]) -> ToolResult:
             req = mgr.request_approval(write_action, target_path, description)
         except ValueError as e:
             return ToolResult(success=False, error=str(e), duration=time.time() - start)
+
+        if _safety_net:
+            try:
+                _safety_net.record_audit(
+                    tool_name="write_approval",
+                    params={"action": write_action, "path": target_path},
+                    risk_level=req.risk_level,
+                    result="auto_approved" if req.status == "approved" else "pending_approval",
+                )
+            except Exception as _exc:
+                log_ignored(None, "write_approval_tool._auto_approve.audit", _exc)
 
         if req.status == "approved":
             return ToolResult(

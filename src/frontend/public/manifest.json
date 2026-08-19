@@ -1,6 +1,7 @@
 {
-  "short_name": "React App",
-  "name": "Create React App Sample",
+  "short_name": "家百星",
+  "name": "家百星 Desktop",
+  "description": "本地优先的 AI Agent 执行引擎",
   "icons": [
     {
       "src": "favicon.ico",
@@ -20,6 +21,6 @@
   ],
   "start_url": ".",
   "display": "standalone",
-  "theme_color": "#000000",
-  "background_color": "#ffffff"
+  "theme_color": "#0f0e0d",
+  "background_color": "#0f0e0d"
 }

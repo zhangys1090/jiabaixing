@@ -60,6 +60,7 @@ export interface MemoryStoreDeps {
     category: string,
     metadata: MemoryMetadata
   ) => Promise<boolean>;
+  getAllMemories?: (category?: string) => Promise<Array<{ content: string }>>;
 }
 
 /**
@@ -140,6 +141,21 @@ export function createMemoryStoreExecutor(deps: MemoryStoreDeps) {
             validated: false,
           };
         }
+      } else if (deps.getAllMemories) {
+        const existing = await deps.getAllMemories(category);
+        if (
+          isDuplicateContent(
+            content,
+            existing.map((m) => m.content)
+          )
+        ) {
+          return {
+            success: true,
+            output: '已存在相似记忆（自动去重）',
+            duration: 0,
+            validated: false,
+          };
+        }
       }
 
       const now = Date.now();
@@ -177,6 +193,16 @@ export function createMemoryStoreExecutor(deps: MemoryStoreDeps) {
             validated: false,
           };
         }
+      } else {
+        // B-2 (A1): 缺依赖时诚实失败，不再静默返回 success:true "已存储"
+        return {
+          success: false,
+          output:
+            '存储失败: 未注入记忆存储后端(storeWithMetadata / storeShortTermMemory)',
+          error: '记忆存储后端未注入',
+          duration: 0,
+          validated: false,
+        };
       }
 
       const importanceLabel =

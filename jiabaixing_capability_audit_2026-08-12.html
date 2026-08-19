@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>家百星九大能力模块审计与增强方案 · 2026-08-12</title>
+<style>
+  :root{
+    --bg:#0f141a; --panel:#161d26; --panel2:#1b2430; --line:#2a3645;
+    --txt:#e6edf3; --mut:#9fb0c0; --acc:#4ea1ff; --acc2:#7ee0c0;
+    --p0:#ff5b6e; --p1:#ffb454; --p2:#7ee0c0; --ok:#5fd38a;
+    --code:#cfe3ff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    line-height:1.65;font-size:14px}
+  .wrap{max-width:1180px;margin:0 auto;padding:32px 28px 80px}
+  h1{font-size:26px;margin:0 0 6px;border-left:5px solid var(--acc);padding-left:14px}
+  h2{font-size:20px;margin:38px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--line);color:var(--acc2)}
+  h3{font-size:16px;margin:22px 0 8px;color:var(--txt)}
+  .sub{color:var(--mut);font-size:13px;margin:0 0 18px}
+  .meta{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 4px}
+  .chip{background:var(--panel2);border:1px solid var(--line);border-radius:20px;padding:3px 12px;font-size:12px;color:var(--mut)}
+  table{border-collapse:collapse;width:100%;margin:12px 0 6px;font-size:13px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:var(--panel2);color:var(--acc2);font-weight:600}
+  tr:nth-child(even) td{background:rgba(255,255,255,.02)}
+  code{background:var(--panel2);color:var(--code);padding:1px 6px;border-radius:5px;font-size:12.5px;font-family:"SFMono-Regular",Consolas,monospace}
+  .tag{display:inline-block;border-radius:6px;padding:1px 8px;font-size:11.5px;font-weight:700;margin:1px 2px}
+  .p0{background:rgba(255,91,110,.16);color:var(--p0);border:1px solid rgba(255,91,110,.4)}
+  .p1{background:rgba(255,180,84,.16);color:var(--p1);border:1px solid rgba(255,180,84,.4)}
+  .p2{background:rgba(126,224,192,.14);color:var(--p2);border:1px solid rgba(126,224,192,.4)}
+  .ok{background:rgba(95,211,138,.14);color:var(--ok);border:1px solid rgba(95,211,138,.4)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin:14px 0}
+  .cap{display:flex;align-items:center;gap:10px;margin:18px 0 6px}
+  .cap .dot{width:10px;height:10px;border-radius:50%}
+  .g{background:var(--ok)} .y{background:var(--p1)} .r{background:var(--p0)}
+  .note{color:var(--mut);font-size:12.5px}
+  .find{margin:8px 0;padding-left:2px}
+  .find b{color:var(--txt)}
+  .src{color:var(--mut);font-size:12px}
+  ul.tight{margin:6px 0 6px 18px;padding:0}
+  ul.tight li{margin:3px 0}
+  .box{background:var(--panel2);border-left:4px solid var(--acc);border-radius:8px;padding:12px 16px;margin:14px 0}
+  .warn{border-left-color:var(--p0)}
+  .plan{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:820px){.plan{grid-template-columns:1fr}}
+  .kbd{font-family:monospace}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>家百星 · 九大能力模块审计与增强方案</h1>
+<p class="sub">审计对象：能记 / 能搜 / 能抓 / 能说 / 能画 / 能写 / 能管 / 能思 / 能控（共 14 个已注册工具）<br/>
+方法：实时探测（grep / read / 真实代码路径），不采信文档宣称。所有结论附 <code>file:line</code> 证据。</p>
+<div class="meta">
+  <span class="chip">日期 2026-08-12</span>
+  <span class="chip">默认后端 AGENT_BACKEND=python</span>
+  <span class="chip">14 工具全部已注册并纳入默认 toolset</span>
+  <span class="chip">证据来源：src/harness/tools/* + python/agent/tools/*</span>
+</div>
+
+<div class="box warn">
+  <b>一句话结论：</b>14 个工具均已注册启用，基础功能可用，但存在 <b>3 个 P0 级系统性风险</b>（文件沙箱逃逸、审批(HITL)在执行层未强制、超时无法真正中止）+ 多处 P1 安全/正确性缺陷。认知类工具（能思）在 TS 侧被降级为规则启发式，与 Python 主实现能力不对称。整体尚未达到“一致、可靠、高效”的生产态。
+</div>
+
+<!-- ===================== 总览评分卡 ===================== -->
+<h2>一、总览评分卡</h2>
+<table>
+<thead><tr><th>能力</th><th>工具</th><th>注册/启用</th><th>功能完整性</th><th>异常处理</th><th>边界/安全</th><th>性能</th><th>测试</th><th>综合</th></tr></thead>
+<tbody>
+<tr><td>能记</td><td><code>memory_store/recall/search</code></td><td><span class="tag ok">启用</span></td><td><span class="tag ok">基本</span></td><td><span class="tag p1">缺依赖静默成功</span></td><td><span class="tag p2">晋升未实现</span></td><td><span class="tag p2">LCS O(nm)</span></td><td><span class="tag p1">store/search 无单测</span></td><td><span class="tag p1">可优化</span></td></tr>
+<tr><td>能搜</td><td><code>web_search</code></td><td><span class="tag ok">启用</span></td><td><span class="tag ok">多引擎</span></td><td><span class="tag p2">空结果算成功</span></td><td><span class="tag p1">TS 本地实现</span></td><td><span class="tag ok">AbortSignal</span></td><td><span class="tag p1">无 executor 单测</span></td><td><span class="tag p1">可优化</span></td></tr>
+<tr><td>能抓</td><td><code>web_fetch</code></td><td><span class="tag ok">启用</span></td><td><span class="tag ok">HTML→MD</span></td><td><span class="tag ok">try/catch</span></td><td><span class="tag p0">SSRF 缺失</span></td><td><span class="tag p2">整页缓冲</span></td><td><span class="tag p1">无 SSRF 测试</span></td><td><span class="tag p0">高危</span></td></tr>
+<tr><td>能说</td><td><code>tts_speak</code></td><td><span class="tag ok">启用</span></td><td><span class="tag p1">无依赖=模拟</span></td><td><span class="tag p1">抛错也成功</span></td><td><span class="tag p2">参数丢弃</span></td><td><span class="tag ok">默认模拟</span></td><td><span class="tag p1">仅模拟路径</span></td><td><span class="tag p1">可优化</span></td></tr>
+<tr><td>能画</td><td><code>image_generate</code></td><td><span class="tag ok">启用</span></td><td><span class="tag ok">真实调用</span></td><td><span class="tag p2">状态未分级</span></td><td><span class="tag p1">无鉴权/费用护栏</span></td><td><span class="tag p2">无去重/配额</span></td><td><span class="tag ok">有单测</span></td><td><span class="tag p1">可优化</span></td></tr>
+<tr><td>能写</td><td><code>code_generate/review/fix</code></td><td><span class="tag ok">启用</span></td><td><span class="tag p1">fix 只建议不落地</span></td><td><span class="tag p1">review 吞 LLM 错</span></td><td><span class="tag p2">生成物未校验</span></td><td><span class="tag ok">单次 LLM</span></td><td><span class="tag p0">三者均无单测</span></td><td><span class="tag p1">可优化</span></td></tr>
+<tr><td>能管</td><td><code>task_manage/note_take/calendar</code></td><td><span class="tag ok">启用</span></td><td><span class="tag p1">calendar 提醒不实</span></td><td><span class="tag p1">calendar 无守卫</span></td><td><span class="tag p1">并发读改写覆盖</span></td><td><span class="tag p2">全量读写</span></td><td><span class="tag p1">calendar 零测试</span></td><td><span class="tag p1">可优化</span></td></tr>
+<tr><td>能思</td><td><code>emotion_detect/self_reflect</code></td><td><span class="tag ok">启用</span></td><td><span class="tag p0">TS 规则/伪反思</span></td><td><span class="tag p0">无 try/catch</span></td><td><span class="tag p1">与 Python 能力不对称</span></td><td><span class="tag ok">无 LLM 开销</span></td><td><span class="tag p1">仅注入 stub</span></td><td><span class="tag p0">能力缺陷</span></td></tr>
+<tr><td>能控</td><td><code>shell_exec/file_read/file_list</code></td><td><span class="tag ok">启用</span></td><td><span class="tag ok">功能齐</span></td><td><span class="tag ok">较完整</span></td><td><span class="tag p0">路径穿越/禁令可绕过</span></td><td><span class="tag p1">execSync 阻塞</span></td><td><span class="tag p1">file_* 无单测</span></td><td><span class="tag p0">高危</span></td></tr>
+</tbody>
+</table>
+<p class="note">启用确认：14 工具全部在 <code>src/harness/tools/registerHarnessTools.ts:386-587</code> 注册；按 toolset 分配——记忆/认知入 <code>base</code>，文件/代码/Shell 入 <code>coding</code>，日常入 <code>daily</code>，网络入 <code>network</code>；<code>full</code> 集含全部。即默认即启用。</p>
+
+<!-- ===================== 系统性风险 ===================== -->
+<h2>二、系统性风险（跨能力，P0）</h2>
+
+<div class="card">
+<h3 class="r">P0-1 · 文件沙箱逃逸（能控）</h3>
+<p class="find"><b>file_read</b> 对绝对路径直接采用、无项目根约束：<span class="src">src/harness/tools/file/file_read.ts:99-101</span> —— <code>path.isAbsolute(rawPath) ? rawPath : path.resolve(...)</code>。传入 <code>/etc/shadow</code>、<code>C:\Windows\...</code> 等可读任意文件。当注入 <code>deps.readFileContent</code> 时，<code>MAX_FILE_SIZE</code> 2MB 上限被绕过（:96-97 直接整文件读取，:126-133 的大小检查仅作用于本地分支）。</p>
+<p class="find"><b>file_list</b> 同理：<span class="src">src/harness/tools/file/file_list.ts:78-80</span> 绝对路径直接 <code>readdir</code>，无 containment；且递归跟随符号链接（:105 <code>entry.isDirectory()</code>）无环路保护，<code>max_depth</code> 参数被硬编码为 10（:90），描述承诺的 <code>max_depth</code> 形同虚设。</p>
+</div>
+
+<div class="card">
+<h3 class="r">P0-2 · 审批(HITL)在执行层未强制（能控 / 能写）</h3>
+<p class="find"><code>ToolRegistry.execute()</code> 仅做 Schema + Permission 前置，<b>从不调用 <code>ApprovalEngine</code></b>：<span class="src">src/harness/tools/registry/ToolRegistry.ts:254-305</span>。PermissionGuard 对高风险工具返回 <code>needsConfirmation:true</code>（:288 只判断 <code>allowed</code>），但 execute 层<b>忽略该标志</b>。后果：授予 <code>SYSTEM_ADMIN</code> 后 <code>shell_exec</code> 无需任何人工确认即执行；<code>code_fix</code> 等声明 <code>requiresConfirmation:true</code>（code_fix.ts:34）亦不生效。且 <code>setPreChecksEnabled(false)</code>（:571-577）可一键关闭全部门禁。</p>
+</div>
+
+<div class="card">
+<h3 class="r">P0-3 · 超时无法真正中止非协作式工具（能控 / 能抓）</h3>
+<p class="find"><code>execute</code> 用 <code>Promise.race([tool.execute, createTimeoutPromise(timeout)])</code>（<span class="src">ToolRegistry.ts:313-322</span>），超时仅 <code>reject</code> 而不取消底层操作。若工具使用无 <code>AbortSignal</code> 的全局 <code>fetch</code> 或 <code>execSync</code>，底层进程/请求继续运行 → 资源泄漏。更糟：<code>execSync</code> 为<b>同步阻塞事件循环</b>，期间 <code>setTimeout</code> 根本不触发，超时对同步工具完全失效。</p>
+</div>
+
+<div class="card">
+<h3 class="y">P1 · 无瞬态失败重试 / 自愈未接入 TS 路径</h3>
+<p class="find">TS 执行链 <b>零重试</b>（一次失败即返回）。Python 侧 <code>tool_self_healing.py</code> 的 <code>heal()</code> 仅做参数修正→替代工具→降级，<b>不处理 429/5xx/限流退避</b>，且其 <code>RETRY</code> 枚举未被使用；该自愈链<b>未挂到 TS 执行路径</b>（仅 Python 引擎侧）。</p>
+</div>
+
+<div class="card">
+<h3 class="y">P1 · 无真实并发上限 / 无成本预算（TS 侧）</h3>
+<p class="find">PermissionGuard 仅有会话级计数（maxToolCalls:100），无 per-agent 信号量；ToolCallGuard 的限速/去重 <code>MAX_SAME_TOOL=2</code>（ToolCallGuard.ts:62-65）<b>未被 TS 执行链引用</b>，形同死代码。TS 侧对 image_generate / tts_speak / LLM 类工具<b>无任何 token 或费用预算</b>（成本守卫仅 Python 侧存在）。</p>
+</div>
+
+<!-- ===================== 逐项审计 ===================== -->
+<h2>三、九大能力逐项审计</h2>
+
+<!-- 能记 -->
+<div class="cap"><span class="dot y"></span><h3 style="margin:0">能记 · memory_store / recall / search</h3></div>
+<table>
+<thead><tr><th>发现</th><th>级别</th><th>证据</th></tr></thead>
+<tbody>
+<tr><td>缺依赖时存储静默成功：<code>storeWithMetadata</code> 与 <code>storeShortTermMemory</code> 均缺省时跳过存储却返回 <code>success:true</code> "已存储"</td><td><span class="tag p1">P1</span></td><td>memory_store.ts:170-206</td></tr>
+<tr><td>importance≥7 “晋升长期记忆” 仅拼文案标签，无真实晋升逻辑</td><td><span class="tag p2">P2</span></td><td>memory_store.ts:198-199</td></tr>
+<tr><td>recall/search 失败时返回 <code>success:true</code> 并把错误塞进 output，Agent 无法区分“无结果”与“系统故障”</td><td><span class="tag p2">P2</span></td><td>memory_recall.ts:122-129,161-168; memory_search.ts:97-104</td></tr>
+<tr><td>recall 空结果时 <code>retrieveRelevant({query:'',limit:1000})</code> 全量拉取再打分，无分页</td><td><span class="tag p2">P2</span></td><td>memory_recall.ts:78-82</td></tr>
+<tr><td>测试：recall 有较完整单测；store/search 无 executor 级单测（仅 e2e 间接）</td><td><span class="tag p1">P1</span></td><td>tests/unit/tools/memory_recall.test.ts</td></tr>
+</tbody></table>
+
+<!-- 能搜 / 能抓 -->
+<div class="cap"><span class="dot r"></span><h3 style="margin:0">能搜 · web_search ｜ 能抓 · web_fetch</h3></div>
+<table>
+<thead><tr><th>发现</th><th>级别</th><th>证据</th></tr></thead>
+<tbody>
+<tr><td><b>web_fetch SSRF 缺失</b>：仅校验 <code>^https?://</code>，未过滤 localhost / 127.0.0.1 / 169.254.169.254(云元数据) / 内网 IP；Python <code>network_tools.py:async_is_safe_url</code> 有检查而 TS 没有，实现不统一</td><td><span class="tag p0">P0</span></td><td>web_fetch.ts:140</td></tr>
+<tr><td>注入的 <code>httpClient.get</code> 无超时/无 SSRF/整响应缓冲入字符串（内存 DoS）；自带 25s 超时仅作用于自管 fetch 分支</td><td><span class="tag p1">P1</span></td><td>web_fetch.ts:149-150,152-159; initHarness.ts:1137-1158</td></tr>
+<tr><td>web_search 生产未注入 <code>searchEngine</code>，回退到 TS 本地多引擎实现 —— 与 Python <code>web_search_provider</code> 重复，违反“TS 不独立实现核心能力”</td><td><span class="tag p1">P1</span></td><td>web_search.ts:421-501; initHarness 未注入</td></tr>
+<tr><td>web_search 空结果返回 <code>success:true</code> 且把 JSON 错误块塞进 output；max_results 无上限校验</td><td><span class="tag p2">P2</span></td><td>web_search.ts:503-512,414</td></tr>
+<tr><td>web_fetch 测试：无 <code>htmlToMarkdown</code>/executor 单测；TS 端 SSRF 完全无测试</td><td><span class="tag p1">P1</span></td><td>tests/e2e/capabilities/*</td></tr>
+</tbody></table>
+
+<!-- 能说 / 能画 -->
+<div class="cap"><span class="dot y"></span><h3 style="margin:0">能说 · tts_speak ｜ 能画 · image_generate</h3></div>
+<table>
+<thead><tr><th>发现</th><th>级别</th><th>证据</th></tr></thead>
+<tbody>
+<tr><td>tts_speak 无 <code>speechSynthesizer</code> 时返回 [模拟模式] 且 <code>success:true</code>；即使 <code>speak()</code> 抛错也降级为“模拟成功” → 假成功</td><td><span class="tag p1">P1</span></td><td>tts_speak.ts:130-138,117-127</td></tr>
+<tr><td>tts_speak 的 voice/speed/pitch 被 clamp 后<b>未转发</b>给合成器，参数丢失</td><td><span class="tag p2">P2</span></td><td>tts_speak.ts:87-98</td></tr>
+<tr><td>image_generate 默认直连外部 API，<b>无鉴权/无费用护栏/无去重/无会话配额</b> → 付费 API 可被无限调用</td><td><span class="tag p1">P1</span></td><td>image_generate.ts:93-156</td></tr>
+<tr><td>image_generate 非 2xx 笼统为 <code>HTTP ${status}</code>，401/429/5xx 未分级，429 未退避重试</td><td><span class="tag p2">P2</span></td><td>image_generate.ts:126-131,114</td></tr>
+<tr><td>测试：image_generate 有单测+e2e（较好）；tts_speak 仅模拟路径 e2e</td><td><span class="tag p1">P1</span></td><td>NewTools.test.ts:111,162</td></tr>
+</tbody></table>
+
+<!-- 能写 -->
+<div class="cap"><span class="dot y"></span><h3 style="margin:0">能写 · code_generate / code_review / code_fix</h3></div>
+<table>
+<thead><tr><th>发现</th><th>级别</th><th>证据</th></tr></thead>
+<tbody>
+<tr><td><b>code_fix 声明与行为严重不符</b>：DEF 声明 <code>Permission.FILE_WRITE</code>+<code>requiresConfirmation:true</code>，但 executor <b>从不写文件</b>，只把 fixedCode 塞进 output；名为 fix 实为“建议”</td><td><span class="tag p1">P1</span></td><td>code_fix.ts:30-34,95-106</td></tr>
+<tr><td>code_review 描述夸大“四层/四维度”，实际仅规则+安全+LLM；无语法解析层、无独立性能层；LLM 失败被 <code>catch{}</code> 静默吞掉</td><td><span class="tag p1">P1</span></td><td>code_review.ts:4-8,94,339-352</td></tr>
+<tr><td>code_review LLM 返回未做 schema 校验；缺 severity 时 <code>severityOrder[f.severity]</code> 为 undefined → NaN 排序</td><td><span class="tag p2">P2</span></td><td>code_review.ts:361-363,116-118</td></tr>
+<tr><td>code_generate 生成物 <code>validated:false</code> 无语法校验；:116-308 脚手架函数（generateCodeTemplate 等）为死代码</td><td><span class="tag p2">P2</span></td><td>code_generate.ts:98,116-308</td></tr>
+<tr><td><b>三者均无 executor 行为单测</b>（仅 comprehensive-coverage 做存在性断言）；含缺陷的 fallback 正则与未校验 LLM 输出完全未覆盖</td><td><span class="tag p0">P0</span></td><td>tests/ 无对应 *.test.ts</td></tr>
+</tbody></table>
+
+<!-- 能管 -->
+<div class="cap"><span class="dot y"></span><h3 style="margin:0">能管 · task_manage / note_take / calendar</h3></div>
+<table>
+<thead><tr><th>发现</th><th>级别</th><th>证据</th></tr></thead>
+<tbody>
+<tr><td>calendar 无 deps 守卫，<code>calendarStore</code> 未注入时抛 TypeError 才被 catch 吞；其余四工具均有 <code>if(!deps.x)</code> 守卫</td><td><span class="tag p1">P1</span></td><td>calendar.ts:182</td></tr>
+<tr><td>calendar <code>set_reminder</code> 只写 <code>reminderMinutes</code> 数值，<b>无定时器/触发机制</b>，描述暗示“实际提醒”实为存数</td><td><span class="tag p1">P1</span></td><td>calendar.ts:517-518,238</td></tr>
+<tr><td>task/note/calendar 均为 read-all→find→save 全量覆盖，<b>无锁/无原子</b>，并发写同一存储会丢更新</td><td><span class="tag p1">P1</span></td><td>task_manage.ts:181-194,234-250; note_take.ts:119-148</td></tr>
+<tr><td>task_manage <code>delete</code> 对不存在 id 也返回“任务已删除”；<code>dependencies</code> 为死字段从未读写</td><td><span class="tag p2">P2</span></td><td>task_manage.ts:214-217,18,123-134</td></tr>
+<tr><td>calendar 时区缺失（全程本地服务器时区），跨时区部署时间偏差；all_day 事件仍补 +1h 结束</td><td><span class="tag p2">P2</span></td><td>calendar.ts:99,105,111,211</td></tr>
+<tr><td>测试：calendar <b>零测试</b>（五个中唯一）；task/note 仅 e2e 集成；均无 executor 级单测</td><td><span class="tag p1">P1</span></td><td>grep 无 createCalendarExecutor 引用</td></tr>
+</tbody></table>
+
+<!-- 能思 -->
+<div class="cap"><span class="dot r"></span><h3 style="margin:0">能思 · emotion_detect / self_reflect</h3></div>
+<table>
+<thead><tr><th>发现</th><th>级别</th><th>证据</th></tr></thead>
+<tbody>
+<tr><td><b>emotion_detect / self_reflect 在 TS 侧为规则/伪反思</b>：emotion_detect 为纯词典规则（正/负词+程度+否定翻转），self_reflect 为满意度打分启发式；而 Python 同类工具 <b>真实调用 LLM</b>。两套实现能力不对称，以 Python 为事实标准则 TS 两工具属能力缺陷</td><td><span class="tag p0">P0</span></td><td>emotion_detect.ts:43; initHarness.ts:472-652; cognition_tools.py:66-89,146-173</td></tr>
+<tr><td>emotion_detect <b>完全无 try/catch、无 deps 守卫</b>，<code>detectEmotionFromInput</code> 缺失或非函数即抛未捕获异常</td><td><span class="tag p0">P0</span></td><td>emotion_detect.ts:37-57</td></tr>
+<tr><td>self_reflect：<code>agentSelfReflection</code> 与 <code>reflectionStore</code> 皆空时仍返回 <code>success:true</code> 却不持久化（假成功）；无 try/catch；requiredParams 运行时未校验</td><td><span class="tag p1">P1</span></td><td>self_reflect.ts:93,116,125-131,78-132,28,88-89</td></tr>
+<tr><td>测试：均以注入 stub 的 e2e 覆盖，无检测/反思逻辑单元测</td><td><span class="tag p1">P1</span></td><td>tests/e2e/*</td></tr>
+</tbody></table>
+
+<!-- 能控 -->
+<div class="cap"><span class="dot r"></span><h3 style="margin:0">能控 · shell_exec / file_read / file_list</h3></div>
+<table>
+<thead><tr><th>发现</th><th>级别</th><th>证据</th></tr></thead>
+<tbody>
+<tr><td>shell_exec 禁令第 39-84 行为<b>子串匹配</b>（<code>lowerCommand.includes(forbidden)</code>），顺序/空格变体可绕过，如 <code>del /q /s C:\</code>、<code>rm -rf ~</code>、<code>rm -rf /tmp/../../</code></td><td><span class="tag p0">P0</span></td><td>shell_exec.ts:217-226</td></tr>
+<tr><td>shell_exec 缺 deps 时回退 <code>execSync</code>（:274）阻塞事件循环 + 无异步沙箱池；<code>maxBuffer</code> 仅 1MB</td><td><span class="tag p2">P2</span></td><td>shell_exec.ts:274-280</td></tr>
+<tr><td>file_read / file_list 沙箱逃逸（见 P0-1）</td><td><span class="tag p0">P0</span></td><td>file_read.ts:99-101; file_list.ts:78-80</td></tr>
+<tr><td>file_read binary 处理弱：<code>base64/hex</code> 枚举支持后却按行 split base64（无意义）；无 raw 缓冲模式</td><td><span class="tag p2">P2</span></td><td>file_read.ts:141-153</td></tr>
+<tr><td>测试：shell_exec 有较好单测+e2e；file_read/file_list 仅 e2e 真实 fs，无单测</td><td><span class="tag p1">P1</span></td><td>NewTools.test.ts:162; user-scenarios.e2e:1052,751</td></tr>
+</tbody></table>
+
+<!-- ===================== 增强方案 ===================== -->
+<h2>四、增强优化方案</h2>
+
+<div class="box">
+<b>设计原则：</b>① 先补安全与一致性（P0），再补弹性与效率（P1），最后补协同与体验（P2）；② 贯彻 AGENTS.md §0.1 —— Agent 核心能力以 Python 为主实现，TS 收敛为薄壳/桥；③ 所有改动须有单测守护，尤其是错误与边界路径。
+</div>
+
+<div class="plan">
+<div class="card">
+<h3 class="r">A. 安全加固（P0，最高优先）</h3>
+<ul class="tight">
+<li><b>A1 文件沙箱 containment</b>：file_read/file_list 增加 <code>isWithinRoot(resolved, projectRoot)</code> 前缀断言，拒绝绝对路径越界；<code>readFileContent</code> 注入路径也须先过 containment + MAX_FILE_SIZE。复刻 Python <code>file_tools.py:_resolve_path</code> 的多根候选+白名单思路。</li>
+<li><b>A2 SSRF 护栏</b>：web_fetch 复用 <code>async_is_safe_url</code> 逻辑（解析 IP、拒绝 127/169.254/内网/元数据）；注入 <code>httpClient</code> 也必须先过 SSRF 检查+AbortSignal 超时；<code>redirect:'manual'</code> 禁止跳内网。</li>
+<li><b>A3 审批强制</b>：在 <code>ToolRegistry.execute</code> 中，若 <code>permResult.needsConfirmation</code> 或 <code>definition.requiresConfirmation</code>，调用 <code>ApprovalManager.requestApproval</code> 并等待结果；将 <code>setPreChecksEnabled</code> 改为不可运行时关闭（或仅限测试）。</li>
+<li><b>A4 禁令牌硬化</b>：shell_exec 由子串匹配改为“分词归一化 + 危险 token 黑名单 + 危险标志位(--force/-rf/-s/-q 组合) + AST/参数级拦截”，覆盖顺序/空格变体。</li>
+</ul>
+</div>
+
+<div class="card">
+<h3 class="y">B. 错误恢复机制（P1）</h3>
+<ul class="tight">
+<li><b>B1 瞬态重试</b>：在 <code>ToolRegistry.execute</code> 外包一层 retry 装饰器，仅对网络/LLM 类工具（429/5xx/ETIMEDOUT）做指数退避（最多 3 次，含 jitter），其余不重试。</li>
+<li><b>B2 自愈接入 TS 路径</b>：将 Python <code>tool_self_healing.heal()</code> 的能力（参数修正→替代工具→降级）以桥方式挂到 TS execute 的 catch 分支；补齐 <code>RETRY</code> 枚举的真实退避重试。</li>
+<li><b>B3 熔断器</b>：对付费/外部 API（image_generate/tts_speak/web_search）按错误率熔断，避免级联失败与费用失控。</li>
+<li><b>B4 真超时中止</b>：所有外部 IO 强制 <code>AbortSignal.timeout</code>；shell/子进程改用异步 <code>spawn</code>+<code>child.kill</code>，使超时真正生效（替换 execSync）。</li>
+</ul>
+</div>
+
+<div class="card">
+<h3 class="y">C. 资源使用效率（P1）</h3>
+<ul class="tight">
+<li><b>C1 统一结果缓存</b>：复用已有 <code>python/agent/tools/tool_result_cache.py</code> 与 TS <code>system/result_cache.ts</code>，按 (tool, normalizedArgs, version) 缓存幂等工具（web_fetch/idempotent、file_read、search），降低重复外部调用与费用。</li>
+<li><b>C2 并发与配额</b>：per-agent 信号量（如 maxConcurrentTools=4）；image_generate/tts_speak 增加 per-session 日配额与去重（相同 prompt hash 命中缓存）。</li>
+<li><b>C3 流式/截断</b>：web_fetch/file_read 大响应走分块读取与硬上限（已部分有），memory recall 加分页游标避免全量拉取。</li>
+<li><b>C4 异步化</b>：shell_exec、内存/文件读写改异步非阻塞，避免事件循环卡死（同时修复 P0-3）。</li>
+</ul>
+</div>
+
+<div class="card">
+<h3 class="y">D. 能力协同（P2，价值最高）</h3>
+<ul class="tight">
+<li><b>D1 记忆↔检索↔搜索</b>：memory_recall 优先走向量检索，命中不足时自动降级 web_search 并回填记忆（RAG 闭环），统一由 <code>knowledge_query</code> 编排。</li>
+<li><b>D2 认知↔循环</b>：emotion_detect/self_reflect 的真实 LLM 结果回灌 ReAct 循环的情绪/反思总线，驱动策略调整（如高负向情绪降速、反思建议进 evolution）。</li>
+<li><b>D3 代码工具共享</b>：code_generate/review/fix 共用同一 LLM 客户端、同一“生成物语法校验”与“安全扫描”中间件；code_fix 复用 Python <code>code_edit_ast</code> 的 preview_only+AST 校验写盘路径（消除“只建议不落地”错位）。</li>
+<li><b>D4 统一门禁/缓存/观测</b>：所有工具经由同一 execute 包装（Schema+Perm+Approval+Retry+Cache+Timeout+TraceId），保证一致的可观测性与治理。</li>
+</ul>
+</div>
+
+<div class="card">
+<h3 class="y">E. 测试补齐（P1，可信度底座）</h3>
+<ul class="tight">
+<li>为每个工具补 <b>executor 级单测</b>：重点覆盖错误路径（网络 429/5xx、文件不存在、注入缺失、参数越界）与安全路径（SSRF、路径穿越、禁令牌绕过）。</li>
+<li>code_generate/review/fix 与 calendar 为零单测，须优先补齐行为断言（而非仅“已注册”）。</li>
+<li>将 Python <code>async_is_safe_url</code> 测试与 TS SSRF 守卫对齐，避免实现分裂。</li>
+</ul>
+</div>
+
+<div class="card">
+<h3 class="r">F. 架构一致性（P0，治本）</h3>
+<ul class="tight">
+<li><b>明确“谁为主”</b>：按 AGENTS.md §0.1，记忆/LLM/认知/搜索应 Python 主实现。当前 web_search、file_*/shell_exec、memory_store 的 TS 本地实现与 Python 并存 → 选其一为 canonical，另一为桥/壳，杜绝双端 DRY 违规与行为漂移。</li>
+<li><b>能思对齐</b>：TS 的 emotion_detect/self_reflect 要么改为经 PythonAgentBridge 调用 Python LLM 实现（与 Python 能力一致），要么在 DEF 描述中明确“轻量规则模式”并降级处理，避免 Agent 误以为有真实反思能力。</li>
+<li><b>缺依赖即失败而非静默成功</b>：memory_store / tts_speak / self_reflect 等“无依赖就假装成功”的模式必须改为显式失败或明确降级标注。</li>
+</ul>
+</div>
+</div>
+
+<!-- ===================== 路线图 ===================== -->
+<h2>五、优先级路线图</h2>
+<table>
+<thead><tr><th>阶段</th><th>动作</th><th>范围</th><th>产出</th></tr></thead>
+<tbody>
+<tr><td><span class="tag p0">P0</span> 第1轮</td><td>A1 文件 containment · A2 SSRF · A3 审批强制 · A4 禁令牌硬化 · F3 去静默成功</td><td>file_read/file_list/web_fetch/shell_exec/ToolRegistry</td><td>安全单测 + 红/绿验证</td></tr>
+<tr><td><span class="tag p0">P0</span> 第2轮</td><td>B4 真超时+异步化 · F1/F2 架构归一+能思对齐 · code 三件套单测</td><td>shell_exec/cognition/code_*/bridge</td><td>一致性 + 单测覆盖率提升</td></tr>
+<tr><td><span class="tag p1">P1</span> 第3轮</td><td>B1 重试 · B2 自愈接入 · B3 熔断 · C2 并发配额 · E 测试补齐</td><td>ToolRegistry/execute 包装层 + 各工具</td><td>弹性与资源护栏</td></tr>
+<tr><td><span class="tag p2">P2</span> 第4轮</td><td>C1 统一缓存 · C3 流式 · D1-D4 能力协同编排</td><td>knowledge_query/loop/cache/认知总线</td><td>九能力一致高效闭环</td></tr>
+</tbody>
+</table>
+
+<div class="box">
+<b>建议的下一步（请确认是否执行）：</b>我可直接实施 <b>P0 第1轮</b>（文件沙箱 containment、web_fetch SSRF、审批在 execute 层强制、shell 禁令牌硬化），均为低风险、高确定性的安全加固，并配套最小单测。是否开始？或你想先聚焦某一项（如仅“能控”安全三连）？
+</div>
+
+<h2>附录 · 证据索引</h2>
+<p class="note">
+file_read.ts:99-101,126-133,141-153 · file_list.ts:78-80,90,100 · ToolRegistry.ts:254-305,313-322,324-328,341-361,571-577 ·
+web_fetch.ts:140,149-159 · web_search.ts:414,421-501,503-512 · memory_store.ts:170-206,198-199 ·
+tts_speak.ts:87-98,117-127,130-138 · image_generate.ts:93-156,114,126-131 ·
+code_fix.ts:30-34,95-106 · code_review.ts:4-8,94,116-118,339-363 · code_generate.ts:98,116-308 ·
+task_manage.ts:18,123-134,181-250 · note_take.ts:119-148 · calendar.ts:99,105,111,182,211,238,517-518 ·
+emotion_detect.ts:37-57 (+ initHarness.ts:472-652) · self_reflect.ts:28,78-132 ·
+shell_exec.ts:39-84,160,217-226,229-280 · registerHarnessTools.ts:386-587 ·
+builtinToolsets.ts:16-173 · python/agent/tools/tool_self_healing.py:41,133-179 ·
+python/agent/tools/network_tools.py:async_is_safe_url · python/agent/tools/cognition_tools.py:66-89,146-173
+</p>
+
+</div>
+</body>
+</html>

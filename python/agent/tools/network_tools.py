@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import ipaddress
+import socket
+import urllib.parse
 from typing import Any
 
 from agent.tools.registry import (
@@ -8,6 +11,67 @@ from agent.tools.registry import (
     ToolParameterDef,
     ToolResult,
 )
+from agent.core.logger import log_ignored
+from agent.core.logger import StructuredLogger
+
+_log = StructuredLogger("tools.network")
+
+# ─── 审计 P1-5：SSRF 异步检查 ───
+
+_SSRF_BLOCKED_NETWORKS = [
+    ipaddress.IPv4Network("10.0.0.0/8"),
+    ipaddress.IPv4Network("172.16.0.0/12"),
+    ipaddress.IPv4Network("192.168.0.0/16"),
+    ipaddress.IPv4Network("127.0.0.0/8"),
+    ipaddress.IPv4Network("169.254.0.0/16"),
+    ipaddress.IPv4Network("224.0.0.0/4"),
+    ipaddress.IPv6Network("::1/128"),
+    ipaddress.IPv6Network("fe80::/10"),
+    ipaddress.IPv6Network("fc00::/7"),
+]
+
+_SSRF_BLOCKED_HOSTS = {
+    "localhost", "0.0.0.0", "metadata.google.internal",
+    "169.254.169.254",
+}
+
+
+async def async_is_safe_url(url: str) -> bool:
+    """异步检查 URL 是否安全（非内网/非云元数据地址）。
+
+    返回 True 表示安全可访问，False 表示需阻止。
+    """
+    try:
+        parsed = urllib.parse.urlparse(url)
+        hostname = parsed.hostname
+        if not hostname:
+            return False
+
+        hostname_lower = hostname.lower()
+        if hostname_lower in _SSRF_BLOCKED_HOSTS:
+            return False
+
+        try:
+            ip = ipaddress.IPv4Address(hostname_lower)
+        except ipaddress.AddressValueError:
+            try:
+                ip = ipaddress.IPv6Address(hostname_lower)
+            except ipaddress.AddressValueError:
+                try:
+                    resolved = socket.getaddrinfo(hostname_lower, None, socket.AF_UNSPEC)
+                    if not resolved:
+                        return False
+                    ip = ipaddress.ip_address(resolved[0][4][0])
+                except (socket.gaierror, OSError):
+                    return True
+
+        for network in _SSRF_BLOCKED_NETWORKS:
+            if ip in network:
+                return False
+        return True
+    except Exception as _exc:
+        log_ignored(_log, "network_tools._is_safe_url", _exc)
+        return False
 
 
 WEB_SEARCH_DEF = ToolDefinition(
@@ -101,6 +165,10 @@ async def web_fetch_executor(params: dict[str, Any]) -> ToolResult:
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
 
+    # ─── 审计 P1-5：SSRF 检查 ───
+    if not await async_is_safe_url(url):
+        return ToolResult(success=False, error="URL 被安全策略阻止（内网/元数据地址）", duration=time.time() - start)
+
     try:
         import urllib.request
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
@@ -134,8 +202,8 @@ async def chart_generate_executor(params: dict[str, Any]) -> ToolResult:
         from agent.main import engine
         if engine and hasattr(engine, "llm"):
             llm = engine.llm
-    except Exception:
-        pass
+    except Exception as _exc:
+        log_ignored(None, "network_tools.chart_generate_executor", _exc)
 
     if llm:
         try:
@@ -149,8 +217,8 @@ async def chart_generate_executor(params: dict[str, Any]) -> ToolResult:
             response = await llm.chat(messages=[{"role": "user", "content": prompt}], use_cache=False)
             content = response.get("content", "")
             return ToolResult(success=True, output=content, duration=time.time() - start)
-        except Exception:
-            pass
+        except Exception as _exc:
+            log_ignored(None, "network_tools.chart_generate_executor", _exc)
 
     return ToolResult(
         success=True,

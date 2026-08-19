@@ -66,8 +66,8 @@ class WhatsAppAdapter(PlatformAdapter):
 
     async def start(self) -> None:
         if not self._access_token:
-            log.warning("WhatsApp Access Token 未配置，适配器以模拟模式运行")
-            self._connected = True
+            log.warning("WhatsApp Access Token 未配置，适配器以模拟模式运行（不会真实连接）")
+            self._enter_simulated()
             return
 
         try:
@@ -98,8 +98,8 @@ class WhatsAppAdapter(PlatformAdapter):
             self._connected = True
             log.info("WhatsApp 适配器已启动", port=self._port)
         except ImportError:
-            log.warning("fastapi/uvicorn 未安装，WhatsApp 适配器以模拟模式运行")
-            self._connected = True
+            log.warning("fastapi/uvicorn 未安装，WhatsApp 适配器以模拟模式运行（不会真实连接）")
+            self._enter_simulated()
         except Exception as e:
             log.error("WhatsApp 适配器启动失败", error=str(e))
             self._connected = False
@@ -145,8 +145,9 @@ class WhatsAppAdapter(PlatformAdapter):
 
     async def send_message(self, chat_id: str, text: str) -> bool:
         if not self._access_token:
-            log.debug("WhatsApp 模拟发送", chat_id=chat_id, text=text[:50])
-            return True
+            # 诚实化：模拟态（未配置 Token / 未安装 fastapi）未真实发送
+            log.warning("WhatsApp 适配器未连接，消息未真实发送", chat_id=chat_id)
+            return False
 
         try:
             import httpx

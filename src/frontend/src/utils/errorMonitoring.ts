@@ -31,6 +31,11 @@ interface ErrorData {
   additionalData?: Record<string, unknown>;
 }
 
+interface ResourceElement extends HTMLElement {
+  src?: string;
+  href?: string;
+}
+
 class ErrorMonitor {
   private isInitialized = false;
 
@@ -70,7 +75,7 @@ class ErrorMonitor {
 
   private handleResourceError(event: ErrorEvent): void {
     if (event.target instanceof Element || event.target instanceof HTMLElement) {
-      const target = event.target as HTMLElement;
+      const target = event.target as ResourceElement;
       const tagName = target.tagName.toLowerCase();
 
       if (
@@ -81,10 +86,10 @@ class ErrorMonitor {
         tagName === 'audio'
       ) {
         const errorData: ErrorData = {
-          message: `资源加载失败: ${(target as unknown as { src?: string }).src || (target as unknown as { href?: string }).href}`,
+          message: `资源加载失败: ${target.src || target.href}`,
           level: ErrorLevel.WARN,
           type: ErrorType.RESOURCE,
-          url: (target as unknown as { src?: string }).src || (target as unknown as { href?: string }).href,
+          url: target.src || target.href,
           timestamp: Date.now(),
           userAgent: navigator.userAgent,
           pageUrl: window.location.href,

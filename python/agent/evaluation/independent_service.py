@@ -10,6 +10,7 @@ from agent.security.sensitive_detector import (
     RiskLevel,
     check_sensitive_info,
 )
+from agent.core.logger import log_ignored
 
 
 @dataclass
@@ -128,8 +129,8 @@ class IndependentEvaluationService:
         if self.deps.enable_llm_evaluation and self.deps.llm:
             try:
                 llm_eval = await self._llm_deep_evaluate(input_data)
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(None, "independent_service.IndependentEvaluationService.evaluate", _exc)
 
         return self._merge_results(rule_eval, llm_eval)
 

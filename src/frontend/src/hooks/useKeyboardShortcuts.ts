@@ -1,6 +1,6 @@
 import { useEffect, useCallback } from 'react';
 import { useUIStore } from '../stores/useUIStore';
-import type { ModuleId } from '../components/layout/LeftRail';
+import type { ModuleId } from '../types/chat';
 
 // 快捷键配置
 export interface Shortcut {

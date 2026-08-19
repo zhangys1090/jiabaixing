@@ -28,6 +28,7 @@ from typing import Any, AsyncIterator
 
 from agent.gateway.base import Message, PlatformAdapter
 from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
 
 log = StructuredLogger("gateway.matrix_adapter")
 
@@ -70,8 +71,8 @@ class MatrixAdapter(PlatformAdapter):
 
     async def start(self) -> None:
         if not self._access_token:
-            log.warning("Matrix Access Token 未配置，适配器以模拟模式运行")
-            self._connected = True
+            log.warning("Matrix Access Token 未配置，适配器以模拟模式运行（不会真实连接）")
+            self._enter_simulated()
             return
 
         try:
@@ -79,8 +80,8 @@ class MatrixAdapter(PlatformAdapter):
             self._user_id = whoami.get("user_id", self._user_id)
             log.info("Matrix 已认证", user_id=self._user_id)
         except Exception as e:
-            log.warning("Matrix 认证检查失败，以模拟模式运行", error=str(e))
-            self._connected = True
+            log.warning("Matrix 认证检查失败，以模拟模式运行（不会真实连接）", error=str(e))
+            self._enter_simulated()
             return
 
         try:
@@ -182,14 +183,15 @@ class MatrixAdapter(PlatformAdapter):
             self._sync_task.cancel()
             try:
                 await self._sync_task
-            except asyncio.CancelledError:
-                pass
+            except asyncio.CancelledError as _exc:
+                log_ignored(log, "matrix_adapter.MatrixAdapter.stop", _exc)
         log.info("Matrix 适配器已停止")
 
     async def send_message(self, chat_id: str, text: str) -> bool:
         if not self._access_token:
-            log.debug("Matrix 模拟发送", room=chat_id, text=text[:50])
-            return True
+            # 诚实化：模拟态（未配置 Token / 认证失败）未真实发送
+            log.warning("Matrix 适配器未连接，消息未真实发送", room=chat_id)
+            return False
 
         try:
             txn_id = str(uuid.uuid4())

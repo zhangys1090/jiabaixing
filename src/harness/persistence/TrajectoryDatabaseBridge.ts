@@ -99,7 +99,13 @@ export interface ExecutionStats {
   avgScore: number;
 }
 
-export class TrajectoryDatabase {
+/**
+ * @deprecated 已迁移 Python (`python/agent/persistence/trajectory.py`)。
+ * 仅作本地回退存根；生产路径经 `PythonAgentBridge.getTrajectory()` 桥接。
+ * `AgentHarness` 仍 `new TrajectoryDatabase()`，经 `TrajectoryDatabase.ts` 重导出壳
+ * 解析为本类。
+ */
+export class TrajectoryDatabaseBridge {
   private db: DatabaseAdapter;
   private dbPath: string;
   /** P3: 嵌入函数 — 将文本转为向量 */
@@ -786,5 +792,124 @@ export class TrajectoryDatabase {
       // 静默处理
     }
     return null;
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // P2 #15: 时间预算预估 — 基于历史执行数据预测
+  // ═══════════════════════════════════════════════════════════
+
+  /**
+   * 基于历史数据预估任务执行时间
+   * @param taskType - 任务类型标识（如工具名、技能名）
+   * @param complexity - 任务复杂度 (0-1)
+   * @returns 预估时间及置信区间
+   */
+  estimateExecutionTime(
+    taskType: string,
+    complexity?: number
+  ): {
+    estimatedMs: number;
+    p50: number;
+    p90: number;
+    p99: number;
+    sampleCount: number;
+    confidence: 'low' | 'medium' | 'high';
+  } | null {
+    try {
+      const stmt = this.db.prepare(
+        `SELECT total_duration, total_tool_calls, quality_overall
+         FROM executions
+         WHERE status = 'success' AND total_duration > 0
+         ORDER BY created_at DESC
+         LIMIT 200`
+      );
+      const rows = stmt.all() as Array<{
+        total_duration: number;
+        total_tool_calls: number;
+        quality_overall: number | null;
+      }>;
+
+      if (rows.length < 3) {
+        return null;
+      }
+
+      const durations = rows.map((r) => r.total_duration).sort((a, b) => a - b);
+      const n = durations.length;
+
+      const p50 = durations[Math.floor(n * 0.5)];
+      const p90 = durations[Math.floor(n * 0.9)];
+      const p99 = durations[Math.min(Math.floor(n * 0.99), n - 1)];
+
+      const avgDuration = durations.reduce((a, b) => a + b, 0) / n;
+
+      let estimatedMs = avgDuration;
+
+      if (complexity !== undefined && complexity >= 0 && complexity <= 1) {
+        const avgToolCalls =
+          rows.reduce((a, r) => a + r.total_tool_calls, 0) / n;
+        const complexityFactor = 0.5 + complexity * 1.5;
+        estimatedMs = avgDuration * complexityFactor;
+
+        if (avgToolCalls > 0) {
+          const toolCallFactor = 1 + complexity * 0.3;
+          estimatedMs *= toolCallFactor;
+        }
+      }
+
+      let confidence: 'low' | 'medium' | 'high';
+      if (n < 10) confidence = 'low';
+      else if (n < 50) confidence = 'medium';
+      else confidence = 'high';
+
+      return {
+        estimatedMs: Math.round(estimatedMs),
+        p50,
+        p90,
+        p99,
+        sampleCount: n,
+        confidence,
+      };
+    } catch (error) {
+      Logger.warn(
+        `时间预算预估失败: ${(error as Error).message}`,
+        'TrajectoryDatabase'
+      );
+      return null;
+    }
+  }
+
+  /**
+   * 按工具名预估执行时间
+   */
+  estimateToolTime(toolName: string): {
+    estimatedMs: number;
+    p50: number;
+    p90: number;
+    sampleCount: number;
+  } | null {
+    try {
+      const stmt = this.db.prepare(
+        `SELECT duration FROM tool_invocations
+         WHERE tool_name = ? AND duration > 0
+         ORDER BY created_at DESC
+         LIMIT 100`
+      );
+      const rows = stmt.all(toolName) as Array<{ duration: number }>;
+
+      if (rows.length < 2) return null;
+
+      const durations = rows.map((r) => r.duration).sort((a, b) => a - b);
+      const n = durations.length;
+      const avg = durations.reduce((a, b) => a + b, 0) / n;
+
+      return {
+        estimatedMs: Math.round(avg),
+        p50: durations[Math.floor(n * 0.5)],
+        p90: durations[Math.floor(n * 0.9)],
+        sampleCount: n,
+      };
+    } catch {
+      return null;
+    }
   }
 }

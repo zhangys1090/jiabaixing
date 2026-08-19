@@ -61,8 +61,9 @@ export function createMemorySearchExecutor(deps: MemorySearchDeps) {
 
     if (!deps.searchMemories) {
       return {
-        success: true,
+        success: false,
         output: '记忆搜索暂不可用',
+        error: '未注入记忆搜索后端(searchMemories)',
         duration: 0,
         validated: false,
       };
@@ -96,8 +97,9 @@ export function createMemorySearchExecutor(deps: MemorySearchDeps) {
       };
     } catch (error) {
       return {
-        success: true,
-        output: `记忆搜索失败: ${(error as Error).message}`,
+        success: false,
+        output: '记忆搜索失败',
+        error: `记忆搜索异常: ${(error as Error).message}`,
         duration: 0,
         validated: false,
       };

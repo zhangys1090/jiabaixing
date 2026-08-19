@@ -11,8 +11,8 @@
 
 import express from 'express';
 import {
-  getApprovalEngine,
   ApprovalPolicy,
+  getApprovalEngine,
 } from '../../security/ApprovalEngine';
 import { Logger } from '../../utils/Logger';
 
@@ -76,15 +76,16 @@ router.get('/stats', (_req: express.Request, res: express.Response) => {
 router.get('/policy', (_req: express.Request, res: express.Response) => {
   try {
     const engine = getApprovalEngine();
+    const policy = engine.getPolicy();
     res.json({
       data: {
-        mode: (engine as any).policy.mode,
-        autoApproveLow: (engine as any).policy.autoApproveLow,
-        autoApproveMedium: (engine as any).policy.autoApproveMedium,
-        requireHumanForHigh: (engine as any).policy.requireHumanForHigh,
-        requireHumanForCritical: (engine as any).policy.requireHumanForCritical,
-        batchWindowMs: (engine as any).policy.batchWindowMs,
-        timeoutMs: (engine as any).policy.timeoutMs,
+        mode: policy.mode,
+        autoApproveLow: policy.autoApproveLow,
+        autoApproveMedium: policy.autoApproveMedium,
+        requireHumanForHigh: policy.requireHumanForHigh,
+        requireHumanForCritical: policy.requireHumanForCritical,
+        batchWindowMs: policy.batchWindowMs,
+        timeoutMs: policy.timeoutMs,
       },
     });
   } catch (err) {

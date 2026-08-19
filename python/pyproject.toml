@@ -16,14 +16,17 @@ dependencies = [
     "chromadb>=1.0.0",
     "jieba>=0.42.1",
     "sentence-transformers>=3.3.0",
+    "tiktoken>=0.8.0",
     "apscheduler>=3.11.0",
     "sqlalchemy[asyncio]>=2.0.0",
     "aiosqlite>=0.20.0",
     "asyncpg>=0.30.0",
+    "psycopg2-binary>=2.9.0",
     "scikit-learn>=1.6.0",
     "python-dotenv>=1.0.0",
     "websockets>=14.0",
     "redis[hiredis]>=5.0.0",
+    "alembic>=1.13.0",
     "opentelemetry-api>=1.28.0",
     "opentelemetry-sdk>=1.28.0",
     "opentelemetry-exporter-otlp-proto-grpc>=1.28.0",
@@ -36,6 +39,9 @@ dependencies = [
 test = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.25.0",
+    "pytest-xdist>=3.6.0",
+    "pytest-cov>=5.0.0",
+    "pytest-json-report>=1.5.0",
     "httpx>=0.28.0",
     "ruff>=0.8.0",
 ]
@@ -43,6 +49,9 @@ test = [
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.25.0",
+    "pytest-xdist>=3.6.0",
+    "pytest-cov>=5.0.0",
+    "pytest-json-report>=1.5.0",
     "httpx>=0.28.0",
     "ruff>=0.8.0",
 ]
@@ -55,6 +64,47 @@ include = ["agent*"]
 line-length = 100
 target-version = "py313"
 
+# 静默异常红线（silent-except）的静态护栏：与 CI 红线条约 test_zero_silent_except
+# （scripts/check_silent_except.py 的 AST 扫描）双保险，防止裸 except / try-except-pass 回潮。
+[tool.ruff.lint]
+# 精准静默异常红线：仅拦"裸 except"与"try-except 体为空"，避免误伤合理宽异常兜底。
+# 更广义的盲捕（BLE001）由 AST 红线 test_zero_silent_except 在 CI 中精细把关。
+select = ["E722", "S112"]
+
+# 注意：pytest 实际配置以根目录 pytest.ini 为准（pytest.ini 优先级高于本段）。
+# 本段仅保留与 pytest.ini 一致的冗余声明，避免误导；marker 与 addopts 的统一来源是 pytest.ini。
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+# 覆盖率配置 — CI 中通过 `pytest --cov=agent --cov-report=xml` 显式启用。
+# fail_under=60 为最低门禁，低于此值 CI e2e-python job 失败。
+[tool.coverage.run]
+source = ["agent"]
+branch = true
+omit = [
+    "*/tests/*",
+    "*/__pycache__/*",
+    "*/migrations/*",
+    "*/conftest.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+precision = 2
+fail_under = 60
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "pass",
+    "if TYPE_CHECKING:",
+]
+
+[tool.coverage.xml]
+output = "coverage.xml"

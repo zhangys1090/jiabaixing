@@ -159,6 +159,10 @@ SUBSYSTEM_DEPS: list[SubsystemSpec] = [
             "canary_manager",
             "constraints",
             "memory",
+            # C1: 防护串主路径——保证 Schema 校验 / 调用守卫在 LoopController 构造前就绪，
+            # 使 getattar(self, "schema_validator"/"tool_call_guard") 解析到真实共享实例（与 conversation 对齐）。
+            "schema_validator",
+            "tool_call_guard",
         ),
         critical=False,
     ),
@@ -231,6 +235,13 @@ SUBSYSTEM_DEPS: list[SubsystemSpec] = [
         ("agent_registry", "a2a_manager", "a2a_self_card", "a2a_auth_interceptor"),
         critical=False,
     ),
+    # P0 接入：DAG 任务调度器（OrchestrationExecutor）
+    SubsystemSpec(
+        "orchestration_executor",
+        "_init_orchestration_executor",
+        ("tool_registry",),
+        critical=False,
+    ),
     # ── 后台任务层 ──
     SubsystemSpec("cron_scheduler", "_init_cron_scheduler", critical=False),
     SubsystemSpec("sandbox", "_init_sandbox", critical=False),
@@ -279,7 +290,8 @@ SUBSYSTEM_DEPS: list[SubsystemSpec] = [
     SubsystemSpec("lazy_deps", "_init_lazy_deps", critical=False),
     SubsystemSpec("coding_context", "_init_coding_context", critical=False),
     SubsystemSpec("subdirectory_hints", "_init_subdirectory_hints", critical=False),
-    SubsystemSpec("tool_result_cache", "_init_tool_result_cache", critical=False),
+    # W3：tool_result_cache 子系统已下线（孤儿接线，零调用点），
+    # 类实现保留在 agent/tools/tool_result_cache.py 备用。
     SubsystemSpec("conversation_compressor", "_init_conversation_compressor", critical=False),
     # ── 安全可控层 (T2) ──
     SubsystemSpec("budget_guard", "_init_budget_guard", critical=False),
@@ -351,7 +363,27 @@ SUBSYSTEM_DEPS: list[SubsystemSpec] = [
     SubsystemSpec("rate_limit_tracker", "_init_rate_limit_tracker", critical=False),
     SubsystemSpec("blueprint_catalog", "_init_blueprint_catalog", critical=False),
     SubsystemSpec("onboarding", "_init_onboarding", critical=False),
-    SubsystemSpec("multi_agent", "_init_multi_agent", ("llm",), critical=False),
     SubsystemSpec("gateway_hooks", "_init_gateway_hooks", critical=False),
     SubsystemSpec("slash_commands", "_init_slash_commands", critical=False),
+    # ── P0 安全沙箱 + 持久化工作流 ──
+    SubsystemSpec("safety_net", "_init_safety_net", critical=False),
+    SubsystemSpec(
+        "workflow_engine",
+        "_init_workflow_engine",
+        ("safety_net", "tool_registry"),
+        critical=False,
+    ),
+    # ── P1 多模态感知 + 知识沉淀 + MCP 集成 ──
+    SubsystemSpec("perception_loop", "_init_perception_loop", critical=False),
+    SubsystemSpec(
+        "knowledge_lifecycle",
+        "_init_knowledge_lifecycle",
+        critical=False,
+    ),
+    SubsystemSpec(
+        "mcp_integration",
+        "_init_mcp_integration",
+        ("tool_registry",),
+        critical=False,
+    ),
 ]

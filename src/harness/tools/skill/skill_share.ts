@@ -138,7 +138,12 @@ async function exportSkill(
   }
 
   const content = fs.readFileSync(filePath, 'utf-8');
-  const skill = JSON.parse(content) as SkillPackage;
+  let skill: SkillPackage;
+  try {
+    skill = JSON.parse(content) as SkillPackage;
+  } catch (_err) {
+    throw new Error(`技能文件不是合法 JSON，无法解析: ${filePath}`);
+  }
 
   // 生成可分享的格式
   const shareable = `<!-- jiabaixing skill: ${skill.name} v${skill.version} -->
@@ -240,7 +245,12 @@ async function runSkill(
   }
 
   const content = fs.readFileSync(filePath, 'utf-8');
-  const skill = JSON.parse(content) as SkillPackage;
+  let skill: SkillPackage;
+  try {
+    skill = JSON.parse(content) as SkillPackage;
+  } catch (_err) {
+    throw new Error(`技能文件不是合法 JSON，无法加载执行: ${filePath}`);
+  }
 
   // 构建执行指令
   const instruction = `执行技能 "${skill.name}": ${skill.description}

@@ -149,7 +149,13 @@ export class CLIWebSocketClient {
 
           // 将所有事件转发到 EventBus
           if (event.type) {
-            EventBus.emit(event.type, event);
+            // 使用类型断言绕过 EventMap 严格键检查（事件来自后端动态推送）
+            (
+              EventBus.emit as (
+                eventName: string,
+                ...args: unknown[]
+              ) => boolean
+            )(event.type, event);
           }
         } catch (err) {
           Logger.debug('WebSocket 消息解析失败', 'CLIWS', err);
@@ -159,7 +165,7 @@ export class CLIWebSocketClient {
       this.ws.on('close', () => {
         this.isConnecting = false;
         Logger.debug('WebSocket 已断开', 'CLIWS');
-        EventBus.emit('ws_disconnected' as any, {});
+        EventBus.emit('ws_disconnected', {});
         this.scheduleReconnect();
       });
 
@@ -293,7 +299,7 @@ export function initCLIWebSocket(): CLIWebSocketClient {
 
   // 注册审批请求事件 — 在 CLI 中显示确认提示
   EventBus.on(
-    'approval_request' as any,
+    'approval_request',
     async (request: {
       id: string;
       type: string;

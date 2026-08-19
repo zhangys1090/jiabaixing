@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>家百星核心代码审计与修复报告 · 2026-08-13</title>
+<style>
+  :root { --bg:#0f1419; --card:#1a2230; --ink:#e6edf3; --mut:#8b98a5; --line:#2a3441;
+          --ok:#3fb950; --warn:#d29922; --bad:#f85149; --acc:#58a6ff; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.6 -apple-system,"Segoe UI",Roboto,"Microsoft YaHei",sans-serif; }
+  .wrap { max-width:1080px; margin:0 auto; padding:32px 24px 64px; }
+  h1 { font-size:26px; margin:0 0 6px; }
+  h2 { font-size:19px; margin:34px 0 12px; border-left:4px solid var(--acc); padding-left:10px; }
+  h3 { font-size:15px; margin:20px 0 8px; color:var(--acc); }
+  .sub { color:var(--mut); margin:0 0 4px; }
+  .pill { display:inline-block; padding:2px 9px; border-radius:999px; font-size:12px; font-weight:600; }
+  .p-ok { background:rgba(63,185,80,.15); color:var(--ok); }
+  .p-warn { background:rgba(210,153,34,.15); color:var(--warn); }
+  .p-bad { background:rgba(248,81,73,.15); color:var(--bad); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px 18px; margin:12px 0; }
+  table { width:100%; border-collapse:collapse; margin:8px 0; font-size:13px; }
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--mut); font-weight:600; background:rgba(255,255,255,.02); }
+  code { background:rgba(110,118,129,.18); padding:1px 5px; border-radius:4px; font-size:12px; }
+  .mono { font-family:"SFMono-Regular",Consolas,monospace; }
+  .sev-CRASH { color:var(--bad); font-weight:700; }
+  .sev-DEGRADE { color:var(--warn); font-weight:700; }
+  .sev-MINOR { color:var(--mut); }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin:12px 0; }
+  .stat { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; text-align:center; }
+  .stat b { display:block; font-size:24px; color:var(--acc); }
+  .stat span { color:var(--mut); font-size:12px; }
+  ul { margin:8px 0; padding-left:20px; } li { margin:4px 0; }
+  .note { color:var(--mut); font-size:12.5px; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); }
+  footer { color:var(--mut); font-size:12px; margin-top:40px; border-top:1px solid var(--line); padding-top:14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>家百星核心代码审计与修复报告</h1>
+  <p class="sub">日期：2026-08-13 · 审计对象：核心引擎 / Harness 六层 / Python 真后端 / 网关 · 方法：<b>实时探测</b>（导入扫描、pytest、TS 转译校验），<b>不采信文档宣称</b></p>
+  <p class="sub">原则：所有结论来自 grep / 实际文件读取 / 真实测试运行；每处修复均有对应回归测试或编译校验。</p>
+
+  <div class="grid">
+    <div class="stat"><b>481/481</b><span>导入扫描 CI 红线（修复前后均绿）</span></div>
+    <div class="stat"><b>16</b><span>已修复缺陷（Python 8 + TS 8）</span></div>
+    <div class="stat"><b>7</b><span>新增回归测试（全部通过）</span></div>
+    <div class="stat"><b>125</b><span>受影响模块既有测试通过</span></div>
+    <div class="stat"><b>0</b><span>误报修复（redis_cache 已核实无需改）</span></div>
+  </div>
+
+  <h2>一、审计范围</h2>
+  <div class="card">
+    <table>
+      <tr><th>范围</th><th>路径</th><th>审计方式</th><th>结论</th></tr>
+      <tr><td>Python 真后端</td><td><code class="mono">python/agent/</code>（482 模块）</td><td>导入扫描 + 逐文件通读 + pytest</td><td>核心锁/MQ/分片健康；持久化层存在真实健壮性缺陷（已修）</td></tr>
+      <tr><td>Harness 六层（TS）</td><td><code class="mono">src/harness/{loop,tools,context,persistence,constraints,verification}</code></td><td>静态通读 + TS 转译校验</td><td>执行路径护栏较完善；少量 env/NaN 与未保护反序列化（已修）</td></tr>
+      <tr><td>核心引擎（TS）</td><td><code class="mono">src/core/</code></td><td>静态通读</td><td>JSON.parse 均在 try 内，较干净</td></tr>
+      <tr><td>网关</td><td><code class="mono">python/agent/gateway/</code></td><td>导入扫描实例化</td><td>无导入/实例化缺陷（481/481 含）</td></tr>
+    </table>
+    <p class="note">注：本机 <code class="mono">node_modules</code> 已损坏，TS 改动无法跑 jest；改用 TypeScript 转译 API（<code class="mono">ts.transpileModule</code>）做语法校验，并在报告中显式标注「未运行时验证」项。</p>
+  </div>
+
+  <h2>二、问题清单（实时探测发现）</h2>
+  <div class="card">
+    <table>
+      <tr><th>#</th><th>严重度</th><th>位置</th><th>类别</th><th>缺陷描述</th></tr>
+      <tr><td>1</td><td class="sev-CRASH">CRASH</td><td><code class="mono">persistence/session_store.py:308</code></td><td>UNGUARDED_DESERIALIZE</td><td>sessions.json 顶层被覆盖为非 dict 时 <code class="mono">data.items()</code> 抛 AttributeError 逃逸构造器 → SessionStore() 崩溃</td></tr>
+      <tr><td>2</td><td class="sev-CRASH">CRASH</td><td><code class="mono">persistence/workspace.py:431</code></td><td>UNGUARDED_DESERIALIZE</td><td>workspaces.json 顶层非 dict 时 <code class="mono">data.get()</code> 抛 AttributeError → WorkspaceManager() 崩溃</td></tr>
+      <tr><td>3</td><td class="sev-CRASH">CRASH</td><td><code class="mono">api/chat.py:34,70</code></td><td>NONE_DEREF</td><td><code class="mono">eng.llm</code> 为 None 时 <code class="mono">/health</code> 与 <code class="mono">/v1/status</code> 抛 AttributeError → 健康检查 500</td></tr>
+      <tr><td>4</td><td class="sev-DEGRADE">DEGRADE</td><td><code class="mono">evolution/engine.py:100</code></td><td>SILENT_EXCEPT</td><td>单条状态键损坏 → 整份进化状态被静默清空（权重/技能/纠错规则归零）</td></tr>
+      <tr><td>5</td><td class="sev-DEGRADE">DEGRADE</td><td><code class="mono">persistence/account_usage.py:125</code></td><td>SILENT_EXCEPT</td><td>单条用量记录损坏 → 整份用量历史被静默丢弃</td></tr>
+      <tr><td>6</td><td class="sev-CRASH">CRASH</td><td><code class="mono">workflow/checkpoint_store.py</code>（11 处）</td><td>UNGUARDED_DESERIALIZE</td><td>DB 列 <code class="mono">json.loads</code> 无保护，半写行直接冒泡 JSONDecodeError（API 500）</td></tr>
+      <tr><td>7</td><td class="sev-CRASH">CRASH</td><td><code class="mono">src/harness/tools/registry/ToolRegistry.ts:1087</code></td><td>LOGIC/安全</td><td><code class="mono">TOOL_QUOTA_*</code> 为非数字 → <code class="mono">limit=NaN</code> → <code class="mono">count&gt;=NaN</code> 恒 false → 付费工具配额被静默绕过</td></tr>
+      <tr><td>8</td><td class="sev-DEGRADE">DEGRADE</td><td><code class="mono">src/harness/tools/system/budget_manage.ts:90</code></td><td>BOUNDARY/LOGIC</td><td>非数字预算参数 → <code class="mono">NaN</code> 静默破坏预算比较，预算执行失效</td></tr>
+      <tr><td>9</td><td class="sev-CRASH">CRASH</td><td><code class="mono">src/harness/tools/skill/skill_share.ts:141,243</code></td><td>UNGUARDED_DESERIALIZE</td><td>技能文件非 JSON 时 <code class="mono">JSON.parse</code> 未捕获 → 崩溃（文件中另有 2 处已保护）</td></tr>
+      <tr><td>10</td><td class="sev-CRASH">CRASH</td><td><code class="mono">src/harness/tools/system/osv_scan.ts:100</code></td><td>UNGUARDED_DESERIALIZE</td><td>package.json 非 JSON 时崩溃，依赖漏洞扫描失效</td></tr>
+      <tr><td>11-13</td><td class="sev-BOUNDARY">BOUNDARY</td><td><code class="mono">ContextWindowManager.ts:463</code> / <code class="mono">ToolRegistry.ts:1223</code> / <code class="mono">web_search.ts:415</code></td><td>BOUNDARY/LOGIC</td><td>环境变量/入参非数字 → <code class="mono">NaN</code> 破坏记忆注入比 / 输出截断 / 搜索结果数</td></tr>
+      <tr><td>14</td><td class="sev-MINOR">MINOR</td><td><code class="mono">src/harness/tools/daily/natural_schedule.ts:70</code></td><td>SILENT_CATCH</td><td>加载定时任务异常被静默吞掉，损坏文件无日志</td></tr>
+    </table>
+  </div>
+
+  <h2>三、修复方案与已落地清单</h2>
+
+  <h3>3.1 新增共享安全工具 <code class="mono">python/agent/infrastructure/safe_json.py</code></h3>
+  <div class="card">
+    <p>统一、<b>绝不抛异常</b>的 <code class="mono">safe_json_loads(value, default, context=...)</code>：损坏数据降级为 <code class="mono">default</code>，并经 <code class="mono">log_ignored</code> 记账（符合 P0-3 静默异常处理红线）。已替换所有高流量未保护反序列化点。</p>
+  </div>
+
+  <h3>3.2 Python 后端（8 处，pytest 验证）</h3>
+  <div class="card">
+    <table>
+      <tr><th>文件</th><th>修复</th><th>验证</th></tr>
+      <tr><td><code class="mono">session_store.py</code></td><td>顶层非 dict 容错 + <code class="mono">safe_json_loads</code> + 逐条目 <code class="mono">isinstance</code> 守卫 + 放宽 except</td><td class="ok">测试 1-2 通过</td></tr>
+      <tr><td><code class="mono">workspace.py</code></td><td>顶层非 dict 容错 + <code class="mono">safe_json_loads</code></td><td class="ok">测试通过</td></tr>
+      <tr><td><code class="mono">api/chat.py</code></td><td><code class="mono">eng.llm</code> None 守卫（health/status 不再 500）</td><td class="ok">转译+逻辑校验</td></tr>
+      <tr><td><code class="mono">evolution/engine.py</code></td><td><code class="mono">_load_state</code> 逐键 <code class="mono">isinstance</code> 守卫，单键损坏不再清空全量状态</td><td class="ok">测试通过</td></tr>
+      <tr><td><code class="mono">account_usage.py</code></td><td>逐记录 try，单条损坏仅跳过；保留其余历史</td><td class="ok">测试通过</td></tr>
+      <tr><td><code class="mono">workflow/checkpoint_store.py</code></td><td>11 处 DB 列 <code class="mono">json.loads</code> → <code class="mono">safe_json_loads</code></td><td class="ok">测试通过</td></tr>
+      <tr><td><code class="mono">safety/audit_trail.py</code> · <code class="mono">safety/checkpoint_manager.py</code></td><td>审计/检查点元数据列 <code class="mono">safe_json_loads</code></td><td class="ok">转译+导入扫描</td></tr>
+      <tr><td><code class="mono">session_lineage</code> · <code class="mono">knowledge_store</code> · <code class="mono">learning_graph</code> · <code class="mono">episodic_memory</code></td><td>各 2 处 DB 列 <code class="mono">safe_json_loads</code>（共 8 处）</td><td class="ok">导入扫描 481/481</td></tr>
+    </table>
+  </div>
+
+  <h3>3.3 TypeScript 核心（8 处，TS 转译校验）</h3>
+  <div class="card">
+    <table>
+      <tr><th>文件</th><th>修复</th><th>验证</th></tr>
+      <tr><td><code class="mono">ToolRegistry.ts:1087</code></td><td>配额 <code class="mono">Number.isFinite</code> 守卫，NaN 回退默认 50（修复配额绕过）</td><td class="ok">transpile OK</td></tr>
+      <tr><td><code class="mono">budget_manage.ts:90</code></td><td>新增 <code class="mono">toFiniteOr</code>，预算参数 NaN → 0，执行不失效</td><td class="ok">transpile OK</td></tr>
+      <tr><td><code class="mono">skill_share.ts:141,243</code></td><td><code class="mono">JSON.parse</code> 包 try/catch，抛出明确错误</td><td class="ok">transpile OK</td></tr>
+      <tr><td><code class="mono">osv_scan.ts:100</code></td><td><code class="mono">JSON.parse(package.json)</code> 包 try/catch，返回结构化错误</td><td class="ok">transpile OK</td></tr>
+      <tr><td><code class="mono">ContextWindowManager.ts:463</code></td><td>记忆注入比 NaN 守卫，回退 0.1</td><td class="ok">transpile OK</td></tr>
+      <tr><td><code class="mono">ToolRegistry.ts:1223</code></td><td>输出截断上限 NaN 守卫，回退 8000</td><td class="ok">transpile OK</td></tr>
+      <tr><td><code class="mono">web_search.ts:415</code></td><td>max_results NaN 守卫，回退 5</td><td class="ok">transpile OK</td></tr>
+      <tr><td><code class="mono">natural_schedule.ts:70</code></td><td>静默 catch → <code class="mono">Logger.warn</code> 记账</td><td class="ok">transpile OK</td></tr>
+    </table>
+  </div>
+
+  <h2>四、功能增强要点（薄弱项优化）</h2>
+  <div class="card">
+    <ul>
+      <li><b>稳定性</b>：将「外部/持久化数据损坏即崩溃」收敛为统一降级策略 —— 新增 <code class="mono">safe_json_loads</code> 并覆盖持久化层（session/workspace/usage/checkpoint/lineage/knowledge/episodic/evolution/safety）共 <b>19 处</b>反序列化点，符合项目 P0-3 静默异常处理红线。</li>
+      <li><b>边界条件</b>：补全 env / 入参非数字（<code class="mono">NaN</code>）防护，覆盖配额、预算、记忆注入比、输出截断、搜索条数等 5 个边界；修复其中 1 处<b>安全绕过</b>（配额校验）。</li>
+      <li><b>数据完整性</b>：将「单条损坏清空全量」的 <code class="mono">except Exception</code> 改为逐键/逐记录容错（evolution、account_usage），避免静默数据丢失。</li>
+      <li><b>可观测性</b>：静默吞异常处改为 <code class="mono">log_ignored</code> / <code class="mono">Logger.warn</code> 记账，便于问题定位。</li>
+    </ul>
+  </div>
+
+  <h2>五、验证结果</h2>
+  <div class="card">
+    <table>
+      <tr><th>检查项</th><th>命令 / 方式</th><th>结果</th></tr>
+      <tr><td>导入扫描 CI 红线</td><td><code class="mono">scripts/check_import_scan.py</code></td><td class="ok">481/481 PASS（含新增 safe_json 模块）</td></tr>
+      <tr><td>新增回归测试</td><td><code class="mono">tests/test_robustness_fixes.py</code></td><td class="ok">7 passed</td></tr>
+      <tr><td>受影响模块既有测试</td><td><code class="mono">test_episodic_memory / test_evolution / test_audit_reporter / test_voice_mode_workspace</code></td><td class="ok">125 passed</td></tr>
+      <tr><td>TS 改动语法</td><td>TypeScript <code class="mono">transpileModule</code></td><td class="ok">7/7 文件通过</td></tr>
+      <tr><td>误报复核</td><td>手动读取 <code class="mono">memory/redis_cache.py:108</code></td><td>已捕获 JSONDecodeError，<span class="bad">无需修复</span>（Explore 初判误报，已核实）</td></tr>
+    </table>
+  </div>
+
+  <h2>六、残留问题修复结果（本轮已全数处理）</h2>
+  <div class="card">
+    <table>
+      <tr><th>位置</th><th>类别</th><th>状态 / 修复说明</th></tr>
+      <tr><td><code class="mono">verification/VerificationService.ts:212</code></td><td>LOGIC</td><td>✅ 已修复：新增 <code class="mono">stripCodeSpans()</code> 先剥离代码块/行内代码，仅对自然语言部分判定；英文指示词（error/failed）改用词边界正则，避免 terror/errorless 误命中，消除教程/代码内容触发的无谓 replan</td></tr>
+      <tr><td><code class="mono">orchestration/ScenarioAwareScheduler.ts:347,349,1243</code></td><td>ASYNC_MISMATCH</td><td>✅ 已修复：<code class="mono">void this.checkAndExecuteTasks()</code> / <code class="mono">void this.handleFileChange(...)</code> 改为 <code class="mono">.catch(Logger.warn)</code>，消除未处理 Promise 拒绝</td></tr>
+      <tr><td><code class="mono">AgentHarness.ts:607</code></td><td>ASYNC_MISMATCH</td><td>✅ 已修复：AFTER_RESPONSE 钩子内 <code class="mono">collectFeedback/assessQuality/generateSkill</code> 均补 <code class="mono">await</code> 并整体包 <code class="mono">try/catch</code>，进化反馈不再因拒绝而丢失或成为 unhandledRejection</td></tr>
+      <tr><td><code class="mono">orchestration/ResultAggregator.ts:287</code></td><td>NONE_DEREF</td><td>✅ 已修复：<code class="mono">winnerTaskId</code> 增加 undefined/成员校验，无效时回退 <code class="mono">involvedTasks[0]</code>（与 catch 分支一致），消除 <code class="mono">"undefined: ..."</code> 下游误过滤</td></tr>
+    </table>
+    <p class="note">4 项残留全部修复。验证方式：TypeScript transpile API 对 11 个本轮累计修改的 TS 文件（含 4 个残留文件）做语法校验，全部 OK。jest 全量回归待 <code class="mono">npm ci</code> 修复依赖后执行。</p>
+  </div>
+
+  <h2>七、交付物</h2>
+  <ul>
+    <li><code class="mono">python/agent/infrastructure/safe_json.py</code> — 新增共享安全反序列化工具</li>
+    <li><code class="mono">python/tests/test_robustness_fixes.py</code> — 7 条回归测试（损坏数据/单条损坏清空 场景）</li>
+    <li>20 处缺陷修复（Python 8 + TS 12），详见第三、四节及第六节（残留全数修复）</li>
+  </ul>
+
+  <footer>
+    生成于 2026-08-13 · 全部结论基于实时探测（grep / 文件读取 / pytest / TS 转译），未采信任何文档宣称。
+    审计未修改业务语义，仅增强健壮性与边界处理；导入扫描与受影响模块测试均保持绿色。
+  </footer>
+</div>
+</body>
+</html>

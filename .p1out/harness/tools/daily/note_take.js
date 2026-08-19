@@ -1,0 +1,260 @@
+"use strict";
+/**
+ * Harness Tool: note_take - 快速笔记
+ */
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.NOTE_TAKE_DEF = void 0;
+exports.createNoteTakeExecutor = createNoteTakeExecutor;
+const types_1 = require("../../types");
+exports.NOTE_TAKE_DEF = {
+    name: 'note_take',
+    description: '快速记录和管理笔记。支持写入、读取、列表、删除和搜索笔记。适用场景：用户需要快速记录想法、备忘、会议纪要等。不适用：任务管理、提醒设置。',
+    category: types_1.ToolCategory.DAILY,
+    parameters: {
+        action: {
+            type: 'string',
+            description: '操作类型',
+            enum: ['write', 'read', 'list', 'delete', 'search'],
+        },
+        note_id: {
+            type: 'string',
+            description: '笔记ID',
+        },
+        title: {
+            type: 'string',
+            description: '笔记标题',
+        },
+        content: {
+            type: 'string',
+            description: '笔记内容',
+        },
+        tags: {
+            type: 'array',
+            description: '标签',
+            items: { type: 'string', description: '标签名' },
+        },
+        query: {
+            type: 'string',
+            description: '搜索关键词',
+        },
+    },
+    requiredParams: ['action'],
+    requiredPermissions: [types_1.Permission.MEMORY_WRITE],
+    riskLevel: 'low',
+    idempotent: false,
+    timeout: 5000,
+};
+function generateId() {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2);
+}
+function formatDate(ts) {
+    return new Date(ts).toLocaleDateString('zh-CN');
+}
+function formatNoteList(notes) {
+    if (notes.length === 0)
+        return '暂无笔记';
+    return notes
+        .map((n) => {
+        const tagStr = n.tags.length > 0 ? ` [${n.tags.join(',')}]` : '';
+        return `📝 [${n.id}] ${n.title}${tagStr} 📅${formatDate(n.updatedAt)}`;
+    })
+        .join('\n');
+}
+function createNoteTakeExecutor(deps) {
+    return async (params, _context) => {
+        const action = String(params.action || '');
+        if (!deps.noteStore) {
+            return {
+                success: false,
+                output: null,
+                error: 'note_take 不可用: noteStore 未注入，请在 initHarness 中配置笔记存储依赖',
+                duration: 0,
+                validated: false,
+            };
+        }
+        try {
+            switch (action) {
+                case 'write': {
+                    const title = String(params.title || '');
+                    const content = String(params.content || '');
+                    if (!title && !content) {
+                        return {
+                            success: false,
+                            output: null,
+                            error: '写入笔记需要提供标题或内容',
+                            duration: 0,
+                            validated: false,
+                        };
+                    }
+                    const now = Date.now();
+                    const noteId = params.note_id ? String(params.note_id) : undefined;
+                    let note;
+                    if (noteId) {
+                        const notes = await deps.noteStore.getNotes();
+                        const existing = notes.find((n) => n.id === noteId);
+                        if (existing) {
+                            existing.title = title || existing.title;
+                            existing.content = content || existing.content;
+                            if (Array.isArray(params.tags))
+                                existing.tags = params.tags.map(String);
+                            existing.updatedAt = now;
+                            note = existing;
+                        }
+                        else {
+                            note = {
+                                id: noteId,
+                                title: title || '无标题',
+                                content,
+                                tags: Array.isArray(params.tags) ? params.tags.map(String) : [],
+                                createdAt: now,
+                                updatedAt: now,
+                            };
+                        }
+                    }
+                    else {
+                        note = {
+                            id: generateId(),
+                            title: title || '无标题',
+                            content,
+                            tags: Array.isArray(params.tags) ? params.tags.map(String) : [],
+                            createdAt: now,
+                            updatedAt: now,
+                        };
+                    }
+                    await deps.noteStore.saveNote(note);
+                    return {
+                        success: true,
+                        output: `笔记已保存: [${note.id}] ${note.title}`,
+                        duration: 0,
+                        validated: false,
+                    };
+                }
+                case 'read': {
+                    const noteId = String(params.note_id || '');
+                    if (!noteId) {
+                        return {
+                            success: false,
+                            output: null,
+                            error: '读取笔记需要提供note_id',
+                            duration: 0,
+                            validated: false,
+                        };
+                    }
+                    const notes = await deps.noteStore.getNotes();
+                    const note = notes.find((n) => n.id === noteId);
+                    if (!note) {
+                        return {
+                            success: false,
+                            output: null,
+                            error: `笔记不存在: ${noteId}`,
+                            duration: 0,
+                            validated: false,
+                        };
+                    }
+                    const tagStr = note.tags.length > 0 ? `\n标签: ${note.tags.join(', ')}` : '';
+                    return {
+                        success: true,
+                        output: `📝 ${note.title}${tagStr}\n\n${note.content}\n\n创建: ${formatDate(note.createdAt)} | 更新: ${formatDate(note.updatedAt)}`,
+                        duration: 0,
+                        validated: false,
+                    };
+                }
+                case 'list': {
+                    const notes = await deps.noteStore.getNotes();
+                    return {
+                        success: true,
+                        output: formatNoteList(notes),
+                        duration: 0,
+                        validated: false,
+                    };
+                }
+                case 'delete': {
+                    const noteId = String(params.note_id || '');
+                    if (!noteId) {
+                        return {
+                            success: false,
+                            output: null,
+                            error: '删除笔记需要提供note_id',
+                            duration: 0,
+                            validated: false,
+                        };
+                    }
+                    await deps.noteStore.deleteNote(noteId);
+                    return {
+                        success: true,
+                        output: `笔记已删除: ${noteId}`,
+                        duration: 0,
+                        validated: false,
+                    };
+                }
+                case 'search': {
+                    const query = String(params.query || '').toLowerCase();
+                    if (!query) {
+                        return {
+                            success: false,
+                            output: null,
+                            error: '搜索需要提供query',
+                            duration: 0,
+                            validated: false,
+                        };
+                    }
+                    const notes = await deps.noteStore.getNotes();
+                    const matched = notes
+                        .map((n) => {
+                        let score = 0;
+                        if (n.title.toLowerCase().includes(query))
+                            score += 10;
+                        if (n.content.toLowerCase().includes(query))
+                            score += 5;
+                        for (const t of n.tags) {
+                            if (t.toLowerCase().includes(query))
+                                score += 3;
+                        }
+                        const queryChars = [...new Set(query.split(''))];
+                        for (const c of queryChars) {
+                            if (c.trim() && n.title.toLowerCase().includes(c))
+                                score += 1;
+                            if (c.trim() && n.content.toLowerCase().includes(c))
+                                score += 0.5;
+                        }
+                        return { note: n, score };
+                    })
+                        .filter((s) => s.score > 0)
+                        .sort((a, b) => b.score - a.score)
+                        .map((s) => s.note);
+                    if (matched.length === 0) {
+                        return {
+                            success: true,
+                            output: `未找到匹配"${params.query}"的笔记`,
+                            duration: 0,
+                            validated: false,
+                        };
+                    }
+                    return {
+                        success: true,
+                        output: formatNoteList(matched),
+                        duration: 0,
+                        validated: false,
+                    };
+                }
+                default:
+                    return {
+                        success: false,
+                        output: null,
+                        error: `未知操作: ${action}`,
+                        duration: 0,
+                        validated: false,
+                    };
+            }
+        }
+        catch (err) {
+            return {
+                success: false,
+                output: null,
+                error: `笔记操作失败: ${err.message}`,
+                duration: 0,
+                validated: false,
+            };
+        }
+    };
+}

@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>家百星代码审计与质量提升 · 第三轮 (2026-08-18)</title>
+<style>
+  :root { --bg:#0f1419; --card:#1a212b; --ink:#e6edf3; --mut:#8b96a5; --line:#2a323d;
+          --red:#ff6b6b; --yel:#ffd166; --grn:#4cd97b; --blu:#5aa9ff; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font-family:-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
+         line-height:1.6; }
+  .wrap { max-width:1080px; margin:0 auto; padding:32px 22px 60px; }
+  h1 { font-size:26px; margin:0 0 6px; }
+  h2 { font-size:19px; margin:34px 0 12px; border-left:4px solid var(--blu); padding-left:10px; }
+  h3 { font-size:15px; margin:20px 0 8px; color:var(--blu); }
+  .sub { color:var(--mut); font-size:13px; margin-bottom:18px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px 18px; margin:12px 0; }
+  table { width:100%; border-collapse:collapse; font-size:13px; margin:8px 0; }
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--mut); font-weight:600; }
+  code { background:#0d1117; padding:1px 6px; border-radius:5px; font-size:12px; color:#cdd9e5;
+         font-family:"SFMono-Regular",Consolas,monospace; }
+  .tag { display:inline-block; padding:1px 8px; border-radius:20px; font-size:11px; font-weight:700; }
+  .r { background:rgba(255,107,107,.15); color:var(--red); }
+  .y { background:rgba(255,209,102,.15); color:var(--yel); }
+  .g { background:rgba(76,217,123,.15); color:var(--grn); }
+  .mono { font-family:"SFMono-Regular",Consolas,monospace; font-size:12px; background:#0d1117;
+          padding:10px 12px; border-radius:8px; color:#cdd9e5; overflow:auto; white-space:pre; }
+  .pill { font-size:12px; color:var(--mut); }
+  .ok { color:var(--grn); font-weight:700; }
+  ul { margin:8px 0; padding-left:20px; } li { margin:4px 0; }
+  .sum { display:flex; gap:12px; flex-wrap:wrap; margin:10px 0; }
+  .stat { flex:1; min-width:120px; background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px 14px; }
+  .stat b { font-size:22px; display:block; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>家百星代码审计与质量提升 · 第三轮</h1>
+  <div class="sub">2026-08-18 · Python 主实现端（<code>python/agent/</code> 480 模块）+ TS 网关/WS/CLI 关键路径 · 方法：静态扫描（AST/正则）+ 逐条源码核验 + 修复 + 回归测试</div>
+
+  <h2>一、本轮扫描维度与候选规模</h2>
+  <p class="pill">在首轮（信号/吞错/调度）与第二轮（ReAct 解析/内存析构）基础上，本轮新增 <b>安全 × 资源 × 死代码× 类型侵蚀</b> 四个质量维度（脚本 <code>audit_quality.py</code>）。所有候选均经 <b>逐条读源码确认真实性</b>，而非采信清单。</p>
+  <div class="sum">
+    <div class="stat"><b>6</b> SQL 注入候选 → <span class="g">0 真实</span>（5 参数化误报 + 1 潜在已修）</div>
+    <div class="stat"><b>33</b> 命令注入候选 → <span class="y">1 高危已修</span></div>
+    <div class="stat"><b>9</b> eval/exec 候选 → <span class="r">1 真实 RCE 已修</span></div>
+    <div class="stat"><b>0</b> open 无 with（资源泄漏）</div>
+  </div>
+  <div class="sum">
+    <div class="stat"><b>177</b> <code>print()</code> 在核心（质量问题）</div>
+    <div class="stat"><b>87</b> TS <code>as any</code> 类型侵蚀</div>
+    <div class="stat"><b>95</b> TS <code>console.*</code> 在核心</div>
+    <div class="stat"><b>74</b> <code># ignore/noqa</code> 压制</div>
+  </div>
+
+  <h2>二、已修复的关键问题（4 项）</h2>
+
+  <div class="card">
+    <h3>🔴 R-01 · 编排 DSL 条件 <code>eval()</code> 远程代码执行 <span class="tag r">CRITICAL</span></h3>
+    <p><b>位置：</b><code>python/agent/orchestration/task_dsl.py</code> <code>_parse_line()</code>（原 <code>eval(cond, {"__builtins__": {}}, row)</code>）</p>
+    <p><b>问题：</b>DSL <code>branch ... when=&lt;expr&gt;</code> 用 <code>eval</code> 解析条件。即便清空 <code>__builtins__</code>，攻击方可经属性遍历逃逸沙箱：<code>().__class__.__bases__[0].__subclasses__()</code> 即可执行任意代码。若 <code>when=</code> 来自不可信管道定义即构成 RCE。</p>
+    <p><b>修复：</b>新增 <code>_compile_dsl_condition()</code>——<code>ast.parse(mode="eval")</code> + <b>白名单节点校验</b>（仅允许比较/布尔/算术与行字段名引用，<b>禁止 Attribute/Call/Import/Subscript</b>），编译失败即 <code>ValueError</code>，运行时字段缺失安全返回 <code>False</code>。回归测试 <code>test_task_dsl_security.py</code>（9 例，含对 5 种逃逸手法的拒绝断言）。</p>
+  </div>
+
+  <div class="card">
+    <h3>🔴 R-02 · <code>shell_exec</code> 失败时回退 <code>shell=True</code> <span class="tag r">HIGH</span></h3>
+    <p><b>位置：</b><code>python/agent/desktop/desktop_controller.py</code> <code>shell_exec()</code></p>
+    <p><b>问题：</b>当 <code>shlex.split</code> 抛 <code>ValueError</code> 时，原代码回退为 <code>subprocess.run(raw_command, shell=True)</code>。危险命令仅用 <b>可绕过的黑名单</b>（<code>"rm -rf /"</code> 等 7 条）校验，而 <code>;</code> <code>|</code> <code>&amp;</code> <code>$(...)</code> 等 Shell 元字符会被解释执行 → 命令注入。</p>
+    <p><b>修复：</b>始终 <code>shell=False</code>；<code>shlex.split</code> 失败（Windows 下用 <code>posix=False</code> 保留路径）即 <b>拒绝执行（fail-closed）</b>，绝不回退 shell。黑名单降级为纵深防御。回归测试 <code>test_desktop_controller_shell.py</code>（3 例）。</p>
+  </div>
+
+  <div class="card">
+    <h3>🟡 R-03 · <code>database.py</code> 表名标识符注入（潜在） <span class="tag y">MEDIUM</span></h3>
+    <p><b>位置：</b><code>python/agent/persistence/database.py</code> <code>get_table_schema()</code> / <code>get_row_count()</code></p>
+    <p><b>问题：</b><code>f"PRAGMA table_info({table_name})"</code> / <code>f"SELECT COUNT(*) FROM {table_name}"</code> 直接拼接标识符（SQLite 表名无法参数化）。当前无外部调用方，但属潜在注入点。</p>
+    <p><b>修复：</b>新增 <code>_validate_table_identifier()</code>，用 <code>re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*")</code> 严格白名单校验，非法即 <code>ValueError</code>。</p>
+  </div>
+
+  <div class="card">
+    <h3>🔴 R-04 · <code>middleware.py</code> 断裂导入（阻塞整个引擎） <span class="tag r">CRITICAL</span></h3>
+    <p><b>位置：</b><code>python/agent/loop/middleware.py:13</code></p>
+    <p><b>问题：</b><code>from agent.utils.logger import log, log_ignored</code> —— <code>agent.utils.logger</code> 模块<b>不存在</b>（日志器实际在 <code>agent.core.logger</code>）。该导入失败导致 <code>LoopController</code> → <code>AgentEngine</code> 整条链路 <b>无法 import</b>，全量 pytest 经 conftest 即崩溃。</p>
+    <p><b>修复：</b>改为 <code>from agent.core.logger import StructuredLogger, log_ignored</code> 并补 <code>log = StructuredLogger("middleware")</code>，与全项目约定一致。修复后 <b>全量 480 个 agent 模块导入冒烟 0 失败</b>（此前为阻断）。</p>
+  </div>
+
+  <h2>三、核查后排除的“疑似问题”（避免误报）</h2>
+  <table>
+    <tr><th>候选</th><th>数量</th><th>结论</th></tr>
+    <tr><td>SQL 注入（<code>prompt_cache.py</code>、<code>audit_trail.py</code>）</td><td>5</td><td><span class="g">安全</span>：均用 <code>?</code> 参数化；<code>audit_trail</code> 的 <code>where</code> 仅由内部硬编码 <code>"col = ?"</code> 片段拼接，无用户标识符</td></tr>
+    <tr><td>命令注入（<code>subprocess.*</code>）</td><td>32</td><td><span class="g">安全</span>：均为 <code>shell=False</code> 调用，无 shell 元字符注入</td></tr>
+    <tr><td>eval/exec（<code>skill_audit</code>/<code>evaluator</code>/<code>code_tools</code> 黑名单字典与 linter）</td><td>8</td><td><span class="g">安全</span>：均为“检测 eval 的防御代码”或文档字符串，非真实调用</td></tr>
+    <tr><td>TS <code>eval</code>/<code>new Function</code></td><td>11</td><td><span class="y">设计内</span>：4 处为代码沙箱执行（<code>SandboxExecutor</code>/<code>execute_code</code>/<code>tool_define</code>，依赖 Worker 隔离）；7 处为检测 eval 的 linter</td></tr>
+    <tr><td><code>open()</code> 无 <code>with</code></td><td>0</td><td><span class="g">良好</span>：核心资源全部上下文管理</td></tr>
+    <tr><td>TODO/FIXME</td><td>6</td><td><span class="g">良性</span>：OCR 集成占位、test_tools 注释，非缺陷</td></tr>
+    <tr><td><code>NotImplementedError</code></td><td>0</td><td><span class="g">良好</span>：无遗留 stub</td></tr>
+  </table>
+
+  <h2>四、代码质量指标与提升清单（已度量，待批量治理）</h2>
+  <table>
+    <tr><th>指标</th><th>数量</th><th>等级</th><th>建议治理方式</th></tr>
+    <tr><td>核心 <code>print()</code> 替代 <code>log</code></td><td>177</td><td><span class="tag y">P1</span></td><td>逐文件迁移至 <code>StructuredLogger</code>；CLI 顶层输出除外。需配单测防回归</td></tr>
+    <tr><td>TS <code>as any</code> / <code>as unknown as</code> 类型侵蚀</td><td>87</td><td><span class="tag y">P2</span></td><td>逐步补类型或收窄断言；禁止在跨信任边界处使用</td></tr>
+    <tr><td>核心 <code>console.log/error</code></td><td>95</td><td><span class="tag y">P2</span></td><td>统一改 <code>Logger</code>，与 Python 端日志体系对齐</td></tr>
+    <tr><td><code># type: ignore</code> / <code># noqa</code> 压制</td><td>74</td><td><span class="tag y">P2</span></td><td>定期复核，确认每行压制仍必要；优先修类型根因</td></tr>
+  </table>
+
+  <h2>五、验证结果</h2>
+  <ul>
+    <li><span class="ok">ruff check</span>：本轮 6 个改动文件 + 2 个新测试文件 <b>全部通过</b>。</li>
+    <li><span class="ok">pytest</span>：4 个测试套件（含本轮新增 <code>test_task_dsl_security</code> / <code>test_desktop_controller_shell</code> + 第二轮 <code>test_react_parser</code> / <code>test_cron_leader</code>）= <b>23/23 通过</b>。</li>
+    <li><span class="ok">导入冒烟</span>：<code>agent.*</code> 全量 480 模块 import <b>0 失败</b>（修复 R-04 后）。</li>
+  </ul>
+
+  <h2>六、下一步建议</h2>
+  <ul>
+    <li><b>立即</b>：提交本轮 4 项修复（建议单文件独立 commit，便于 revert）。</li>
+    <li><b>可选治理</b>：对 177 处 <code>print()</code> 与 87 处 <code>as any</code> 启动批量质量提升（需 <code>npm ci</code> 修复本机依赖后再跑 tsc/单测验证 TS 改动）。</li>
+    <li><b>纵深防御</b>：TS 代码沙箱（<code>new Function</code>）依赖 Worker 隔离，建议补充沙箱逃逸回归测试，确保无 <code>require</code>/<code>process</code> 泄漏。</li>
+  </ul>
+
+  <div class="card" style="border-color:var(--blu)">
+    <p class="pill">本报告所有“结论”均来自对实时代码的探测（grep / ast / import 冒烟 / 真实 pytest 运行），不采信文档宣称。改动均未提交 git，交你复核后提交。</p>
+  </div>
+</div>
+</body>
+</html>

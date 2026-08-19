@@ -10,6 +10,7 @@
  */
 
 import { DAGTask } from '../core/DAGTask';
+import type { IMemoryEngine } from '../core/IMemoryEngine';
 import { EmotionTag, SceneTag } from '../interfaces';
 import { LLMContextBuilder } from '../memory/LLMContextBuilder';
 import { MemoryItem } from '../memory/MemoryEngine';
@@ -116,6 +117,7 @@ export class InteractionEngine {
   private core: CoreEngineLike | null = null;
   private dialogueGenerator: DialogueGenerator | null = null;
   private contextBuilder: LLMContextBuilder;
+  private memoryEngine: IMemoryEngine | null = null;
 
   // v2: 多模态处理器（复用现有架构）
   private speechRecognizer: SpeechRecognizer;
@@ -183,6 +185,19 @@ export class InteractionEngine {
   }
 
   /**
+   * 注入记忆引擎（由 bootstrap initInteraction 调用）
+   * 使交互引擎能检索用户历史记忆，实现个性化话术
+   */
+  public setMemoryEngine(memoryEngine: IMemoryEngine): void {
+    this.memoryEngine = memoryEngine;
+    this.continuousDialogManager.setMemoryEngine(memoryEngine);
+    Logger.info(
+      '💾 MemoryEngine 已注入 InteractionEngine + ContinuousDialogManager',
+      'InteractionEngine'
+    );
+  }
+
+  /**
    * 初始化交互引擎
    */
   public async initialize(): Promise<void> {
@@ -209,7 +224,10 @@ export class InteractionEngine {
     if (this.dialogueGenerator) {
       // 使用 LLM 生成自然的确认回复
       const sceneTag = scene || 'daily';
-      const memoryContext = this.buildMemoryContextFromHistory();
+      const memoryContext = await this.retrieveMemoryEnrichedContext(
+        taskGraph.getName() || '',
+        sceneTag
+      );
       const userProfileSummary = this.buildUserProfileSummary();
 
       const preExecPrompt = `用户刚刚要求我执行一个任务，预计需要 ${Math.ceil(plan.estimatedTime / 60)} 分钟。
@@ -293,17 +311,32 @@ export class InteractionEngine {
     // 优先使用 DialogueGenerator 生成回复
     if (this.dialogueGenerator) {
       try {
-        const memoryCtx = memoryContext.map((m) => {
-          const contentStr =
-            typeof m.content === 'string'
-              ? m.content
-              : JSON.stringify(m.content);
-          return {
-            content: contentStr,
-            type: m.type || 'memory',
-            relevance: m.relevanceScore,
-          };
-        });
+        const enrichedMemory = await this.retrieveMemoryEnrichedContext(
+          userInput || '任务结果',
+          scene.type
+        );
+        const memoryCtx = [
+          ...memoryContext.map((m) => {
+            const contentStr =
+              typeof m.content === 'string'
+                ? m.content
+                : JSON.stringify(m.content);
+            return {
+              content: contentStr,
+              type: m.type || 'memory',
+              relevance: m.relevanceScore,
+            };
+          }),
+          ...enrichedMemory.filter(
+            (em) =>
+              !memoryContext.some(
+                (mc) =>
+                  (typeof mc.content === 'string'
+                    ? mc.content
+                    : JSON.stringify(mc.content)) === em.content
+              )
+          ),
+        ];
 
         const userProfileSummary: UserProfileSummary = {
           name: userBasicInfo.name,
@@ -466,8 +499,18 @@ export class InteractionEngine {
     }
 
     try {
-      // 使用 LLMContextBuilder 智能筛选和排序记忆
-      const memoryItems: MemoryItem[] = memoryContext.map((mc) => ({
+      const enrichedContext = await this.retrieveMemoryEnrichedContext(
+        input,
+        scene
+      );
+      const mergedContext = [
+        ...memoryContext,
+        ...enrichedContext.filter(
+          (ec) => !memoryContext.some((mc) => mc.content === ec.content)
+        ),
+      ];
+
+      const memoryItems: MemoryItem[] = mergedContext.map((mc) => ({
         id: `ctx_${Math.random().toString(36).substring(2, 11)}`,
         type: mc.type as import('../memory/MemoryEngine').MemoryType,
         content: mc.content,
@@ -530,7 +573,10 @@ export class InteractionEngine {
       return '有什么我可以帮你的吗？';
     }
 
-    const memoryContext = this.buildMemoryContextFromHistory();
+    const memoryContext = await this.retrieveMemoryEnrichedContext(
+      context,
+      scene
+    );
     const userProfileSummary = this.buildUserProfileSummary();
 
     const prompt = `作为用户的私人秘书，我需要主动发起一次交互。
@@ -907,6 +953,59 @@ export class InteractionEngine {
       type: h.type,
       timestamp: h.timestamp,
     }));
+  }
+
+  /**
+   * 从 MemoryEngine 检索相关记忆，与交互历史合并
+   * 修复记忆链路断点：使交互引擎能获取用户历史记忆
+   */
+  private async retrieveMemoryEnrichedContext(
+    input: string,
+    scene?: string,
+    emotion?: string
+  ): Promise<MemoryContextItem[]> {
+    const historyContext = this.buildMemoryContextFromHistory();
+
+    if (!this.memoryEngine?.preciseHybridRetrieval) {
+      return historyContext;
+    }
+
+    try {
+      const memories = await this.memoryEngine.preciseHybridRetrieval!(
+        input,
+        scene,
+        emotion,
+        5
+      );
+
+      const memoryItems: MemoryContextItem[] = (
+        memories as Array<{
+          content: string;
+          type?: string;
+          timestamp?: Date;
+          relevanceScore?: number;
+        }>
+      ).map((m) => ({
+        content:
+          typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+        type: m.type || 'long_term',
+        timestamp: m.timestamp || new Date(),
+        relevance: m.relevanceScore,
+      }));
+
+      const existingContents = new Set(historyContext.map((h) => h.content));
+      const uniqueMemoryItems = memoryItems.filter(
+        (m) => !existingContents.has(m.content)
+      );
+
+      return [...uniqueMemoryItems, ...historyContext];
+    } catch (error) {
+      Logger.warn(
+        `⚠️ MemoryEngine 检索失败，降级到交互历史: ${(error as Error).message}`,
+        'InteractionEngine'
+      );
+      return historyContext;
+    }
   }
 
   private buildUserProfileSummary(): UserProfileSummary {

@@ -113,6 +113,10 @@ export class I18nManager {
     this.registerPack(BUILT_IN_EN);
   }
 
+  static create(): I18nManager {
+    return new I18nManager();
+  }
+
   static getInstance(): I18nManager {
     if (!I18nManager.instance) {
       I18nManager.instance = new I18nManager();

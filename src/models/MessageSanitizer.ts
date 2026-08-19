@@ -298,7 +298,10 @@ export class MessageSanitizer {
 
   private static _instance: MessageSanitizer | null = null;
 
-  /** 获取单例（避免重复创建） */
+  static create(): MessageSanitizer {
+    return new MessageSanitizer();
+  }
+
   static getInstance(): MessageSanitizer {
     if (!this._instance) {
       this._instance = new MessageSanitizer();

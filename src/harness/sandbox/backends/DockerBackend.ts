@@ -130,7 +130,9 @@ export class DockerBackend implements ITerminalBackend {
     const writeAndRun = `cat > ${tmpFile} << 'JBX_EOF'\n${code}\nJBX_EOF\n${runner} ${tmpFile}`;
     const result = await this.execute(writeAndRun, options);
     // 清理临时文件（不阻塞结果）
-    this.execute(`rm -f ${tmpFile}`).catch(() => {});
+    this.execute(`rm -f ${tmpFile}`).catch((err) =>
+      Logger.warn(`清理临时文件失败: ${String(err)}`, 'DockerBackend')
+    );
     return result;
   }
 

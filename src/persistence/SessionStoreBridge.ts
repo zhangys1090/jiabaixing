@@ -99,6 +99,11 @@ const CHECKPOINT_EVERY_N_WRITES = 50;
 
 // ─── SessionStore ──────────────────────────────────────────
 
+/**
+ * @deprecated TS 侧持久化实现已迁移至 Python (`python/agent/api/sessions.py` +
+ * `python/agent/persistence/session_store.py`)。本文件仅作为本地回退存根与
+ * 类型契约保留，生产路径经 `PythonAgentBridge` 桥接。请勿在新代码中直接实例化。
+ */
 export interface SessionInfo {
   id: string;
   source: string;
@@ -139,7 +144,12 @@ export interface SearchResult {
   model?: string;
 }
 
-export class SessionStore {
+/**
+ * @deprecated 已迁移 Python (`python/agent/persistence/session_store.py`)。
+ * 仅作本地回退存根；生产路径经 `PythonAgentBridge.getSessions()` 等桥接。
+ * `AgentHarness` 仍 `new SessionStore()`，经 `SessionStore.ts` 重导出壳解析为本类。
+ */
+export class SessionStoreBridge {
   private db: DatabaseAdapter;
   private dbPath: string;
   private writeCount = 0;
@@ -527,11 +537,17 @@ export class SessionStore {
 
   getStats(): { sessions: number; messages: number } {
     const s =
-      (this.db.prepare('SELECT COUNT(*) as c FROM sessions').get() as any)?.c ??
-      0;
+      (
+        this.db.prepare('SELECT COUNT(*) as c FROM sessions').get() as {
+          c: number;
+        }
+      )?.c ?? 0;
     const m =
-      (this.db.prepare('SELECT COUNT(*) as c FROM messages').get() as any)?.c ??
-      0;
+      (
+        this.db.prepare('SELECT COUNT(*) as c FROM messages').get() as {
+          c: number;
+        }
+      )?.c ?? 0;
     return { sessions: s, messages: m };
   }
 

@@ -5,11 +5,11 @@
  * 新增跨会话任务状态管理
  */
 
-import { Logger } from '../../utils/Logger';
-import type { ChatMessage } from '../types';
-import type { IMemoryEngine } from '../../core/IMemoryEngine';
 import fs from 'fs';
 import path from 'path';
+import type { IMemoryEngine } from '../../core/IMemoryEngine';
+import { Logger } from '../../utils/Logger';
+import type { ChatMessage } from '../types';
 
 // ============ 类型定义 ============
 
@@ -200,12 +200,12 @@ export class PersistenceService {
     if (!this.deps.memoryEngine) return [];
 
     try {
-      return (await this.deps.memoryEngine.preciseHybridRetrieval!({
+      return (await this.deps.memoryEngine.preciseHybridRetrieval!(
         query,
-        scene: options.scene,
-        emotion: options.emotion,
-        topK: options.limit || 5,
-      })) as MemoryItem[];
+        options.scene,
+        options.emotion,
+        options.limit || 5
+      )) as MemoryItem[];
     } catch (err) {
       Logger.error('记忆检索失败', err as Error, 'PersistenceService');
       return [];
@@ -267,10 +267,12 @@ export class PersistenceService {
       }> = [];
 
       for (const query of queries) {
-        const results = (await this.deps.memoryEngine.preciseHybridRetrieval!({
+        const results = (await this.deps.memoryEngine.preciseHybridRetrieval!(
           query,
-          topK: 20,
-        })) as MemoryItem[];
+          undefined,
+          undefined,
+          20
+        )) as MemoryItem[];
         allMemories.push(...results);
       }
 

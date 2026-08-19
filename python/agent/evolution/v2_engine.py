@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
 
 log = StructuredLogger("evolution_v2")
 
@@ -218,8 +219,8 @@ class EvolutionRollback:
                     snapshot=data.get("snapshot", {}),
                 )
                 self._checkpoints[cp.id] = cp
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "v2_engine.EvolutionRollback._load_checkpoints", _exc)
 
     def create_checkpoint(self, plan_id: str, actions: list[V2EvolutionAction]) -> V2RollbackCheckpoint:
         snapshot: dict[str, str] = {}
@@ -230,8 +231,8 @@ class EvolutionRollback:
                 if p.exists():
                     try:
                         snapshot[target_path] = p.read_text(encoding="utf-8")
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        log_ignored(log, "v2_engine.EvolutionRollback.create_checkpoint", _exc)
 
         cp = V2RollbackCheckpoint(
             id=f"checkpoint-{plan_id}-{int(time.time())}",
@@ -281,8 +282,8 @@ class EvolutionRollback:
                 if f.stat().st_mtime < cutoff:
                     f.unlink()
                     deleted += 1
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "v2_engine.EvolutionRollback.clean_old_checkpoints", _exc)
         return deleted
 
 
@@ -347,8 +348,8 @@ class SelfModificationEngine:
         if not action.original_content:
             try:
                 action.original_content = p.read_text(encoding="utf-8")
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "v2_engine.SelfModificationEngine._modify_file", _exc)
         try:
             p.write_text(action.content, encoding="utf-8")
             return True
@@ -370,8 +371,8 @@ class SelfModificationEngine:
             if not action.original_content:
                 try:
                     action.original_content = p.read_text(encoding="utf-8")
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    log_ignored(log, "v2_engine.SelfModificationEngine._delete_file", _exc)
             p.unlink()
         return True
 
@@ -594,6 +595,8 @@ class EvolutionPlanner:
 
 
 class EvolutionEngineV2:
+    _instance: EvolutionEngineV2 | None = None
+
     def __init__(
         self,
         llm_client: LLMClientProtocol | None = None,
@@ -607,6 +610,12 @@ class EvolutionEngineV2:
         self._strategy_records: list[StrategyRecord] = []
         self._strategy_weights: dict[str, float] = {}
         self._capability_outcomes: dict[str, dict[str, Any]] = {}
+
+    @classmethod
+    def get_instance(cls, llm_client: LLMClientProtocol | None = None, checkpoint_dir: str | Path | None = None) -> EvolutionEngineV2:
+        if cls._instance is None:
+            cls._instance = cls(llm_client=llm_client, checkpoint_dir=checkpoint_dir)
+        return cls._instance
 
     async def trigger_evolution(self, cause: V2EvolutionCause) -> V2EvolutionResult | None:
         if self._is_running:
@@ -727,6 +736,13 @@ class EvolutionEngineV2:
 
     async def rollback_to_checkpoint(self, checkpoint_id: str) -> dict[str, Any]:
         return await self._rollback.rollback(checkpoint_id)
+
+    def latest_checkpoint_id(self) -> str | None:
+        """返回最近创建的回滚检查点 ID（无则 None）。供能力漂移联动触发回滚。"""
+        cps = getattr(self._rollback, "_checkpoints", None)
+        if not isinstance(cps, dict) or not cps:
+            return None
+        return max(cps.items(), key=lambda kv: kv[1].get("timestamp", 0))[0]
 
     def record_strategy_outcome(self, record: StrategyRecord) -> None:
         self._strategy_records.append(record)

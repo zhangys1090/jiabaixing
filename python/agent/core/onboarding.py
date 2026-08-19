@@ -33,6 +33,7 @@ from typing import Any
 
 from agent.config import DATA_DIR, ENV_FILE, PROJECT_ROOT
 from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
 
 log = StructuredLogger("onboarding")
 
@@ -119,7 +120,7 @@ LLM_OPTIONS: list[LLMProviderOption] = [
     LLMProviderOption(
         name="DeepSeek",
         env_key="DEEPSEEK_API_KEY",
-        default_model="deepseek/deepseek-chat",
+        default_model="deepseek/deepseek-v4-flash",
         default_base_url="https://api.deepseek.com",
         description="DeepSeek，性价比高",
     ),
@@ -165,8 +166,8 @@ class OnboardingWizard:
                     selected_provider=data.get("selected_provider", ""),
                     installed_skills=data.get("installed_skills", []),
                 )
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "onboarding.OnboardingWizard._load_state", _exc)
         return OnboardingState()
 
     def _save_state(self) -> None:
@@ -217,8 +218,8 @@ class OnboardingWizard:
             r = redis.Redis(host="localhost", port=6379, socket_timeout=2)
             r.ping()
             result.redis_available = True
-        except Exception:
-            pass
+        except Exception as _exc:
+            log_ignored(log, "onboarding.OnboardingWizard.check_environment", _exc)
 
         self._state.env_result = result
         return result

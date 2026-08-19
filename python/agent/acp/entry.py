@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Awaitable
 
 from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
 
 log = StructuredLogger("acp.entry")
 
@@ -174,8 +175,8 @@ class ACPEntry:
             try:
                 tools = self._engine.tool_registry.list_tools()
                 return {"tools": [t if isinstance(t, dict) else {"name": str(t)} for t in tools]}
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "entry.ACPEntry._handle_tools_list", _exc)
         return {"tools": []}
 
     async def start_stdio(self) -> None:
@@ -190,14 +191,20 @@ class ACPEntry:
         )
         writer = asyncio.StreamWriter(writer_transport, writer_protocol, reader, loop)
 
+        _max_idle_rounds = 10000
+        _idle_rounds = 0
         while True:
             try:
                 header = b""
+                _max_header_bytes = 65536
                 while True:
                     byte = await reader.read(1)
                     if not byte:
                         return
                     header += byte
+                    if len(header) > _max_header_bytes:
+                        log.warning("ACP stdio: header exceeded %d bytes, resetting", _max_header_bytes)
+                        break
                     if header.endswith(b"\r\n\r\n"):
                         break
                 content_length = 0
@@ -206,7 +213,12 @@ class ACPEntry:
                         content_length = int(line.split(":")[1].strip())
                         break
                 if content_length == 0:
+                    _idle_rounds += 1
+                    if _idle_rounds >= _max_idle_rounds:
+                        log.warning("ACP stdio: %d idle rounds reached, exiting", _max_idle_rounds)
+                        return
                     continue
+                _idle_rounds = 0
                 body = await reader.readexactly(content_length)
                 response = await self.handle_request(body)
                 response_json = json.dumps({
@@ -220,7 +232,7 @@ class ACPEntry:
             except asyncio.IncompleteReadError:
                 return
             except Exception as e:
-                log.warning("ACP stdio error", error=str(e))
+                log.warning("ACP stdio error: %s", e)
 
     def get_capabilities(self) -> ACPCapabilities:
         return self._capabilities

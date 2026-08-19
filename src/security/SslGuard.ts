@@ -178,7 +178,9 @@ export class SslGuard {
     const originalCreateSecureContext = tls.createSecureContext;
     const guard = this;
 
-    (tls as any).createSecureContext = function patchedCreateSecureContext(
+    (
+      tls as { createSecureContext: typeof tls.createSecureContext }
+    ).createSecureContext = function patchedCreateSecureContext(
       options?: tls.SecureContextOptions
     ) {
       const context = originalCreateSecureContext.call(this, options);

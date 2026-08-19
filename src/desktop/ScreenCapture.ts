@@ -34,9 +34,13 @@ export class ScreenCapture {
 
   private constructor() {}
 
+  public static create(): ScreenCapture {
+    return new ScreenCapture();
+  }
+
   public static getInstance(): ScreenCapture {
     if (!ScreenCapture.instance) {
-      ScreenCapture.instance = new ScreenCapture();
+      ScreenCapture.instance = ScreenCapture.create();
     }
     return ScreenCapture.instance;
   }

@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>家百星能力审计 · P1/P2 真值复核 & Remediation 路线图</title>
+<style>
+  :root{
+    --bg:#0f1419; --panel:#1a212b; --panel2:#222c38; --line:#2c3845;
+    --txt:#e6edf3; --dim:#9aa7b5; --accent:#4ea1ff;
+    --red:#ff6b6b; --green:#3ddc84; --yellow:#ffd166; --blue:#4ea1ff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+    font-family:-apple-system,"Segoe UI",Roboto,"Microsoft YaHei",sans-serif;
+    line-height:1.55;padding:28px 20px 60px}
+  .wrap{max-width:1080px;margin:0 auto}
+  h1{font-size:22px;margin:0 0 4px;color:#fff}
+  h2{font-size:17px;margin:30px 0 12px;padding-left:10px;border-left:4px solid var(--accent);color:#fff}
+  h3{font-size:14px;margin:18px 0 8px;color:var(--accent)}
+  .sub{color:var(--dim);font-size:13px;margin-bottom:8px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:12px 0}
+  table{width:100%;border-collapse:collapse;font-size:13px;margin:6px 0}
+  th,td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--dim);font-weight:600;background:var(--panel2)}
+  code{background:#0c1016;padding:1px 5px;border-radius:4px;font-size:12px;color:#ffd9a0}
+  .badge{display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;font-weight:700}
+  .b-conf{background:rgba(255,107,107,.16);color:var(--red);border:1px solid rgba(255,107,107,.4)}
+  .b-ref{background:rgba(61,220,132,.16);color:var(--green);border:1px solid rgba(61,220,132,.4)}
+  .b-par{background:rgba(255,209,102,.16);color:var(--yellow);border:1px solid rgba(255,209,102,.4)}
+  .lvl-p0{color:var(--red);font-weight:700}
+  .lvl-p1{color:var(--yellow);font-weight:700}
+  .lvl-p2{color:var(--blue);font-weight:700}
+  .ok{color:var(--green)}
+  .pill{display:inline-block;font-size:11px;padding:1px 7px;border-radius:8px;background:var(--panel2);color:var(--dim);margin-right:4px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:760px){.grid{grid-template-columns:1fr}}
+  ul{margin:6px 0;padding-left:20px}li{margin:4px 0}
+  .note{background:rgba(78,161,255,.08);border:1px solid rgba(78,161,255,.3);border-radius:8px;padding:10px 14px;font-size:13px;color:var(--dim)}
+  .kbd{color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>家百星能力审计 · P1/P2 真值复核 &amp; Remediation 路线图</h1>
+  <div class="sub">日期 2026-08-13 ｜ 原则：不采信文档宣称，所有结论来自实时探测（逐文件读源码 + 断言级运行时验证）</div>
+
+  <div class="card">
+    <h3 style="margin-top:0">一、P0 残留 3 项 —— 已闭环并验证（20/20 运行时 + jest 镜像）</h3>
+    <ul>
+      <li><b>SSRF 混合编码绕过</b>：<code>web_fetch.ts</code> 新增 <code>parseMixedBaseIpv4</code>，在 <code>isSafeUrl</code> 的 <code>return true</code> 前对 <code>0x7f.0.0.1</code> / <code>0177.0.0.1</code> 归一化并 <code>isSafeIPv4</code> 校验。</li>
+      <li><b>httpClient 无超时 + 全缓冲</b>：新增 <code>withTimeout()</code>（25s，env 可配）+ <code>WEB_FETCH_MAX_BUFFER_CHARS</code>（16MB 截断），注入路径与自管 fetch <b>均覆盖</b>。</li>
+      <li><b>symlink 逃逸</b>：<code>resolveWithinRoot</code> 真实存在时 <code>realpathSync</code> 复检，越界抛“symlink 逃逸”；catch 仅兜底 <code>ENOENT</code>（修了我自己引入的吞 rejection bug）。</li>
+    </ul>
+    <div class="note">⚠️ 上述改动<b>未提交</b>（按用户惯例，未经显式要求不 commit）。验证文件：<code>tests/unit/tools/security_residuals.test.ts</code>。</div>
+  </div>
+
+  <h2>二、P1/P2 整层实时复核 —— 当前真值表（25 项）</h2>
+  <div class="sub">CONFIRMED 19 ｜ REFUTED 2 ｜ PARTIAL 4</div>
+
+  <h3>A. 记忆 memory_store / recall / search</h3>
+  <table>
+    <tr><th style="width:54px">项</th><th style="width:90px">裁决</th><th style="width:60px">级别</th><th>证据（当前文件:行）</th><th>结论</th></tr>
+    <tr><td>A1</td><td><span class="badge b-conf">CONFIRMED</span></td><td class="lvl-p1">P1</td><td><code>memory_store.ts:170-206</code></td><td>缺依赖时静默跳过存储却返回 <code>success:true "已存储"</code></td></tr>
+    <tr><td>A2</td><td><span class="badge b-conf">CONFIRMED</span></td><td class="lvl-p2">P2</td><td><code>memory_store.ts:198-203</code></td><td>importance≥7“晋升长期记忆”仅拼标签文本，无真实晋升逻辑</td></tr>
+    <tr><td>A3</td><td><span class="badge b-conf">CONFIRMED</span></td><td class="lvl-p2">P2</td><td><code>memory_recall.ts:122-129</code> / <code>memory_search.ts:97-104</code></td><td>失败返回 <code>success:true</code> 且把错误塞进 output，Agent 无法区分“无结果”与“故障”</td></tr>
+    <tr><td>A4</td><td><span class="badge b-conf">CONFIRMED</span></td><td class="lvl-p2">P2</td><td><code>memory_recall.ts:77-82</code></td><td>空结果 <code>retrieveRelevant({query:'',limit:1000})</code> 全量拉取再打分，无分页</td></tr>
+    <tr><td>A5</td><td><span class="badge b-conf">CONFIRMED</span></td><td class="lvl-p1">P1</td><td><code>tests/unit/tools/</code></td><td>recall 有单测；store / search 无 executor 级单测（仅间接 e2e）</td></tr>
+  </table>
+
+  <h3>B. 联网 web_search / web_fetch</h3>
+  <table>
+    <tr><th>项</th><th>裁决</th><th>级别</th><th>证据</th><th>结论</th></tr>
+    <tr><td>B1</td><td><span class="badge b-conf">CONFIRMED</span></td><td class="lvl-p1">P1</td><td><code>web_search.ts:421</code> + <code>registerHarnessTools.ts:527</code></td><td>生产未注入 searchEngine，回退 TS 本地多引擎（tavily/ddg/searxng/brave/bing），与 Python <code>web_search_provider</code> 重复，违反 AGENTS.md §0.1</td></tr>
+    <tr><td>B2</td><td><span class="badge b-conf">CONFIRMED</span></td><td class="lvl-p2">P2</td><td><code>web_search.ts:414,503-524</code></td><td>空结果 <code>success:true</code> + 错误 JSON 塞 output；<code>max_results</code> 无上限校验</td></tr>
+    <tr><td>B3</td><td><span class="badge b-ref">REFUTED</span></td><td class="lvl-p1">P1</td><td><code>web_fetch.ts:140,309,325,351</code></td><td>注入 httpClient 路径已同样经 isSafeUrl + withTimeout + 16MB 截断——上一轮已修，无需再动</td></tr>
+  </table>
+
+  <h3>C. 媒体 tts_speak / image_generate</h3>
+  <table>
+    <tr><th>项</th><th>裁决</th><th>级别</th><th>证据</th><th>结论</th></tr>
+    <tr><td>C1</td><td><span class="badge b-conf">CONFIRMED</span></td><td class="lvl-p1">P1</td><td><code>tts_speak.ts:117-138</code></td><td>无合成器或 <code>speak()</code> 抛错均降级为 <code>success:true</code>“模拟成功”，Agent 误判语音已播</td></tr>
+    <tr><td>C2</td><td><span class="badge b-conf">CONFIRMED</span></td><td class="lvl-p2">P2</td><td><code>tts_speak.ts:87-98</code></td><td>voice/speed/pitch 被 clamp 但只调 <code>speak(text)</code>，参数未转发</td></tr>
+    <tr><td>C3</td><td><span class="badge b-ref">REFUTED</span></td><td class="lvl-p1">P1</td><td><code>ToolRegistry.ts:62,472-497</code></td><td>image_generate 已在 <code>PAID_EXTERNAL_TOOLS</code> 集合，注册层施加会话配额 + 去重——上一轮已修</td></tr>
+    <tr><td>C4</td><td><span class="badge b-conf">CONFIRMED</span></td><td class="lvl-p2">P2</td><td><code>image_generate.ts:101-131</code></td><td>非 2xx 一律 lump 为 <code>HTTP ${status}</code>；429/5xx 不分级；重试仅对网络异常，429 不触发退避</td></tr>
+  </table>
+
+  <h3>D. 代码 code_fix / code_review / code_generate</h3>
+  <table>
+    <tr><th>项</th><th>裁决</th><th>级别</th><th>证据</th><th>结论</th></tr>
+    <tr><td>D1</td><td><span class="badge b-par">PARTIAL</span></td><td class="lvl-p1">P1</td><td><code>code_fix.ts:31,35,54-133</code></td><td>FILE_WRITE 越权已改 CODE_EXECUTE + 标注“轻量规则”；但执行器<b>仍从不写盘</b>（仅 preview）。越权 REFUTED，命名/语义残留</td></tr>
+    <tr><td>D2</td><td><span class="badge b-conf">CONFIRMED</span></td><td class="lvl-p1">P1</td><td><code>code_review.ts:19,88-99,94</code></td><td>描述宣称“四层/四维度”，实现仅 rule+safety+LLM；LLM 失败被空 <code>catch{}</code> 吞掉</td></tr>
+    <tr><td>D3</td><td><span class="badge b-conf">CONFIRMED</span></td><td class="lvl-p2">P2</td><td><code>code_review.ts:363,116-118</code></td><td>LLM 返回无 schema 校验；severity 非法 → <code>severityOrder[f.severity]</code> = undefined → 排序 NaN</td></tr>
+    <tr><td>D4</td><td><span class="badge b-conf">CONFIRMED</span></td><td class="lvl-p2">P2</td><td><code>code_generate.ts:108,128-320</code></td><td>生成物 <code>validated:false</code> 且无语法校验；<code>generateCodeTemplate</code> 等脚手架为死代码</td></tr>
+    <tr><td>D5</td><td><span class="badge b-par">PARTIAL</span></td><td class="lvl-p1">P1</td><td><code>tests/unit/tools/code_*.test.ts</code></td><td>三件套现均有 executor 单测（原“全部缺失”已不成立）；但 LLM 输出校验(D3)与 LLM 路径未被任何测试覆盖</td></tr>
+  </table>
+
+  <h3>E. 日常 task / note / calendar</h3>
+  <table>
+    <tr><th>项</th><th>裁决</th><th>级别</th><th>证据</th><th>结论</th></tr>
+    <tr><td>E1</td><td><span class="badge b-conf">CONFIRMED</span></td><td class="lvl-p1">P1</td><td><code>calendar.ts:175-236,537</code></td><td>calendar 无 <code>if(!deps.calendarStore)</code> 守卫，与其他四工具不一致；未注入时 TypeError 被 catch</td></tr>
+    <tr><td>E2</td><td><span class="badge b-conf">CONFIRMED</span></td><td class="lvl-p1">P1</td><td><code>calendar.ts:238,517-518</code></td><td>set_reminder 只写 <code>reminderMinutes</code> 数值，无任何定时/触发机制（create_event 却调 scheduleReminder）</td></tr>
+    <tr><td>E3</td><td><span class="badge b-conf">CONFIRMED</span></td><td class="lvl-p1">P1</td><td><code>task_manage.ts:181-194</code> / <code>note_take.ts:118-148</code> / <code>calendar.ts:236</code></td><td>三者写路径均为“读全量→改单条→整体回写”，无锁/无原子，并发写同存储会丢更新</td></tr>
+    <tr><td>E4</td><td><span class="badge b-conf">CONFIRMED</span></td><td class="lvl-p2">P2</td><td><code>task_manage.ts:18,203-221</code></td><td>delete 不校验 id 是否存在，直接 <code>success:true</code>；<code>dependencies</code> 死字段从未读写</td></tr>
+    <tr><td>E5</td><td><span class="badge b-conf">CONFIRMED</span></td><td class="lvl-p2">P2</td><td><code>calendar.ts:96-142,211-214</code></td><td>无时区处理（默认 server 本地 tz）；all_day 缺 end 时仍 +1h 结束</td></tr>
+    <tr><td>E6</td><td><span class="badge b-conf">CONFIRMED</span></td><td class="lvl-p1">P1</td><td><code>tests/unit/tools/</code></td><td>calendar 零单元测试；task/note 仅 e2e 集成，执行器行为完全未覆盖</td></tr>
+  </table>
+
+  <h3>F. 认知 emotion_detect / self_reflect</h3>
+  <table>
+    <tr><th>项</th><th>裁决</th><th>级别</th><th>证据</th><th>结论</th></tr>
+    <tr><td>F1</td><td><span class="badge b-par">PARTIAL</span></td><td class="lvl-p0">设计</td><td><code>emotion_detect.ts:45-73</code> / <code>self_reflect.ts:94-140</code></td><td>用户已拍板“TS 规则 + 诚实降级”（BY-DESIGN）。emotion_detect 三项合规；self_reflect 持久化块缺 try/catch</td></tr>
+    <tr><td>F2</td><td><span class="badge b-par">PARTIAL</span></td><td class="lvl-p1">P1</td><td><code>self_reflect.ts:88-140</code></td><td>假成功已修（两者皆空→<code>success:false</code>）；但持久化块无 try/catch，<code>recordExecution</code> 抛错会令 Promise 拒绝；requiredParams 未运行时校验</td></tr>
+  </table>
+
+  <h2>三、仍 OPEN 且值得修复（按优先级）</h2>
+  <div class="card">
+    <span class="pill">P1</span> <b>E3</b> task/note/calendar 并发 RMW 无锁丢更新（数据丢失风险，三处同构）<br/>
+    <span class="pill">P1</span> <b>C1</b> tts_speak 无合成器/抛错仍 <code>success:true</code> 假成功<br/>
+    <span class="pill">P1</span> <b>A1</b> memory_store 缺依赖静默 <code>success:true</code> 记忆未落盘<br/>
+    <span class="pill">P1</span> <b>E1</b> calendar 缺 deps 守卫（与其余四工具不一致）<br/>
+    <span class="pill">P1</span> <b>E6 / A5</b> calendar / memory_store / memory_search 零 executor 单测<br/>
+    <span class="pill">P1</span> <b>D2</b> code_review 描述夸大 + LLM 失败静默吞<br/>
+    <span class="pill">P1</span> <b>B1</b> web_search TS 本地实现违反 §0.1（应归 Python canonical，与 F1 同法）<br/>
+    <span class="pill">P1</span> <b>F2</b> self_reflect 持久化无 try/catch<br/>
+    <span style="display:block;margin-top:8px" class="pill">P2</span> <b>B2/C4/D3/D4/C2/E2/E4/E5/A2/A3/A4/D5</b> 见上表对应项
+  </div>
+
+  <h2>四、Remediation 路线图（先 B 后 A）</h2>
+
+  <div class="grid">
+    <div class="card">
+      <h3 style="margin-top:0">Phase B · 基础可靠性（低风险、不改变对外能力）</h3>
+      <ul>
+        <li><b>B-1 E3</b> 并发 RMW 原子化：per-store 互斥锁，或转 Python store</li>
+        <li><b>B-2 A1</b> memory_store 诚实失败：缺依赖返回 <code>success:false</code></li>
+        <li><b>B-3 C1</b> tts_speak 真/假成功分离：无合成器或 speak() 抛错 → <code>success:false</code>（<span class="kbd">需确认</span>：是否保留“模拟模式”为显式 dev 开关）</li>
+        <li><b>B-4 E1</b> calendar 加 <code>if(!deps.calendarStore) return fail</code></li>
+        <li><b>B-5 A3/B2/A4</b> 错误/空结果诚实化 + recall 分页/流式</li>
+        <li><b>B-6 E4</b> task delete 校验存在；清理 dependencies 死字段</li>
+        <li><b>B-7 F2</b> self_reflect 持久化 try/catch + requiredParams 校验</li>
+        <li><b>B-8 E6/A5</b> 补 calendar / memory_store / memory_search executor 单测</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Phase A · 架构对齐 &amp; 质量深度</h3>
+      <ul>
+        <li><b>A-1 B1</b> web_search 归 Python canonical（F1 同法）：TS 入口代理到 <code>web_search_provider</code>，移除 TS 本地多引擎</li>
+        <li><b>A-2 D2/D3/D5</b> code_review 描述去夸大；LLM 失败降级显式（不再静默）；LLM 返回 schema + severity 校验防 NaN；补 LLM 路径单测</li>
+        <li><b>A-3 D4</b> code_generate 生成物加语法校验（validated 真实）；移除/实现死代码脚手架</li>
+        <li><b>A-4 C4</b> image_generate HTTP 状态分级；429 退避重试</li>
+        <li><b>A-5 C2</b> tts_speak 转发 voice/speed/pitch（或文档诚实化未支持）</li>
+        <li><b>A-6 E2/E5</b> calendar set_reminder 接入 scheduleReminder / 时区字段 + all_day 结束修正</li>
+        <li><b>A-7 A2</b> memory importance≥7 真实晋升逻辑（或移除虚假标签）</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="note" style="margin-top:18px">
+    <b>已关闭无需再修</b>：B3、C3（上一轮护栏/配额已加）、D1 的 FILE_WRITE 越权、F2 假成功——均已在当前代码中被修复并有对应测试断言佐证。<br/>
+    <b>建议下一步</b>：先执行 <span class="kbd">Phase B</span>（B-1/B-2/B-4 为最高杠杆、零行为歧义项），再视情况进入 Phase A 的 B1 架构归一。请确认执行范围，我再逐条落地并跑验证。
+  </div>
+
+</div>
+</body>
+</html>

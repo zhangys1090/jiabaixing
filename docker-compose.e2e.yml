@@ -1,0 +1,31 @@
+# 跨服务 E2E 覆盖配置（docker compose -f docker-compose.yml -f docker-compose.e2e.yml）
+#
+# 目标：在不依赖任何真实 LLM API 密钥的前提下，启动「网关(TS) + Python 后端」完整链路，
+# 验证「用户输入 → 网关 → Python → 最终输出」端到端贯通。
+#
+# 做法：
+#   1. 为 python-backend 注入 AGENT_MOCK_LLM=1，使 LLMProvider.chat 返回确定性 canned 响应；
+#   2. 关闭 Redis（REDIS_ENABLED=false）与 postgres/redis 服务（mock 模式不需要），加速启动；
+#   3. 保留 gateway 对 python-backend 的健康依赖，确保链路真实联通。
+
+services:
+  # 关闭 postgres / redis（mock 链路不依赖），避免 e2e 等待外部存储
+  postgres:
+    profiles: ["disabled"]
+  redis:
+    profiles: ["disabled"]
+
+  python-backend:
+    environment:
+      AGENT_MOCK_LLM: '1'
+      REDIS_ENABLED: 'false'
+      # 内存 SQLite，避免依赖 postgres
+      DATABASE_URL: 'sqlite+aiosqlite:///:memory:'
+    # 不再等待 postgres/redis 健康
+    depends_on: []
+
+  gateway:
+    # 仅依赖 python-backend 健康（真实跨服务联通）
+    depends_on:
+      python-backend:
+        condition: service_healthy

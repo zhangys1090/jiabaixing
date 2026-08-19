@@ -8,6 +8,7 @@ from agent.tools.registry import (
     ToolParameterDef,
     ToolResult,
 )
+from agent.core.logger import log_ignored
 
 
 MEMORY_RECALL_DEF = ToolDefinition(
@@ -176,8 +177,8 @@ async def memory_store_executor(params: dict[str, Any]) -> ToolResult:
                     output=f"已存储为{mem_type}记忆",
                     duration=time.time() - start,
                 )
-        except Exception:
-            pass
+        except Exception as _exc:
+            log_ignored(None, "memory_tools.memory_store_executor", _exc)
 
     memory = _get_memory_engine()
     if not memory:

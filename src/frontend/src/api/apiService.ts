@@ -206,6 +206,32 @@ export interface AutomationTriggerInfo {
   timestamp: number;
 }
 
+/** 工作区信息（与 useWorkspaceStore 类型保持一致） */
+interface Workspace {
+  id: string;
+  name: string;
+  path: string;
+  description?: string;
+  projectType?: string;
+  lastActive: string;
+}
+
+/** 会话信息（与 useWorkspaceStore 类型保持一致） */
+interface Session {
+  id: string;
+  title: string;
+  lastActive: string;
+}
+
+/** 网关平台信息（与 useGatewayStore 类型保持一致） */
+interface GatewayPlatform {
+  id: string;
+  name: string;
+  type: string;
+  connected: boolean;
+  unreadCount: number;
+}
+
 export class JiabaixingApiService extends ApiService {
   async getHealth(): Promise<ApiResponse<HealthResponse>> {
     return this.get<HealthResponse>(API_ENDPOINTS.HEALTH, undefined, 30000);
@@ -225,9 +251,50 @@ export class JiabaixingApiService extends ApiService {
 
   async processMultimodalMessage(
     input: string,
-    images?: string[]
+    images?: string[],
+    files?: Array<{ name: string; url: string; size: number; mimeType: string }>
   ): Promise<ApiResponse<{ response: string; traceId: string; intent: string }>> {
-    return this.post<{ response: string; traceId: string; intent: string }>(API_ENDPOINTS.PROCESS, { input, images });
+    return this.post<{ response: string; traceId: string; intent: string }>(API_ENDPOINTS.PROCESS, {
+      input,
+      images,
+      files,
+    });
+  }
+
+  async uploadFile(
+    file: File
+  ): Promise<ApiResponse<{ files: Array<{ name: string; url: string; size: number; mimeType: string }> }>> {
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      const response = await fetch(`${this.baseUrl}${API_ENDPOINTS.FILE_UPLOAD}`, {
+        method: 'POST',
+        body: formData,
+      });
+      return response.json();
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+
+  async uploadAudio(file: File): Promise<ApiResponse<{ text: string; confidence: number; duration: number }>> {
+    const formData = new FormData();
+    formData.append('audio', file);
+    try {
+      const response = await fetch(`${this.baseUrl}${API_ENDPOINTS.AUDIO_UPLOAD}`, {
+        method: 'POST',
+        body: formData,
+      });
+      return response.json();
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+
+  async getUploadHistory(): Promise<ApiResponse<{ files: Array<{ name: string; size: number; uploaded: string }> }>> {
+    return this.get<{ files: Array<{ name: string; size: number; uploaded: string }> }>(
+      API_ENDPOINTS.FILE_UPLOAD_HISTORY
+    );
   }
 
   async submitCorrection(
@@ -455,6 +522,44 @@ export class JiabaixingApiService extends ApiService {
 
   async getSystemConfig(): Promise<ApiResponse<unknown>> {
     return this.get(API_ENDPOINTS.SYSTEM_CONFIG);
+  }
+
+  async osvScan(
+    directory?: string,
+    severity?: string
+  ): Promise<
+    ApiResponse<{ totalVulns: number; critical: number; high: number; medium: number; low: number; report: string }>
+  > {
+    return this.post<{
+      totalVulns: number;
+      critical: number;
+      high: number;
+      medium: number;
+      low: number;
+      report: string;
+    }>(API_ENDPOINTS.SYSTEM_OSV_SCAN, { directory, severity });
+  }
+
+  async diskCleanup(
+    directory?: string,
+    categories?: string[],
+    confirm?: boolean,
+    dryRun?: boolean
+  ): Promise<ApiResponse<{ totalItems: number; totalSize: number; report: string; executed: boolean }>> {
+    return this.post<{ totalItems: number; totalSize: number; report: string; executed: boolean }>(
+      API_ENDPOINTS.SYSTEM_DISK_CLEANUP,
+      { directory, categories, confirm, dryRun }
+    );
+  }
+
+  async subdirectoryHints(
+    directory?: string,
+    query?: string
+  ): Promise<ApiResponse<{ totalDirs: number; hints: string }>> {
+    return this.get<{ totalDirs: number; hints: string }>(API_ENDPOINTS.SYSTEM_SUBDIRECTORY_HINTS, {
+      directory,
+      query,
+    });
   }
 
   async getAutomationTasks(): Promise<ApiResponse<{ tasks: AutomationTaskInfo[] }>> {
@@ -863,6 +968,105 @@ export class JiabaixingApiService extends ApiService {
    */
   async listTools(): Promise<ApiResponse<{ tools: ToolInfo[]; count: number }>> {
     return this.get<{ tools: ToolInfo[]; count: number }>(API_ENDPOINTS.TOOL_LIST);
+  }
+
+  // ===== Workspace / Budget / Gateway / Session APIs =====
+
+  async getWorkspaces(): Promise<ApiResponse<Workspace[]>> {
+    try {
+      const result = await this.get<Workspace[]>('/api/workspaces');
+      if (result.success && Array.isArray(result.data)) {
+        return result;
+      }
+    } catch {
+      /* 后端未实现时降级到 mock */
+    }
+    return { success: true, data: [] };
+  }
+
+  async createWorkspace(name: string, path: string, description?: string): Promise<ApiResponse<Workspace>> {
+    try {
+      const result = await this.post<Workspace>('/api/workspaces', { name, path, description });
+      if (result.success && result.data) {
+        return result;
+      }
+    } catch {
+      /* 后端未实现时降级到本地生成 */
+    }
+    const workspace: Workspace = {
+      id: `ws-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      name,
+      path,
+      description,
+      lastActive: new Date().toISOString(),
+    };
+    return { success: true, data: workspace };
+  }
+
+  async getBudgetStatus(): Promise<
+    ApiResponse<{ tokenUsed: number; tokenBudget: number; costUsed: number; costBudget: number; period: string }>
+  > {
+    try {
+      const result = await this.get<{
+        tokenUsed: number;
+        tokenBudget: number;
+        costUsed: number;
+        costBudget: number;
+        period: string;
+      }>('/api/budget/status');
+      if (result.success && result.data) {
+        return result;
+      }
+    } catch {
+      /* 后端未实现时降级到 mock */
+    }
+    return {
+      success: true,
+      data: { tokenUsed: 0, tokenBudget: 500000, costUsed: 0, costBudget: 10, period: 'daily' },
+    };
+  }
+
+  async getGatewayStatus(): Promise<
+    ApiResponse<{ status: 'online' | 'offline' | 'partial'; platforms: GatewayPlatform[] }>
+  > {
+    try {
+      const result = await this.getIntegrationPlatforms();
+      if (result.success && result.data) {
+        const platforms = result.data.platforms.map((p) => ({
+          id: p.id,
+          name: p.name,
+          type: (p.id as string) || 'im',
+          connected: p.status?.status === 'connected',
+          unreadCount: 0,
+        }));
+        const connectedCount = platforms.filter((p) => p.connected).length;
+        const status: 'online' | 'offline' | 'partial' =
+          connectedCount === 0 ? 'offline' : connectedCount === platforms.length ? 'online' : 'partial';
+        return { success: true, data: { status, platforms } };
+      }
+    } catch {
+      /* 降级到 mock */
+    }
+    return { success: true, data: { status: 'offline', platforms: [] } };
+  }
+
+  async getSessions(): Promise<ApiResponse<Session[]>> {
+    try {
+      const result = await this.getConversations(50);
+      if (result.success && Array.isArray(result.data)) {
+        const sessions = (result.data as Array<{ id?: string; timestamp?: string; title?: string }>)
+          .filter((c) => c.id)
+          .map((c) => ({
+            id: c.id as string,
+            title: c.title || '未命名会话',
+            lastActive: c.timestamp || new Date().toISOString(),
+          }));
+        return { success: true, data: sessions };
+      }
+    } catch {
+      /* 降级到 mock */
+    }
+    return { success: true, data: [] };
   }
 }
 

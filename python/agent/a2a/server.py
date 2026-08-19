@@ -39,6 +39,7 @@ from agent.a2a.types import (
     A2ATask,
     A2ATaskStatus,
 )
+from agent.core.logger import log_ignored
 
 logger = logging.getLogger(__name__)
 
@@ -538,8 +539,8 @@ def create_a2a_router(
                         task.status = TaskStatus(new_status)
                         if hasattr(m, "update_task"):
                             await m.update_task(task)
-                    except (ValueError, KeyError):
-                        pass
+                    except (ValueError, KeyError) as _exc:
+                        log_ignored(logger, "server.create_a2a_router.push_notification", _exc)
             elif req.event_type == "progress":
                 progress = req.data.get("progress")
                 if progress is not None:
@@ -563,6 +564,101 @@ def create_a2a_router(
             "eventType": req.event_type,
             "message": req.message,
         }
+
+    # ───────────────────────────────────────────────────────────
+    # P1-6: A2A 结果推送回调（WebHook / SSE）
+    # ───────────────────────────────────────────────────────────
+
+    _push_subscribers: Dict[str, List[Any]] = {}
+
+    @router.post("/push/subscribe", response_model=Dict[str, Any])
+    async def subscribe_push_notifications(
+        task_id: str = Query(..., alias="taskId"),
+        callback_url: Optional[str] = Query(None, alias="callbackUrl"),
+    ) -> Dict[str, Any]:
+        """P1-6: 订阅 Task 结果推送通知.
+
+        支持两种模式:
+        - WebHook: 提供 callbackUrl，任务状态变更时 POST 到该 URL
+        - SSE: 不提供 callbackUrl，通过 /push/stream SSE 端点接收
+
+        Args:
+            task_id: 要订阅的 Task ID.
+            callback_url: WebHook 回调 URL（可选）.
+
+        Returns:
+            Dict[str, Any]: 订阅确认.
+        """
+        sub_id = f"push_sub_{task_id}_{id(callback_url)}"
+        if task_id not in _push_subscribers:
+            _push_subscribers[task_id] = []
+        _push_subscribers[task_id].append({
+            "sub_id": sub_id,
+            "callback_url": callback_url,
+            "created_at": __import__("time").time(),
+        })
+        logger.info("P1-6: 推送订阅注册: task=%s sub=%s url=%s", task_id, sub_id, callback_url)
+        return {"subId": sub_id, "taskId": task_id, "mode": "webhook" if callback_url else "sse"}
+
+    @router.get("/push/stream")
+    async def push_notification_stream(
+        task_id: str = Query(..., alias="taskId"),
+    ):
+        """P1-6: SSE 推送通知流.
+
+        客户端通过此端点建立 SSE 连接，实时接收 Task 状态变更通知.
+
+        Args:
+            task_id: 要监听的 Task ID.
+        """
+        from fastapi.responses import StreamingResponse
+        import asyncio
+        import json
+
+        queue: asyncio.Queue = asyncio.Queue()
+
+        if task_id not in _push_subscribers:
+            _push_subscribers[task_id] = []
+        _push_subscribers[task_id].append({"sub_id": f"sse_{id(queue)}", "queue": queue})
+
+        async def event_generator():
+            try:
+                while True:
+                    event = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+            except asyncio.TimeoutError:
+                yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
+            except asyncio.CancelledError:
+                pass
+
+        return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+    async def _dispatch_push_to_subscribers(
+        task_id: str, event_type: str, data: Dict[str, Any],
+    ) -> None:
+        """P1-6: 将推送事件分发到所有订阅者（WebHook + SSE）.
+
+        Args:
+            task_id: Task ID.
+            event_type: 事件类型.
+            data: 事件数据.
+        """
+        import json as _json
+
+        subscribers = _push_subscribers.get(task_id, [])
+        for sub in subscribers:
+            if "queue" in sub:
+                await sub["queue"].put({"eventType": event_type, **data})
+            elif sub.get("callback_url"):
+                try:
+                    import httpx
+                    async with httpx.AsyncClient(timeout=5.0) as client:
+                        await client.post(
+                            sub["callback_url"],
+                            json={"taskId": task_id, "eventType": event_type, **data},
+                        )
+                except Exception as _exc:
+                    log_ignored(logger, "server._dispatch_push_to_subscribers.webhook", _exc)
 
     # ───────────────────────────────────────────────────────────
     # 统计端点

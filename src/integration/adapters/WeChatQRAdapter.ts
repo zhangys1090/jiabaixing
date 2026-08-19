@@ -200,8 +200,11 @@ export class WeChatQRAdapter extends BaseIntegrationAdapter {
     try {
       await this.captureQRCode();
       this.loginState.status = 'waiting_scan';
-    } catch {
-      // 二维码刷新失败，继续等待
+    } catch (err) {
+      Logger.warn(
+        `二维码刷新失败: ${(err as Error).message}`,
+        'WeChatQRAdapter'
+      );
     }
   }
 
@@ -248,8 +251,11 @@ export class WeChatQRAdapter extends BaseIntegrationAdapter {
             this.loginCheckTimer = null;
           }
         }
-      } catch {
-        // 检查失败，继续
+      } catch (err) {
+        Logger.warn(
+          `登录状态检查失败: ${(err as Error).message}`,
+          'WeChatQRAdapter'
+        );
       }
     }, 2000);
 
@@ -295,8 +301,11 @@ export class WeChatQRAdapter extends BaseIntegrationAdapter {
             await this.emitMessage(incoming);
           }
         }
-      } catch {
-        // 轮询失败，继续
+      } catch (err) {
+        Logger.warn(
+          `消息轮询失败: ${(err as Error).message}`,
+          'WeChatQRAdapter'
+        );
       }
     }, 1500);
   }

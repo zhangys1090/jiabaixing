@@ -2,6 +2,7 @@
  * 核心路由 - health / models / process / evolution(版本列表) / correct / logs
  */
 
+import Busboy from 'busboy';
 import express from 'express';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -41,7 +42,7 @@ export function registerCoreRoutes(
       status: 'healthy',
       timestamp: new Date().toISOString(),
       uptime: process.uptime(),
-      model: process.env.LLM_MODEL || 'deepseek-chat',
+      model: process.env.LLM_MODEL || 'deepseek-v4-flash',
       autoOptimize: process.env.ENABLE_AUTO_OPTIMIZE !== 'false',
       llm: llmHealth || { available: false, message: 'not initialized' },
       backend: 'typescript',
@@ -53,7 +54,7 @@ export function registerCoreRoutes(
       success: true,
       data: [
         {
-          id: process.env.LLM_MODEL || 'deepseek-chat',
+          id: process.env.LLM_MODEL || 'deepseek-v4-flash',
           name: 'DeepSeek Chat',
           status: 'available',
           version: '2.5',
@@ -198,7 +199,7 @@ export function registerCoreRoutes(
 
   app.post(
     '/api/process',
-    express.json({ limit: '10mb' }),
+    express.json({ limit: '50mb' }),
     async (req, res) => {
       try {
         const { input: rawInput, images } = req.body as {
@@ -276,7 +277,209 @@ export function registerCoreRoutes(
     }
   );
 
-  app.get('/api/evolution', async (_req, res) => {
+  app.get('/api/upload/history', async (_req, res) => {
+    try {
+      const uploadsDir = path.join(process.cwd(), 'data', 'uploads');
+      if (!fs.existsSync(uploadsDir)) {
+        return res.json({ files: [] });
+      }
+      const files = await fs.promises.readdir(uploadsDir);
+      const fileInfos = await Promise.all(
+        files.map(async (f) => {
+          const stat = await fs.promises.stat(path.join(uploadsDir, f));
+          return {
+            name: f,
+            size: stat.size,
+            uploaded: stat.mtime.toISOString(),
+          };
+        })
+      );
+      res.json({
+        files: fileInfos.sort((a, b) => b.uploaded.localeCompare(a.uploaded)),
+      });
+    } catch (error) {
+      res.status(500).json({ error: (error as Error).message });
+    }
+  });
+
+  // ── 文件上传端点 ──────────────────────────
+
+  /** MIME 白名单：仅允许上传安全的文件类型 */
+  const MIME_WHITELIST = new Set([
+    // 图片
+    'image/png',
+    'image/jpeg',
+    'image/jpg',
+    'image/gif',
+    'image/webp',
+    'image/svg+xml',
+    'image/bmp',
+    'image/tiff',
+    // 文档
+    'application/pdf',
+    'text/plain',
+    'text/csv',
+    'text/html',
+    'text/markdown',
+    'application/json',
+    'application/xml',
+    // Office 文档
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-powerpoint',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    // 代码
+    'text/javascript',
+    'application/javascript',
+    'text/x-python',
+    'text/x-typescript',
+    // 压缩
+    'application/zip',
+    'application/gzip',
+  ]);
+
+  /** 扩展名到 MIME 的回退映射（当 client 未提供 MIME 时） */
+  const EXTENSION_MIME_MAP: Record<string, string> = {
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+    '.svg': 'image/svg+xml',
+    '.bmp': 'image/bmp',
+    '.tiff': 'image/tiff',
+    '.pdf': 'application/pdf',
+    '.txt': 'text/plain',
+    '.csv': 'text/csv',
+    '.html': 'text/html',
+    '.md': 'text/markdown',
+    '.json': 'application/json',
+    '.xml': 'application/xml',
+    '.doc': 'application/msword',
+    '.docx':
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    '.xls': 'application/vnd.ms-excel',
+    '.xlsx':
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    '.ppt': 'application/vnd.ms-powerpoint',
+    '.pptx':
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    '.js': 'text/javascript',
+    '.ts': 'text/x-typescript',
+    '.py': 'text/x-python',
+    '.zip': 'application/zip',
+    '.gz': 'application/gzip',
+  };
+
+  app.post('/api/upload', (req, res) => {
+    const uploadedFiles: Array<{
+      name: string;
+      path: string;
+      size: number;
+      mimeType: string;
+    }> = [];
+    const rejectedFiles: string[] = [];
+    const bb = Busboy({
+      headers: req.headers,
+      limits: { fileSize: 50 * 1024 * 1024 },
+    });
+
+    bb.on(
+      'file',
+      (
+        _fieldname: string,
+        file: NodeJS.ReadableStream,
+        info: { filename: string; encoding: string; mimeType: string }
+      ) => {
+        const { filename, mimeType } = info;
+        let mimeToCheck = mimeType;
+        if (!mimeToCheck || mimeToCheck === 'application/octet-stream') {
+          const ext = path.extname(filename).toLowerCase();
+          mimeToCheck = EXTENSION_MIME_MAP[ext] || '';
+        }
+        if (!MIME_WHITELIST.has(mimeToCheck)) {
+          rejectedFiles.push(`${filename} (${mimeToCheck || 'unknown type'})`);
+          file.resume();
+          return;
+        }
+        const chunks: Buffer[] = [];
+        file.on('data', (chunk: Buffer) => chunks.push(chunk));
+        file.on('end', async () => {
+          try {
+            const data = Buffer.concat(chunks);
+            const uploadsDir = path.join(process.cwd(), 'data', 'uploads');
+            if (!fs.existsSync(uploadsDir)) {
+              await fs.promises.mkdir(uploadsDir, { recursive: true });
+            }
+            const timestamp = Date.now();
+            const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
+            const filePath = path.join(uploadsDir, `${timestamp}_${safeName}`);
+            await fs.promises.writeFile(filePath, data);
+            uploadedFiles.push({
+              name: filename,
+              path: filePath,
+              size: data.length,
+              mimeType: mimeType || 'application/octet-stream',
+            });
+          } catch (err) {
+            Logger.error(`写入 ${filename} 失败`, err as Error, 'coreRoutes');
+          }
+        });
+      }
+    );
+
+    bb.on('finish', () => {
+      if (uploadedFiles.length === 0) {
+        const extra =
+          rejectedFiles.length > 0
+            ? `; 已拒绝 ${rejectedFiles.length} 个不安全文件: ${rejectedFiles.join(', ')}`
+            : '';
+        return res.status(400).json({ error: `未找到合法文件${extra}` });
+      }
+      res.json({
+        success: true,
+        files: uploadedFiles.map((f) => ({
+          name: f.name,
+          size: f.size,
+          mimeType: f.mimeType,
+          url: `/api/files/${path.basename(f.path)}`,
+        })),
+        ...(rejectedFiles.length > 0 ? { rejected: rejectedFiles } : {}),
+      });
+    });
+
+    bb.on('error', (err: Error) => {
+      Logger.error('busboy 上传错误', err, 'coreRoutes');
+      if (!res.headersSent) {
+        res.status(500).json({ error: `上传失败: ${err.message}` });
+      }
+    });
+
+    req.pipe(bb);
+  });
+
+  // 文件访问端点
+  app.get('/api/files/:filename', async (req, res) => {
+    try {
+      const filePath = path.join(
+        process.cwd(),
+        'data',
+        'uploads',
+        req.params.filename
+      );
+      if (!fs.existsSync(filePath)) {
+        return res.status(404).json({ error: '文件不存在' });
+      }
+      res.sendFile(filePath);
+    } catch (error) {
+      res.status(500).json({ error: (error as Error).message });
+    }
+  });
+
+  // 上传历史
+  app.get('/api/upload/history', async (_req, res) => {
     const evolutionDir = path.join(process.cwd(), 'data', 'evolution');
     const dirExists = await fs.promises
       .access(evolutionDir)
@@ -461,4 +664,129 @@ export function registerCoreRoutes(
       }
     }
   );
+
+  // ── 音频上传 + 语音识别端点 ──────────────
+
+  const AUDIO_MIME_WHITELIST = new Set([
+    'audio/wav',
+    'audio/mp3',
+    'audio/mpeg',
+    'audio/webm',
+    'audio/ogg',
+    'audio/flac',
+    'audio/x-m4a',
+    'audio/mp4',
+  ]);
+
+  app.post('/api/audio/upload', (req, res) => {
+    let audioBuffer: Buffer | null = null;
+    let audioMime = '';
+    let audioName = '';
+    const bb = Busboy({
+      headers: req.headers,
+      limits: { fileSize: 25 * 1024 * 1024 },
+    });
+
+    bb.on('file', (_fieldname, file, info) => {
+      const { filename, mimeType } = info;
+      audioName = filename;
+      audioMime = mimeType || '';
+
+      if (
+        !AUDIO_MIME_WHITELIST.has(audioMime) &&
+        !audioMime.startsWith('audio/')
+      ) {
+        file.resume();
+        res
+          .status(400)
+          .json({ success: false, error: `不支持的音频类型: ${audioMime}` });
+        return;
+      }
+
+      const chunks: Buffer[] = [];
+      file.on('data', (chunk: Buffer) => chunks.push(chunk));
+      file.on('end', async () => {
+        audioBuffer = Buffer.concat(chunks);
+      });
+    });
+
+    bb.on('finish', async () => {
+      if (!audioBuffer) {
+        return res
+          .status(400)
+          .json({ success: false, error: '未收到音频数据' });
+      }
+
+      try {
+        const uploadsDir = path.join(process.cwd(), 'data', 'uploads', 'audio');
+        if (!fs.existsSync(uploadsDir)) {
+          await fs.promises.mkdir(uploadsDir, { recursive: true });
+        }
+
+        const timestamp = Date.now();
+        const safeName = audioName.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const filePath = path.join(uploadsDir, `${timestamp}_${safeName}`);
+        await fs.promises.writeFile(filePath, audioBuffer);
+
+        const { SpeechRecognizer } =
+          await import('../../multimodal/SpeechRecognizer');
+        const recognizer = new SpeechRecognizer();
+        await recognizer.initialize();
+        // SpeechRecognizer 只有 recognize(buffer) 接口，读取文件后转 Buffer
+        const audioBuffer2 = await fs.promises.readFile(filePath);
+        const result = await recognizer.recognize(audioBuffer2);
+
+        res.json({
+          success: true,
+          text: result.text,
+          confidence: result.confidence,
+          duration: result.duration || 0,
+          language: result.language || 'zh-CN',
+          file: {
+            name: audioName,
+            size: audioBuffer.length,
+            mimeType: audioMime,
+            url: `/api/files/audio/${timestamp}_${safeName}`,
+          },
+        });
+      } catch (error) {
+        Logger.error('音频处理失败', error as Error, 'coreRoutes');
+        res.status(500).json({
+          success: false,
+          error: `音频处理失败: ${(error as Error).message}`,
+        });
+      }
+    });
+
+    bb.on('error', (err: Error) => {
+      Logger.error('音频上传错误', err, 'coreRoutes');
+      if (!res.headersSent) {
+        res.status(500).json({ error: `上传失败: ${err.message}` });
+      }
+    });
+
+    req.pipe(bb);
+  });
+
+  app.get('/api/health/slo', async (_req, res) => {
+    try {
+      const bridge = getActivePythonBridge();
+      if (!bridge) {
+        return res.status(200).json({
+          success: true,
+          data: {
+            status: 'degraded',
+            message: 'Python 后端未连接，SLO 指标不可用',
+            uptime: process.uptime(),
+            memory: process.memoryUsage(),
+          },
+        });
+      }
+      const result = await bridge.request('GET', '/v1/health/slo');
+      res.json({ success: true, data: result });
+    } catch (error) {
+      Logger.error('SLO 健康检查失败', error as Error, 'coreRoutes');
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
 }

@@ -4,6 +4,7 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from agent.core.logger import log_ignored
 
 
 @dataclass
@@ -195,8 +196,8 @@ class CodingContextDetector:
                     lang = ext_languages.get(child.suffix.lower())
                     if lang and lang not in languages:
                         languages.append(lang)
-        except OSError:
-            pass
+        except OSError as _exc:
+            log_ignored(None, "coding_context.CodingContextDetector._detect_language", _exc)
 
         return languages
 
@@ -222,8 +223,8 @@ class CodingContextDetector:
                 for fw_name, keywords in self._FRAMEWORK_KEYWORDS.items():
                     if any(kw in deps for kw in keywords):
                         frameworks.append(fw_name)
-            except (json.JSONDecodeError, OSError):
-                pass
+            except (json.JSONDecodeError, OSError) as _exc:
+                log_ignored(None, "coding_context.CodingContextDetector._detect_framework", _exc)
 
         # Python 框架检测
         requirements_path = working_dir / "requirements.txt"
@@ -235,8 +236,8 @@ class CodingContextDetector:
                         if any(kw in content for kw in keywords):
                             if fw_name not in frameworks:
                                 frameworks.append(fw_name)
-            except OSError:
-                pass
+            except OSError as _exc:
+                log_ignored(None, "coding_context.CodingContextDetector._detect_framework", _exc)
 
         pyproject_path = working_dir / "pyproject.toml"
         if pyproject_path.exists():
@@ -245,8 +246,8 @@ class CodingContextDetector:
                 for fw_name in ("fastapi", "django", "flask"):
                     if fw_name in content and fw_name not in frameworks:
                         frameworks.append(fw_name)
-            except OSError:
-                pass
+            except OSError as _exc:
+                log_ignored(None, "coding_context.CodingContextDetector._detect_framework", _exc)
 
         return frameworks
 

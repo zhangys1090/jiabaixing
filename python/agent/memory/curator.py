@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
 
 log = StructuredLogger("memory_curator")
 
@@ -172,8 +173,8 @@ class MemoryCurator:
                 if store and hasattr(store, "update_memory_type"):
                     store.update_memory_type(memory_id, "long_term")
                     return True
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "curator.MemoryCurator.consolidate_memory", _exc)
         return True
 
     def forget_memory(self, memory_id: str) -> bool:
@@ -188,8 +189,8 @@ class MemoryCurator:
                 store = getattr(self._memory, "_store", None)
                 if store and hasattr(store, "delete"):
                     store.delete(memory_id)
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "curator.MemoryCurator.forget_memory", _exc)
         return True
 
     async def review(self) -> Any:

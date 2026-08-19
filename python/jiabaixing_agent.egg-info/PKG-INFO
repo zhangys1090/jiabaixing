@@ -1,0 +1,39 @@
+Metadata-Version: 2.4
+Name: jiabaixing-agent
+Version: 0.1.0
+Summary: 家百星 Agent Python 后端 — 核心 AI 逻辑
+Requires-Python: >=3.11
+Requires-Dist: fastapi>=0.115.0
+Requires-Dist: uvicorn[standard]>=0.34.0
+Requires-Dist: pydantic>=2.10.0
+Requires-Dist: litellm>=1.60.0
+Requires-Dist: httpx>=0.28.0
+Requires-Dist: chromadb>=1.0.0
+Requires-Dist: jieba>=0.42.1
+Requires-Dist: sentence-transformers>=3.3.0
+Requires-Dist: tiktoken>=0.8.0
+Requires-Dist: apscheduler>=3.11.0
+Requires-Dist: sqlalchemy[asyncio]>=2.0.0
+Requires-Dist: aiosqlite>=0.20.0
+Requires-Dist: asyncpg>=0.30.0
+Requires-Dist: psycopg2-binary>=2.9.0
+Requires-Dist: scikit-learn>=1.6.0
+Requires-Dist: python-dotenv>=1.0.0
+Requires-Dist: websockets>=14.0
+Requires-Dist: redis[hiredis]>=5.0.0
+Requires-Dist: alembic>=1.13.0
+Requires-Dist: opentelemetry-api>=1.28.0
+Requires-Dist: opentelemetry-sdk>=1.28.0
+Requires-Dist: opentelemetry-exporter-otlp-proto-grpc>=1.28.0
+Requires-Dist: opentelemetry-exporter-prometheus>=0.49b0
+Requires-Dist: opentelemetry-instrumentation-fastapi>=0.49b0
+Provides-Extra: test
+Requires-Dist: pytest>=8.0.0; extra == "test"
+Requires-Dist: pytest-asyncio>=0.25.0; extra == "test"
+Requires-Dist: httpx>=0.28.0; extra == "test"
+Requires-Dist: ruff>=0.8.0; extra == "test"
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0.0; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.25.0; extra == "dev"
+Requires-Dist: httpx>=0.28.0; extra == "dev"
+Requires-Dist: ruff>=0.8.0; extra == "dev"

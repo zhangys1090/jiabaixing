@@ -1,6 +1,6 @@
-import { createDatabase } from '../shared/DatabaseShim';
 import * as fs from 'fs';
 import * as path from 'path';
+import { createDatabase } from '../shared/DatabaseShim';
 import { Logger } from '../utils/Logger';
 
 /**
@@ -32,7 +32,7 @@ interface DatabaseConfig {
  */
 export class MemoryDatabase {
   private static instance: MemoryDatabase | null = null;
-  private db: any = null;
+  private db: import('../shared/DatabaseShim').DatabaseAdapter | null = null;
   private config: DatabaseConfig;
 
   private constructor(storagePath: string) {
@@ -78,7 +78,7 @@ export class MemoryDatabase {
       }
 
       const dbFilePath = path.join(storageDir, 'jiabaixing_memory.db');
-      this.db = createDatabase(dbFilePath) as any;
+      this.db = createDatabase(dbFilePath);
       if (this.db) {
         try {
           this.db.pragma(`journal_mode = ${this.config.journalMode}`);
@@ -125,7 +125,7 @@ export class MemoryDatabase {
       CREATE INDEX IF NOT EXISTS idx_memories_importance ON memories(importance);
       CREATE INDEX IF NOT EXISTS idx_memories_timestamp ON memories(timestamp);
       CREATE INDEX IF NOT EXISTS idx_memories_trace_id ON memories(trace_id);
-      
+
       -- FTS5全文搜索虚拟表（P1增强）
       CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
         content,
@@ -133,16 +133,16 @@ export class MemoryDatabase {
         content_rowid=id,
         tokenize='porter unicode61'
       );
-      
+
       -- FTS5触发器，自动同步数据
       CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
         INSERT INTO memories_fts(rowid, content) VALUES (new.id, new.content);
       END;
-      
+
       CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
         INSERT INTO memories_fts(memories_fts, rowid, content) VALUES('delete', old.id, old.content);
       END;
-      
+
       CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
         INSERT INTO memories_fts(memories_fts, rowid, content) VALUES('delete', old.id, old.content);
         INSERT INTO memories_fts(rowid, content) VALUES (new.id, new.content);
@@ -417,7 +417,9 @@ export class MemoryDatabase {
   /**
    * 获取数据库实例（底层访问，用于高级操作）
    */
-  public getRawDatabase(): any | null {
+  public getRawDatabase():
+    | import('../shared/DatabaseShim').DatabaseAdapter
+    | null {
     return this.db;
   }
 

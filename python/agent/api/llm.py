@@ -170,10 +170,19 @@ async def cache_stats():
 
 @router.delete("/cache")
 async def clear_cache():
+    """清空 LLM 侧全部缓存（响应缓存 + prompt 缓存）。
+
+    W3（审计 §1.8）：此前调用 ``engine.llm.cache.clear()``，但 LLMProvider 上
+    并无 ``cache`` 属性（只有 ``tiered_cache`` / ``prompt_cache``），该端点必抛
+    AttributeError；且旧实现无论成败都返回 ``{"success": True}``（假成功）。
+    """
     from agent.main import engine
-    if engine and hasattr(engine, "llm"):
-        engine.llm.cache.clear()
-    return {"success": True}
+    if not (engine and hasattr(engine, "llm")):
+        return {"success": False, "detail": "Engine not initialized"}
+
+    cleared = engine.llm.clear_cache()
+    failed = [k for k, v in cleared.items() if str(v).startswith("error:")]
+    return {"success": not failed, "cleared": cleared, "failed": failed}
 
 
 @router.post("/credentials/pool")

@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from agent.loop.types import ExecutionPlan, LoopContext, PlanStep
+from agent.core.logger import log_ignored
 
 
 class LLMProtocol(Protocol):
@@ -125,8 +126,8 @@ class TreeOfThoughtsPlanner:
                     recommended_strategy=parsed.get("recommendedStrategy", ""),
                     complexity=parsed.get("complexity", "moderate"),
                 )
-        except Exception:
-            pass
+        except Exception as _exc:
+            log_ignored(None, "tot_planner.TreeOfThoughtsPlanner._analyze_task_nature", _exc)
         return TaskNature()
 
     async def _generate_candidates(
@@ -238,8 +239,8 @@ class TreeOfThoughtsPlanner:
                 evals = parsed.get("evaluations", [])
                 if evals:
                     return [{"score": e.get("feasibilityScore", 0.5), "reasoning": e.get("reasoning", "")} for e in evals]
-        except Exception:
-            pass
+        except Exception as _exc:
+            log_ignored(None, "tot_planner.TreeOfThoughtsPlanner._evaluate_candidates", _exc)
 
         return [{"score": 0.5} for _ in candidates]
 

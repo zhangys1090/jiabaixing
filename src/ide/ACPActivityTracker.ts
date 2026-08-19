@@ -7,9 +7,9 @@
  */
 
 import type {
-  ACPFileDiff,
-  ACPTerminalCommand,
-  ACPToolActivity,
+    ACPFileDiff,
+    ACPTerminalCommand,
+    ACPToolActivity,
 } from '../ide/ACPServer';
 import { Logger } from '../utils/Logger';
 
@@ -50,6 +50,10 @@ export class ACPActivityTracker {
 
   private constructor() {
     this.cleanupInterval = setInterval(() => this.prune(), 10 * 60 * 1000);
+  }
+
+  static create(): ACPActivityTracker {
+    return new ACPActivityTracker();
   }
 
   static getInstance(): ACPActivityTracker {

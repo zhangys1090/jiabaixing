@@ -11,8 +11,10 @@
  */
 
 import { DesktopExecutionAgent } from '../../../desktop/DesktopExecutionAgent';
+import { getActionDispatcher, type VerificationOutcome } from '../../action';
 import type { ToolContext, ToolDefinition, ToolResult } from '../../types';
 import { Permission, ToolCategory } from '../../types';
+import { Logger } from '../../../utils/Logger';
 
 export const DESKTOP_AUTOMATE_DEF: ToolDefinition = {
   name: 'desktop_automate',
@@ -24,6 +26,11 @@ export const DESKTOP_AUTOMATE_DEF: ToolDefinition = {
       type: 'string',
       description:
         '桌面操作描述，如"打开记事本并输入Hello World"、"截图保存桌面"、"点击屏幕上的确定按钮"、"在搜索框中输入关键词"、"最大化当前窗口"',
+    },
+    verify: {
+      type: 'object',
+      description:
+        '可选：操作完成后经 Python ActionVerifier 复核结果。传 { prePath, postPath } 提供操作前后截图路径（留空则仅记录待复核）。',
     },
   },
   requiredParams: ['task'],
@@ -57,13 +64,36 @@ export function createDesktopAutomateExecutor() {
       const agent = DesktopExecutionAgent.getInstance();
 
       // 确保Agent已初始化
-      if (!(agent as any).initialized) {
+      if (!(agent as unknown as { initialized?: boolean }).initialized) {
         await agent.initialize();
       }
 
       const result = await agent.executeTask(task);
 
       const duration = Date.now() - startTime;
+
+      // P1-2：桌面动作接回 action_verifier（经统一调度器的验证桥）
+      const verifyReq = params.verify;
+      let verification: VerificationOutcome | undefined;
+      if (verifyReq) {
+        const { prePath, postPath } =
+          typeof verifyReq === 'object' && verifyReq !== null
+            ? (verifyReq as { prePath?: string; postPath?: string })
+            : {};
+        try {
+          verification = await getActionDispatcher().verifyDesktopAction(
+            task,
+            prePath,
+            postPath,
+            { strategy: 'auto' }
+          );
+        } catch (vErr) {
+          Logger.warn(
+            `desktop_automate 验证接回失败: ${(vErr as Error).message}`,
+            'desktop_automate'
+          );
+        }
+      }
 
       return {
         success: result.success,
@@ -79,6 +109,9 @@ export function createDesktopAutomateExecutor() {
           totalSteps: result.totalSteps,
           usedSkill: result.usedSkill,
           observationCount: result.observations.length,
+          ...(verification
+            ? { verification }
+            : {}),
         },
       };
     } catch (err) {

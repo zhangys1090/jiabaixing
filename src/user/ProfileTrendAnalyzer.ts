@@ -47,6 +47,10 @@ export class ProfileTrendAnalyzer {
 
   private constructor() {}
 
+  static create(): ProfileTrendAnalyzer {
+    return new ProfileTrendAnalyzer();
+  }
+
   static getInstance(): ProfileTrendAnalyzer {
     if (!ProfileTrendAnalyzer._instance) {
       ProfileTrendAnalyzer._instance = new ProfileTrendAnalyzer();

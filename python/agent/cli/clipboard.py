@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess
+from agent.infrastructure.subprocess_util import run
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -29,6 +29,7 @@ from enum import Enum
 from typing import Any
 
 from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
 
 log = StructuredLogger("clipboard")
 
@@ -152,15 +153,15 @@ class Clipboard:
         return ClipboardBackend.FILE
 
     def _copy_pbcopy(self, text: str) -> bool:
-        proc = subprocess.run(["pbcopy"], input=text.encode(), capture_output=True)
+        proc = run(["pbcopy"], input=text.encode(), capture_output=True)
         return proc.returncode == 0
 
     def _paste_pbpaste(self) -> str:
-        proc = subprocess.run(["pbpaste"], capture_output=True, text=True)
+        proc = run(["pbpaste"], capture_output=True, text=True)
         return proc.stdout if proc.returncode == 0 else ""
 
     def _copy_xclip(self, text: str) -> bool:
-        proc = subprocess.run(
+        proc = run(
             ["xclip", "-selection", "clipboard"],
             input=text.encode(),
             capture_output=True,
@@ -168,7 +169,7 @@ class Clipboard:
         return proc.returncode == 0
 
     def _paste_xclip(self) -> str:
-        proc = subprocess.run(
+        proc = run(
             ["xclip", "-selection", "clipboard", "-o"],
             capture_output=True,
             text=True,
@@ -176,7 +177,7 @@ class Clipboard:
         return proc.stdout if proc.returncode == 0 else ""
 
     def _copy_xsel(self, text: str) -> bool:
-        proc = subprocess.run(
+        proc = run(
             ["xsel", "--clipboard", "--input"],
             input=text.encode(),
             capture_output=True,
@@ -184,7 +185,7 @@ class Clipboard:
         return proc.returncode == 0
 
     def _paste_xsel(self) -> str:
-        proc = subprocess.run(
+        proc = run(
             ["xsel", "--clipboard", "--output"],
             capture_output=True,
             text=True,
@@ -192,19 +193,19 @@ class Clipboard:
         return proc.stdout if proc.returncode == 0 else ""
 
     def _copy_wl_copy(self, text: str) -> bool:
-        proc = subprocess.run(["wl-copy"], input=text.encode(), capture_output=True)
+        proc = run(["wl-copy"], input=text.encode(), capture_output=True)
         return proc.returncode == 0
 
     def _paste_wl_paste(self) -> str:
-        proc = subprocess.run(["wl-paste"], capture_output=True, text=True)
+        proc = run(["wl-paste"], capture_output=True, text=True)
         return proc.stdout if proc.returncode == 0 else ""
 
     def _copy_clip(self, text: str) -> bool:
-        proc = subprocess.run(["clip"], input=text.encode(), capture_output=True, shell=True)
+        proc = run(["clip"], input=text.encode(), capture_output=True)
         return proc.returncode == 0
 
     def _paste_powershell(self) -> str:
-        proc = subprocess.run(
+        proc = run(
             ["powershell", "-NoProfile", "-Command", "Get-Clipboard"],
             capture_output=True,
             text=True,
@@ -212,7 +213,7 @@ class Clipboard:
         return proc.stdout.strip() if proc.returncode == 0 else ""
 
     def _copy_termux(self, text: str) -> bool:
-        proc = subprocess.run(
+        proc = run(
             ["termux-clipboard-set"],
             input=text.encode(),
             capture_output=True,
@@ -220,7 +221,7 @@ class Clipboard:
         return proc.returncode == 0
 
     def _paste_termux(self) -> str:
-        proc = subprocess.run(
+        proc = run(
             ["termux-clipboard-get"],
             capture_output=True,
             text=True,
@@ -242,6 +243,6 @@ class Clipboard:
             if os.path.exists(path):
                 with open(path, "r", encoding="utf-8") as f:
                     return f.read()
-        except Exception:
-            pass
+        except Exception as _exc:
+            log_ignored(log, "clipboard.Clipboard._paste_file", _exc)
         return ""

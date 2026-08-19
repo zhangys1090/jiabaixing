@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 from pathlib import Path
 
 import pytest
 
+from agent.tools import file_tools as _file_tools
 from agent.tools.registry import ToolRegistry, register_default_tools
 
 
@@ -14,6 +16,14 @@ def registry():
     r = ToolRegistry()
     register_default_tools(r)
     return r
+
+
+@pytest.fixture(autouse=True)
+def _allow_edit_without_read(monkeypatch):
+    # 本模块测试编辑工具的内部机制（替换/预览/语法校验/多文件原子性）。
+    # read-before-edit 守卫本身由 tests/test_p2_7_read_before_edit.py 专项覆盖，
+    # 此处将其置为 no-op，避免编辑 freshly-created 临时文件时被守卫拦截（P2-7 回归修复）。
+    monkeypatch.setattr(_file_tools, "_read_before_edit_check", lambda *a, **k: None)
 
 
 class TestToolRegistration:
@@ -191,6 +201,7 @@ class TestFileEditTool:
                 "file_path": tmp,
                 "old_text": "world",
                 "new_text": "python",
+                "bypass_read_check": True,
             })
             assert result.success
             assert "1 处匹配" in result.output
@@ -533,6 +544,11 @@ class TestNetworkEnhancedTools:
         assert "hello" in result.output
 
     @pytest.mark.asyncio
+    @pytest.mark.xfail(
+        sys.platform == "win32",
+        strict=False,
+        reason="Windows 沙箱无回收站，safe_delete fail-closed 拒绝删除使 result.success=False；Linux CI 走回收站删除正常通过",
+    )
     async def test_skill_create_delete(self, registry: ToolRegistry):
         await registry.execute("skill_create", {"action": "create", "skill_name": "del_test", "template": "temp", "description": "删除测试"})
         result = await registry.execute("skill_create", {"action": "delete", "skill_name": "del_test"})

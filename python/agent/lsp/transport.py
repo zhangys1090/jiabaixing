@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
 
 log = StructuredLogger("lsp.transport")
 
@@ -73,12 +74,12 @@ class LspTransport:
         if self._process:
             try:
                 self._process.stdin.close()
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "transport.LspTransport.stop", _exc)
             try:
                 self._process.kill()
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "transport.LspTransport.stop", _exc)
             self._process = None
 
         for future in self._pending.values():

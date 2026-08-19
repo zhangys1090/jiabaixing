@@ -58,6 +58,10 @@ export class PreferenceManager {
 
   private constructor() {}
 
+  public static create(): PreferenceManager {
+    return new PreferenceManager();
+  }
+
   public static getInstance(): PreferenceManager {
     if (!PreferenceManager.instance) {
       PreferenceManager.instance = new PreferenceManager();

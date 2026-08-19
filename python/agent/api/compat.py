@@ -2,11 +2,12 @@ import os
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from typing import Any
 
 from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
 from agent.core.resilience import RetryConfig, resilient_call
 
 router = APIRouter()
@@ -662,8 +663,8 @@ async def tools_list():
     try:
         from agent.main import app
         request = Request({})
-    except Exception:
-        pass
+    except Exception as _exc:
+        log_ignored(log, "compat.tools_list", _exc)
 
     tools = []
     for d in defs:
@@ -712,7 +713,8 @@ async def trae_skills_status():
 
 @router.post("/trae/skills/execute")
 async def trae_skills_execute(req: dict):
-    return {"success": False, "error": "Not implemented"}
+    """技能执行端点（待实现）。"""
+    raise HTTPException(status_code=501, detail="Skills execute not yet implemented")
 
 
 @router.post("/trae/security/audit")
@@ -809,7 +811,8 @@ async def integration_platform_status(platform: str):
 
 @router.post("/integration/{platform}/connect")
 async def integration_platform_connect(platform: str):
-    return {"success": False, "error": "Not implemented"}
+    """第三方平台连接端点（待实现）。"""
+    raise HTTPException(status_code=501, detail=f"Platform {platform} connect not yet implemented")
 
 
 @router.post("/integration/{platform}/disconnect")
@@ -824,7 +827,8 @@ async def integration_platform_webhook(platform: str):
 
 @router.post("/integration/{platform}/send")
 async def integration_platform_send(platform: str):
-    return {"success": False, "error": "Not implemented"}
+    """第三方平台消息发送端点（待实现）。"""
+    raise HTTPException(status_code=501, detail=f"Platform {platform} send not yet implemented")
 
 
 @router.get("/mcp/servers/{name}")
@@ -987,10 +991,10 @@ async def ws_endpoint(websocket: WebSocket):
                 "trace_id": result.get("trace_id", ""),
                 "done": True,
             })
-    except WebSocketDisconnect:
-        pass
+    except WebSocketDisconnect as _exc:
+        log_ignored(log, "compat.ws_endpoint", _exc)
     except Exception as e:
         try:
             await websocket.send_json({"type": "error", "content": str(e), "done": True})
-        except Exception:
-            pass
+        except Exception as _exc:
+            log_ignored(log, "compat.ws_endpoint", _exc)

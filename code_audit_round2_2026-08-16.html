@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>家百星代码审计 · 第二轮（2026-08-16）</title>
+<style>
+  :root{--bg:#0f1117;--card:#1a1d27;--fg:#e6e6e6;--muted:#9aa0aa;--line:#2a2e3a;
+        --red:#ff6b6b;--yellow:#ffd166;--green:#51cf66;--accent:#5c7cfa;}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,Segoe UI,Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
+       background:var(--bg);color:var(--fg);line-height:1.6;padding:32px;}
+  .wrap{max-width:1080px;margin:0 auto;}
+  h1{font-size:26px;margin:0 0 6px;}
+  h2{font-size:20px;margin:34px 0 12px;border-left:4px solid var(--accent);padding-left:10px;}
+  h3{font-size:16px;margin:22px 0 8px;color:var(--accent);}
+  p,li{color:var(--fg);font-size:14px;}
+  .sub{color:var(--muted);font-size:13px;margin-top:0;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:14px 0;}
+  table{width:100%;border-collapse:collapse;margin:10px 0;font-size:13px;}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top;}
+  th{background:#222633;color:var(--fg);}
+  code{background:#11141c;padding:2px 6px;border-radius:4px;font-family:"SFMono-Regular",Consolas,monospace;font-size:12.5px;color:#ffd9a0;}
+  pre{background:#11141c;border:1px solid var(--line);border-radius:8px;padding:12px;overflow:auto;font-size:12.5px;}
+  .tag{display:inline-block;padding:1px 8px;border-radius:20px;font-size:12px;font-weight:600;}
+  .red{background:rgba(255,107,107,.15);color:var(--red);}
+  .yellow{background:rgba(255,209,102,.15);color:var(--yellow);}
+  .green{background:rgba(81,207,102,.15);color:var(--green);}
+  .muted{color:var(--muted);}
+  .ok{color:var(--green);font-weight:600;}
+  .file{color:#8ecbff;}
+  .foot{margin-top:30px;color:var(--muted);font-size:12px;border-top:1px solid var(--line);padding-top:14px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>家百星代码审计 · 第二轮</h1>
+<p class="sub">日期 2026-08-16 · 范围：在首轮（信号/吞错/调度逻辑）修复基础上，深入核心模块做第二轮全面复核 + 重点问题修复</p>
+
+<div class="card">
+<h3 style="margin-top:0">审计方法与覆盖</h3>
+<ul>
+<li><b>静态扫描</b>：复用自研 AST/正则扫描器（<span class="file">audit_scanner.py</span>），本轮刷新候选：Python swallowed <b>407</b> / signal <b>2</b> / logic <b>0</b>；TS swallowed <b>907</b> / signal <b>8</b>。</li>
+<li><b>逐条人工核验</b>：对核心模块（memory / evolution / context / tools / orchestration / loop / llm / perception / api）的吞错候选、并发调用、逻辑缺陷逐项读源码确认，<b>非文档宣称</b>。</li>
+<li><b>专项逻辑探测</b>：平衡括号解析、嵌套 JSON、<code>asyncio.gather</code> 异常传播、<code>JSON.parse</code> 不可信输入、状态机。覆盖 39 个 Python 子目录、TS 网关/WS/CLI 关键路径。</li>
+</ul>
+</div>
+
+<h2>一、本轮修复的重点问题</h2>
+
+<div class="card">
+<h3>🔴 R-01　ReAct 思考解析器：嵌套 JSON 参数被截断（逻辑错误）</h3>
+<table>
+<tr><th>项</th><th>内容</th></tr>
+<tr><td>位置</td><td class="file">python/agent/loop/controller.py · <code>_parse_react_thought()</code> 原 L2669</td></tr>
+<tr><td>问题</td><td>旧正则 <code>Args:\s*(\{.+?\})</code> 为<b>非贪婪</b>，遇首个 <code>}</code> 即截断。
+对嵌套参数如 <code>{"filters": {"type": "x"}}</code> 会截为 <code>{"filters": {"type": "x"}</code>（非法 JSON）→
+<code>json.loads</code> 失败 → <code>tool_args = {}</code>，<b>真实工具参数被整体静默丢弃</b>，导致带嵌套参数的工具调用必然失败。</td></tr>
+<tr><td>风险</td><td><span class="tag red">高危</span> 影响所有 ReAct 嵌套参数工具调用（搜索过滤、结构化入参等）</td></tr>
+<tr><td>修复</td><td>改为<b>平衡括号扫描</b>（跟踪 <code>{</code>/<code>}</code> 深度 + 字符串/转义状态），精确截取最外层 JSON 对象，再 <code>json.loads</code>。正确支持任意嵌套与字符串内含花括号。</td></tr>
+<tr><td>验证</td><td>新增回归测试 <span class="file">python/tests/test_react_parser.py</span>（4 例：嵌套/扁平/字符串含花括号/无参数）全部通过；该测试在旧代码下必失败（锁定修复）。</td></tr>
+</table>
+</div>
+
+<div class="card">
+<h3>🟡 R-02　memory/store.py 析构与关闭：静默吞错（错误被吞）</h3>
+<table>
+<tr><th>项</th><th>内容</th></tr>
+<tr><td>位置</td><td class="file">python/agent/memory/store.py · <code>close()</code> L1082、<code>__del__()</code> L1092</td></tr>
+<tr><td>问题</td><td><code>except Exception: pass</code> 完全静默——向量库/SQLite 连接关闭失败（如句柄泄漏、写盘异常）无任何记录，运维不可见。</td></tr>
+<tr><td>风险</td><td><span class="tag yellow">中</span> 资源清理失败难以诊断（与首轮 P0-3 静默异常红线一致）</td></tr>
+<tr><td>修复</td><td>两处改为 <code>except Exception as _exc: log_ignored(log, "...", _exc)</code>，纳入项目既有静默异常基线。</td></tr>
+<tr><td>验证</td><td><code>ruff check</code> 全绿；<code>py_compile</code> 通过。</td></tr>
+</table>
+</div>
+
+<h2>二、本轮重点核查并确认"无误（已排除）"的项</h2>
+<p class="sub">以下为候选清单中高度可疑、经读源码确认非真实缺陷的项，列出以避免重复误报：</p>
+<table>
+<tr><th>候选位置</th><th>初判风险</th><th>核查结论</th></tr>
+<tr><td class="file">orchestration/fanout.py:221 <code>asyncio.gather(*sem_tasks)</code></td><td>无 <code>return_exceptions</code> 恐丢异常</td><td><span class="ok">安全</span> <code>_execute_with_semaphore</code>（L252-290）已 <code>except Exception</code> 返回 <code>SubTaskResult</code>，永不抛 → gather 无遗漏</td></tr>
+<tr><td class="file">server/websocket/index.ts:202 / desktopEventStream.ts:44 <code>JSON.parse(message)</code></td><td>不可信输入未捕获崩溃</td><td><span class="ok">安全</span> 均在 <code>try{}catch{}</code> 内，catch 已 <code>Logger.error/warn</code> 记录并返回</td></tr>
+<tr><td class="file">loop/controller.py L2517/2538/2560/2586/2641 等 9 处</td><td>except 返回默认值疑似吞错</td><td><span class="ok">设计性降级</span> 均为"能力探测/预算预估失败→安全默认值"，属预期容错，但建议后续统一加 <code>log_ignored</code> 提升可观测性（低优先级）</td></tr>
+<tr><td class="file">tools/tool_call_guard.py 全量</td><td>守卫逻辑/权限误判</td><td><span class="ok">正确</span> 宪法守卫/缓存/去重/速率限制分支清晰，<code>record()</code> 缓存仅成功结果，无越权漏判</td></tr>
+<tr><td class="file">evolution/v2_engine.py <code>_execute_plan</code></td><td>自修改回滚失效</td><td><span class="ok">正确</span> 真实运行 AST 语法校验（非恒真），失败置 <code>rollback_needed</code> 并回滚；<code>__init__</code> 单例/运行锁正确</td></tr>
+<tr><td class="file">loop/executor.py <code>_retry_with_reflection</code></td><td>重试计数/状态机缺陷</td><td><span class="ok">正确</span> 状态转换经 <code>can_transition_to</code> 守卫，重试上限由 <code>max_retries</code> 收敛</td></tr>
+<tr><td class="file">memory/store.py L620 等</td><td>except 吞错</td><td><span class="ok">容错</span> 语义检索失败回退关键词检索，错误被下游记录</td></tr>
+<tr><td class="file">核心模块 <code>dict.get(k, [])</code> ×1161</td><td>可变默认共享状态</td><td><span class="ok">误报</span> Python 每次调用重新求值默认对象，非函数默认参量，不存在共享可变状态</td></tr>
+<tr><td class="file">core/engine.py / context/context_references.py</td><td>except 吞错</td><td><span class="ok">正确</span> 均将 <code>str(e)</code> 作为错误体返回给调用方（error 字段可见），非静默</td></tr>
+</table>
+
+<h2>三、TS 侧复核结论</h2>
+<div class="card">
+<ul>
+<li><b>信号处理器</b>：首轮已修复（main.ts/gatewayWorker.ts 记录后退出；forensics 自管道化）。本轮复核无新增。</li>
+<li><b>空 <code>.catch(()=&gt;{})</code></b>：首轮已修复 8 处并确认零残留。</li>
+<li><b>不可信 JSON.parse</b>：WS 消息、IPC、CLI 响应均在 try/catch 内；<code>desktop/*</code> 的 LLM 输出解析属内部数据，风险低。</li>
+<li><b>受环境限制</b>：本机 <code>node_modules</code> 损坏，无法跑 tsc/jest；TS 改动为机械性安全加固（首轮），本轮未做 TS 代码改动。</li>
+</ul>
+</div>
+
+<h2>四、验证结果汇总</h2>
+<table>
+<tr><th>检查项</th><th>结果</th></tr>
+<tr><td><code>py_compile</code> 本轮改动文件</td><td class="ok">通过</td></tr>
+<tr><td><code>ruff check</code> 全部改动（controller/store + 首轮 6 文件）</td><td class="ok">All checks passed!</td></tr>
+<tr><td><code>pytest python/tests/test_react_parser.py</code></td><td class="ok">4 passed（嵌套/扁平/字符串花括号/无参）</td></tr>
+<tr><td><code>pytest test_react_parser + test_cron_leader</code></td><td class="ok">10 passed</td></tr>
+</table>
+
+<h2>五、建议（未执行，待确认）</h2>
+<div class="card">
+<ul>
+<li><b>低优先级·可观测性</b>：controller.py 9 处能力探测 <code>except</code> 当前静默返回默认值，建议统一加 <code>log_ignored(log, ...)</code>（debug 级），便于排障而不改变行为。</li>
+<li><b>CI 加固</b>：首轮已加 API 错误日志中间件；可进一步在 ruff 加规则拦截 <code>except Exception: return {"error"...}</code> 式"只回不记"。</li>
+<li><b>TS 回归</b>：待 <code>npm ci</code> 修复依赖后，对 TS 网关补一轮 tsc + 关键路径单测。</li>
+</ul>
+</div>
+
+<div class="foot">
+交付物：<span class="file">code_audit_round2_2026-08-16.html</span>（本报告）·
+<span class="file">python/agent/loop/controller.py</span>（R-01 修复）·
+<span class="file">python/agent/memory/store.py</span>（R-02 修复）·
+<span class="file">python/tests/test_react_parser.py</span>（回归测试）·
+<span class="file">audit_scanner.py</span>（可复用扫描器）。
+所有改动未提交 git，交你复核后提交。
+</div>
+</div>
+</body>
+</html>

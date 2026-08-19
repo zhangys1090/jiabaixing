@@ -8,7 +8,7 @@ from typing import Any
 
 from agent.core.logger import StructuredLogger
 from agent.evolution.engine import EvolutionEngine
-from agent.evolution.llm_capability_detector import LLMCapabilityDetector, LLMCapabilities, LLMProtocol
+from agent.evolution.llm_capability_detector import LLMCapabilityDetector, LLMCapabilities, LLMProtocol, RuntimeSignals
 from agent.evolution.strategy_adapter import StrategyAdapter
 from agent.evolution.types import RollbackSnapshot
 from agent.evolution.v2_engine import EvolutionEngineV2, V2EvolutionCause
@@ -92,6 +92,8 @@ class EvolutionOrchestrator:
         self._consecutive_low_quality_count = 0
         self._consecutive_failure_count = 0
         self._last_auto_detection_time = 0.0
+        self._runtime_signals_accumulator: list[dict] = []
+        self._provider_for_runtime: str = ""
 
         # 验证回滚（P0）
         self._pending_rollbacks: dict[str, RollbackSnapshot] = {}
@@ -259,6 +261,34 @@ class EvolutionOrchestrator:
                             self._evolution_engine._tool_weights[tool_name] = max(
                                 0.1, weight * 0.95
                             )
+
+            self._runtime_signals_accumulator.append({
+                "quality": quality,
+                "response_time_ms": response_time_ms,
+                "tool_successes": tool_successes,
+                "timestamp": time.time(),
+            })
+            if (
+                len(self._runtime_signals_accumulator) >= 10
+                and self._capability_detector
+                and self._provider_for_runtime
+            ):
+                signals = self._runtime_signals_accumulator[-20:]
+                rt = RuntimeSignals(
+                    total_interactions=len(signals),
+                    avg_quality=sum(s["quality"] for s in signals) / len(signals),
+                    avg_response_time_ms=sum(s["response_time_ms"] for s in signals) / len(signals),
+                    tool_call_success_rate=1.0 - sum(1 for s in signals if not s["tool_successes"]) / len(signals),
+                    code_gen_success_rate=sum(1 for s in signals if s["quality"] > 0.6) / len(signals),
+                    structured_output_success_rate=sum(1 for s in signals if s["quality"] > 0.7) / len(signals),
+                )
+                try:
+                    self._capability_detector.upgrade_capabilities_from_runtime(
+                        self._provider_for_runtime, rt,
+                    )
+                    self._runtime_signals_accumulator = self._runtime_signals_accumulator[-5:]
+                except Exception as e:
+                    log.debug("Runtime capability upgrade failed", error=str(e))
 
             log.debug(
                 "Per-turn lightweight signal processed",
@@ -478,6 +508,7 @@ class EvolutionOrchestrator:
             return None
 
         self._capability_detector.set_llm(llm)
+        self._provider_for_runtime = provider
         caps = await self._capability_detector.detect(provider, force=True)
 
         if not caps or not self._strategy_adapter:

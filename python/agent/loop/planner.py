@@ -5,6 +5,7 @@ import re
 from typing import Any
 
 from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
 from agent.llm.provider import LLMProvider
 from agent.loop.types import (
     BudgetState,
@@ -13,7 +14,9 @@ from agent.loop.types import (
     PlanStep,
 )
 from agent.tools.registry import ToolRegistry
+from agent.tools.risk_level import classify_risk, requires_approval
 from agent.loop.tot_planner import TreeOfThoughtsPlanner, TotConfig
+from agent.loop.incremental_planner import IncrementalPlanner
 
 log = StructuredLogger("planner")
 
@@ -41,6 +44,16 @@ class Planner:
                     max_candidates=3,
                 ),
             )
+        # F2: 接入 IncrementalPlanner，replan 时增量修正而非全量重做
+        self._incremental_planner = IncrementalPlanner()
+        # Phase 2: 场景感知工具选择器 — 基于感知状态推荐最佳工具
+        self._scene_tool_selector: Any | None = None
+        if tool_registry:
+            try:
+                from agent.tools.scene_tool_selector import SceneToolSelector
+                self._scene_tool_selector = SceneToolSelector(tool_registry)
+            except Exception as _e:
+                log.debug("SceneToolSelector init failed", error=str(_e))
 
     def set_memory_engine(self, engine: Any) -> None:
         """设置记忆引擎，用于主动检索历史经验。"""
@@ -48,6 +61,14 @@ class Planner:
 
     def set_tool_registry(self, registry: ToolRegistry) -> None:
         self._tool_registry = registry
+        if self._scene_tool_selector:
+            self._scene_tool_selector.set_tool_registry(registry)
+        elif not self._scene_tool_selector:
+            try:
+                from agent.tools.scene_tool_selector import SceneToolSelector
+                self._scene_tool_selector = SceneToolSelector(registry)
+            except Exception as _exc:
+                log_ignored(log, "planner.Planner.set_tool_registry", _exc)
 
     def inject_reflection_insight(self, insight: str) -> None:
         self._reflection_insight = insight
@@ -91,6 +112,7 @@ class Planner:
             result = await self.llm.chat(
                 messages=[{"role": "user", "content": prompt}],
                 use_cache=True,
+                task_type="cheap",
             )
             content = result.get("content", "").strip().lower()
             if "complex" in content:
@@ -151,6 +173,30 @@ class Planner:
         max_steps = 5 if complexity == "complex" else 3
         tool_catalog = self._build_tool_catalog()
 
+        # Phase 2: 场景感知工具推荐 — 基于感知状态推荐最佳工具
+        scene_recommendation = ""
+        if self._scene_tool_selector and context.perception_state:
+            try:
+                recommendations = self._scene_tool_selector.select(
+                    input_text, context.perception_state, limit=5,
+                )
+                if recommendations:
+                    rec_lines = ["【场景感知工具推荐】"]
+                    for rec in recommendations:
+                        rec_lines.append(
+                            f"  - {rec.tool_name} (评分:{rec.score:.2f}, 原因:{rec.reason}, "
+                            f"风险:{rec.risk_level}, 能力:L{rec.capability_level})"
+                        )
+                    scene_recommendation = "\n".join(rec_lines)
+                    log.info(
+                        "Scene-aware tool recommendation",
+                        top_tool=recommendations[0].tool_name,
+                        score=recommendations[0].score,
+                        scene=self._scene_tool_selector._detect_scene(context.perception_state),
+                    )
+            except Exception as e:
+                log.debug("Scene tool selection failed (non-blocking)", error=str(e))
+
         # P0-2: 主动记忆检索 — 在规划前注入相似任务经验
         experience_injection = ""
         if self._memory_engine:
@@ -188,6 +234,9 @@ class Planner:
         if experience_injection:
             system_content += f"\n\n{experience_injection}"
 
+        if scene_recommendation:
+            system_content += f"\n\n{scene_recommendation}"
+
         messages = [
             {"role": "system", "content": system_content},
         ]
@@ -198,7 +247,7 @@ class Planner:
 
         messages.append({"role": "user", "content": f"请规划以下任务：{input_text}"})
 
-        result = await self.llm.chat(messages=messages, use_cache=False)
+        result = await self.llm.chat(messages=messages, use_cache=False, task_type="reasoning")
         content = result.get("content", "")
 
         steps = self._parse_steps(content, max_steps)
@@ -206,6 +255,7 @@ class Planner:
             steps = [PlanStep(step_id="direct", description=input_text[:200])]
 
         steps = self._validate_tool_names(steps)
+        steps = self._annotate_risk(steps)
 
         return ExecutionPlan(
             steps=steps,
@@ -257,6 +307,23 @@ class Planner:
                     log.warning("Unknown tool, removing", tool=step.tool_name)
                     step.tool_name = None
 
+        return steps
+
+    def _annotate_risk(self, steps: list[PlanStep]) -> list[PlanStep]:
+        """规划阶段即按风险拆分「需审批/可自动」步骤。
+
+        依据工具注册中心的风险等级为每一步标注 ``risk_level`` 与
+        ``requires_approval``，使前端确认 UI 与执行前审批流可在生成阶段
+        拿到完整的待审批清单，而非等到执行时才逐个拦截。
+        """
+        if not self._tool_registry:
+            return steps
+        for step in steps:
+            if not step.tool_name:
+                continue
+            risk = classify_risk(self._tool_registry, step.tool_name)
+            step.risk_level = risk
+            step.requires_approval = requires_approval(risk)
         return steps
 
     def _find_closest_tool(self, name: str, valid_names: set[str]) -> str | None:
@@ -313,6 +380,56 @@ class Planner:
         failed_steps: list[dict[str, Any]],
         root_cause: str | None = None,
     ) -> ExecutionPlan:
+        # F2: 优先使用增量重规划 — 仅修正受影响部分，保留已完成步骤
+        completed_ids = {
+            sr.step_id
+            for sr in context.step_results.values()
+            if sr.success
+        }
+        if completed_ids and self._incremental_planner:
+            try:
+                changed_step_id = failed_steps[0].get("step_id", "") if failed_steps else ""
+                # 类型适配：将 types.PlanStep 转为 incremental_planner.PlanStep
+                from agent.loop.incremental_planner import PlanStep as IncrPlanStep
+                incr_steps = [
+                    IncrPlanStep(
+                        step_id=s.step_id,
+                        description=s.description,
+                        tool_name=s.tool_name or "",
+                        params=s.tool_params or {},
+                        status="completed" if s.step_id in completed_ids else "pending",
+                    )
+                    for s in original_plan.steps
+                ]
+                incr_result = self._incremental_planner.incremental_replan(
+                    original_plan=incr_steps,
+                    trigger_step_id=changed_step_id,
+                    reason=root_cause or "步骤失败",
+                )
+                if incr_result.success and incr_result.new_plan:
+                    new_steps = [
+                        PlanStep(
+                            step_id=ps.step_id,
+                            description=ps.description,
+                            tool_name=ps.tool_name,
+                            tool_params=ps.params,
+                        )
+                        for ps in incr_result.new_plan
+                        if ps.status != "completed"
+                    ]
+                    if new_steps:
+                        log.info(
+                            "Incremental replan succeeded",
+                            changes=len(incr_result.changes),
+                            new_steps=len(new_steps),
+                        )
+                        return ExecutionPlan(
+                            steps=self._annotate_risk(new_steps),
+                            reasoning=f"增量重规划：{len(incr_result.changes)} 处变更",
+                        )
+            except Exception as e:
+                log.debug("Incremental replan failed, falling back to full", error=str(e))
+
         completed_ids = {
             sr.step_id
             for sr in context.step_results.values()
@@ -384,7 +501,7 @@ class Planner:
             },
         )
 
-        result = await self.llm.chat(messages=messages, use_cache=False)
+        result = await self.llm.chat(messages=messages, use_cache=False, task_type="reasoning")
         content = result.get("content", "")
 
         new_steps = self._parse_steps(content, 5)
@@ -392,6 +509,7 @@ class Planner:
             new_steps = remaining_steps
 
         new_steps = self._validate_tool_names(new_steps)
+        new_steps = self._annotate_risk(new_steps)
 
         # 增量合并：已完成步骤 + 新生成步骤
         merged_steps = list(completed_steps) + new_steps

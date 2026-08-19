@@ -233,4 +233,76 @@ export function registerMemoryRoutes(
       }
     }
   );
+
+  app.post('/api/memory/store-short-term', express.json({ limit: '1mb' }), async (req, res) => {
+    try {
+      const bridge = getActivePythonBridge();
+      if (!bridge) return res.status(503).json({ success: false, error: 'Python 后端未连接' });
+      const result = await bridge.request('POST', '/v1/memory/store-short-term', req.body);
+      res.json({ success: true, data: result });
+    } catch (error) {
+      Logger.error('短期记忆存储失败', error as Error, 'MemoryAPI');
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  app.post('/api/memory/store-long-term', express.json({ limit: '1mb' }), async (req, res) => {
+    try {
+      const bridge = getActivePythonBridge();
+      if (!bridge) return res.status(503).json({ success: false, error: 'Python 后端未连接' });
+      const result = await bridge.request('POST', '/v1/memory/store-long-term', req.body);
+      res.json({ success: true, data: result });
+    } catch (error) {
+      Logger.error('长期记忆存储失败', error as Error, 'MemoryAPI');
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  app.post('/api/memory/store-episodic', express.json({ limit: '1mb' }), async (req, res) => {
+    try {
+      const bridge = getActivePythonBridge();
+      if (!bridge) return res.status(503).json({ success: false, error: 'Python 后端未连接' });
+      const result = await bridge.request('POST', '/v1/memory/store-episodic', req.body);
+      res.json({ success: true, data: result });
+    } catch (error) {
+      Logger.error('情节记忆存储失败', error as Error, 'MemoryAPI');
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  app.post('/api/memory/hybrid-retrieval', express.json({ limit: '1mb' }), async (req, res) => {
+    try {
+      const bridge = getActivePythonBridge();
+      if (!bridge) return res.status(503).json({ success: false, error: 'Python 后端未连接' });
+      const result = await bridge.request('POST', '/v1/memory/hybrid-retrieval', req.body);
+      res.json({ success: true, data: result });
+    } catch (error) {
+      Logger.error('混合检索失败', error as Error, 'MemoryAPI');
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  app.post('/api/memory/dream', express.json({ limit: '1mb' }), async (req, res) => {
+    try {
+      const bridge = getActivePythonBridge();
+      if (!bridge) return res.status(503).json({ success: false, error: 'Python 后端未连接' });
+      const result = await bridge.request('POST', '/v1/memory/dream', req.body);
+      res.json({ success: true, data: result });
+    } catch (error) {
+      Logger.error('记忆整理失败', error as Error, 'MemoryAPI');
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  app.get('/api/memory/knowledge-graph', async (_req, res) => {
+    try {
+      const bridge = getActivePythonBridge();
+      if (!bridge) return res.status(503).json({ success: false, error: 'Python 后端未连接' });
+      const result = await bridge.request('GET', '/v1/memory/knowledge-graph');
+      res.json({ success: true, data: result });
+    } catch (error) {
+      Logger.error('知识图谱获取失败', error as Error, 'MemoryAPI');
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
 }

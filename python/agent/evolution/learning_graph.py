@@ -156,7 +156,7 @@ class LearningGraph:
                 id=row[0],
                 type=NodeType(row[1]),
                 name=row[2],
-                metadata=json.loads(row[3]),
+                metadata=safe_json_loads(row[3], {}, context="learning_graph.node_metadata"),
                 weight=row[4],
                 created_at=row[5],
                 updated_at=row[6],
@@ -167,7 +167,7 @@ class LearningGraph:
                 target_id=row[1],
                 type=EdgeType(row[2]),
                 weight=row[3],
-                metadata=json.loads(row[4]),
+                metadata=safe_json_loads(row[4], {}, context="learning_graph.edge_metadata"),
                 created_at=row[5],
             )
             self._edges.append(edge)

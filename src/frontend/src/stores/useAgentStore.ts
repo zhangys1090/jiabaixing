@@ -1,14 +1,17 @@
-import { create } from 'zustand';
 import type {
-  WsBrainStageUpdateData,
-  WsToolTraceData,
   WsAgentExecutionUpdateData,
+  WsBrainStageUpdateData,
   WsClarificationRequestData,
   WsExecutionPreviewData,
   WsFileModifiedData,
   WsFileRollbackData,
+  WsToolTraceData,
 } from '@shared/contracts';
+import { create } from 'zustand';
 import { apiService } from '../api/apiService';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('AgentStore');
 
 interface AgentState {
   executionUpdates: WsAgentExecutionUpdateData[];
@@ -106,7 +109,7 @@ export const useAgentStore = create<AgentState>((set) => ({
         set({ error: result.error || '获取 Harness 状态失败', loading: false });
       }
     } catch (error) {
-      console.error('[AgentStore] fetchHarnessStatus 失败:', error);
+      log.error('fetchHarnessStatus 失败:', error);
       set({ error: (error as Error).message, loading: false });
     }
   },

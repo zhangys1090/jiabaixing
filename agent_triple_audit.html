@@ -1,0 +1,1528 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>
+      家百星 V5.0 — 三合一全面审计报告（数据流 / 业务逻辑 / LOOP主循环）
+    </title>
+    <style>
+      :root {
+        --bg: #0d1117;
+        --card-bg: #161b22;
+        --border: #30363d;
+        --text: #c9d1d9;
+        --text-secondary: #8b949e;
+        --accent: #58a6ff;
+        --green: #3fb950;
+        --red: #f85149;
+        --orange: #d2991d;
+        --purple: #a371f7;
+        --cyan: #39d2c0;
+        --pink: #db61a2;
+      }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei',
+          Helvetica, Arial, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.7;
+        padding: 2rem;
+        max-width: 1400px;
+        margin: 0 auto;
+      }
+      h1 {
+        font-size: 2rem;
+        color: var(--accent);
+        border-bottom: 2px solid var(--border);
+        padding-bottom: 0.5rem;
+        margin-bottom: 0.5rem;
+      }
+      h2 {
+        font-size: 1.4rem;
+        color: var(--purple);
+        margin-top: 2.5rem;
+        margin-bottom: 1rem;
+        border-left: 4px solid var(--purple);
+        padding-left: 0.75rem;
+      }
+      h3 {
+        font-size: 1.1rem;
+        color: var(--cyan);
+        margin-top: 1.5rem;
+        margin-bottom: 0.5rem;
+      }
+      h4 {
+        font-size: 1rem;
+        color: var(--orange);
+        margin-top: 1rem;
+        margin-bottom: 0.5rem;
+      }
+      .subtitle {
+        color: var(--text-secondary);
+        font-size: 0.95rem;
+        margin-bottom: 2rem;
+      }
+      .card {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 1.25rem;
+        margin: 1rem 0;
+      }
+      .grid {
+        display: grid;
+        gap: 1rem;
+      }
+      .grid-2 {
+        grid-template-columns: 1fr 1fr;
+      }
+      .grid-3 {
+        grid-template-columns: 1fr 1fr 1fr;
+      }
+      .tag {
+        display: inline-block;
+        padding: 0.15rem 0.6rem;
+        border-radius: 12px;
+        font-size: 0.8rem;
+        font-weight: 600;
+      }
+      .tag-green {
+        background: rgba(63, 185, 80, 0.15);
+        color: var(--green);
+      }
+      .tag-red {
+        background: rgba(248, 81, 73, 0.15);
+        color: var(--red);
+      }
+      .tag-orange {
+        background: rgba(210, 153, 29, 0.15);
+        color: var(--orange);
+      }
+      .tag-blue {
+        background: rgba(88, 166, 255, 0.15);
+        color: var(--accent);
+      }
+      .tag-purple {
+        background: rgba(163, 113, 247, 0.15);
+        color: var(--purple);
+      }
+      .tag-pink {
+        background: rgba(219, 97, 178, 0.15);
+        color: var(--pink);
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 0.75rem 0;
+      }
+      th,
+      td {
+        padding: 0.6rem 0.75rem;
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+      }
+      th {
+        color: var(--text-secondary);
+        font-weight: 600;
+        font-size: 0.85rem;
+      }
+      td {
+        font-size: 0.9rem;
+      }
+      .code {
+        background: rgba(240, 246, 252, 0.06);
+        padding: 0.15rem 0.4rem;
+        border-radius: 4px;
+        font-family: 'Cascadia Code', 'Fira Code', monospace;
+        font-size: 0.85rem;
+      }
+      .highlight-box {
+        background: rgba(88, 166, 255, 0.08);
+        border: 1px solid rgba(88, 166, 255, 0.2);
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 1rem 0;
+      }
+      .warn-box {
+        background: rgba(210, 153, 29, 0.08);
+        border: 1px solid rgba(210, 153, 29, 0.2);
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 1rem 0;
+      }
+      .success-box {
+        background: rgba(63, 185, 80, 0.08);
+        border: 1px solid rgba(63, 185, 80, 0.2);
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 1rem 0;
+      }
+      .danger-box {
+        background: rgba(248, 81, 73, 0.08);
+        border: 1px solid rgba(248, 81, 73, 0.2);
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 1rem 0;
+      }
+      pre {
+        background: rgba(240, 246, 252, 0.04);
+        padding: 1rem;
+        border-radius: 6px;
+        overflow-x: auto;
+        font-size: 0.85rem;
+        line-height: 1.5;
+        border: 1px solid var(--border);
+        white-space: pre-wrap;
+      }
+      code {
+        font-family: 'Cascadia Code', 'Fira Code', monospace;
+      }
+      ul,
+      ol {
+        margin: 0.5rem 0 0.5rem 1.25rem;
+      }
+      li {
+        margin: 0.3rem 0;
+      }
+      hr {
+        border: none;
+        border-top: 1px solid var(--border);
+        margin: 1.5rem 0;
+      }
+      .flow-diagram {
+        background: rgba(240, 246, 252, 0.03);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 1.5rem;
+        margin: 1rem 0;
+        font-family: 'Cascadia Code', 'Fira Code', monospace;
+        font-size: 0.8rem;
+        line-height: 2;
+        white-space: pre;
+        overflow-x: auto;
+      }
+      .score-circle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 48px;
+        height: 48px;
+        border-radius: 50%;
+        font-weight: 800;
+        font-size: 1.2rem;
+      }
+      .score-a {
+        background: var(--green);
+        color: #000;
+      }
+      .score-b {
+        background: var(--accent);
+        color: #fff;
+      }
+      .score-c {
+        background: var(--orange);
+        color: #000;
+      }
+      @media (max-width: 768px) {
+        body {
+          padding: 1rem;
+        }
+        .grid-2,
+        .grid-3 {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>家百星 V5.0 — 三合一全面审计报告</h1>
+    <p class="subtitle">
+      审计维度：<strong>数据流向</strong> · <strong>业务逻辑</strong> ·
+      <strong>LOOP主循环</strong> &nbsp;|&nbsp; 版本：2026-07-18
+    </p>
+
+    <!-- ===== 总览仪表盘 ===== -->
+    <div class="grid grid-3">
+      <div class="card" style="text-align: center">
+        <div style="font-size: 0.85rem; color: var(--text-secondary)">
+          数据流向
+        </div>
+        <div class="score-circle score-a" style="margin: 0.5rem auto">A</div>
+        <div style="font-size: 0.85rem">6条主线 · 12个检查点 · 1个隐患</div>
+      </div>
+      <div class="card" style="text-align: center">
+        <div style="font-size: 0.85rem; color: var(--text-secondary)">
+          业务逻辑
+        </div>
+        <div class="score-circle score-a" style="margin: 0.5rem auto">A</div>
+        <div style="font-size: 0.85rem">4层架构 · 8条规则 · 2个边界问题</div>
+      </div>
+      <div class="card" style="text-align: center">
+        <div style="font-size: 0.85rem; color: var(--text-secondary)">
+          LOOP主循环
+        </div>
+        <div class="score-circle score-a" style="margin: 0.5rem auto">A+</div>
+        <div style="font-size: 0.85rem">5阶段 · 12个检查点 · 3个优化项</div>
+      </div>
+    </div>
+
+    <hr />
+
+    <!-- ================================================================================= -->
+    <!-- 第一部分：数据流向审计 -->
+    <!-- ================================================================================= -->
+    <h2>一、全面审计数据流向</h2>
+
+    <h3>1.1 数据流全景图</h3>
+    <div class="flow-diagram">
+      ┌──────────────────────────────────────────────────────────────────────────────┐
+      │ 家百星 V5.0 数据流全景 │ │ │ │ ┌──────────┐ HTTP/WS ┌──────────────┐
+      process_input() │ │ │ 客户端 │ ────────────→ │ FastAPI │ ────────────────→
+      │ │ │ (飞书/ │ ←──────────── │ main.py │ ←──────────────── │ │ │ 微信/CLI)
+      │ JSON/SSE │ │ │ │ └──────────┘ └──────┬───────┘ │ │ │ │ │
+      ┌─────────▼─────────┐ │ │ │ AgentEngine │ │ │ │ process_input() │ │ │
+      └─────────┬─────────┘ │ │ │ │ │
+      ┌─────────────────────┼─────────────────────┐ │ │ │ │ │ │ │
+      ┌────────▼────────┐ ┌────────▼────────┐ ┌────────▼────────┐ │ │ │ Simple
+      路径 │ │ Conversation 路径│ │ LOOP 路径 │ │ │ │ (直接LLM) │ │ (ReAct模式)
+      │ │ (Plan→Exec→Eval) │ │ │ └────────┬────────┘ └────────┬────────┘
+      └────────┬────────┘ │ │ │ │ │ │ │ │ ┌──────▼──────┐ ┌──────▼──────┐ │ │ │
+      │ Conversation │ │ LoopController│ │ │ │ │ Loop.run() │ │ .run() │ │ │ │
+      └──────┬──────┘ └──────┬──────┘ │ │ │ │ │ │ │
+      └─────────────────────┼─────────────────────┘ │ │ │ │ │
+      ┌─────────▼─────────┐ │ │ │ LLMProvider │ │ │ │ (LiteLLM网关) │ │ │
+      └─────────┬─────────┘ │ │ │ │ │
+      ┌─────────────────────┼─────────────────────┐ │ │ │ │ │ │ │
+      ┌────────▼────────┐ ┌────────▼────────┐ ┌────────▼────────┐ │ │ │ Memory
+      Engine │ │ Trajectory DB │ │ Session Store │ │ │ │ (3层记忆) │ │
+      (执行轨迹) │ │ (会话持久化) │ │ │ └────────┬────────┘ └────────┬────────┘
+      └────────┬────────┘ │ │ │ │ │ │ │ ┌────────▼────────┐ ┌────────▼────────┐
+      ┌────────▼────────┐ │ │ │ SQLite │ │ SQLite │ │ SQLite │ │ │ │ + ChromaDB
+      │ │ (可切换PG) │ │ + FTS5 │ │ │ └─────────────────┘ └─────────────────┘
+      └─────────────────┘ │ │ │ │
+      ┌─────────────────────────────────────────────────────────────────────┐ │
+      │ │ 横向贯穿：Redis缓存层 | OTel可观测性 | SLO采集器 | 生产埋点 │ │ │
+      └─────────────────────────────────────────────────────────────────────┘ │
+      └──────────────────────────────────────────────────────────────────────────────┘
+    </div>
+
+    <h3>1.2 六条核心数据流审计</h3>
+
+    <!-- 数据流 1 -->
+    <div class="card">
+      <h4>数据流 1：HTTP 请求 → Agent 响应（主链路）</h4>
+      <table>
+        <tr>
+          <th>阶段</th>
+          <th>文件</th>
+          <th>数据形态</th>
+          <th>审计结论</th>
+        </tr>
+        <tr>
+          <td>① 入口</td>
+          <td>
+            <span class="code">main.py:L126</span>
+            <span class="code">chat()</span>
+          </td>
+          <td>
+            <span class="code"
+              >ChatRequest {message, session_id, context_files, user_id,
+              strategy_name}</span
+            >
+          </td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td>② 路由</td>
+          <td>
+            <span class="code">engine.py:L1050</span>
+            <span class="code">process_input()</span>
+          </td>
+          <td>安全审查 → 上下文文件加载 → 引用解析 → 复杂度判断 → 分流</td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td>③ 分流</td>
+          <td><span class="code">engine.py:L1118-1138</span></td>
+          <td>
+            3路分流：<span class="code">_process_with_loop</span> /
+            <span class="code">_process_with_conversation</span> /
+            <span class="code">_process_simple</span>
+          </td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td>④ Loop</td>
+          <td>
+            <span class="code">controller.py:L167</span>
+            <span class="code">run()</span>
+          </td>
+          <td>
+            <span class="code">LoopContext</span> → Plan → Exec → Eval → Replan
+            → Report
+          </td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td>⑤ 输出</td>
+          <td><span class="code">engine.py:L1750-1780</span></td>
+          <td>
+            安全审查 → 输出护栏 → <span class="code">AgentResult</span> →
+            <span class="code">ChatResponse</span>
+          </td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+      </table>
+      <div class="success-box">
+        <strong>结论：</strong>主链路完整，入口→路由→分流→执行→输出
+        5个阶段清晰。安全审查在入口和出口各执行一次，双保险。
+      </div>
+    </div>
+
+    <!-- 数据流 2 -->
+    <div class="card">
+      <h4>数据流 2：LoopContext 生命周期（核心状态载体）</h4>
+      <table>
+        <tr>
+          <th>阶段</th>
+          <th>数据变更</th>
+          <th>审计结论</th>
+        </tr>
+        <tr>
+          <td>创建</td>
+          <td>
+            <span class="code">controller.py:L203</span> 新建
+            <span class="code">LoopContext</span>，注入
+            <span class="code">user_input</span>、<span class="code"
+              >session_id</span
+            >、<span class="code">messages</span>、<span class="code"
+              >budget</span
+            >、<span class="code">cancel_event</span>、<span class="code"
+              >trace_id</span
+            >
+          </td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td>Planning</td>
+          <td>
+            <span class="code">context.plan</span> ← Planner 输出；<span
+              class="code"
+              >context.messages</span
+            >
+            ← 注入计划摘要
+          </td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td>Executing</td>
+          <td>
+            <span class="code">context.step_results</span> ← 每步执行结果；<span
+              class="code"
+              >context.messages</span
+            >
+            ← 工具调用/结果消息；<span class="code"
+              >context.budget.tool_calls_used</span
+            >
+            ← 递增
+          </td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td>Evaluating</td>
+          <td>
+            读取 <span class="code">context.step_results</span> → 产出
+            <span class="code">EvaluatorOutput</span>（不修改 context）
+          </td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td>Replanning</td>
+          <td>
+            <span class="code">context.plan</span> ← 新计划；<span class="code"
+              >context.messages</span
+            >
+            ← 失败分析/修正建议
+          </td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td>Reporting</td>
+          <td>
+            读取 <span class="code">context</span> 全部字段 → 产出
+            <span class="code">ReporterOutput</span>（不修改 context）
+          </td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+      </table>
+      <div class="highlight-box">
+        <strong>关键发现：</strong
+        ><span class="code">LoopContext</span>
+        是贯穿整个循环的单一数据载体，包含 12 个字段。 数据流向清晰：<strong
+          >Planning 写入 plan → Executing 写入 step_results → Evaluating 读取
+          step_results → Replanning 覆写 plan</strong
+        >。 无并发写入风险（单线程协程模型）。
+      </div>
+    </div>
+
+    <!-- 数据流 3 -->
+    <div class="card">
+      <h4>数据流 3：记忆系统（三层记忆读写）</h4>
+      <table>
+        <tr>
+          <th>层级</th>
+          <th>写入时机</th>
+          <th>读取时机</th>
+          <th>存储后端</th>
+        </tr>
+        <tr>
+          <td>即时记忆</td>
+          <td>每次对话后 <span class="code">store_instant()</span></td>
+          <td>下次对话 <span class="code">search_with_context()</span></td>
+          <td>SQLite FTS5</td>
+        </tr>
+        <tr>
+          <td>短期记忆</td>
+          <td>每次对话后 <span class="code">store_short_term()</span></td>
+          <td>下次对话 <span class="code">search_with_context()</span></td>
+          <td>SQLite + ChromaDB 向量</td>
+        </tr>
+        <tr>
+          <td>长期记忆</td>
+          <td>深度反思后 <span class="code">store_long_term()</span></td>
+          <td>Plan 阶段 <span class="code">search_with_context()</span></td>
+          <td>SQLite + ChromaDB 向量</td>
+        </tr>
+        <tr>
+          <td>情景记忆</td>
+          <td>每轮执行后 <span class="code">EpisodicMemoryStore</span></td>
+          <td><span class="code">search_with_context()</span> 透明检索</td>
+          <td>SQLite</td>
+        </tr>
+        <tr>
+          <td>跨模态记忆</td>
+          <td>Vision 理解后</td>
+          <td>语义检索</td>
+          <td>ChromaDB</td>
+        </tr>
+      </table>
+      <div class="warn-box">
+        <strong>⚠ 隐患 D-01：</strong>即时记忆和短期记忆的区分边界模糊。两者都在
+        <span class="code">_process_with_loop</span> 末尾同时写入，但
+        <span class="code">search_with_context()</span>
+        检索时合并返回，导致"即时"和"短期"实际上差距不大。建议：即时记忆 TTL
+        设为 5 分钟，短期记忆 TTL 设为 24 小时，长期记忆永不过期。
+      </div>
+    </div>
+
+    <!-- 数据流 4 -->
+    <div class="card">
+      <h4>数据流 4：轨迹持久化（Trajectory 全链路）</h4>
+      <table>
+        <tr>
+          <th>写入点</th>
+          <th>数据</th>
+          <th>代码位置</th>
+        </tr>
+        <tr>
+          <td>循环开始</td>
+          <td>
+            <span class="code"
+              >ExecutionRecord {id, input, status="running"}</span
+            >
+          </td>
+          <td><span class="code">controller.py:L218</span></td>
+        </tr>
+        <tr>
+          <td>状态转换</td>
+          <td>
+            <span class="code"
+              >StateTransitionRecord {from_state→to_state}</span
+            >
+          </td>
+          <td><span class="code">controller.py:L278, L318, L436</span></td>
+        </tr>
+        <tr>
+          <td>工具调用</td>
+          <td>
+            <span class="code"
+              >ToolInvocationRecord {tool_name, success, duration, error}</span
+            >
+          </td>
+          <td><span class="code">controller.py:L410-420</span></td>
+        </tr>
+        <tr>
+          <td>循环结束</td>
+          <td>
+            <span class="code">ExecutionRecord</span> 更新
+            <span class="code">status, quality_overall, total_duration</span>
+          </td>
+          <td><span class="code">controller.py:L600-610</span></td>
+        </tr>
+      </table>
+      <div class="success-box">
+        <strong>结论：</strong
+        >轨迹持久化覆盖完整——从循环开始到结束，每次状态转换和工具调用都记录在案。但写入均为同步操作，大并发下可能成为瓶颈（已通过
+        PG 改造缓解）。
+      </div>
+    </div>
+
+    <!-- 数据流 5 -->
+    <div class="card">
+      <h4>数据流 5：进化学习信号（双环反馈）</h4>
+      <table>
+        <tr>
+          <th>信号类型</th>
+          <th>来源</th>
+          <th>去向</th>
+          <th>审计</th>
+        </tr>
+        <tr>
+          <td><span class="code">TASK_SUCCESS / TASK_FAILURE</span></td>
+          <td><span class="code">controller.py:L619-640</span> 循环结束</td>
+          <td><span class="code">EvolutionEngine.record_signal()</span></td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td><span class="code">PLAN_QUALITY</span></td>
+          <td><span class="code">controller.py:L660-670</span> 计划完成率</td>
+          <td><span class="code">EvolutionEngine.record_signal()</span></td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td><span class="code">TOOL_SELECTION_QUALITY</span></td>
+          <td><span class="code">controller.py:L675-688</span> 工具成功率</td>
+          <td><span class="code">EvolutionEngine.record_signal()</span></td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td><span class="code">REFLECTION_EFFECTIVENESS</span></td>
+          <td><span class="code">controller.py:L691-700</span> 经验库大小</td>
+          <td><span class="code">EvolutionEngine.record_signal()</span></td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td><span class="code">MEMORY_RETRIEVAL_HIT</span></td>
+          <td><span class="code">controller.py:L703-718</span> 记忆检索命中</td>
+          <td><span class="code">EvolutionEngine.record_signal()</span></td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td><span class="code">CONTEXT_COMPRESSION_SUCCESS</span></td>
+          <td><span class="code">controller.py:L722-730</span> 上下文压缩</td>
+          <td><span class="code">EvolutionEngine.record_signal()</span></td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td>隐式反馈</td>
+          <td><span class="code">ImplicitFeedbackCollector</span></td>
+          <td>
+            <span class="code">EvolutionEngine.record_implicit_feedback()</span>
+          </td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+      </table>
+      <div class="success-box">
+        <strong>结论：</strong>7 种学习信号 +
+        隐式反馈全部打通，形成完整的"执行→评估→学习→进化"双环反馈。信号采集点分布合理，不阻塞主循环。
+      </div>
+    </div>
+
+    <!-- 数据流 6 -->
+    <div class="card">
+      <h4>数据流 6：上下文构建管线（system_prompt → LLM）</h4>
+      <table>
+        <tr>
+          <th>组件</th>
+          <th>输入</th>
+          <th>输出</th>
+          <th>审计</th>
+        </tr>
+        <tr>
+          <td><span class="code">SystemPromptComponent</span></td>
+          <td>场景标识</td>
+          <td>系统提示词</td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td><span class="code">PersonaComponent</span></td>
+          <td><span class="code">PersonaCore</span></td>
+          <td>人格描述 + 场景语调</td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td><span class="code">MemoryRetrievalComponent</span></td>
+          <td>用户输入</td>
+          <td>相关记忆片段</td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td><span class="code">FileContextComponent</span></td>
+          <td><span class="code">context_files</span></td>
+          <td>文件内容摘要</td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td><span class="code">TokenBudgetComponent</span></td>
+          <td>总预算 8000</td>
+          <td>各区域 Token 分配</td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td><span class="code">AttentionFocusComponent</span></td>
+          <td>全部消息</td>
+          <td>聚焦后的消息列表</td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td><span class="code">ContextAssemblerComponent</span></td>
+          <td>各组件输出</td>
+          <td>最终消息列表</td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+      </table>
+      <div class="highlight-box">
+        <strong>关键发现：</strong>上下文构建采用<strong>管道模式</strong>，7
+        个组件按序处理，每个组件独立可替换。Token 预算分配：system_prompt 30% +
+        memory 15% + history 25% + dynamic_context 15% + tool_results 15% +
+        reserve 10%。分配比例合理。
+      </div>
+    </div>
+
+    <!-- 数据流汇总 -->
+    <h3>1.3 数据流审计总评</h3>
+    <div class="grid grid-3">
+      <div class="card" style="text-align: center">
+        <div style="font-size: 0.85rem; color: var(--text-secondary)">
+          数据流线条数
+        </div>
+        <div style="font-size: 2rem; font-weight: 800; color: var(--accent)">
+          6
+        </div>
+        <div style="font-size: 0.8rem">主链路清晰可追踪</div>
+      </div>
+      <div class="card" style="text-align: center">
+        <div style="font-size: 0.85rem; color: var(--text-secondary)">
+          数据载体数量
+        </div>
+        <div style="font-size: 2rem; font-weight: 800; color: var(--green)">
+          12
+        </div>
+        <div style="font-size: 0.8rem">LoopContext 12字段</div>
+      </div>
+      <div class="card" style="text-align: center">
+        <div style="font-size: 0.85rem; color: var(--text-secondary)">
+          发现隐患
+        </div>
+        <div style="font-size: 2rem; font-weight: 800; color: var(--orange)">
+          1
+        </div>
+        <div style="font-size: 0.8rem">即时/短期记忆边界模糊</div>
+      </div>
+    </div>
+
+    <hr />
+
+    <!-- ================================================================================= -->
+    <!-- 第二部分：业务逻辑审计 -->
+    <!-- ================================================================================= -->
+    <h2>二、全面审计业务逻辑</h2>
+
+    <h3>2.1 业务逻辑分层架构</h3>
+    <div class="flow-diagram">
+      家百星 V5.0 业务逻辑 4 层架构：
+      ┌─────────────────────────────────────────────────────────────────┐ │
+      Layer 4: 接入层 (Access Layer) │ │ ┌──────────┐ ┌──────────┐ ┌──────────┐
+      ┌──────────┐ │ │ │ 飞书 Bot │ │ 微信 Bot │ │ CLI 入口 │ │ HTTP API │ │ │ │
+      feishu/ │ │ wechat/ │ │ cli/ │ │ /v1/chat │ │ │ └────┬─────┘ └────┬─────┘
+      └────┬─────┘ └────┬─────┘ │ │ └─────────────┴─────────────┴─────────────┘
+      │ │ │ │
+      ├─────────────────────────┼────────────────────────────────────────┤ │
+      Layer 3: 编排层 (Orchestration Layer) │ │
+      ┌──────────────────────────────────────────────────────────┐ │ │ │
+      process_input() → 复杂度判断 → 3路分流 │ │ │ │ ├─ Simple: 直接LLM
+      (简单问答) │ │ │ │ ├─ Conversation: ReAct模式 (中等复杂度) │ │ │ │ └─
+      Loop: Plan→Exec→Eval (复杂任务) │ │ │ │ └─ very_complex →
+      MultiAgentOrchestrator │ │ │
+      └──────────────────────────────────────────────────────────┘ │
+      ├─────────────────────────────────────────────────────────────────┤ │
+      Layer 2: 执行层 (Execution Layer) │ │ ┌──────────┐ ┌──────────┐
+      ┌──────────┐ ┌──────────┐ │ │ │ Planner │ │ Executor │ │ Evaluator│ │
+      Reporter │ │ │ │ (ToT) │ │ (+韧性) │ │ (+反思) │ │ │ │ │ └──────────┘
+      └──────────┘ └──────────┘ └──────────┘ │
+      ├─────────────────────────────────────────────────────────────────┤ │
+      Layer 1: 基础设施层 (Infrastructure Layer) │ │ ┌──────────┐ ┌──────────┐
+      ┌──────────┐ ┌──────────┐ │ │ │ LLM │ │ Memory │ │ Tool │ │ Session │ │ │
+      │ Provider │ │ Engine │ │ Registry │ │ Store │ │ │ └──────────┘
+      └──────────┘ └──────────┘ └──────────┘ │ │ ┌──────────┐ ┌──────────┐
+      ┌──────────┐ ┌──────────┐ │ │ │ Security │ │ Evolution│ │ MCP/A2A │ │
+      Trajectory│ │ │ │ Guard │ │ Engine │ │ Protocol │ │ DB │ │ │ └──────────┘
+      └──────────┘ └──────────┘ └──────────┘ │
+      └─────────────────────────────────────────────────────────────────┘
+    </div>
+
+    <h3>2.2 八条核心业务规则审计</h3>
+
+    <!-- 规则 1 -->
+    <div class="card">
+      <h4>规则 1：任务复杂度自动判定与分流</h4>
+      <table>
+        <tr>
+          <th>判定方式</th>
+          <th>阈值</th>
+          <th>分流结果</th>
+          <th>代码位置</th>
+        </tr>
+        <tr>
+          <td>关键词匹配</td>
+          <td>
+            score ≥ 2
+            (分析/对比/设计/实现/优化/重构/迁移/集成/部署/步骤/流程/方案/搜索/查找/读取/修改/执行/运行)
+          </td>
+          <td>→ Loop 模式</td>
+          <td><span class="code">engine.py:L1195-1202</span></td>
+        </tr>
+        <tr>
+          <td>MultiAgent 复杂度</td>
+          <td>complexity == "very_complex" && recommended_agents > 1</td>
+          <td>→ MultiAgentOrchestrator</td>
+          <td><span class="code">engine.py:L1118-1125</span></td>
+        </tr>
+        <tr>
+          <td>ReAct 模式判定</td>
+          <td>Planner 复杂度分析 → "simple"</td>
+          <td>→ ReAct 模式</td>
+          <td><span class="code">controller.py:L177-180</span></td>
+        </tr>
+      </table>
+      <div class="warn-box">
+        <strong>⚠ 边界问题 B-01：</strong>关键词匹配
+        <span class="code">_should_use_loop()</span> 和语义分析
+        <span class="code">_analyze_complexity_semantic()</span>
+        两套判定逻辑并存，但没有统一入口。关键词匹配在 engine 层，语义分析在
+        planner 层——可能出现 engine 判定为 simple 但 planner 判定为 complex
+        的矛盾情况。建议：统一到 planner 的语义分析，关键词匹配仅作为快速通道。
+      </div>
+    </div>
+
+    <!-- 规则 2 -->
+    <div class="card">
+      <h4>规则 2：预算控制（时间/轮次/Token/工具调用）</h4>
+      <table>
+        <tr>
+          <th>预算维度</th>
+          <th>默认值</th>
+          <th>检查点</th>
+          <th>审计</th>
+        </tr>
+        <tr>
+          <td>最大轮次</td>
+          <td><span class="code">max_rounds=5</span></td>
+          <td>每轮循环开头</td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td>最大工具调用</td>
+          <td><span class="code">max_tool_calls=20</span></td>
+          <td>每轮循环开头</td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td>最大 Token</td>
+          <td><span class="code">max_tokens=8000</span></td>
+          <td>每轮循环开头</td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td>最大耗时</td>
+          <td>自适应预估 / 默认 120s</td>
+          <td>每轮循环开头 + 弹性延长</td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td>约束服务</td>
+          <td><span class="code">ConstraintsService.check_budget()</span></td>
+          <td>每轮循环开头</td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+      </table>
+      <div class="highlight-box">
+        <strong>关键发现：</strong
+        >预算控制有<strong>4层检查</strong>（rounds/tool_calls/tokens/duration）+
+        1层约束服务，保证不会无限循环。自适应预算通过
+        <span class="code">_resolve_budget_max_duration()</span>
+        从历史轨迹预估耗时，比固定 120s 更精确。
+      </div>
+    </div>
+
+    <!-- 规则 3 -->
+    <div class="card">
+      <h4>规则 3：任务取消机制</h4>
+      <table>
+        <tr>
+          <th>检查点</th>
+          <th>位置</th>
+          <th>审计</th>
+        </tr>
+        <tr>
+          <td>每轮循环开头</td>
+          <td><span class="code">controller.py:L237-239</span></td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td>执行前</td>
+          <td><span class="code">controller.py:L294-296</span></td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td>ReAct 每步开头</td>
+          <td><span class="code">controller.py:L855-857</span></td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td>全局取消令牌</td>
+          <td>
+            <span class="code">main.py:L46</span>
+            <span class="code">_cancel_tokens</span>
+          </td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+      </table>
+      <div class="success-box">
+        <strong>结论：</strong>取消机制在 3
+        个关键检查点生效，不会出现"取消后仍继续执行"的情况。全局
+        <span class="code">_cancel_tokens</span> 字典按 session_id
+        隔离，支持多会话并发取消。
+      </div>
+    </div>
+
+    <!-- 规则 4 -->
+    <div class="card">
+      <h4>规则 4：安全审查链（输入→输出双保险）</h4>
+      <table>
+        <tr>
+          <th>阶段</th>
+          <th>组件</th>
+          <th>检查内容</th>
+          <th>审计</th>
+        </tr>
+        <tr>
+          <td>入口</td>
+          <td><span class="code">SecurityGuard.check_command()</span></td>
+          <td>恶意指令检测、注入攻击</td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td>入口</td>
+          <td><span class="code">ContextReferenceResolver</span></td>
+          <td>危险上下文模式（prompt injection）</td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td>出口</td>
+          <td>
+            <span class="code">VerificationService.check_output_safety()</span>
+          </td>
+          <td>敏感信息泄露、不安全内容</td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td>出口</td>
+          <td><span class="code">OutputGuardrailEngine.check()</span></td>
+          <td>内容合规、风险等级</td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td>工具</td>
+          <td>
+            <span class="code">PermissionGuard</span> +
+            <span class="code">SchemaValidator</span> +
+            <span class="code">ToolCallGuard</span>
+          </td>
+          <td>权限/参数/频率三重保护</td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+      </table>
+      <div class="success-box">
+        <strong>结论：</strong>安全审查覆盖输入→工具→输出全链路，入口
+        SecurityGuard + 出口 OutputGuardrail + 工具
+        PermissionGuard/SchemaValidator/ToolCallGuard 三重保护。
+      </div>
+    </div>
+
+    <!-- 规则 5 -->
+    <div class="card">
+      <h4>规则 5：会话生命周期管理</h4>
+      <table>
+        <tr>
+          <th>操作</th>
+          <th>组件</th>
+          <th>持久化</th>
+          <th>审计</th>
+        </tr>
+        <tr>
+          <td>创建会话</td>
+          <td><span class="code">SessionStore.create_session()</span></td>
+          <td>SQLite sessions 表</td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td>存储消息</td>
+          <td><span class="code">SessionStore.append_message()</span></td>
+          <td>SQLite messages 表 + FTS5 索引</td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td>加载历史</td>
+          <td><span class="code">SessionStore.get_messages(limit=10)</span></td>
+          <td>最近 10 条消息</td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td>搜索历史</td>
+          <td><span class="code">SessionSearchEngine</span></td>
+          <td>FTS5 全文搜索 + jieba 分词</td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td>会话血缘</td>
+          <td><span class="code">SessionLineageTracker</span></td>
+          <td>fork/merge 关系追踪</td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+      </table>
+      <div class="success-box">
+        <strong>结论：</strong>会话管理完整，支持 CRUD + 全文搜索 +
+        血缘追踪。FTS5 + jieba 中文分词是亮点。
+      </div>
+    </div>
+
+    <!-- 规则 6 -->
+    <div class="card">
+      <h4>规则 6：进化引擎触发条件</h4>
+      <table>
+        <tr>
+          <th>触发方式</th>
+          <th>条件</th>
+          <th>审计</th>
+        </tr>
+        <tr>
+          <td>自动检测</td>
+          <td>
+            <span class="code">EvolutionOrchestrator</span> 定期检查性能指标
+          </td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td>性能告警</td>
+          <td>
+            <span class="code">PerformanceMonitor.check_alerts()</span> 触发
+          </td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td>元反思</td>
+          <td>
+            每 10 次 loop 触发一次
+            <span class="code">_trigger_meta_reflect()</span>
+          </td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td>手动触发</td>
+          <td><span class="code">/api/evolution/trigger</span></td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td>自动回滚</td>
+          <td>进化后质量下降 → 自动回滚</td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+      </table>
+      <div class="highlight-box">
+        <strong>关键发现：</strong>进化触发有 4 条路径 +
+        自动回滚保护。EvolutionOrchestrator 的 auto-detection 和 auto-rollback
+        是生产级特性。
+      </div>
+    </div>
+
+    <!-- 规则 7 -->
+    <div class="card">
+      <h4>规则 7：多 Agent 编排逻辑</h4>
+      <table>
+        <tr>
+          <th>场景</th>
+          <th>编排方式</th>
+          <th>审计</th>
+        </tr>
+        <tr>
+          <td>超复杂任务</td>
+          <td>
+            <span class="code"
+              >MultiAgentOrchestrator.process_goal_with_loop()</span
+            >
+            → 分解为子任务 → 委派子 Agent
+          </td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td>A2A 跨 Agent</td>
+          <td>
+            <span class="code">A2AProtocolManager</span> → 远程 Agent 任务委派 →
+            结果收集
+          </td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td>Fanout 并行</td>
+          <td>
+            <span class="code">OrchestratorAgent</span>
+            三种策略：sequential/parallel/adaptive
+          </td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td>Agent 工厂</td>
+          <td>
+            <span class="code">AgentFactory</span> → 按场景创建专用
+            Agent（coding/desktop/daily/network）
+          </td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+      </table>
+      <div class="success-box">
+        <strong>结论：</strong>多 Agent 编排覆盖单机多
+        Agent（Fanout/Orchestrator）和跨机多 Agent（A2A）两种模式。
+      </div>
+    </div>
+
+    <!-- 规则 8 -->
+    <div class="card">
+      <h4>规则 8：灰度发布 & 金丝雀策略</h4>
+      <table>
+        <tr>
+          <th>机制</th>
+          <th>实现</th>
+          <th>审计</th>
+        </tr>
+        <tr>
+          <td>用户分桶</td>
+          <td>
+            <span class="code">CanaryReleaseManager</span> 按 user_id 哈希分桶
+          </td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td>策略选择</td>
+          <td>
+            <span class="code">strategy_name</span> 参数传递到 LLMProvider
+          </td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td>版本对比</td>
+          <td>不同桶使用不同 LLM 模型/参数</td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+        <tr>
+          <td>自动回滚</td>
+          <td>金丝雀组质量低于基线 → 自动切回</td>
+          <td class="tag tag-green">✓</td>
+        </tr>
+      </table>
+      <div class="warn-box">
+        <strong>⚠ 边界问题 B-02：</strong>金丝雀发布的分桶逻辑在
+        <span class="code">CanaryReleaseManager</span> 中，但
+        <span class="code">user_id</span> 参数在多层传递中可能丢失。从
+        <span class="code">ChatRequest</span> →
+        <span class="code">process_input</span> →
+        <span class="code">_process_with_loop</span> →
+        <span class="code">loop.run()</span> →
+        <span class="code">LoopContext</span>，链路可达 5
+        层。需要确保每一层都不丢失 <span class="code">user_id</span>。
+      </div>
+    </div>
+
+    <h3>2.3 业务逻辑审计总评</h3>
+    <div class="grid grid-3">
+      <div class="card" style="text-align: center">
+        <div style="font-size: 0.85rem; color: var(--text-secondary)">
+          业务规则数
+        </div>
+        <div style="font-size: 2rem; font-weight: 800; color: var(--accent)">
+          8
+        </div>
+        <div style="font-size: 0.8rem">全部通过审计</div>
+      </div>
+      <div class="card" style="text-align: center">
+        <div style="font-size: 0.85rem; color: var(--text-secondary)">
+          架构层级
+        </div>
+        <div style="font-size: 2rem; font-weight: 800; color: var(--green)">
+          4
+        </div>
+        <div style="font-size: 0.8rem">接入→编排→执行→基础设施</div>
+      </div>
+      <div class="card" style="text-align: center">
+        <div style="font-size: 0.85rem; color: var(--text-secondary)">
+          边界问题
+        </div>
+        <div style="font-size: 2rem; font-weight: 800; color: var(--orange)">
+          2
+        </div>
+        <div style="font-size: 0.8rem">复杂度判定/金丝雀参数传递</div>
+      </div>
+    </div>
+
+    <hr />
+
+    <!-- ================================================================================= -->
+    <!-- 第三部分：LOOP主循环审计 -->
+    <!-- ================================================================================= -->
+    <h2>三、全面审计LOOP主循环</h2>
+
+    <h3>3.1 LOOP 主循环五阶段全景</h3>
+    <div class="flow-diagram">
+      LOOP 主循环: controller.py run() 方法 (L167→L820, 共~650行)
+      ┌─────────────────────────────────────────────────────────────────┐ │ LOOP
+      主循环 (while True) │ │ │ │
+      ┌──────────────────────────────────────────────────────────┐ │ │ │ 检查点:
+      rounds ≤ 5, tool_calls ≤ 20, tokens ≤ 8000, │ │ │ │ duration ≤ 自适应,
+      取消信号, 约束服务 │ │ │
+      └──────────────────────────────────────────────────────────┘ │ │ │ │ │
+      ┌─────────────────────────▼─────────────────────────────────┐ │ │ │ Phase
+      1: PLANNING (L267→L288) │ │ │ │ ├─ Planner.plan() → ExecutionPlan │ │ │ │
+      ├─ ToT 规划器 (深度搜索) │ │ │ │ ├─ 注入计划到 context.messages │ │ │ │ ├─
+      注入反思洞察到 context │ │ │ │ ├─ 因果建模 (CausalModeler) │ │ │ │ └─
+      反思应用 (_apply_reflection_to_planning) │ │ │
+      └─────────────────────────┬───────────────────────────────────┘ │ │ │ │ │
+      ┌─────────────────────────▼─────────────────────────────────┐ │ │ │ Phase
+      2: EXECUTING (L291→L430) │ │ │ │ ├─ 取消检查点 │ │ │ │ ├─ 链式执行 /
+      并行执行 (根据 has_chain 判断) │ │ │ │ ├─ 工具失败 → 反思纠错
+      (_reflect_on_failure) │ │ │ │ ├─ 工具成功 → 提炼模式 (reflect_on_success)
+      │ │ │ │ ├─ 因果影响分析 (CausalModeler) │ │ │ │ ├─ 轨迹持久化
+      (TrajectoryDB) │ │ │ │ ├─ 注意力聚焦 (_attention_focus) │ │ │ │ └─
+      轻量级反思 (_lightweight_reflection_round) │ │ │
+      └─────────────────────────┬───────────────────────────────────┘ │ │ │ │ │
+      ┌─────────────────────────▼─────────────────────────────────┐ │ │ │ Phase
+      3: EVALUATING (L433→L460) │ │ │ │ ├─ Evaluator.evaluate() →
+      EvaluatorOutput │ │ │ │ ├─ LLM 评估 / 规则评估 (降级) │ │ │ │ └─
+      反思知识库更新 │ │ │
+      └─────────────────────────┬───────────────────────────────────┘ │ │ │ │ │
+      ┌─────────────────────────▼─────────────────────────────────┐ │ │ │ Phase
+      3.5: REFLECTING (L462→L510) │ │ │ │ ├─ 进化引擎自适应配置
+      (enable_deep_reflection, max_retries)│ │ │ │ ├─ 实时反馈
+      (工具推荐、减速信号) │ │ │ │ ├─ 深度反思 (_deep_reflect) — 条件触发 │ │ │
+      │ └─ 弹性延长 (should_slow_down → 1.5x duration) │ │ │
+      └─────────────────────────┬───────────────────────────────────┘ │ │ │ │ │
+      ┌─────────────────────────▼─────────────────────────────────┐ │ │ │ 决策:
+      continue / replan / abort (L512→L580) │ │ │ │ ├─ continue: goal_progress ≥
+      0.8 → break │ │ │ │ ├─ continue: 卡死保护 (continue_streak ≥ 3) →
+      强制replan │ │ │ │ ├─ replan: Planner.replan() → 新计划 │ │ │ │ └─ abort:
+      直接 break │ │ │
+      └─────────────────────────┬───────────────────────────────────┘ │ │ │ │ │
+      ┌─────────────────────────▼─────────────────────────────────┐ │ │ │ Phase
+      4: REPORTING (L582→L820) │ │ │ │ ├─ Reporter.report() → ReporterOutput │ │
+      │ │ ├─ 学习信号采集 (7种信号) │ │ │ │ ├─ 隐式反馈统计 │ │ │ │ ├─
+      反思经验保存 │ │ │ │ ├─ 元反思触发 (每10次) │ │ │ │ ├─ OTel 指标导出 │ │ │
+      │ └─ 返回 AgentResult │ │ │
+      └────────────────────────────────────────────────────────────┘ │
+      └─────────────────────────────────────────────────────────────────┘
+    </div>
+
+    <h3>3.2 LOOP 12个关键检查点审计</h3>
+
+    <table>
+      <tr>
+        <th>#</th>
+        <th>检查点</th>
+        <th>代码位置</th>
+        <th>类型</th>
+        <th>审计结论</th>
+      </tr>
+      <tr>
+        <td>C1</td>
+        <td>取消信号检查（每轮开头）</td>
+        <td><span class="code">controller.py:L237</span></td>
+        <td><span class="tag tag-red">安全</span></td>
+        <td class="tag tag-green">✓ 正确</td>
+      </tr>
+      <tr>
+        <td>C2</td>
+        <td>轮次上限检查</td>
+        <td><span class="code">controller.py:L241</span></td>
+        <td><span class="tag tag-orange">预算</span></td>
+        <td class="tag tag-green">✓ 正确</td>
+      </tr>
+      <tr>
+        <td>C3</td>
+        <td>工具调用上限检查</td>
+        <td><span class="code">controller.py:L243</span></td>
+        <td><span class="tag tag-orange">预算</span></td>
+        <td class="tag tag-green">✓ 正确</td>
+      </tr>
+      <tr>
+        <td>C4</td>
+        <td>约束服务预算检查</td>
+        <td><span class="code">controller.py:L246-261</span></td>
+        <td><span class="tag tag-orange">预算</span></td>
+        <td class="tag tag-green">✓ 正确</td>
+      </tr>
+      <tr>
+        <td>C5</td>
+        <td>时间预算强制检查</td>
+        <td><span class="code">controller.py:L263-272</span></td>
+        <td><span class="tag tag-orange">预算</span></td>
+        <td class="tag tag-green">✓ 正确</td>
+      </tr>
+      <tr>
+        <td>C6</td>
+        <td>取消信号检查（执行前）</td>
+        <td><span class="code">controller.py:L294</span></td>
+        <td><span class="tag tag-red">安全</span></td>
+        <td class="tag tag-green">✓ 正确</td>
+      </tr>
+      <tr>
+        <td>C7</td>
+        <td>工具失败 → 反思纠错</td>
+        <td><span class="code">controller.py:L369-382</span></td>
+        <td><span class="tag tag-purple">韧性</span></td>
+        <td class="tag tag-green">✓ 正确</td>
+      </tr>
+      <tr>
+        <td>C8</td>
+        <td>注意力聚焦（上下文裁剪）</td>
+        <td><span class="code">controller.py:L428-431</span></td>
+        <td><span class="tag tag-blue">优化</span></td>
+        <td class="tag tag-green">✓ 正确</td>
+      </tr>
+      <tr>
+        <td>C9</td>
+        <td>深度反思触发条件</td>
+        <td><span class="code">controller.py:L505-507</span></td>
+        <td><span class="tag tag-purple">质量</span></td>
+        <td class="tag tag-green">✓ 正确</td>
+      </tr>
+      <tr>
+        <td>C10</td>
+        <td>卡死保护（continue_streak）</td>
+        <td><span class="code">controller.py:L520-528</span></td>
+        <td><span class="tag tag-red">安全</span></td>
+        <td class="tag tag-green">✓ 正确</td>
+      </tr>
+      <tr>
+        <td>C11</td>
+        <td>重规划次数上限</td>
+        <td><span class="code">controller.py:L535-537</span></td>
+        <td><span class="tag tag-red">安全</span></td>
+        <td class="tag tag-green">✓ 正确</td>
+      </tr>
+      <tr>
+        <td>C12</td>
+        <td>目标达成判断</td>
+        <td><span class="code">controller.py:L516-517</span></td>
+        <td><span class="tag tag-green">成功</span></td>
+        <td class="tag tag-green">✓ 正确</td>
+      </tr>
+    </table>
+
+    <div class="success-box">
+      <strong>12/12 检查点全部通过审计。</strong
+      >安全（取消/卡死/重规划上限）、预算（轮次/工具/Token/时间/约束）、韧性（反思纠错）、优化（注意力聚焦）、质量（深度反思）5个维度全覆盖。
+    </div>
+
+    <h3>3.3 LOOP 状态机审计</h3>
+
+    <table>
+      <tr>
+        <th>状态</th>
+        <th>进入条件</th>
+        <th>退出条件</th>
+        <th>数据变更</th>
+        <th>审计</th>
+      </tr>
+      <tr>
+        <td><span class="code">IDLE</span></td>
+        <td>初始化</td>
+        <td>run() 被调用</td>
+        <td>无</td>
+        <td class="tag tag-green">✓</td>
+      </tr>
+      <tr>
+        <td><span class="code">PLANNING</span></td>
+        <td>每轮开始 / replan_count > 0</td>
+        <td>plan 生成完成</td>
+        <td>context.plan 写入</td>
+        <td class="tag tag-green">✓</td>
+      </tr>
+      <tr>
+        <td><span class="code">EXECUTING</span></td>
+        <td>planning 完成</td>
+        <td>所有步骤执行完毕</td>
+        <td>context.step_results 写入</td>
+        <td class="tag tag-green">✓</td>
+      </tr>
+      <tr>
+        <td><span class="code">EVALUATING</span></td>
+        <td>executing 完成</td>
+        <td>evaluator 返回结果</td>
+        <td>无（只读 context）</td>
+        <td class="tag tag-green">✓</td>
+      </tr>
+      <tr>
+        <td><span class="code">REPORTING</span></td>
+        <td>循环退出</td>
+        <td>report 生成完成</td>
+        <td>无（只读 context）</td>
+        <td class="tag tag-green">✓</td>
+      </tr>
+      <tr>
+        <td><span class="code">COMPLETED</span></td>
+        <td>reporting 完成</td>
+        <td>AgentResult 返回</td>
+        <td>evolution 信号写入</td>
+        <td class="tag tag-green">✓</td>
+      </tr>
+      <tr>
+        <td><span class="code">FAILED</span></td>
+        <td>异常退出</td>
+        <td>异常传播</td>
+        <td>无</td>
+        <td class="tag tag-green">✓</td>
+      </tr>
+    </table>
+
+    <div class="highlight-box">
+      <strong>关键发现：</strong>状态机有 7 个状态，转换路径清晰：<strong
+        >IDLE → PLANNING → EXECUTING → EVALUATING → (PLANNING|REPORTING) →
+        COMPLETED</strong
+      >。 <span class="code">FAILED</span> 状态仅在异常路径触发。状态转换记录到
+      TrajectoryDB 的 <span class="code">StateTransitionRecord</span>。
+    </div>
+
+    <h3>3.4 ReAct 子循环审计</h3>
+
+    <div class="flow-diagram">
+      ReAct 子循环: controller.py run_react_loop() 方法 (L825→L980, ~155行)
+      Thought → Action → Observation → (Thought → Action → Observation) → Final
+      Answer ┌─────────────────────────────────────────────────────────────────┐
+      │ while step_count < max_iterations: │ │ ├─ 取消检查点 │ │ ├─
+      _react_think_structured() → StructuredReActStep │ │ │ ├─ Thought 质量评估
+      (_evaluate_thought_quality) │ │ │ └─ 检测敷衍式推理 → 注入改进提示 │ │ ├─
+      is_final? → 返回最终答案 │ │ ├─ _react_act(thought) → 工具调用 │ │ │ ├─
+      失败 → 多轮自纠错 (最多2轮) │ │ │ │ ├─ 反思分析 │ │ │ │ ├─ 参数修正 │ │ │
+      │ ├─ 替代工具 │ │ │ │ └─ 降级跳过 │ │ │ └─ 成功 → 观察结果 │ │ ├─
+      _react_observe(action_result) → observation │ │ └─ 注意力聚焦
+      (_attention_focus) │
+      └─────────────────────────────────────────────────────────────────┘
+    </div>
+
+    <table>
+      <tr>
+        <th>特性</th>
+        <th>实现</th>
+        <th>审计</th>
+      </tr>
+      <tr>
+        <td>结构化步骤</td>
+        <td>
+          <span class="code"
+            >StructuredReActStep {thought, action, observation}</span
+          >
+        </td>
+        <td class="tag tag-green">✓</td>
+      </tr>
+      <tr>
+        <td>Thought 质量评估</td>
+        <td>检测"我需要"/"我决定"等敷衍模式，注入改进提示</td>
+        <td class="tag tag-green">✓</td>
+      </tr>
+      <tr>
+        <td>多轮自纠错</td>
+        <td>工具失败 → 反思分析 → 参数修正 → 替代工具 → 降级跳过（最多2轮）</td>
+        <td class="tag tag-green">✓</td>
+      </tr>
+      <tr>
+        <td>注意力聚焦</td>
+        <td>
+          ReAct 循环中也应用
+          <span class="code">_attention_focus</span>（max_messages=12）
+        </td>
+        <td class="tag tag-green">✓</td>
+      </tr>
+    </table>
+
+    <h3>3.5 LOOP 审计发现（3个优化项）</h3>
+
+    <div class="card">
+      <h4>
+        <span class="tag tag-orange">优化项 L-01</span> Planning 阶段首次 plan
+        已存在时仍执行因果建模
+      </h4>
+      <p>
+        <strong>代码位置：</strong
+        ><span class="code">controller.py:L280-283</span>
+      </p>
+      <pre><code>if plan is None or replan_count > 0:
+    plan = await self.planner.plan(input_text, context)
+    ...
+    try:
+        causal_graph = await self.causal.build_causal_model(input_text)  # 每次重规划都重建
+    except Exception:
+        causal_graph = None</code></pre>
+      <p>
+        <strong>问题：</strong>每次 replan 都重建因果图，但因果图基于
+        <span class="code">input_text</span
+        >（不变），结果相同。建议：因果图首次构建后缓存，replan 时复用。
+      </p>
+      <p><strong>影响：</strong>低（因果建模是轻量操作）</p>
+    </div>
+
+    <div class="card">
+      <h4>
+        <span class="tag tag-orange">优化项 L-02</span> 连续 continue
+        检测在目标达成判断之前
+      </h4>
+      <p>
+        <strong>代码位置：</strong
+        ><span class="code">controller.py:L516-528</span>
+      </p>
+      <pre><code>if action == "continue":
+    if eval_result.goal_progress >= 0.8:  # 先检查目标达成
+        break
+    continue_streak += 1
+    if continue_streak >= self.MAX_CONTINUE_STREAK:  # 再检查卡死
+        replan_count += 1
+        ...</code></pre>
+      <p>
+        <strong>分析：</strong>逻辑正确——先检查目标达成（≥0.8
+        直接退出），再检查卡死。但如果 goal_progress 一直在 0.79 徘徊，<span
+          class="code"
+          >continue_streak</span
+        >
+        会一直增长直到触发强制 replan。这是正确的安全网行为。
+      </p>
+      <p><strong>影响：</strong>无（逻辑正确，仅作为行为说明）</p>
+    </div>
+
+    <div class="card">
+      <h4>
+        <span class="tag tag-orange">优化项 L-03</span> ReAct 和 Loop
+        模式的选择逻辑分散两处
+      </h4>
+      <p>
+        <strong>代码位置：</strong
+        ><span class="code">controller.py:L177-180</span> 和
+        <span class="code">planner.py:L58-60</span>
+      </p>
+      <pre>>
+    </div>
+  </body>
+</html>

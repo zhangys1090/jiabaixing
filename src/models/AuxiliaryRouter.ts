@@ -7,7 +7,7 @@
  * 用法:
  *   const router = new AuxiliaryRouter();
  *   const config = router.resolve('compression');
- *   // → { model: "deepseek-chat", baseUrl: "https://api.deepseek.com", ... }
+ *   // → { model: "deepseek-v4-flash", baseUrl: "https://api.deepseek.com", ... }
  */
 
 import { ProviderManager } from './ProviderManager';
@@ -139,7 +139,7 @@ export class AuxiliaryRouter {
 
     // 最终回退
     return {
-      model: process.env.LLM_MODEL || 'deepseek-chat',
+      model: process.env.LLM_MODEL || 'deepseek-v4-flash',
       baseUrl: process.env.OPENAI_API_BASE || 'https://api.deepseek.com',
       apiKey: process.env.OPENAI_API_KEY || '',
       providerName: 'default',

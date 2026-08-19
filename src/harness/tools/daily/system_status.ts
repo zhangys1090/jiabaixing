@@ -41,7 +41,7 @@ export interface SystemStatusDeps {
     initialized: boolean;
     config: Record<string, boolean>;
   };
-  getEvolutionStats: () => Record<string, unknown>;
+  getEvolutionStats: () => Promise<Record<string, unknown>>;
   getSchedulerStats: () => Record<string, unknown>;
 }
 
@@ -124,7 +124,7 @@ export function createSystemStatusExecutor(deps: SystemStatusDeps) {
       }
       if (component === 'all' || component === 'evolution') {
         lines.push(
-          formatGenericStats('进化系统', deps.getEvolutionStats(), detailed)
+          formatGenericStats('进化系统', await deps.getEvolutionStats(), detailed)
         );
       }
       if (component === 'all' || component === 'scheduler') {

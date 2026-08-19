@@ -1,5 +1,6 @@
 import type { ToolContext, ToolDefinition, ToolResult } from '../../types';
 import { ToolCategory } from '../../types';
+import { withStoreLock } from './storeLock';
 
 export const CALENDAR_DEF: ToolDefinition = {
   name: 'calendar',
@@ -179,6 +180,17 @@ export function createCalendarExecutor(deps: CalendarDeps) {
   ): Promise<ToolResult> => {
     const action = String(params.action || '');
 
+    if (!deps.calendarStore) {
+      return {
+        success: false,
+        output: null,
+        error:
+          'calendar 不可用: calendarStore 未注入，请在 initHarness 中配置日程存储依赖',
+        duration: 0,
+        validated: false,
+      };
+    }
+
     try {
       switch (action) {
         case 'create_event': {
@@ -233,27 +245,29 @@ export function createCalendarExecutor(deps: CalendarDeps) {
             createdAt: Date.now(),
           };
 
-          await deps.calendarStore.saveEvent(event);
+          return withStoreLock(deps.calendarStore, async () => {
+            await deps.calendarStore.saveEvent(event);
 
-          if (deps.scheduleReminder) {
-            deps.scheduleReminder(event);
-          }
+            if (deps.scheduleReminder) {
+              deps.scheduleReminder(event);
+            }
 
-          const timeDisplay = event.allDay
-            ? formatDate(event.startTime)
-            : `${formatDateTime(event.startTime)} - ${formatDateTime(event.endTime)}`;
+            const timeDisplay = event.allDay
+              ? formatDate(event.startTime)
+              : `${formatDateTime(event.startTime)} - ${formatDateTime(event.endTime)}`;
 
-          return {
-            success: true,
-            output:
-              `📅 日程已创建: [${event.id}] ${event.title}\n` +
-              `时间: ${timeDisplay}\n` +
-              `${event.location ? `地点: ${event.location}\n` : ''}` +
-              `${event.attendees.length > 0 ? `参会人员: ${event.attendees.join(', ')}\n` : ''}` +
-              `提醒: ${event.reminderMinutes}分钟前`,
-            duration: 0,
-            validated: false,
-          };
+            return {
+              success: true,
+              output:
+                `📅 日程已创建: [${event.id}] ${event.title}\n` +
+                `时间: ${timeDisplay}\n` +
+                `${event.location ? `地点: ${event.location}\n` : ''}` +
+                `${event.attendees.length > 0 ? `参会人员: ${event.attendees.join(', ')}\n` : ''}` +
+                `提醒: ${event.reminderMinutes}分钟前`,
+              duration: 0,
+              validated: false,
+            };
+          });
         }
 
         case 'list_events': {
@@ -413,26 +427,28 @@ export function createCalendarExecutor(deps: CalendarDeps) {
             };
           }
 
-          const events = await deps.calendarStore.getEvents();
-          const event = events.find((e) => e.id === eventId);
-          if (!event) {
+          return withStoreLock(deps.calendarStore, async () => {
+            const events = await deps.calendarStore.getEvents();
+            const event = events.find((e) => e.id === eventId);
+            if (!event) {
+              return {
+                success: false,
+                output: null,
+                error: `日程不存在: ${eventId}`,
+                duration: 0,
+                validated: false,
+              };
+            }
+
+            await deps.calendarStore.deleteEvent(eventId);
+
             return {
-              success: false,
-              output: null,
-              error: `日程不存在: ${eventId}`,
+              success: true,
+              output: `🗑️ 日程已删除: [${eventId}] ${event.title}`,
               duration: 0,
               validated: false,
             };
-          }
-
-          await deps.calendarStore.deleteEvent(eventId);
-
-          return {
-            success: true,
-            output: `🗑️ 日程已删除: [${eventId}] ${event.title}`,
-            duration: 0,
-            validated: false,
-          };
+          });
         }
 
         case 'check_conflict': {
@@ -502,27 +518,29 @@ export function createCalendarExecutor(deps: CalendarDeps) {
             };
           }
 
-          const events = await deps.calendarStore.getEvents();
-          const event = events.find((e) => e.id === eventId);
-          if (!event) {
+          return withStoreLock(deps.calendarStore, async () => {
+            const events = await deps.calendarStore.getEvents();
+            const event = events.find((e) => e.id === eventId);
+            if (!event) {
+              return {
+                success: false,
+                output: null,
+                error: `日程不存在: ${eventId}`,
+                duration: 0,
+                validated: false,
+              };
+            }
+
+            event.reminderMinutes = minutes;
+            await deps.calendarStore.saveEvent(event);
+
             return {
-              success: false,
-              output: null,
-              error: `日程不存在: ${eventId}`,
+              success: true,
+              output: `🔔 提醒已设置: [${eventId}] ${event.title} 将在 ${minutes} 分钟前提醒`,
               duration: 0,
               validated: false,
             };
-          }
-
-          event.reminderMinutes = minutes;
-          await deps.calendarStore.saveEvent(event);
-
-          return {
-            success: true,
-            output: `🔔 提醒已设置: [${eventId}] ${event.title} 将在 ${minutes} 分钟前提醒`,
-            duration: 0,
-            validated: false,
-          };
+          });
         }
 
         default:

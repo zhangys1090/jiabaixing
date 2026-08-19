@@ -1,8 +1,8 @@
 import { Logger } from '../../utils/Logger';
 import { COLORS, c } from '../constants';
 import { requestWithFallback } from '../ipc';
-import { checkBackendHealth } from '../utils';
 import { SubcommandOptions } from '../types';
+import { checkBackendHealth } from '../utils';
 
 /**
  * 处理 /model 命令（REPL 模式）
@@ -11,7 +11,7 @@ import { SubcommandOptions } from '../types';
 export async function handleModelCommand(): Promise<void> {
   const health = await checkBackendHealth();
   Logger.info(`\n  ${COLORS.bold}当前模型${COLORS.reset}\n`, 'CLI');
-  Logger.info(`  模型: ${health.model || 'deepseek-chat'}`, 'CLI');
+  Logger.info(`  模型: ${health.model || 'deepseek-v4-flash'}`, 'CLI');
   Logger.info(
     `  LLM: ${health.llm?.available ? c(COLORS.green, '✅ 可用') : c(COLORS.red, '❌ 不可用')}`,
     'CLI'

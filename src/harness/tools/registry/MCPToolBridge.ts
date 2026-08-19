@@ -3,11 +3,12 @@
  * 让 LLM 能通过 FC 循环自主调用 MCP 工具 (browser, cron 等)
  */
 
-import { MCPServerManager } from '../../../mcp/MCPServerManager';
-import { ToolRegistry } from './ToolRegistry';
+import { getActivePythonBridge } from '../../../ide/bridgeRegistry';
+import { JiabaixingEventBus } from '../../../shared/EventBus';
+import { Logger } from '../../../utils/Logger';
 import type { ToolDefinition, ToolResult } from '../../types';
 import { Permission, ToolCategory } from '../../types';
-import { Logger } from '../../../utils/Logger';
+import { ToolRegistry } from './ToolRegistry';
 
 export class MCPToolBridge {
   private static instance: MCPToolBridge | null = null;
@@ -17,6 +18,10 @@ export class MCPToolBridge {
 
   private constructor() {}
 
+  public static create(): MCPToolBridge {
+    return new MCPToolBridge();
+  }
+
   public static getInstance(): MCPToolBridge {
     if (!MCPToolBridge.instance) {
       MCPToolBridge.instance = new MCPToolBridge();
@@ -25,13 +30,14 @@ export class MCPToolBridge {
   }
 
   public async syncToRegistry(registry: ToolRegistry): Promise<number> {
-    const mcpManager = MCPServerManager.getInstance();
-    const runningServers = mcpManager.getRunningServers();
+    const bridge = getActivePythonBridge();
+    if (!bridge) return 0;
+    const runningServers = await bridge.getRunningMcpServers();
     let syncedCount = 0;
 
     for (const serverName of runningServers) {
       try {
-        const tools = await mcpManager.listTools(serverName);
+        const tools = await bridge.listMcpTools(serverName);
         const mcpTools = tools as Array<{
           name: string;
           description?: string;
@@ -94,8 +100,17 @@ export class MCPToolBridge {
   ): Promise<ToolResult> {
     const startTime = Date.now();
     try {
-      const mcpManager = MCPServerManager.getInstance();
-      const result = await mcpManager.callTool(serverName, toolName, params);
+      const bridge = getActivePythonBridge();
+      if (!bridge) {
+        return {
+          success: false,
+          output: null,
+          error: `MCP 后端未连接 [${serverName}/${toolName}]`,
+          duration: Date.now() - startTime,
+          validated: false,
+        };
+      }
+      const result = await bridge.callMcpTool(serverName, toolName, params);
 
       const outputStr =
         typeof result === 'string' ? result : JSON.stringify(result);
@@ -207,16 +222,236 @@ export class MCPToolBridge {
     }
   }
 
+  /**
+   * 将 MCP Resources 同步为工具（mcp_{server}_read_resource）
+   */
+  public async syncResourcesToRegistry(
+    registry: ToolRegistry
+  ): Promise<number> {
+    const bridge = getActivePythonBridge();
+    if (!bridge) return 0;
+    const runningServers = await bridge.getRunningMcpServers();
+    let syncedCount = 0;
+
+    for (const serverName of runningServers) {
+      try {
+        const resources = await bridge.listMcpResources(serverName);
+        const mcpResources = resources as Array<{
+          uri: string;
+          name?: string;
+          description?: string;
+          mimeType?: string;
+        }>;
+
+        if (mcpResources.length === 0) continue;
+
+        const bridgedName = `mcp_${serverName}_read_resource`;
+
+        if (this.bridgedTools.has(bridgedName)) continue;
+
+        const resourceList = mcpResources
+          .map(
+            (r) => `- ${r.uri}: ${r.name || r.uri} (${r.mimeType || 'unknown'})`
+          )
+          .join('\n');
+
+        const definition: ToolDefinition = {
+          name: bridgedName,
+          description: `[MCP/${serverName}] 读取资源。可用资源:\n${resourceList}`,
+          category: ToolCategory.MEMORY,
+          parameters: {
+            uri: {
+              type: 'string',
+              description: '资源 URI',
+            },
+          },
+          requiredParams: ['uri'],
+          requiredPermissions: [Permission.MEMORY_READ],
+          riskLevel: 'low',
+          idempotent: true,
+          timeout: 15000,
+          requiresConfirmation: false,
+        };
+
+        const serverNameCapture = serverName;
+
+        registry.register(definition, async (params) => {
+          const startTime = Date.now();
+          try {
+            const result = await bridge.readMcpResource(
+              serverNameCapture,
+              params.uri as string
+            );
+            return {
+              success: true,
+              output:
+                typeof result === 'string' ? result : JSON.stringify(result),
+              duration: Date.now() - startTime,
+              validated: false,
+            };
+          } catch (err) {
+            return {
+              success: false,
+              output: null,
+              error: `MCP资源读取失败: ${(err as Error).message}`,
+              duration: Date.now() - startTime,
+              validated: false,
+            };
+          }
+        });
+
+        this.bridgedTools.set(bridgedName, `${serverName}/resources`);
+        syncedCount++;
+
+        Logger.info(
+          `🌉 MCP资源桥接: ${bridgedName} ← ${serverName} (${mcpResources.length} resources)`,
+          'MCPToolBridge'
+        );
+      } catch (err) {
+        Logger.warn(
+          `⚠️ MCP服务器 ${serverName} 资源同步失败: ${(err as Error).message}`,
+          'MCPToolBridge'
+        );
+      }
+    }
+
+    return syncedCount;
+  }
+
+  /**
+   * 将 MCP Prompts 同步为工具（mcp_{server}_get_prompt）
+   */
+  public async syncPromptsToRegistry(registry: ToolRegistry): Promise<number> {
+    const bridge = getActivePythonBridge();
+    if (!bridge) return 0;
+    const runningServers = await bridge.getRunningMcpServers();
+    let syncedCount = 0;
+
+    for (const serverName of runningServers) {
+      try {
+        const prompts = await bridge.listMcpPrompts(serverName);
+        const mcpPrompts = prompts as Array<{
+          name: string;
+          description?: string;
+          arguments?: Array<{
+            name: string;
+            description?: string;
+            required?: boolean;
+          }>;
+        }>;
+
+        if (mcpPrompts.length === 0) continue;
+
+        const bridgedName = `mcp_${serverName}_get_prompt`;
+
+        if (this.bridgedTools.has(bridgedName)) continue;
+
+        const promptList = mcpPrompts
+          .map((p) => `- ${p.name}: ${p.description || p.name}`)
+          .join('\n');
+
+        const definition: ToolDefinition = {
+          name: bridgedName,
+          description: `[MCP/${serverName}] 获取提示模板。可用模板:\n${promptList}`,
+          category: ToolCategory.SYSTEM,
+          parameters: {
+            name: {
+              type: 'string',
+              description: '提示模板名称',
+            },
+            arguments: {
+              type: 'object',
+              description: '提示模板参数',
+            },
+          },
+          requiredParams: ['name'],
+          requiredPermissions: [Permission.CODE_EXECUTE],
+          riskLevel: 'low',
+          idempotent: true,
+          timeout: 15000,
+          requiresConfirmation: false,
+        };
+
+        const serverNameCapture = serverName;
+
+        registry.register(definition, async (params) => {
+          const startTime = Date.now();
+          try {
+            const result = await bridge.getMcpPrompt(
+              serverNameCapture,
+              params.name as string,
+              params.arguments as Record<string, string> | undefined
+            );
+            return {
+              success: true,
+              output:
+                typeof result === 'string' ? result : JSON.stringify(result),
+              duration: Date.now() - startTime,
+              validated: false,
+            };
+          } catch (err) {
+            return {
+              success: false,
+              output: null,
+              error: `MCP提示模板获取失败: ${(err as Error).message}`,
+              duration: Date.now() - startTime,
+              validated: false,
+            };
+          }
+        });
+
+        this.bridgedTools.set(bridgedName, `${serverName}/prompts`);
+        syncedCount++;
+
+        Logger.info(
+          `🌉 MCP提示模板桥接: ${bridgedName} ← ${serverName} (${mcpPrompts.length} prompts)`,
+          'MCPToolBridge'
+        );
+      } catch (err) {
+        Logger.warn(
+          `⚠️ MCP服务器 ${serverName} 提示模板同步失败: ${(err as Error).message}`,
+          'MCPToolBridge'
+        );
+      }
+    }
+
+    return syncedCount;
+  }
+
+  private _eventDrivenSyncEnabled: boolean = false;
+  private _boundRegistry: ToolRegistry | null = null;
+
   public startAutoSync(registry: ToolRegistry): void {
+    this._boundRegistry = registry;
     void this.syncToRegistry(registry);
-    this.syncInterval = setInterval(
-      () => this.syncToRegistry(registry),
-      MCPToolBridge.SYNC_INTERVAL_MS
-    );
+    void this.syncResourcesToRegistry(registry);
+    void this.syncPromptsToRegistry(registry);
+    this.syncInterval = setInterval(() => {
+      void this.syncToRegistry(registry);
+      void this.syncResourcesToRegistry(registry);
+      void this.syncPromptsToRegistry(registry);
+    }, MCPToolBridge.SYNC_INTERVAL_MS);
+    this._enableEventDrivenSync(registry);
     Logger.info(
-      `🌉 MCP工具自动同步已启动 (间隔=${MCPToolBridge.SYNC_INTERVAL_MS / 1000}s)`,
+      `🌉 MCP工具自动同步已启动 (间隔=${MCPToolBridge.SYNC_INTERVAL_MS / 1000}s, 事件驱动=on)`,
       'MCPToolBridge'
     );
+  }
+
+  private _enableEventDrivenSync(registry: ToolRegistry): void {
+    if (this._eventDrivenSyncEnabled) return;
+    this._eventDrivenSyncEnabled = true;
+    try {
+      const bus = JiabaixingEventBus.getInstance();
+      bus.on('bridge:mcp_sync' as any, () => {
+        Logger.info('MCP 按需同步触发 (bridge:mcp_sync 事件)', 'MCPToolBridge');
+        void this.syncToRegistry(registry);
+        void this.syncResourcesToRegistry(registry);
+        void this.syncPromptsToRegistry(registry);
+      });
+    } catch {
+      Logger.warn('MCP 事件驱动同步注册失败，仅使用定时同步', 'MCPToolBridge');
+    }
   }
 
   public stopAutoSync(): void {
@@ -224,6 +459,7 @@ export class MCPToolBridge {
       clearInterval(this.syncInterval);
       this.syncInterval = null;
     }
+    this._eventDrivenSyncEnabled = false;
   }
 
   public getBridgedTools(): Map<string, string> {

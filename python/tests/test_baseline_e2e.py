@@ -30,6 +30,7 @@ import time
 from typing import Any
 
 import pytest
+import threading
 from httpx import ASGITransport, AsyncClient
 
 from agent.core.engine import AgentEngine
@@ -105,6 +106,16 @@ async def baseline_engine(monkeypatch):
     engine._session_count = 0
     engine._active_sessions = 0
     engine._start_time = time.time()
+    # process_input 使用 _counter_lock 做并发计数，__new__ 跳过了 __init__ 必须手动补上
+    engine._counter_lock = threading.Lock()
+    # __init__ 中设置的下划线簿记属性（__getattr__ 对缺失下划线属性一律抛错，必须补齐）
+    engine._domain_proxy_enabled = True
+    engine._loop_strategies: dict = {}
+    engine._registry = None
+    engine._degraded_subsystems: set = set()
+    engine._degraded_reasons: dict = {}
+    engine._critical_degraded: set = set()
+    engine.domains: dict = {}
 
     # process_input 中可选的子系统（设为 None 走降级路径）
     engine.hook_manager = None

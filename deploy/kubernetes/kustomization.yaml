@@ -1,0 +1,24 @@
+# Kustomize 入口（P0-3 收口：消除两代清单冲突）
+# 此前 deploy/kubernetes/ 同时存在两代清单（deployment.yaml / service.yaml /
+# namespace-and-redis.yaml 为第一代；python-* / gateway-* / redis-* 等为第二代），
+# 导致 `kubectl apply -f 目录` 必然因同名资源冲突失败。
+# 现仅保留第二代清单，并通过本 kustomization 统一入口：
+#   kubectl apply -k deploy/kubernetes/
+# 第一代清单已删除（备份见 .workbuddy/removed/2026-08-02_k8s_gen1/）。
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - secret.yaml
+  - redis-deployment.yaml
+  - redis-service.yaml
+  - python-deployment.yaml
+  - python-service.yaml
+  - gateway-deployment.yaml
+  - gateway-service.yaml
+  - otel-collector.yaml
+  - hpa.yaml
+  - pdb.yaml
+  - ingress.yaml

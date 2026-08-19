@@ -2,13 +2,29 @@
  * @jest-environment jsdom
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import React from 'react';
 import App from './App';
 
-// 模拟 fetch 函数
-global.fetch = jest.fn();
+const mockFetch = jest.fn((url: string) => {
+  if (url.includes('/api/budget/status')) {
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ tokenUsed: 0, tokenBudget: 500000, costUsed: 0, costBudget: 10, period: 'daily' }),
+    });
+  }
+  if (url.includes('/api/integration/platforms')) {
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ platforms: [] }),
+    });
+  }
+  return Promise.resolve({
+    ok: true,
+    json: () => Promise.resolve([]),
+  });
+});
 
-// 模拟 errorMonitor
+global.fetch = mockFetch as unknown as typeof global.fetch;
+
 jest.mock('./utils/errorMonitoring', () => ({
   errorMonitor: {
     initialize: jest.fn(),
@@ -17,94 +33,91 @@ jest.mock('./utils/errorMonitoring', () => ({
   },
 }));
 
+jest.mock('./hooks/websocket', () => ({
+  connectionManager: {
+    onAgentExecution: jest.fn(),
+    offAgentExecution: jest.fn(),
+    onBrainStageUpdate: jest.fn(),
+    offBrainStageUpdate: jest.fn(),
+    onToolTrace: jest.fn(),
+    offToolTrace: jest.fn(),
+  },
+}));
+
+jest.mock('./stores/useAgentStore', () => ({
+  useAgentStore: (selector: any) => {
+    const state = {
+      executionUpdates: [],
+      brainStageUpdates: [],
+      toolTraces: [],
+      clarificationRequest: null,
+      executionPreview: null,
+      fileEvents: [],
+      crossSessionTasks: [],
+      fcLoopCount: 0,
+      fcLoopMax: 8,
+      tokenBudget: 6000,
+      tokenUsed: 0,
+      harnessStatus: null,
+      loading: false,
+      error: null,
+      addExecutionUpdate: jest.fn(),
+      addBrainStageUpdate: jest.fn(),
+      addToolTrace: jest.fn(),
+      setClarificationRequest: jest.fn(),
+      setExecutionPreview: jest.fn(),
+      addFileEvent: jest.fn(),
+      setCrossSessionTasks: jest.fn(),
+      updateFcLoop: jest.fn(),
+      fetchHarnessStatus: jest.fn(),
+      reset: jest.fn(),
+    };
+    return selector ? selector(state) : state;
+  },
+}));
+
+jest.mock('./stores/useWorkspaceStore', () => ({
+  useWorkspaceStore: (selector: any) => {
+    const state = {
+      sessions: [],
+      activeSessionId: null,
+      fetchSessions: jest.fn(),
+      setActiveSession: jest.fn(),
+      createSession: jest.fn(),
+      renameSession: jest.fn(),
+      deleteSession: jest.fn(),
+      reorderSessions: jest.fn(),
+    };
+    return selector ? selector(state) : state;
+  },
+}));
+
 describe('App', () => {
   beforeEach(() => {
-    // 清除所有模拟
     jest.clearAllMocks();
   });
 
   test('renders App component', () => {
     render(<App />);
-    const appElement = screen.getByText(/jiabaixing 智能助手/i);
+    const appElement = screen.getByText('欢迎使用家百星智能助手系统 V5.0');
     expect(appElement).toBeInTheDocument();
   });
 
-  test('should send message when input is submitted', async () => {
-    // 模拟 fetch 成功
-    (global.fetch as jest.Mock).mockResolvedValueOnce({
-      ok: true,
-      json: jest.fn().mockResolvedValueOnce({ response: 'Hello, world!' }),
-    });
-
+  test('renders sidebar with settings navigation', () => {
     render(<App />);
-
-    // 输入消息
-    const inputElement = screen.getByPlaceholderText(/请输入您的问题或需求.../i);
-    fireEvent.change(inputElement, { target: { value: 'Hello' } });
-
-    // 发送消息
-    const sendButton = screen.getByText(/发送/i);
-    fireEvent.click(sendButton);
-
-    // 验证 fetch 是否被调用
-    await waitFor(() => {
-      expect(global.fetch).toHaveBeenCalledWith(
-        'http://test-api.jiabaixing.com/api/process',
-        expect.objectContaining({
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ input: 'Hello' }),
-        })
-      );
-    });
-
-    // 验证回复是否显示
-    await waitFor(() => {
-      const replyElement = screen.getByText(/Hello, world!/i);
-      expect(replyElement).toBeInTheDocument();
-    });
+    const settingsNav = screen.getByTestId('nav-settings');
+    expect(settingsNav).toBeInTheDocument();
+    expect(settingsNav).toHaveTextContent('偏好设置');
   });
 
-  test('should handle network error', async () => {
-    // 模拟 fetch 失败
-    (global.fetch as jest.Mock).mockRejectedValueOnce(new Error('Network error'));
-
+  test('should switch to settings view', async () => {
     render(<App />);
 
-    // 输入消息
-    const inputElement = screen.getByPlaceholderText(/请输入您的问题或需求.../i);
-    fireEvent.change(inputElement, { target: { value: 'Hello' } });
+    const settingsNav = screen.getByTestId('nav-settings');
+    fireEvent.click(settingsNav);
 
-    // 发送消息
-    const sendButton = screen.getByText(/发送/i);
-    fireEvent.click(sendButton);
-
-    // 验证错误消息是否显示
     await waitFor(() => {
-      const errorMessage = screen.getByText(/抱歉，网络连接失败，请稍后再试。/i);
-      expect(errorMessage).toBeInTheDocument();
+      expect(screen.getByText('偏好设置')).toBeInTheDocument();
     });
-  });
-
-  test('should switch between modules', () => {
-    render(<App />);
-
-    // 点击开发辅助模块
-    const developmentModule = screen.getByText(/开发辅助/i);
-    fireEvent.click(developmentModule);
-
-    // 验证开发辅助模块是否显示
-    const developmentTitle = screen.getByText(/开发辅助/i);
-    expect(developmentTitle).toBeInTheDocument();
-
-    // 点击智能助理模块
-    const housekeeperModule = screen.getByText(/智能助理/i);
-    fireEvent.click(housekeeperModule);
-
-    // 验证智能助理模块是否显示
-    const housekeeperTitle = screen.getByText(/智能助理/i);
-    expect(housekeeperTitle).toBeInTheDocument();
   });
 });

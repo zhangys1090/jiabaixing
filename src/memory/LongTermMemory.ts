@@ -9,8 +9,8 @@
 import { ChromaClient, Collection } from 'chromadb';
 import { Logger } from '../utils/Logger';
 import { BaseMemoryStore } from './BaseMemoryStore';
-import { MemoryItem, MemoryType } from './MemoryEngine';
 import { MemoryDatabase } from './Database';
+import { MemoryItem, MemoryType } from './MemoryEngine';
 
 interface SQLiteLongTermRecord {
   id: string;
@@ -20,6 +20,17 @@ interface SQLiteLongTermRecord {
   timestamp: string;
   type: string;
 }
+
+/**
+ * @deprecated 长期记忆核心逻辑已迁移至 Python agent/memory (AGENTS.md §0.1)。
+ * 本类仅保留为类型契约/本地回退存根，不再由生产代码实例化。运行时走 Python。
+ */
+import { emitDeprecationWarning } from '../shared/deprecationWarning';
+emitDeprecationWarning(
+  'LongTermMemory',
+  'Python MemoryEngine (AGENT_BACKEND=python)',
+  'V6.0'
+);
 
 export class LongTermMemory extends BaseMemoryStore {
   private chromaPath: string;
@@ -192,11 +203,14 @@ export class LongTermMemory extends BaseMemoryStore {
       if (ftsResults.length > 0) {
         return ftsResults
           .filter((r) => {
+            const extra = r as unknown as Record<string, unknown>;
+            const scene = extra.scene as string | undefined;
+            const emotion = extra.emotion as string | undefined;
             return requirements.every(
               (req) =>
-                r.content.includes(req) ||
-                (r as unknown as SQLiteLongTermRecord).scene?.includes(req) ||
-                (r as unknown as SQLiteLongTermRecord).emotion?.includes(req)
+                r.content?.includes(req) ||
+                scene?.includes(req) ||
+                emotion?.includes(req)
             );
           })
           .map((record) => ({

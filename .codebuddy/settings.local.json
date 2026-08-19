@@ -1,0 +1,13 @@
+{
+  "enabledPlugins": {
+    "financial-analysis@cb_teams_marketplace": true,
+    "investment-banking@cb_teams_marketplace": true,
+    "equity-research@cb_teams_marketplace": true,
+    "private-equity@cb_teams_marketplace": true,
+    "wealth-management@cb_teams_marketplace": true,
+    "lseg@cb_teams_marketplace": true,
+    "spglobal@cb_teams_marketplace": true,
+    "codebuddy-chat-web@cb_teams_marketplace": true,
+    "agent-sdk-dev@cb_teams_marketplace": true
+  }
+}

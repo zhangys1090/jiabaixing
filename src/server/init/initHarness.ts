@@ -10,7 +10,8 @@ import { IndependentEvaluationService } from '../../harness/evaluation/Independe
 import { QualityScorer } from '../../harness/evaluation/QualityScorer';
 import { StepEvaluator } from '../../harness/evaluation/StepEvaluator';
 import { AutonomousTrigger } from '../../harness/loop/AutonomousTrigger';
-import { CausalModeler } from '../../harness/loop/CausalModeler';
+import { getActivePythonBridge } from '../../ide/bridgeRegistry';
+
 import { TrajectoryFlywheel } from '../../harness/persistence/TrajectoryFlywheel';
 import { BackendFactory } from '../../harness/sandbox/backends/BackendFactory';
 import type { ITerminalBackend } from '../../harness/sandbox/backends/ITerminalBackend';
@@ -73,8 +74,6 @@ export async function initHarness(
 
     const constitutionPromptBuilder = core.getConstitutionPromptBuilder();
     const conversationHistoryManager = core.getConversationHistoryManager();
-    // V1 removed; V2 EvolutionOrchestrator handles evolution directly
-    const evolutionEngine = core.evolutionEngine;
 
     const harnessDeps: HarnessDeps = {
       llm: {
@@ -200,17 +199,17 @@ export async function initHarness(
                   scene || '',
                   emotion || 'neutral'
                 ),
-              preciseHybridRetrieval: async (query: {
-                query: string;
-                scene?: string;
-                emotion?: string;
-                topK?: number;
-              }) => {
+              preciseHybridRetrieval: async (
+                query: string,
+                scene?: string,
+                emotion?: string,
+                topK?: number
+              ) => {
                 const results = await memoryEngine.preciseHybridRetrieval(
-                  query.query,
-                  query.scene,
-                  query.emotion,
-                  query.topK || 5
+                  query,
+                  scene,
+                  emotion,
+                  topK || 5
                 );
                 return results.map((r) => ({
                   id: r.id,
@@ -256,7 +255,7 @@ export async function initHarness(
           : null,
         conversationHistory: conversationHistoryManager
           ? (() => {
-              const chm = conversationHistoryManager as unknown as {
+              const chm = conversationHistoryManager as {
                 addUserMessage?: (content: string) => void;
                 addAssistantMessage?: (content: string) => void;
                 getAll?: () => Array<{ role: string; content: string }>;
@@ -305,32 +304,44 @@ export async function initHarness(
             }
           : null,
       },
+      // 进化引擎已迁移到 Python 后端（A-Evolution-Engine 整改）。
+      // collectFeedback 经 PythonAgentBridge 转发到 /v1/evolution/feedback；
+      // 其余 TS 本地进化方法（assessQuality/generateSkill/nudgeKnowledgePersistence/
+      // getStrategyOptimizer）现由 Python 进化引擎统一处理，TS 薄网关不再独立实现。
       evolutionEngine: {
         collectFeedback: (input, response, result, scene) => {
-          if (evolutionEngine?.collectFeedback) {
-            evolutionEngine.collectFeedback(input, response, result, scene);
-          }
-        },
-        assessQuality: (traceId, success, qualityScore, duration) => {
-          if (evolutionEngine?.assessQuality) {
-            evolutionEngine.assessQuality(
-              traceId,
-              success,
-              qualityScore,
-              duration
+          const bridge = core.getPythonBridgeResolver()?.();
+          if (!bridge) return;
+          void bridge
+            .submitFeedback({
+              session_id: scene || 'harness',
+              quality_score:
+                typeof result.success === 'boolean'
+                  ? result.success
+                    ? 0.8
+                    : 0.2
+                  : 0.5,
+              cause:
+                result.error ||
+                (result.success ? 'task_completed' : 'task_failed'),
+              tool_name: Array.isArray(result.toolsUsed)
+                ? result.toolsUsed[0]
+                : undefined,
+              error: result.error,
+            })
+            .catch((err: Error) =>
+              Logger.warn(`进化反馈提交失败: ${err.message}`, 'initHarness')
             );
-          }
         },
-        generateSkill: (params) => {
-          if (evolutionEngine?.generateSkill) {
-            return evolutionEngine.generateSkill(params);
-          }
+        assessQuality: () => {
+          // Python 侧在 collectFeedback 内统一评估质量
+        },
+        generateSkill: () => {
+          // 技能自生成已迁移 Python，TS 侧不再独立实现
           return null;
         },
-        nudgeKnowledgePersistence: (input, toolsUsed) => {
-          if (evolutionEngine?.nudgeKnowledgePersistence) {
-            return evolutionEngine.nudgeKnowledgePersistence(input, toolsUsed);
-          }
+        nudgeKnowledgePersistence: () => {
+          // 知识持久化已由 Python 记忆系统接管
           return null;
         },
       },
@@ -338,9 +349,7 @@ export async function initHarness(
       skillRegistry: SkillRegistry.getInstance(),
       evolutionExamples: {
         getPromptExamples: () => {
-          if (evolutionEngine?.getStrategyOptimizer) {
-            return evolutionEngine.getStrategyOptimizer().getPromptExamples();
-          }
+          // 进化提示样例现由 Python 后端提供（/v1/evolution/evolution-prompt）
           return [];
         },
       },
@@ -418,10 +427,11 @@ export async function initHarness(
           return isDuplicateContent(content, existingContents);
         },
         storeWithMetadata: async (content, category, metadata) => {
+          const emotionTag = metadata.importance >= 7 ? 'important' : 'neutral';
           await memoryEngine.storeShortTermMemory(
-            JSON.stringify({ content, metadata }),
+            content,
             category,
-            'neutral'
+            emotionTag
           );
           return true;
         },
@@ -580,10 +590,42 @@ export async function initHarness(
             }
           }
 
-          // 否定词翻转情绪极性
-          if (hasNegation && Math.abs(score) > 0) {
-            // 只在紧挨情绪词时翻转，简单处理：整句翻转
-            score = -score;
+          // 否定词翻转情绪极性（就近翻转：否定词仅翻转其前 3 字内的情绪词）
+          if (hasNegation) {
+            let negatedScore = 0;
+            let nonNegatedScore = 0;
+            const allEmotionWords = [
+              ...negativeWords.map((w) => ({ word: w, val: -1 })),
+              ...positiveWords.map((w) => ({ word: w, val: 1 })),
+            ];
+            const matchedRanges: Array<{ start: number; end: number }> = [];
+            for (const { word, val } of allEmotionWords) {
+              const regex = new RegExp(
+                word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+                'g'
+              );
+              let match: RegExpExecArray | null;
+              while ((match = regex.exec(text)) !== null) {
+                const start = match.index;
+                const end = start + word.length;
+                const isSubsumed = matchedRanges.some(
+                  (r) => start >= r.start && end <= r.end
+                );
+                if (isSubsumed) continue;
+                matchedRanges.push({ start, end });
+                const window = text.substring(Math.max(0, start - 3), start);
+                const isNegated = negations.some((n) => window.includes(n));
+                const weight = hasIntensifier ? 2 : 1;
+                if (isNegated) {
+                  negatedScore += -val * weight;
+                } else {
+                  nonNegatedScore += val * weight;
+                }
+              }
+            }
+            if (negatedScore !== 0 || nonNegatedScore !== 0) {
+              score = negatedScore + nonNegatedScore;
+            }
           }
 
           // 感叹号增强强度
@@ -605,6 +647,8 @@ export async function initHarness(
             return {
               type: 'negative' as const,
               intensity: Math.round(rawIntensity * 10) / 10,
+              dominant: matchedNeg > matchedPos ? 'negative' : 'mixed',
+              confidence: Math.min(1, Math.abs(score) / 5),
             };
           }
           if (score >= 2) {
@@ -612,9 +656,16 @@ export async function initHarness(
             return {
               type: 'positive' as const,
               intensity: Math.round(rawIntensity * 10) / 10,
+              dominant: matchedPos > matchedNeg ? 'positive' : 'mixed',
+              confidence: Math.min(1, score / 5),
             };
           }
-          return { type: 'neutral' as const, intensity: 1 };
+          return {
+            type: 'neutral' as const,
+            intensity: 1,
+            dominant: 'neutral',
+            confidence: 0.5,
+          };
         },
         recognizeScene: async (text: string) => {
           const { MultimodalInput } =
@@ -992,12 +1043,24 @@ export async function initHarness(
         },
         getHarnessStats: () => ({
           initialized: true,
-          config: { useHarnessTools: true, useHarnessLoop: true },
+          config: { useHarnessTools: true, useHarnessLoop: false },
           loopRounds: 0,
           toolCalls: 0,
           uptime: process.uptime(),
         }),
-        getEvolutionStats: () => {
+        getEvolutionStats: async () => {
+          const bridge = getActivePythonBridge();
+          if (bridge) {
+            try {
+              const metrics = (await bridge.getEvolutionMetrics()) as Record<
+                string,
+                unknown
+              > | null;
+              return metrics ?? {};
+            } catch {
+              return {};
+            }
+          }
           const orchestrator = (() => {
             try {
               return require('../../evolution/EvolutionOrchestrator').EvolutionOrchestrator.getInstance();
@@ -1156,8 +1219,10 @@ export async function initHarness(
     );
     evaluationPipeline.addStage('quality_scoring', new QualityScorer(), 0.45);
     harnessDeps.evaluationPipeline =
-      evaluationPipeline as unknown as import('../../harness/loop/LoopController').LoopControllerDeps['evaluationPipeline'];
-    Logger.info('  📊 EvaluationPipeline: 已注入 LoopController', 'Bootstrap');
+      evaluationPipeline as unknown as NonNullable<
+        HarnessDeps['evaluationPipeline']
+      >;
+    Logger.info('  📊 EvaluationPipeline: 已注入 HarnessDeps', 'Bootstrap');
 
     // P2: ContextReferenceResolver — @引用解析器
     const contextReferenceResolver = new ContextReferenceResolver({
@@ -1174,20 +1239,8 @@ export async function initHarness(
     harnessDeps.outputGuardrails = outputGuardrails;
     Logger.info('  🛡️ OutputGuardrailEngine: 已注入 AgentHarness', 'Bootstrap');
 
-    // P2: CausalModeler — 因果建模器（注入 LoopController 供规划阶段使用）
-    const causalModeler = new CausalModeler(
-      harnessDeps.llm
-        ? {
-            chat: async (prompt: string, systemPrompt?: string) =>
-              harnessDeps.llm.chat(prompt, systemPrompt),
-          }
-        : null
-    );
-    harnessDeps.causalModeler = causalModeler;
-    Logger.info(
-      '  🔗 CausalModeler: 已注入 LoopController 规划阶段',
-      'Bootstrap'
-    );
+    // P2: CausalModeler — 已迁移到 Python agent/loop/causal.py，TS端不再初始化
+    Logger.info('  🔗 CausalModeler: 已迁移到 Python 后端', 'Bootstrap');
 
     // P3: TrajectoryFlywheel — 轨迹飞轮引擎（需要 TrajectoryDatabase，在 initialize 后注入）
     Logger.info('  🔄 TrajectoryFlywheel: 将在 initialize 后注入', 'Bootstrap');
@@ -1299,10 +1352,7 @@ export async function initHarness(
       const trajectoryFlywheel = new TrajectoryFlywheel(trajectoryDB);
       harnessDeps.trajectoryFlywheel = trajectoryFlywheel;
       harness.injectTrajectoryFlywheel(trajectoryFlywheel);
-      Logger.info(
-        '  🔄 TrajectoryFlywheel: 已注入 LoopController 进化闭环',
-        'Bootstrap'
-      );
+      Logger.info('  🔄 TrajectoryFlywheel: 已注入 AgentHarness', 'Bootstrap');
     } else {
       Logger.warn(
         '  ⚠️ TrajectoryFlywheel: TrajectoryDatabase 不可用，跳过注入',

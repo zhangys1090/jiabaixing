@@ -77,9 +77,10 @@ export class EnvironmentManager {
     this.loadEnvironment();
   }
 
-  /**
-   * 获取单例实例
-   */
+  public static create(): EnvironmentManager {
+    return new EnvironmentManager();
+  }
+
   public static getInstance(): EnvironmentManager {
     if (!EnvironmentManager.instance) {
       EnvironmentManager.instance = new EnvironmentManager();
@@ -120,7 +121,7 @@ export class EnvironmentManager {
           'http://127.0.0.1:8001/v1'
         ),
         OPENAI_API_KEY: this.getString('_OPENAI_API_KEY', 'not-needed'),
-        LLM_MODEL: this.getString('_LLM_MODEL', 'deepseek-chat'),
+        LLM_MODEL: this.getString('_LLM_MODEL', 'deepseek-v4-flash'),
         EMBEDDING_MODEL: this.getString(
           'EMBEDDING_MODEL',
           'text-embedding-3-small'

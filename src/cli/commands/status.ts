@@ -1,7 +1,7 @@
 import { Logger } from '../../utils/Logger';
 import { COLORS, c } from '../constants';
-import { checkBackendHealth, getIM } from '../utils';
 import { SubcommandOptions } from '../types';
+import { checkBackendHealth, getIM } from '../utils';
 
 /**
  * 处理 /status 命令（REPL 模式）
@@ -32,7 +32,7 @@ export async function handleStatusCommand(): Promise<void> {
   }
 
   const im = getIM();
-  const platforms = im.getPlatforms();
+  const platforms = await im.getPlatforms();
   if (platforms.length > 0) {
     Logger.info(`\n  ${COLORS.dim}平台连接:${COLORS.reset}`, 'CLI');
     for (const p of platforms) {

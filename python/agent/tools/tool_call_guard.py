@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from agent.core.logger import StructuredLogger
+from agent.perception.sensory_fusion import FusedPerception
+from agent.tools.constitution_guard import ConstitutionGuard
 
 log = StructuredLogger("tool_call_guard")
 
@@ -79,19 +81,61 @@ class ToolCallGuard:
         self._result_cache: dict[str, CachedResult] = {}
         self._call_history: list[ToolCallRecord] = []
         self._per_tool_counts: dict[str, int] = {}
+        # 宪法/人格约束守卫（U4 第2项）：前置到动作执行闸门
+        self._constitution_guard: ConstitutionGuard | None = None
+        # 当前轮次的融合感知，供宪法守卫做"危险信号"判断
+        self._current_perception: FusedPerception | None = None
 
-    def check(self, tool_name: str, args: dict[str, Any]) -> GuardResult:
+    def set_constitution_guard(self, guard: ConstitutionGuard) -> None:
+        """注入宪法守卫（可选）。未注入时不做宪法约束检查。"""
+        self._constitution_guard = guard
+
+    def set_current_perception(self, fused: FusedPerception | None) -> None:
+        """设置当前轮次的融合感知，供宪法守卫判断危险信号。"""
+        self._current_perception = fused
+
+    def check(
+        self,
+        tool_name: str,
+        args: dict[str, Any],
+        perception: FusedPerception | None = None,
+    ) -> GuardResult:
         """检查工具调用是否被拦截。
 
-        依次检查：缓存命中 → 去重检测 → 速率限制。
+        依次检查：宪法约束 → 缓存命中 → 去重检测 → 速率限制。
+        宪法约束为前置硬闸门，可基于当前感知危险信号拦截破坏性动作。
 
         Args:
             tool_name: 工具名称。
             args: 调用参数。
+            perception: 可选的当前融合感知；缺省时回退到 set_current_perception 设置的值。
 
         Returns:
             GuardResult: 包含blocked标志和替代结果。
         """
+        # —— 宪法/人格约束前置闸门（U4 第2项）——
+        if self._constitution_guard is not None:
+            fused = perception if perception is not None else self._current_perception
+            verdict = self._constitution_guard.evaluate(
+                {"tool": tool_name, "args": args}, fused=fused
+            )
+            if not verdict.allowed:
+                log.warning("宪法守卫拦截动作", tool=tool_name, reason=verdict.reason)
+                return GuardResult(
+                    blocked=True,
+                    result={
+                        "success": False,
+                        "output": f"[宪法守卫拦截] {verdict.reason}",
+                        "duration": 0,
+                        "validated": True,
+                        "metadata": {
+                            "constitutionBlocked": True,
+                            "violations": [v.rule_id for v in verdict.violations],
+                        },
+                    },
+                    reason=verdict.reason,
+                )
+
         args_hash = self._hash_args(args)
         now_ms = time.time() * 1000
 

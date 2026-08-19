@@ -40,6 +40,10 @@ import { FILE_SEARCH_DEF } from './file/file_search';
 import { GET_ACTIVE_FILE_DEF } from './file/get_active_file';
 import { INCREMENTAL_EDIT_DEF } from './file/incremental_edit';
 import { MULTI_FILE_EDIT_DEF } from './file/multi_file_edit';
+import {
+  SUBDIRECTORY_HINTS_DEF,
+  createSubdirectoryHintsExecutor,
+} from './file/subdirectory_hints';
 
 // === 代码工具 ===
 import { CODE_ANALYZE_DEF } from './code/code_analyze';
@@ -98,10 +102,15 @@ import {
   createDelegateTaskExecutor,
 } from './system/delegate_task';
 import {
+  DISK_CLEANUP_DEF,
+  createDiskCleanupExecutor,
+} from './system/disk_cleanup';
+import {
   EXECUTE_CODE_DEF,
   createExecuteCodeExecutor,
   type ExecuteCodeDeps,
 } from './system/execute_code';
+import { OSV_SCAN_DEF, createOsvScanExecutor } from './system/osv_scan';
 import { SHELL_EXEC_DEF } from './system/shell_exec';
 import {
   SHELL_GENERATE_DEF,
@@ -112,6 +121,41 @@ import {
   createVoiceInteractExecutor,
   type VoiceInteractDeps,
 } from './system/voice_interact';
+
+// === T0/T1/T2 新增工具 ===
+import {
+  BUDGET_MANAGE_DEF,
+  createBudgetManageExecutor,
+} from './system/budget_manage';
+import {
+  CONVERSATION_COMPRESSION_DEF,
+  createConversationCompressionExecutor,
+  type ConversationCompressionDeps,
+} from './system/conversation_compression';
+import { LAZY_DEPS_DEF, createLazyDepsExecutor } from './system/lazy_deps';
+import {
+  RESULT_CACHE_DEF,
+  createResultCacheExecutor,
+} from './system/result_cache';
+import {
+  SECURITY_GUIDANCE_DEF,
+  createSecurityGuidanceExecutor,
+} from './system/security_guidance';
+import {
+  TODO_MANAGE_DEF,
+  createTodoManageExecutor,
+} from './system/todo_manage';
+import {
+  WRITE_APPROVAL_DEF,
+  createWriteApprovalExecutor,
+  type WriteApprovalDeps,
+} from './system/write_approval';
+
+// === T3 新增工具 ===
+import {
+  PROJECT_MANAGER_DEF,
+  createProjectManagerExecutor,
+} from './system/project_manager';
 
 // ── LSP 工具定义与执行器 ──
 import {
@@ -144,6 +188,8 @@ import {
   createLspSymbolsExecutor,
   type LspSymbolsDeps,
 } from './lsp/lsp_symbols';
+
+// === 元工具（动态工具自创造） ===
 
 // === 工具执行器工厂 ===
 import {
@@ -321,7 +367,9 @@ export interface HarnessToolDeps
     LspHoverDeps,
     LspDefinitionDeps,
     LspReferencesDeps,
-    LspSymbolsDeps {
+    LspSymbolsDeps,
+    WriteApprovalDeps,
+    ConversationCompressionDeps {
   // 允许运行时动态挂载额外依赖（如 messageProcessor、i18nManager）
   [key: string]: unknown;
 }
@@ -373,6 +421,10 @@ export function registerHarnessTools(
   toolRegistry.register(FILE_LIST_DEF, createFileListExecutor(deps));
   toolRegistry.register(FILE_GREP_DEF, createFileGrepExecutor(deps));
   toolRegistry.register(FILE_DEDUP_DEF, createFileDedupExecutor());
+  toolRegistry.register(
+    SUBDIRECTORY_HINTS_DEF,
+    createSubdirectoryHintsExecutor()
+  );
 
   // 代码工具 (3)
   toolRegistry.register(CODE_GENERATE_DEF, createCodeGenerateExecutor(deps));
@@ -443,6 +495,26 @@ export function registerHarnessTools(
           });
         }
       : undefined,
+    // D1: 记忆召回不足时降级到 web_search（复用 HarnessToolDeps.searchEngine）
+    webSearch: deps.searchEngine
+      ? async (query, limit) => {
+          const r = await deps.searchEngine!(query, {
+            searchType: 'web',
+            maxResults: limit,
+            language: 'zh-CN',
+          });
+          return r.map((x) => ({
+            content: x.snippet || x.title,
+            source: x.url,
+          }));
+        }
+      : undefined,
+    // D1: 网络检索补强结果回填记忆（RAG 闭环），复用 MemoryStoreDeps.storeShortTermMemory
+    memoryStore: deps.storeShortTermMemory
+      ? async (query, content) => {
+          await deps.storeShortTermMemory!(content, 'knowledge');
+        }
+      : undefined,
   };
   toolRegistry.register(
     KNOWLEDGE_QUERY_DEF,
@@ -487,6 +559,30 @@ export function registerHarnessTools(
   );
   toolRegistry.register(CONTEXT_MANAGE_DEF, createContextManageExecutor(deps));
   toolRegistry.register(VOICE_INTERACT_DEF, createVoiceInteractExecutor(deps));
+  toolRegistry.register(OSV_SCAN_DEF, createOsvScanExecutor());
+  toolRegistry.register(DISK_CLEANUP_DEF, createDiskCleanupExecutor());
+
+  // T0 新增工具: todo_manage + write_approval
+  toolRegistry.register(TODO_MANAGE_DEF, createTodoManageExecutor());
+  toolRegistry.register(WRITE_APPROVAL_DEF, createWriteApprovalExecutor(deps));
+
+  // T1 新增工具: lazy_deps + result_cache + conversation_compression
+  toolRegistry.register(LAZY_DEPS_DEF, createLazyDepsExecutor());
+  toolRegistry.register(RESULT_CACHE_DEF, createResultCacheExecutor());
+  toolRegistry.register(
+    CONVERSATION_COMPRESSION_DEF,
+    createConversationCompressionExecutor({ llm: deps.llm })
+  );
+
+  // T2 新增工具: budget_manage + security_guidance
+  toolRegistry.register(BUDGET_MANAGE_DEF, createBudgetManageExecutor());
+  toolRegistry.register(
+    SECURITY_GUIDANCE_DEF,
+    createSecurityGuidanceExecutor()
+  );
+
+  // T3 新增工具: project_manager
+  toolRegistry.register(PROJECT_MANAGER_DEF, createProjectManagerExecutor());
 
   // LSP 工具 (5) — Phase 2 集成
   toolRegistry.register(
@@ -498,6 +594,12 @@ export function registerHarnessTools(
   toolRegistry.register(LSP_DEFINITION_DEF, createLspDefinitionExecutor(deps));
   toolRegistry.register(LSP_REFERENCES_DEF, createLspReferencesExecutor(deps));
   toolRegistry.register(LSP_SYMBOLS_DEF, createLspSymbolsExecutor(deps));
+
+  // 元工具（动态工具自创造）
+  const metaDeps = { toolRegistry };
+  toolRegistry.register(TOOL_DEFINE_DEF, createToolDefineExecutor(metaDeps));
+  toolRegistry.register(TOOL_INSPECT_DEF, createToolInspectExecutor(metaDeps));
+  toolRegistry.register(TOOL_UNDEFINE_DEF, createToolUndefineExecutor(metaDeps));
 
   Logger.info(
     `🔧 Harness 工具注册完成: ${toolRegistry.size} 个工具`,

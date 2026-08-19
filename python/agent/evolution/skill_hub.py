@@ -32,6 +32,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from agent.config import DATA_ROOT
 from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("skill_hub")
@@ -194,10 +195,11 @@ class SkillHub:
     管理技能的发布、发现、安装和更新。
     """
 
-    def __init__(self, skills_dir: Path | None = None) -> None:
-        self._dir = skills_dir or Path("data/skills")
+    def __init__(self, skills_dir: Path | None = None, auditor: Any = None) -> None:
+        self._dir = skills_dir or DATA_ROOT / "skills"
         self._registry: dict[str, SkillEntry] = {s.id: s for s in _BUILTIN_SKILLS}
         self._installed: dict[str, str] = {}
+        self._auditor = auditor
         self._load_installed()
 
     def _load_installed(self) -> None:
@@ -266,6 +268,30 @@ class SkillHub:
         target_version = version or entry.latest_version
         if entry.status == SkillStatus.INSTALLED and entry.installed_version == target_version:
             return InstallResult(success=True, skill_id=skill_id, version=target_version, message="已安装")
+
+        # 安装前安全审计
+        if self._auditor:
+            try:
+                skill_dir = self._dir / skill_id
+                if skill_dir.exists():
+                    py_files = list(skill_dir.glob("**/*.py"))
+                    for py_file in py_files:
+                        report = self._auditor.audit_file(py_file)
+                        if not report.is_safe:
+                            log.warning(
+                                "技能安装被安全审计阻止",
+                                skill_id=skill_id,
+                                risk_level=report.risk_level.value,
+                                violations=len(report.violations),
+                            )
+                            return InstallResult(
+                                success=False,
+                                skill_id=skill_id,
+                                version=target_version,
+                                message=f"安全审计未通过: {report.summary}",
+                            )
+            except Exception as e:
+                log.warning("技能安全审计异常，跳过审计继续安装", error=str(e))
 
         entry.status = SkillStatus.INSTALLED
         entry.installed_version = target_version

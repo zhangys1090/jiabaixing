@@ -7,6 +7,9 @@
  * 支持动态后端切换:
  *   AGENT_BACKEND=python  → 使用 Python Agent 后端（默认）
  *   AGENT_BACKEND=local   → 使用 TS 本地 JiabaixingCore（回退）
+ *
+ * 架构：复用 bootstrap.ts 中的全局 PythonAgentBridge 实例，
+ * 避免创建第二个 bridge 导致双重连接/双重回复。
  */
 
 import express from 'express';
@@ -18,8 +21,13 @@ import {
   type ACPDeps,
 } from '../../ide/ACPServer';
 import { PythonAgentBridge } from '../../ide/PythonAgentBridge';
-import { EventBus } from '../../shared/EventBus';
+import {
+  EventBus,
+  type EventName,
+  type JiabaixingEventBus,
+} from '../../shared/EventBus';
 import { Logger } from '../../utils/Logger';
+import { getPythonBridge, isPythonBackend } from '../bootstrap';
 
 let acpServer: ACPServer | null = null;
 let eventBusBridgeInitialized: boolean = false;
@@ -45,22 +53,9 @@ function isAuthEnabled(): boolean {
   return process.env.ACP_AUTH_ENABLED !== 'false';
 }
 
-function isPythonBackend(): boolean {
-  const backend = process.env.AGENT_BACKEND;
-  return backend !== 'local';
-}
-
 function setupEventBusBridge(bridge: PythonAgentBridge): void {
   if (eventBusBridgeInitialized) return;
   eventBusBridgeInitialized = true;
-
-  bridge.setTsEventBusForward((event: string, payload: unknown) => {
-    try {
-      void EventBus.emit(event as any, payload);
-    } catch {
-      // ignore emit errors
-    }
-  });
 
   const forwardEvents = [
     'agent_execution_update',
@@ -83,13 +78,19 @@ function setupEventBusBridge(bridge: PythonAgentBridge): void {
   ];
 
   for (const event of forwardEvents) {
-    EventBus.on(event as any, (data: unknown) => {
-      bridge.forwardTsEvent(event, data);
-    });
+    (EventBus as JiabaixingEventBus).on(
+      event as EventName,
+      (...args: unknown[]) => {
+        const data = args.length === 1 ? args[0] : args;
+        bridge.forwardTsEvent(event, data);
+      }
+    );
   }
 
-  bridge.connectEvents();
-  Logger.info('🔌 EventBus 双向桥接已建立 (TS ↔ Python)', 'ACPRoutes');
+  Logger.info(
+    '🔌 EventBus TS→Python 单向桥接已建立（Python→TS 由 bootstrap.ts 管理）',
+    'ACPRoutes'
+  );
 }
 
 function getACPServer(core: JiabaixingCore): ACPServer {
@@ -99,14 +100,26 @@ function getACPServer(core: JiabaixingCore): ACPServer {
   let deps: ACPDeps;
 
   if (usePython) {
-    const bridge = new PythonAgentBridge({
-      baseUrl: process.env.PYTHON_AGENT_URL || 'http://localhost:3112',
-      timeout: 60000,
-    });
-    pythonBridge = bridge;
-    deps = bridge;
-    setupEventBusBridge(bridge);
-    Logger.info('🔌 ACPServer 使用 Python Agent 后端', 'ACPRoutes');
+    const bridge = getPythonBridge();
+    if (bridge) {
+      deps = bridge;
+      setupEventBusBridge(bridge);
+      Logger.info('🔌 ACPServer 复用全局 PythonAgentBridge 实例', 'ACPRoutes');
+    } else {
+      deps = {
+        processInput: async (message, sessionId) => {
+          const result = await core.processInput(message, sessionId);
+          return { response: result.response, traceId: result.traceId };
+        },
+        getFileDiffs: () => [],
+        getTerminalCommands: () => [],
+        getToolActivities: () => [],
+      };
+      Logger.info(
+        '🔌 ACPServer Python Bridge 不可用，降级到 TS 本地',
+        'ACPRoutes'
+      );
+    }
   } else {
     deps = {
       processInput: async (message, sessionId) => {

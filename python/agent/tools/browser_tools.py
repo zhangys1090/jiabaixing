@@ -16,6 +16,8 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
 from agent.tools.registry import (
     ToolCategory,
     ToolDefinition,
@@ -27,6 +29,8 @@ from agent.tools.browser_automation import (
     BrowserConfig,
     BrowserConnectionMode,
 )
+
+log = StructuredLogger("browser_tools")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -169,6 +173,7 @@ async def browser_agent_executor(params: dict[str, Any]) -> ToolResult:
     headless = bool(params.get("headless", True))
 
     if not task:
+        log.warning("browser_agent: 任务为空")
         return ToolResult(success=False, error="请提供浏览器任务描述", duration=time.time() - start)
 
     try:
@@ -506,8 +511,8 @@ async def browser_fill_form_executor(params: dict[str, Any]) -> ToolResult:
             if wait_for_selector:
                 try:
                     await page.wait_for_selector(wait_for_selector, timeout=5000)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    log_ignored(log, "browser_tools.browser_fill_form_executor", _exc)
 
             # ─── iframe 处理 ───
             fill_context: Any = page
@@ -515,8 +520,8 @@ async def browser_fill_form_executor(params: dict[str, Any]) -> ToolResult:
                 try:
                     frame_locator = page.frame_locator(iframe_selector)
                     fill_context = frame_locator
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    log_ignored(log, "browser_tools.browser_fill_form_executor", _exc)
 
             results: dict[str, bool] = {}
 
@@ -555,8 +560,8 @@ async def browser_fill_form_executor(params: dict[str, Any]) -> ToolResult:
                         submit_btn = page.locator(submit_sel).first
                         if await submit_btn.count() > 0:
                             await submit_btn.click()
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    log_ignored(log, "browser_tools.browser_fill_form_executor", _exc)
 
             filled = sum(1 for v in results.values() if v)
             total = len(results)
@@ -640,7 +645,8 @@ async def _detect_captcha(page: Any) -> dict[str, Any]:
                         elif captcha_type == "slider_captcha":
                             result["hint"] = "滑块验证码，需要拖动滑块到正确位置"
                         return result
-            except Exception:
+            except Exception as e:
+                log_ignored(log, "browser_tools._detect_captcha", e)
                 continue
 
     return result
@@ -685,32 +691,32 @@ async def _find_input_selector(page: Any, description: str, is_frame: bool = Fal
             input_inside = label.locator("input, textarea, select").first
             if await input_inside.count() > 0:
                 return "input, textarea, select"
-    except Exception:
-        pass
+    except Exception as _exc:
+        log_ignored(log, "browser_tools._find_input_selector", _exc)
 
     # 策略2: placeholder匹配
     try:
         by_placeholder = page.locator(f'[placeholder*="{description}" i]').first
         if await by_placeholder.count() > 0:
             return f'[placeholder*="{description}" i]'
-    except Exception:
-        pass
+    except Exception as _exc:
+        log_ignored(log, "browser_tools._find_input_selector", _exc)
 
     # 策略3: name属性匹配
     try:
         by_name = page.locator(f'[name*="{desc_lower}" i]').first
         if await by_name.count() > 0:
             return f'[name*="{desc_lower}" i]'
-    except Exception:
-        pass
+    except Exception as _exc:
+        log_ignored(log, "browser_tools._find_input_selector", _exc)
 
     # 策略4: aria-label 匹配
     try:
         by_aria = page.locator(f'[aria-label*="{description}" i]').first
         if await by_aria.count() > 0:
             return f'[aria-label*="{description}" i]'
-    except Exception:
-        pass
+    except Exception as _exc:
+        log_ignored(log, "browser_tools._find_input_selector", _exc)
 
     # 策略5: 类型推断
     for hint, selector in type_hints.items():
@@ -719,7 +725,7 @@ async def _find_input_selector(page: Any, description: str, is_frame: bool = Fal
                 elem = page.locator(selector).first
                 if await elem.count() > 0:
                     return selector
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "browser_tools._find_input_selector", _exc)
 
     return None

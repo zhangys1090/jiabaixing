@@ -796,10 +796,9 @@ describe('V5.0 Task 1: Harness 系统完整性验证', () => {
       }
     });
 
-    test('所有测试应该能够正常通过（自我验证）', () => {
-      // 这个测试用于验证我们的测试框架本身是正常的
-      expect(true).toBe(true);
-      expect(1 + 1).toBe(2);
+    test('tool registry 应包含已注册的全部工具', () => {
+      // 验证工具注册表结构正常且数量符合预期（非恒真断言）
+      expect(Array.isArray(ALL_TOOL_NAMES)).toBe(true);
       expect(ALL_TOOL_NAMES.length).toBe(33);
     });
   });

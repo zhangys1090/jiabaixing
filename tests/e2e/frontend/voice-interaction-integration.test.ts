@@ -18,9 +18,9 @@ describe('前端语音交互集成测试', () => {
       const response = await apiService.processMultimodalMessage(voiceInput);
       expect(response).toBeDefined();
       expect(response).toHaveProperty('success');
-    } catch {
-      // 后端未启动时测试 API 调用能力
-      expect(true).toBe(true);
+    } catch (err) {
+      // 后端未启动时，明确断言确实捕获到了错误，而非静默假绿通过
+      expect(err).toBeInstanceOf(Error);
     }
   }, 10000);
 });

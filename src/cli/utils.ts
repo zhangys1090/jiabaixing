@@ -1,7 +1,7 @@
-import * as path from 'path';
 import * as fs from 'fs';
-import { IntegrationManager } from '../integration/IntegrationManager';
+import * as path from 'path';
 import { GatewayBridge } from '../integration/GatewayBridge';
+import { IntegrationManager } from '../integration/IntegrationManager';
 import { Logger } from '../utils/Logger';
 import { backendUrl, COLORS, SHELL_COMMANDS } from './constants';
 import { ipcSend } from './ipc';
@@ -57,7 +57,7 @@ export async function checkBackendHealth(): Promise<{
         online: true,
         status: 'healthy',
         uptime: data.uptime as number,
-        model: process.env.LLM_MODEL || 'deepseek-chat',
+        model: process.env.LLM_MODEL || 'deepseek-v4-flash',
         llm: data.llm as { available: boolean; message?: string } | undefined,
       };
     }
@@ -248,3 +248,10 @@ export function detectEnvironmentType(title: string, proc: string): string {
   }
   return `${COLORS.dim}其他${COLORS.reset}`;
 }
+
+export {
+  applyRuntimePostureFlags,
+  parseRuntimePostureFlags,
+  RUNTIME_POSTURES,
+} from './runtimePosture';
+export type { RuntimePosture } from './runtimePosture';

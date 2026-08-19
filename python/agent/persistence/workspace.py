@@ -22,6 +22,8 @@ from pathlib import Path
 from typing import Any
 
 from agent.config import DATA_DIR
+from agent.core.logger import log_ignored
+from agent.infrastructure.safe_json import safe_json_loads
 
 
 # ==================== 数据类 ====================
@@ -347,8 +349,8 @@ class WorkspaceManager:
                 context["languages"] = coding_ctx.languages
                 context["frameworks"] = coding_ctx.frameworks
                 context["toolsets"] = coding_ctx.toolsets
-        except Exception:
-            pass
+        except Exception as _exc:
+            log_ignored(None, "workspace.WorkspaceManager.get_workspace_context", _exc)
 
         # 集成 SubdirectoryHints
         try:
@@ -362,8 +364,8 @@ class WorkspaceManager:
                 "constraints": hints.constraints,
                 "warnings": hints.warnings,
             }
-        except Exception:
-            pass
+        except Exception as _exc:
+            log_ignored(None, "workspace.WorkspaceManager.get_workspace_context", _exc)
 
         return context
 
@@ -391,8 +393,8 @@ class WorkspaceManager:
             coding_ctx = detector.detect(path)
             if coding_ctx is not None:
                 project_type = coding_ctx.project_type
-        except Exception:
-            pass
+        except Exception as _exc:
+            log_ignored(None, "workspace.WorkspaceManager.auto_detect_workspace", _exc)
 
         if project_type is None:
             # 降级：检测基本特征文件
@@ -427,8 +429,12 @@ class WorkspaceManager:
 
         try:
             content = self._storage_path.read_text(encoding="utf-8")
-            data = json.loads(content)
+            data = safe_json_loads(content, {}, context="workspace.load")
         except (json.JSONDecodeError, OSError):
+            return
+        if not isinstance(data, dict):
+            # workspaces.json 顶层被覆盖为非 dict（数组/标量）时，旧的 data.get(...)
+            # 会抛 AttributeError 逃逸构造器 → WorkspaceManager() 崩溃。
             return
 
         workspaces_data = data.get("workspaces", {})
@@ -459,5 +465,5 @@ class WorkspaceManager:
                 json.dumps(data, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
-        except OSError:
-            pass
+        except OSError as _exc:
+            log_ignored(None, "workspace.WorkspaceManager._save", _exc)

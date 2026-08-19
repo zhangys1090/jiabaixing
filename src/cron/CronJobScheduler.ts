@@ -64,6 +64,31 @@ class CronPromptInjectionScanner {
     /(?:postMessage\s*\()/i,
     /(?:document\.cookie|localStorage\.clear)/i,
     /(?:__proto__|constructor\.prototype)/i,
+    /(?:curl\s|wget\s)/i,
+    /(?:nc\s+-|ncat\s|netcat\s)/i,
+    /(?:bash\s+-c|sh\s+-c|powershell\s+-enc)/i,
+    /(?:chmod\s+[0-7]{3,4}|chown\s)/i,
+    /(?:\/etc\/passwd|\/etc\/shadow|\/\.ssh\/)/i,
+    /(?:base64\s+--decode|xxd\s+-r)/i,
+  ];
+
+  private static readonly ALLOWED_COMMAND_PREFIXES: string[] = [
+    'node ',
+    'npx ',
+    'npm ',
+    'python ',
+    'python3 ',
+    'pip ',
+    'echo ',
+    'git ',
+    'ls ',
+    'cat ',
+    'mkdir ',
+    'cp ',
+    'mv ',
+    'jq ',
+    'sqlite3 ',
+    'jiabaixing-',
   ];
 
   static scan(prompt: string): { blocked: boolean; reason?: string } {
@@ -76,6 +101,26 @@ class CronPromptInjectionScanner {
       }
     }
     return { blocked: false };
+  }
+
+  static validateWhitelist(command: string): {
+    allowed: boolean;
+    reason?: string;
+  } {
+    const trimmed = command.trim();
+
+    const isAllowed = CronPromptInjectionScanner.ALLOWED_COMMAND_PREFIXES.some(
+      (prefix) => trimmed.startsWith(prefix)
+    );
+
+    if (!isAllowed) {
+      return {
+        allowed: false,
+        reason: `命令不在白名单中: "${trimmed.split(' ')[0]}"`,
+      };
+    }
+
+    return { allowed: true };
   }
 }
 
@@ -201,6 +246,10 @@ export class CronJobScheduler {
     this.loadJobs();
   }
 
+  public static create(): CronJobScheduler {
+    return new CronJobScheduler();
+  }
+
   public static getInstance(): CronJobScheduler {
     if (!CronJobScheduler.instance) {
       CronJobScheduler.instance = new CronJobScheduler();
@@ -234,6 +283,30 @@ export class CronJobScheduler {
 
   /** 注册新任务 */
   public register(job: Omit<CronJob, 'status'>): void {
+    const injectionScan = CronPromptInjectionScanner.scan(job.command);
+    if (injectionScan.blocked) {
+      Logger.error(
+        `[CronJobScheduler] 任务注册被拒绝 (注入检测): ${injectionScan.reason}`,
+        undefined,
+        'CronJobScheduler'
+      );
+      throw new Error(`Cron任务注入检测失败: ${injectionScan.reason}`);
+    }
+
+    const whitelistCheck = CronPromptInjectionScanner.validateWhitelist(
+      job.command
+    );
+    if (!whitelistCheck.allowed) {
+      Logger.warn(
+        `[CronJobScheduler] 任务注册警告 (白名单): ${whitelistCheck.reason}`,
+        'CronJobScheduler'
+      );
+      Logger.warn(
+        `[CronJobScheduler] 任务 "${job.name}" 的命令不在白名单中，但仍允许注册。建议将命令前缀添加到 ALLOWED_COMMAND_PREFIXES`,
+        'CronJobScheduler'
+      );
+    }
+
     const fullJob: CronJob = {
       ...job,
       status: 'idle',

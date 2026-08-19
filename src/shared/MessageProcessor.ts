@@ -63,6 +63,10 @@ export class MessageProcessor {
 
   private constructor() {}
 
+  static create(): MessageProcessor {
+    return new MessageProcessor();
+  }
+
   static getInstance(): MessageProcessor {
     if (!MessageProcessor.instance) {
       MessageProcessor.instance = new MessageProcessor();

@@ -27,6 +27,13 @@
  * 【注意】
  * TypeScript 端的 V1 已标记 deprecated，将在 V6.0 移除。
  * 默认使用 Python 后端时，进化引擎在 Python 端运行。
+ *
+ * 【P2-3 收口（2026-08-03）】
+ * 本模块（含 EvolutionOrchestrator / EvolutionEngineV2）已正式收口为
+ * AGENT_BACKEND=local 的废弃回退存根。生产路径（AGENT_BACKEND=python，默认）下，
+ * `src/server/init/initEvolution.ts` 不再启动 TS 自进化引擎（避免 TS 直接写文件），
+ * 所有进化执行与数据由 Python `agent.evolution` 经 `PythonAgentBridge` 接管
+ * （详见 `docs/P2-3_EVOLUTION_LLM_CLOSURE_DESIGN.md`）。请勿在新代码中依赖其运行时行为。
  */
 
 // V2 真正自我进化引擎
@@ -35,6 +42,3 @@ export { EvolutionRollback } from './v2/EvolutionRollback';
 export { SelfModificationEngine } from './v2/SelfModificationEngine';
 export { EvolutionPlanner } from './v2/EvolutionPlanner';
 export * from './v2/types';
-
-// V1 反馈学习引擎（已废弃，仅用于向后兼容）
-export { EvolutionEngine } from './EvolutionEngine';

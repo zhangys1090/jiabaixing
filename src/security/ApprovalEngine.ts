@@ -167,6 +167,10 @@ export class ApprovalEngine {
     Logger.info('ApprovalEngine 已初始化', 'ApprovalEngine');
   }
 
+  getPolicy(): Readonly<ApprovalPolicy> {
+    return this.policy;
+  }
+
   /**
    * 更新审批策略
    */
@@ -352,7 +356,7 @@ export class ApprovalEngine {
       this.pending.set(request.id, { request, resolve, timer });
 
       // 通过 EventBus 发出审批请求，等待 UI 层响应
-      EventBus.emit('approval_request' as any, request);
+      EventBus.emit('approval_request', request);
 
       Logger.info(
         `📤 审批请求已发出: ${request.type} - ${request.target} (风险: ${this.assessRisk(request)})`,
@@ -439,7 +443,13 @@ export class ApprovalEngine {
     }
 
     // 通过 EventBus 通知（用于 UI 显示和审计日志）
-    EventBus.emit('approval_decision' as any, { request, decision });
+    EventBus.emit('approval_request', {
+      id: request.id,
+      type: request.type,
+      description: request.description,
+      target: request.target,
+      risk: request.risk,
+    });
   }
 
   /**

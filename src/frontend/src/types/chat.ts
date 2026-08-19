@@ -3,7 +3,7 @@
  * WebSocket 事件类型引用共享契约层
  */
 
-import { ConnectionStatus as ContractConnectionStatus, WsServerEventType, WS_EVENTS } from '@shared/contracts';
+import { ConnectionStatus as ContractConnectionStatus, WS_EVENTS, WsServerEventType } from '@shared/contracts';
 
 export type MessageStatus =
   | 'idle'
@@ -18,6 +18,16 @@ export type MessageStatus =
 
 export type MessageSender = 'user' | 'assistant' | 'system';
 
+export interface ToolCallEvent {
+  toolName: string;
+  toolArgs?: Record<string, unknown>;
+  success?: boolean;
+  resultSummary?: string;
+  error?: string;
+  durationMs?: number;
+  timestamp: number;
+}
+
 export interface Message {
   id: string;
   content: string;
@@ -26,9 +36,11 @@ export interface Message {
   status: MessageStatus;
   emoji?: string;
   images?: string[];
-  retryPayload?: { text: string; images?: string[] };
+  retryPayload?: { text: string; images?: string[]; files?: unknown[] };
   errorReason?: string;
   isRead?: boolean;
+  toolEvents?: ToolCallEvent[];
+  thinkingText?: string;
 }
 
 export interface MessageBubbleProps {
@@ -48,10 +60,21 @@ export interface TypewriterTextProps {
 
 export type ConnectionStatus = ContractConnectionStatus;
 
+export type ModuleId =
+  | 'chat'
+  | 'memory'
+  | 'agent'
+  | 'evolution'
+  | 'skills'
+  | 'desktop'
+  | 'automation'
+  | 'security'
+  | 'monitor';
+
 export interface WebSocketMessage {
   type: WsServerEventType;
-  data?: Record<string, unknown>;
-  payload?: Record<string, unknown>;
+  data?: unknown;
+  payload?: unknown;
   traceId?: string;
   timestamp?: number;
 }

@@ -248,7 +248,7 @@ class SessionLineageTracker:
         if row is None:
             return False
 
-        tags: list[str] = json.loads(row[0])
+        tags: list[str] = safe_json_loads(row[0], [], context="session_lineage.tags")
         if tag in tags:
             return False
 
@@ -351,5 +351,5 @@ class SessionLineageTracker:
             child_ids=self._get_child_ids(session_id),
             created_at=row[2],
             summary=row[3],
-            tags=json.loads(row[4]),
+            tags=safe_json_loads(row[4], [], context="session_lineage.tags4"),
         )

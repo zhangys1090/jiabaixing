@@ -1,26 +1,27 @@
+import jwt from 'jsonwebtoken';
+import { perf } from '../monitoring/PerformanceMonitor';
 import { AuditLogger } from './AuditLogger';
 import { AuthenticationManager } from './AuthenticationManager';
 import { EncryptionManager } from './EncryptionManager';
 import { SecurityPolicyEngine } from './SecurityPolicyEngine';
-import { perf } from '../monitoring/PerformanceMonitor';
-import jwt from 'jsonwebtoken';
 import type {
-  User,
-  OperationAudit,
-  SecurityIncidentEvent,
-  RiskAssessment,
   EncryptionOptions,
+  OperationAudit,
+  RiskAssessment,
+  SecurityIncidentEvent,
+  User,
 } from './types';
 
 export type {
-  User,
-  OperationAudit,
-  RiskLevel,
-  RiskAssessment,
+  AccessControlRule,
   EncryptionOptions,
+  OperationAudit,
+  Permission,
+  RiskAssessment,
+  RiskLevel,
+  SecurityIncidentEvent as SecurityEvent,
+  User
 } from './types';
-export type { SecurityIncidentEvent as SecurityEvent } from './types';
-export type { Permission, AccessControlRule } from './types';
 
 interface AuditLogEntry {
   id?: string;
@@ -53,6 +54,7 @@ export class SecurityManager {
   private authenticationManager: AuthenticationManager;
   private auditLogger: AuditLogger;
   private policyEngine: SecurityPolicyEngine;
+  private apiKeyManager: ApiKeyManager;
   private emergencyMode = false;
 
   constructor() {
@@ -60,12 +62,15 @@ export class SecurityManager {
     this.authenticationManager = new AuthenticationManager();
     this.auditLogger = new AuditLogger();
     this.policyEngine = SecurityPolicyEngine.getInstance();
+    this.apiKeyManager = ApiKeyManager.create();
   }
 
   public async initialize(): Promise<void> {
     await this.encryptionManager.initialize();
     await this.authenticationManager.initialize();
     await this.auditLogger.initialize();
+    this.apiKeyManager.setAuditLogger(this.auditLogger);
+    await this.apiKeyManager.initialize();
     this.initialized = true;
   }
 
@@ -73,6 +78,7 @@ export class SecurityManager {
     void this.encryptionManager.shutdown();
     void this.authenticationManager.shutdown();
     void this.auditLogger.shutdown();
+    await this.apiKeyManager.shutdown();
     this.initialized = false;
     this.policyEngine.clearRateLimits();
     this.emergencyMode = false;
@@ -82,6 +88,10 @@ export class SecurityManager {
     if (!this.initialized) {
       throw new Error('安全管理器未初始化');
     }
+  }
+
+  public getApiKeyManager(): ApiKeyManager {
+    return this.apiKeyManager;
   }
 
   public encrypt(data: string, _options: EncryptionOptions): string {
@@ -133,17 +143,16 @@ export class SecurityManager {
 
   public hashPassword(password: string): string {
     this.ensureInitialized();
-    return this.encryptionManager.hash(password);
+    const salt = this.encryptionManager.generateRandomKey(16);
+    const hash = this.encryptionManager.hashWithSaltSync(password, salt);
+    return salt + hash;
   }
 
   public verifyPassword(password: string, hashedPassword: string): boolean {
     this.ensureInitialized();
     const salt = hashedPassword.substring(0, 32);
-    return this.encryptionManager.verifyHashWithSalt(
-      password,
-      hashedPassword,
-      salt
-    );
+    const hash = hashedPassword.substring(32);
+    return this.encryptionManager.verifyHashWithSalt(password, hash, salt);
   }
 
   private userStore: Map<string, User> = new Map();
@@ -198,10 +207,9 @@ export class SecurityManager {
         const result = await this.authenticationManager.authenticate({
           username,
           password,
-        } as unknown as AuthRequest);
-        const authResult = result as unknown as AuthResult;
+        } satisfies AuthRequest);
         if (result && typeof result === 'object' && 'user' in result) {
-          return authResult.user as User;
+          return (result as AuthResult).user as User;
         }
         return null;
       },
@@ -437,9 +445,12 @@ export class SecurityManager {
     this.ensureInitialized();
     const result = this.auditLogger.queryLogs({
       userId,
-      startTime: startDate,
-      endTime: endDate,
-    } as unknown as Partial<import('./types').AuditLogEntry>);
+      startDate,
+      endDate,
+    } as Partial<import('./types').AuditLogEntry> & {
+      startDate?: Date;
+      endDate?: Date;
+    });
     return (Array.isArray(result) ? result : []).map(
       (entry: AuditLogEntry) => ({
         id: entry.id || `audit_${Date.now()}`,
@@ -688,7 +699,7 @@ export class SecurityManager {
   }
 }
 
-export { SecurityCore } from './SecurityCore';
-export type { SecurityCoreConfig } from './SecurityCore';
 export { AuditService } from './AuditService';
 export type { AuditServiceConfig } from './AuditService';
+export { SecurityCore } from './SecurityCore';
+export type { SecurityCoreConfig } from './SecurityCore';

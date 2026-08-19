@@ -194,14 +194,17 @@ export interface MemoryAssistantDeps {
   ): Promise<void>;
 }
 
-export interface HarnessDeps {
+export interface RequiredHarnessDeps {
   llm: LLMProviderDeps;
-  modelRouter?: ModelRouterDeps;
   constitutionalBuilder: ConstitutionalBuilderDeps;
   memoryInjector: MemoryInjectorDeps;
-  memoryStore?: MemoryStoreDeps;
   dynamicContext: DynamicContextDeps;
   historyProvider: HistoryProviderDeps;
+}
+
+export interface OptionalHarnessDeps {
+  modelRouter?: ModelRouterDeps;
+  memoryStore?: MemoryStoreDeps;
   toolDeps?: HarnessToolDeps;
   skillRegistry?: SkillRegistryDeps;
   persistenceDeps?: PersistenceServiceDeps;
@@ -251,23 +254,8 @@ export interface HarnessDeps {
   feedbackCollector?: FeedbackCollectorDeps;
   /** FeedbackLoops 闭环服务依赖 — 记忆助手（自动知识提取） */
   memoryAssistant?: MemoryAssistantDeps;
-  /** P2: CausalModeler — 因果建模器，识别步骤依赖和并行机会 */
-  causalModeler?: {
-    buildCausalModel(
-      task: string
-    ): Promise<import('./loop/CausalModeler').CausalGraph>;
-    analyzeDependencies(
-      graph: import('./loop/CausalModeler').CausalGraph,
-      stepId: string
-    ): import('./loop/CausalModeler').DependencyAnalysis;
-    findParallelGroups(
-      graph: import('./loop/CausalModeler').CausalGraph
-    ): string[][];
-    getFailureImpact(
-      graph: import('./loop/CausalModeler').CausalGraph,
-      stepId: string
-    ): import('./loop/CausalModeler').FailureImpact;
-  };
+  /** P2: CausalModeler — 已迁移到 Python agent/loop/causal.py */
+  causalModeler?: never;
   /** P1: EvaluationPipeline — 多阶段评估流水线 */
   evaluationPipeline?: {
     run(context: unknown): Promise<unknown>;
@@ -281,6 +269,21 @@ export interface HarnessDeps {
   };
   /** 工作区根 URI — 用于 LSP 集成层配置工作区 */
   workspaceRootUri?: string;
+}
+
+export interface HarnessDeps extends RequiredHarnessDeps, OptionalHarnessDeps {}
+
+const REQUIRED_DEPS_KEYS: ReadonlyArray<keyof RequiredHarnessDeps> = [
+  'llm',
+  'constitutionalBuilder',
+  'memoryInjector',
+  'dynamicContext',
+  'historyProvider',
+] as const;
+
+export function validateHarnessDeps(deps: Partial<HarnessDeps>): { valid: boolean; missing: string[] } {
+  const missing = REQUIRED_DEPS_KEYS.filter(key => deps[key] === undefined || deps[key] === null);
+  return { valid: missing.length === 0, missing: missing as string[] };
 }
 
 export interface ReflectionEngineDeps {

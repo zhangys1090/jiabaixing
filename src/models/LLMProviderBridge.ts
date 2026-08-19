@@ -3,12 +3,15 @@
  * 支持重试机制和健康检查，增强连接稳定性
  * v2: 支持多模型热切换和自动故障转移
  *
- * @deprecated 已迁移到 Python agent/llm/provider.py。当 AGENT_BACKEND=python（默认）时不再使用此文件。
- *   回退方式：设置 AGENT_BACKEND=local 可继续使用 TS 本地实现。
- *   迁移日期：2026-06-22
+ * 迁移说明：LLM 核心（chat / chatWithTools / healthCheck / getModelName /
+ * markLocalUnavailable / resetAvailability）已归属 Python agent/llm。
+ * 当 AGENT_BACKEND=python（默认）且 PythonAgentBridge 可用时，上述方法
+ * 经 bridgeRegistry 代理到 Python FastAPI (:3112) 的 /v1/llm/* 端点。
+ * AGENT_BACKEND=local 降级时仍走 TS 本地实现。
+ * 多模态 / 代码助手 / 多模型路由策略暂留 TS（第二批迁移）。
  */
 
-import { getPromptTemplate } from '../llm/prompt-templates';
+import { getActivePythonBridge } from '../ide/bridgeRegistry';
 import { injectPreferences } from '../memory/PreferenceInjector';
 import { Logger } from '../utils/Logger';
 import { ChatProvider } from './ChatProvider';
@@ -18,10 +21,19 @@ import { MessageSanitizer } from './MessageSanitizer';
 import { Model, ModelInput } from './ModelInterface';
 import { MultimodalProvider } from './MultimodalProvider';
 import { OpenAICompatibleModel } from './OpenAICompatibleModel';
+import { getPromptTemplate } from './prompt-templates';
 import { PromptOptimizer } from './PromptOptimizer';
+import { PythonBackedModel } from './PythonBackedModel';
 import { RequestQueue } from './RequestQueue';
 
-export class LLMProvider {
+/**
+ * @deprecated LLM 核心（chat / chatWithTools / healthCheck / multimodal / code /
+ * devGenerateCode / mark-unavailable / reset）已迁移 Python agent/llm，经
+ * PythonAgentBridge 代理 /v1/llm/* 端点。此类保留为兼容桥接实现：bridge 优先，
+ * bridge 为 null（AGENT_BACKEND=local）时回落本地 ChatProvider/CodeProvider/
+ * MultimodalProvider。原路径 src/models/LLMProvider.ts 已改为 re-export 壳。
+ */
+export class LLMProviderBridge {
   private model: Model;
   private modelName: string;
   private maxRetries: number = 2;
@@ -80,6 +92,17 @@ export class LLMProvider {
       this.model = model;
       this.modelName = modelName || 'external';
       Logger.info('🔌 使用外部注入的模型实例', 'LLMProvider');
+    } else if (getActivePythonBridge()) {
+      // Python 后端模式（AGENT_BACKEND=python）：不实例化 TS 本地 LLM 客户端（§0.1 收口）。
+      // 所有真实调用经 PythonAgentBridge 委派 Python agent.llm；此处仅放置占位模型满足 Model 契约。
+      this.modelName = modelName || process.env.LLM_MODEL || 'python-backend';
+      this.model = new PythonBackedModel(this.modelName);
+      this.zhipuModel = null;
+      this.serviceAvailable = true;
+      Logger.info(
+        '🐍 使用 Python 后端 LLM（桥接模式，TS 本地客户端已禁用）',
+        'LLMProvider'
+      );
     } else {
       // 优先使用 ProviderManager 主模型
       if (pmPrimary) {
@@ -102,7 +125,8 @@ export class LLMProvider {
             (pmPrimary.extra?.reasoningEffort as 'high' | 'max') || undefined,
         });
       } else {
-        this.modelName = modelName || process.env.LLM_MODEL || 'deepseek-chat';
+        this.modelName =
+          modelName || process.env.LLM_MODEL || 'deepseek-v4-flash';
         Logger.info('🔌 使用 OpenAI 兼容模式', 'LLMProvider');
         this.model = new OpenAICompatibleModel({
           baseUrl:
@@ -170,7 +194,7 @@ export class LLMProvider {
         this.localUnavailable &&
         this.localUnavailableSince > 0 &&
         Date.now() - this.localUnavailableSince >
-          LLMProvider.RECOVERY_INTERVAL_MS
+          LLMProviderBridge.RECOVERY_INTERVAL_MS
       ) {
         Logger.info('🔄 主模型恢复间隔已过，重新尝试使用主模型', 'LLMProvider');
         this.localUnavailable = false;
@@ -191,15 +215,8 @@ export class LLMProvider {
     }
 
     // 检查主模型熔断状态
-    if (
-      this.model &&
-      typeof (this.model as unknown as { isCircuitOpen?: () => boolean })
-        .isCircuitOpen === 'function'
-    ) {
-      const modelWithCircuit = this.model as unknown as {
-        isCircuitOpen: () => boolean;
-      };
-      if (modelWithCircuit.isCircuitOpen()) {
+    if (this.model && typeof this.model.isCircuitOpen === 'function') {
+      if (this.model.isCircuitOpen!()) {
         Logger.warn('⚠️ 主模型熔断中，切换到降级模型', 'LLMProvider');
         if (this.zhipuModel) return this.zhipuModel;
       }
@@ -234,6 +251,11 @@ export class LLMProvider {
   }
 
   async healthCheck(): Promise<{ available: boolean; message: string }> {
+    const bridge = getActivePythonBridge();
+    if (bridge) {
+      return bridge.llmHealthCheck();
+    }
+
     try {
       const baseUrl =
         process.env.OPENAI_API_BASE ||
@@ -296,7 +318,10 @@ export class LLMProvider {
     images?: string[],
     history: Array<{ role: string; content: string }> = []
   ): Promise<string> {
-    // v5.1 Task 7: 委托给 MultimodalProvider（保留 localUnavailable 检查）
+    const bridge = getActivePythonBridge();
+    if (bridge) {
+      return bridge.llmMultimodalChat(message, images ?? [], history);
+    }
     if (this.localUnavailable) {
       throw new Error('本地模型已标记不可用');
     }
@@ -308,7 +333,10 @@ export class LLMProvider {
     images: string[],
     filePath?: string
   ): Promise<string> {
-    // v5.1 Task 7: 委托给 MultimodalProvider
+    const bridge = getActivePythonBridge();
+    if (bridge) {
+      return bridge.llmMultimodalCodeAnalysis(userQuery, images, filePath);
+    }
     return this.multimodalProvider.multimodalCodeAnalysis(
       userQuery,
       images,
@@ -321,7 +349,10 @@ export class LLMProvider {
     content: string,
     userQuery: string
   ): Promise<string> {
-    // v5.1 Task 7: 委托给 CodeProvider
+    const bridge = getActivePythonBridge();
+    if (bridge) {
+      return bridge.llmCodeAnalyze(filePath, content, userQuery);
+    }
     return this.codeProvider.analyzeCode(filePath, content, userQuery);
   }
 
@@ -330,7 +361,10 @@ export class LLMProvider {
     content: string,
     userQuery: string
   ): Promise<string> {
-    // v5.1 Task 7: 委托给 CodeProvider
+    const bridge = getActivePythonBridge();
+    if (bridge) {
+      return bridge.llmCodeModificationPlan(filePath, content, userQuery);
+    }
     return this.codeProvider.generateModificationPlan(
       filePath,
       content,
@@ -344,7 +378,15 @@ export class LLMProvider {
     userRequest: string,
     fileExists: boolean
   ): Promise<string> {
-    // v5.1 Task 7: 委托给 CodeProvider
+    const bridge = getActivePythonBridge();
+    if (bridge) {
+      return bridge.llmCodeModifiedContent(
+        filePath,
+        currentContent,
+        userRequest,
+        fileExists
+      );
+    }
     return this.codeProvider.generateModifiedFileContent(
       filePath,
       currentContent,
@@ -358,6 +400,11 @@ export class LLMProvider {
     history: Array<{ role: string; content: string }> = [],
     systemPromptOverride?: string
   ): Promise<string> {
+    const bridge = getActivePythonBridge();
+    if (bridge) {
+      return bridge.llmChat(message, history, systemPromptOverride);
+    }
+
     // v5.1 Task 7: 委托给 ChatProvider，保留门面中的 zhipuModel 降级逻辑
     const defaultPrompt = getPromptTemplate('chat');
     const systemPrompt = injectPreferences(
@@ -473,6 +520,11 @@ export class LLMProvider {
       function: { name: string; arguments: string };
     }>;
   }> {
+    const bridge = getActivePythonBridge();
+    if (bridge) {
+      return bridge.llmChatWithTools(messages, tools, maxTokens, toolChoice);
+    }
+
     // 如果本地模型不可用，直接走智谱降级
     if ((this.localUnavailable || !this.serviceAvailable) && this.zhipuModel) {
       Logger.info(
@@ -615,6 +667,10 @@ export class LLMProvider {
     filePath?: string,
     existingContent?: string
   ): Promise<string> {
+    const bridge = getActivePythonBridge();
+    if (bridge) {
+      return bridge.llmDevGenerateCode(userRequest, filePath, existingContent);
+    }
     return this.codeProvider.devGenerateCode(
       userRequest,
       filePath,
@@ -633,11 +689,28 @@ export class LLMProvider {
   }
 
   getModelName(): string {
+    const bridge = getActivePythonBridge();
+    if (bridge) {
+      return this.modelName || 'python-backend';
+    }
     return this.modelName;
   }
 
   /** 永久标记本地模型不可用（供外部调用，如启动时健康检查失败） */
   markLocalUnavailable(reason?: string): void {
+    const bridge = getActivePythonBridge();
+    if (bridge) {
+      bridge.llmMarkUnavailable(reason).catch((err: Error) => {
+        Logger.warn(
+          `Python markUnavailable 失败: ${err.message}`,
+          'LLMProvider'
+        );
+      });
+      this.localUnavailable = true;
+      this.localUnavailableSince = Date.now();
+      this.serviceAvailable = false;
+      return;
+    }
     this.localUnavailable = true;
     this.localUnavailableSince = Date.now();
     this.serviceAvailable = false;
@@ -649,6 +722,18 @@ export class LLMProvider {
 
   /** 重置可用性标志（供外部调用，如用户手动切换回本地模型） */
   resetAvailability(): void {
+    const bridge = getActivePythonBridge();
+    if (bridge) {
+      bridge.llmResetAvailability().catch((err: Error) => {
+        Logger.warn(
+          `Python resetAvailability 失败: ${err.message}`,
+          'LLMProvider'
+        );
+      });
+      this.localUnavailable = false;
+      this.serviceAvailable = true;
+      return;
+    }
     this.localUnavailable = false;
     this.serviceAvailable = true;
     Logger.info('🔄 本地模型可用性已重置', 'LLMProvider');

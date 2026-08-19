@@ -41,7 +41,23 @@ if %ERRORLEVEL% neq 0 (
 )
 
 echo.
-echo   [1/3] 正在启动后端服务...
+echo   [0/4] 正在启动 Python Agent 后端 (端口 3112)...
+set "PYOK=0"
+if exist "%~dp0.venv\Scripts\python.exe" (
+    start /b "" cmd /c "cd /d %~dp0python && "%~dp0.venv\Scripts\python.exe" -m uvicorn agent.main:app --host 127.0.0.1 --port 3112 > "%~dp0logs\python_backend.log" 2>&1"
+    for /l %%i in (1,1,40) do (
+        >nul 2>&1 curl -s http://127.0.0.1:3112/health
+        if not errorlevel 1 (
+            set "PYOK=1"
+            goto py_wait_done
+        )
+        timeout /t 1 /nobreak >nul
+    )
+)
+:py_wait_done
+if "%PYOK%"=="1" ( echo   [OK] Python Agent 后端就绪 (3112) ) else ( echo   [WARN] Python 后端未就绪，将降级到 TS 本地 )
+
+echo   [1/4] 正在启动后端服务...
 start /b cmd /c "cd /d C:\zy\jiabaixing && npx tsx --env-file=.env src/main.ts" > nul 2>&1
 
 echo   [2/3] 等待服务就绪...

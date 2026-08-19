@@ -1,9 +1,12 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Any, Awaitable, Callable
+
+if TYPE_CHECKING:  # 仅供类型注解使用，避免 toolset_registry ↔ registry 循环导入
+    from agent.tools.toolset_registry import SceneToToolsetMapper
 
 
 class ToolCategory(str, Enum):
@@ -22,6 +25,7 @@ class ToolCategory(str, Enum):
     NETWORK = "network"
     IOT = "iot"
     PERCEPTION = "perception"
+    AUTOMATION = "automation"
 
 
 @dataclass
@@ -34,6 +38,9 @@ class ToolParameterDef:
         required: 是否必填。
         description: 参数描述。
         enum: 允许的枚举值。
+        items: 数组元素类型描述（type=array 时使用）。
+        properties: 对象属性定义（type=object 时使用）。
+        default: 默认值。
     """
 
     name: str
@@ -41,6 +48,9 @@ class ToolParameterDef:
     required: bool = True
     description: str = ""
     enum: list[str] | None = None
+    items: dict[str, Any] | None = None
+    properties: dict[str, Any] | None = None
+    default: Any = None
 
 
 @dataclass
@@ -107,6 +117,7 @@ class ToolRegistry:
     """
     def __init__(self) -> None:
         self._tools: dict[str, tuple[ToolDefinition, ToolExecutor]] = {}
+        self._feedback_collector: Any | None = None
 
     def register(self, definition: ToolDefinition, executor: ToolExecutor) -> None:
         if definition.name in self._tools:
@@ -217,6 +228,42 @@ class ToolRegistry:
     def get_all_definitions(self) -> list[ToolDefinition]:
         return [d for d, _ in self._tools.values()]
 
+    def get_entries(self) -> list[tuple[str, "ToolDefinition", "ToolExecutor"]]:
+        """返回全部 (name, definition, executor) 三元组。
+
+        用于构建白名单子注册表（如子 Agent 工具下放）等场景，
+        避免在调用方直接访问私有属性 ``_tools``。
+        """
+        return [(n, d, e) for n, (d, e) in self._tools.items()]
+
+    def set_feedback_collector(self, collector: Any) -> None:
+        """设置反馈收集器实例。
+
+        Args:
+            collector: FeedbackCollector 实例，用于在工具执行后收集反馈数据。
+        """
+        self._feedback_collector = collector
+
+    def _record_feedback(self, tool_name: str, result: ToolResult) -> None:
+        """记录工具调用的反馈数据（异步flush，不影响执行性能）。
+
+        Args:
+            tool_name: 工具名称。
+            result: 工具执行结果。
+        """
+        if self._feedback_collector is None:
+            return
+        try:
+            self._feedback_collector.record_tool_call(
+                tool_name=tool_name,
+                success=result.success,
+                duration=result.duration,
+                error=result.error,
+            )
+            self._feedback_collector.maybe_flush()
+        except Exception as exc:
+            self.log.warning("记录工具反馈失败，已跳过: %s", exc)
+
     async def execute(self, name: str, params: dict[str, Any] | None = None) -> ToolResult:
         entry = self._tools.get(name)
         if not entry:
@@ -225,6 +272,10 @@ class ToolRegistry:
         import asyncio
         import time
         from agent.config import TOOL_EXECUTE_TIMEOUT
+        # OTel追踪：记录工具执行span
+        from agent.core.tracing import get_tracing_manager
+        _tracing = get_tracing_manager()
+        _span = _tracing.start_span(f"tool.{name}", {"tool_name": name})
         start = time.monotonic()
         try:
             # timeout<=0 视为不设置超时（审计 T-07：wait_for(..., timeout=0) 会立即抛 TimeoutError）
@@ -244,20 +295,29 @@ class ToolRegistry:
                     result.metadata["truncated_chars"] = truncated.truncated_chars
                     result.metadata["original_lines"] = truncated.original_lines
                     result.metadata["truncated_lines"] = truncated.truncated_lines
+            # 反馈收集钩子：异步记录工具调用结果，不影响执行性能
+            self._record_feedback(name, result)
+            _tracing.end_span(_span)
             return result
         except asyncio.TimeoutError:
-            return ToolResult(
+            result = ToolResult(
                 success=False,
                 error=f"Tool '{name}' timed out after {TOOL_EXECUTE_TIMEOUT}s",
                 duration=time.monotonic() - start,
             )
+            self._record_feedback(name, result)
+            _tracing.end_span(_span)
+            return result
         except Exception as e:
-            return ToolResult(
+            result = ToolResult(
                 success=False,
                 error=f"{type(e).__name__}: {e}",
                 duration=time.monotonic() - start,
                 metadata={"exception_type": type(e).__name__, "exception_module": type(e).__module__},
             )
+            self._record_feedback(name, result)
+            _tracing.end_span(_span)
+            return result
 
     def to_openai_tools(self) -> list[dict[str, Any]]:
         tools = []
@@ -268,6 +328,12 @@ class ToolRegistry:
                 prop: dict[str, Any] = {"type": p.type, "description": p.description}
                 if p.enum:
                     prop["enum"] = p.enum
+                if p.items and p.type == "array":
+                    prop["items"] = p.items
+                if p.properties and p.type == "object":
+                    prop["properties"] = p.properties
+                if p.default is not None:
+                    prop["default"] = p.default
                 params_properties[p.name] = prop
                 if p.required:
                     required.append(p.name)
@@ -350,9 +416,11 @@ def register_default_tools(registry: ToolRegistry, session_store: Any = None) ->
     from agent.tools.code_tools import (
         CODE_GENERATE_DEF, CODE_ANALYZE_DEF, CODE_FIX_DEF, SHELL_EXEC_DEF,
         CODE_REVIEW_DEF, CSV_ANALYZE_DEF,
+        CODE_GENERATE_AST_DEF, CODE_EDIT_AST_DEF,
         code_generate_executor, code_analyze_executor,
         code_fix_executor, shell_exec_executor,
         code_review_executor, csv_analyze_executor,
+        code_generate_ast_executor, code_edit_ast_executor,
     )
     for definition, executor in [
         (CODE_GENERATE_DEF, code_generate_executor),
@@ -361,6 +429,52 @@ def register_default_tools(registry: ToolRegistry, session_store: Any = None) ->
         (SHELL_EXEC_DEF, shell_exec_executor),
         (CODE_REVIEW_DEF, code_review_executor),
         (CSV_ANALYZE_DEF, csv_analyze_executor),
+        (CODE_GENERATE_AST_DEF, code_generate_ast_executor),
+        (CODE_EDIT_AST_DEF, code_edit_ast_executor),
+    ]:
+        registry.register(definition, executor)
+        count += 1
+
+    # ===== 重构工具链（AST感知：重命名/提取/移动/预览） =====
+    from agent.tools.refactor_tools import (
+        REFACTOR_RENAME_DEF, REFACTOR_EXTRACT_DEF, REFACTOR_MOVE_DEF,
+        REFACTOR_PREVIEW_DEF, REFACTOR_DEPGRAPH_DEF,
+        refactor_rename_executor, refactor_extract_executor,
+        refactor_move_executor, refactor_preview_executor, refactor_depgraph_executor,
+    )
+    for definition, executor in [
+        (REFACTOR_RENAME_DEF, refactor_rename_executor),
+        (REFACTOR_EXTRACT_DEF, refactor_extract_executor),
+        (REFACTOR_MOVE_DEF, refactor_move_executor),
+        (REFACTOR_PREVIEW_DEF, refactor_preview_executor),
+        (REFACTOR_DEPGRAPH_DEF, refactor_depgraph_executor),
+    ]:
+        registry.register(definition, executor)
+        count += 1
+
+    # ===== 测试链路（审计 P1-1） =====
+    from agent.tools.test_tools import (
+        TEST_RUN_DEF, TEST_GENERATE_DEF, COVERAGE_READ_DEF,
+        test_run_executor, test_generate_executor, coverage_read_executor,
+    )
+    for definition, executor in [
+        (TEST_RUN_DEF, test_run_executor),
+        (TEST_GENERATE_DEF, test_generate_executor),
+        (COVERAGE_READ_DEF, coverage_read_executor),
+    ]:
+        registry.register(definition, executor)
+        count += 1
+
+    # ===== Git 链路（审计 P1-2） =====
+    from agent.tools.git_tools import (
+        GIT_STATUS_DEF, GIT_DIFF_DEF, GIT_COMMIT_DEF, GIT_LOG_DEF,
+        git_status_executor, git_diff_executor, git_commit_executor, git_log_executor,
+    )
+    for definition, executor in [
+        (GIT_STATUS_DEF, git_status_executor),
+        (GIT_DIFF_DEF, git_diff_executor),
+        (GIT_COMMIT_DEF, git_commit_executor),
+        (GIT_LOG_DEF, git_log_executor),
     ]:
         registry.register(definition, executor)
         count += 1
@@ -377,7 +491,6 @@ def register_default_tools(registry: ToolRegistry, session_store: Any = None) ->
     ]:
         registry.register(definition, executor)
         count += 1
-
     from agent.tools.cognition_tools import (
         EMOTION_DETECT_DEF, SCENE_ANALYZE_DEF, SELF_REFLECT_DEF,
         emotion_detect_executor, scene_analyze_executor, self_reflect_executor,
@@ -446,14 +559,18 @@ def register_default_tools(registry: ToolRegistry, session_store: Any = None) ->
     from agent.tools.desktop_tools import (
         DESKTOP_AUTOMATE_DEF, DESKTOP_SCREENSHOT_DEF,
         DESKTOP_WINDOW_DEF, DESKTOP_CLIPBOARD_DEF,
+        DESKTOP_UIA_ACTION_DEF, DESKTOP_EXPLORE_DEF,
         desktop_automate_executor, desktop_screenshot_executor,
         desktop_window_executor, desktop_clipboard_executor,
+        desktop_uia_action_executor, desktop_explore_executor,
     )
     for definition, executor in [
         (DESKTOP_AUTOMATE_DEF, desktop_automate_executor),
         (DESKTOP_SCREENSHOT_DEF, desktop_screenshot_executor),
         (DESKTOP_WINDOW_DEF, desktop_window_executor),
         (DESKTOP_CLIPBOARD_DEF, desktop_clipboard_executor),
+        (DESKTOP_UIA_ACTION_DEF, desktop_uia_action_executor),
+        (DESKTOP_EXPLORE_DEF, desktop_explore_executor),
     ]:
         registry.register(definition, executor)
         count += 1
@@ -478,17 +595,21 @@ def register_default_tools(registry: ToolRegistry, session_store: Any = None) ->
         registry.register(definition, executor)
         count += 1
 
-    # ===== 感知工具（五感：视觉解析/语音识别/操作验证/智能等待） =====
+    # ===== 感知工具（五感：视觉解析/语音识别/操作验证/智能等待/五感融合/环境感） =====
     from agent.tools.perception_tools import (
         SCREEN_PARSE_DEF, ACTION_VERIFY_DEF, SMART_WAIT_DEF, SPEECH_TRANSCRIBE_DEF,
+        PERCEPTION_FUSE_DEF, ENVIRONMENT_SENSE_DEF,
         screen_parse_executor, action_verify_executor,
         smart_wait_executor, speech_transcribe_executor,
+        perception_fuse_executor, environment_sense_executor,
     )
     for definition, executor in [
         (SCREEN_PARSE_DEF, screen_parse_executor),
         (ACTION_VERIFY_DEF, action_verify_executor),
         (SMART_WAIT_DEF, smart_wait_executor),
         (SPEECH_TRANSCRIBE_DEF, speech_transcribe_executor),
+        (PERCEPTION_FUSE_DEF, perception_fuse_executor),
+        (ENVIRONMENT_SENSE_DEF, environment_sense_executor),
     ]:
         registry.register(definition, executor)
         count += 1
@@ -589,6 +710,39 @@ def register_default_tools(registry: ToolRegistry, session_store: Any = None) ->
         (SANBAO_TRAIN_DEF, sanbao_train_executor),
         (SANBAO_FEEDBACK_DEF, sanbao_feedback_executor),
         (SANBAO_STATUS_DEF, sanbao_status_executor),
+    ]:
+        registry.register(definition, executor)
+        count += 1
+
+    # ===== P0 接入：Kanban 多代理可视化 =====
+    from agent.tools.kanban_swarm import register_kanban_tools
+    register_kanban_tools(registry)
+    count += 3
+
+    # ===== P0 接入：Cronjob 定时任务模板 =====
+    from agent.tools.cronjob_tools import register_cronjob_tools
+    register_cronjob_tools(registry)
+    count += 3
+
+    # ===== P0 接入：Windows UIA 精确桌面自动化 =====
+    from agent.tools.windows_uia import register_uia_tools
+    register_uia_tools(registry)
+    count += 3
+
+    # ===== 自动测试生成闭环工具（分析/生成/执行/迭代/覆盖率） =====
+    from agent.tools.test_gen_tools import (
+        TEST_GEN_ANALYZE_DEF, TEST_GEN_GENERATE_DEF, TEST_GEN_EXECUTE_DEF,
+        TEST_GEN_ITERATE_DEF, TEST_GEN_COVERAGE_DEF,
+        test_gen_analyze_executor, test_gen_generate_executor,
+        test_gen_execute_executor, test_gen_iterate_executor,
+        test_gen_coverage_executor,
+    )
+    for definition, executor in [
+        (TEST_GEN_ANALYZE_DEF, test_gen_analyze_executor),
+        (TEST_GEN_GENERATE_DEF, test_gen_generate_executor),
+        (TEST_GEN_EXECUTE_DEF, test_gen_execute_executor),
+        (TEST_GEN_ITERATE_DEF, test_gen_iterate_executor),
+        (TEST_GEN_COVERAGE_DEF, test_gen_coverage_executor),
     ]:
         registry.register(definition, executor)
         count += 1
@@ -742,7 +896,7 @@ class ToolRecommendationEngine:
             try:
                 exclude_cats.append(ToolCategory(cat_name))
             except ValueError:
-                pass
+                self.log.debug("跳过无效工具类别: %s", cat_name)
 
         candidates = self._registry.filter_by(
             tags=tags if tags else None,

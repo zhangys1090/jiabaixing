@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, TypeVar
@@ -17,7 +18,7 @@ class RetryConfig:
     """重试配置。
 
     Attributes:
-        max_retries: 最大重试次数。
+        max_retries: 最大重试次数（>=0，0 表示不重试仅执行一次）。
         base_delay: 基础延迟（秒）。
         max_delay: 最大延迟（秒）。
         exponential_base: 指数退避基数。
@@ -29,6 +30,14 @@ class RetryConfig:
     max_delay: float = 30.0
     exponential_base: float = 2.0
     retryable_exceptions: tuple[type[Exception], ...] = (ConnectionError, TimeoutError, OSError)
+
+    def __post_init__(self) -> None:
+        if self.max_retries < 0:
+            raise ValueError(f"max_retries must be >= 0, got {self.max_retries}")
+        if self.base_delay <= 0:
+            raise ValueError(f"base_delay must be > 0, got {self.base_delay}")
+        if self.max_delay < self.base_delay:
+            raise ValueError(f"max_delay ({self.max_delay}) must be >= base_delay ({self.base_delay})")
 
 
 @dataclass
@@ -50,22 +59,31 @@ class CircuitState:
     failure_count: int = 0
     last_failure_time: float = 0.0
     state: str = "closed"
+    _lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
 
     def record_success(self) -> None:
         """记录成功调用，重置失败计数，half-open 状态回到 closed。"""
-        self.failure_count = 0
-        if self.state == "half-open":
-            self.state = "closed"
-            logger.info("Circuit closed", circuit=self.name)
+        with self._lock:
+            self.failure_count = 0
+            if self.state == "half-open":
+                self.state = "closed"
+                logger.info("Circuit closed", circuit=self.name)
 
     def record_failure(self) -> None:
-        """记录失败调用，达到阈值时切换到 open 状态。"""
-        self.failure_count += 1
-        self.last_failure_time = time.monotonic()
-        if self.failure_count >= self.failure_threshold:
-            if self.state != "open":
+        """记录失败调用，达到阈值时切换到 open 状态。
+
+        half-open 状态下失败立即回到 open，重置恢复计时器。
+        """
+        with self._lock:
+            self.failure_count += 1
+            self.last_failure_time = time.monotonic()
+            if self.state == "half-open":
                 self.state = "open"
-                logger.warning("Circuit opened", circuit=self.name, failures=self.failure_count)
+                logger.warning("Circuit re-opened from half-open", circuit=self.name, failures=self.failure_count)
+            elif self.failure_count >= self.failure_threshold:
+                if self.state != "open":
+                    self.state = "open"
+                    logger.warning("Circuit opened", circuit=self.name, failures=self.failure_count)
 
     def allow_request(self) -> bool:
         """判断是否允许请求通过。
@@ -76,19 +94,21 @@ class CircuitState:
         Returns:
             bool: 是否允许请求。
         """
-        if self.state == "closed":
-            return True
-        if self.state == "open":
-            elapsed = time.monotonic() - self.last_failure_time
-            if elapsed >= self.recovery_timeout:
-                self.state = "half-open"
-                logger.info("Circuit half-open", circuit=self.name)
+        with self._lock:
+            if self.state == "closed":
                 return True
-            return False
-        return True
+            if self.state == "open":
+                elapsed = time.monotonic() - self.last_failure_time
+                if elapsed >= self.recovery_timeout:
+                    self.state = "half-open"
+                    logger.info("Circuit half-open", circuit=self.name)
+                    return True
+                return False
+            return True
 
 
 _circuits: dict[str, CircuitState] = {}
+_circuits_lock = threading.Lock()
 
 
 def get_circuit(name: str, failure_threshold: int = 5, recovery_timeout: float = 30.0) -> CircuitState:
@@ -102,13 +122,14 @@ def get_circuit(name: str, failure_threshold: int = 5, recovery_timeout: float =
     Returns:
         CircuitState: 熔断器状态实例。
     """
-    if name not in _circuits:
-        _circuits[name] = CircuitState(
-            name=name,
-            failure_threshold=failure_threshold,
-            recovery_timeout=recovery_timeout,
-        )
-    return _circuits[name]
+    with _circuits_lock:
+        if name not in _circuits:
+            _circuits[name] = CircuitState(
+                name=name,
+                failure_threshold=failure_threshold,
+                recovery_timeout=recovery_timeout,
+            )
+        return _circuits[name]
 
 
 async def with_retry(
@@ -157,10 +178,13 @@ async def with_retry(
     raise last_error  # type: ignore[misc]
 
 
+_NO_FALLBACK = object()
+
+
 async def with_circuit_breaker(
     fn: Callable[[], Awaitable[T]],
     circuit_name: str,
-    fallback: T | None = None,
+    fallback: Any = _NO_FALLBACK,
 ) -> T:
     """带熔断器保护的执行。
 
@@ -169,7 +193,7 @@ async def with_circuit_breaker(
     Args:
         fn: 待执行的异步函数。
         circuit_name: 熔断器名称。
-        fallback: 熔断时的降级返回值，None 时抛出 ConnectionError。
+        fallback: 熔断时的降级返回值，未提供时抛出 ConnectionError。
 
     Returns:
         T: 函数执行结果或 fallback 值。
@@ -180,7 +204,7 @@ async def with_circuit_breaker(
     circuit = get_circuit(circuit_name)
     if not circuit.allow_request():
         logger.warning("Circuit open, request rejected", circuit=circuit_name)
-        if fallback is not None:
+        if fallback is not _NO_FALLBACK:
             return fallback
         raise ConnectionError(f"Circuit '{circuit_name}' is open")
     try:
@@ -197,7 +221,7 @@ async def resilient_call(
     operation: str = "operation",
     retry_config: RetryConfig | None = None,
     circuit_name: str | None = None,
-    fallback: T | None = None,
+    fallback: Any = _NO_FALLBACK,
 ) -> T:
     """弹性调用 — 组合重试 + 熔断器保护。
 

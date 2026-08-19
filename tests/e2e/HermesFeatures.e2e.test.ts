@@ -44,14 +44,6 @@ describe('Hermes 特性端到端验证 — 20项', () => {
     getModelName: jest.fn().mockReturnValue('gpt-4o-test'),
   };
 
-  // Executor 依赖的 SchemaValidator / PermissionGuard mock
-  const mockSchemaValidator = {
-    validate: jest.fn().mockReturnValue({ valid: true, errors: [] }),
-  };
-  const mockPermissionGuard = {
-    checkPermission: jest.fn().mockReturnValue(true),
-  };
-
   describe('网关入口 (HTTP API)', () => {
     test('1. 健康检查端点可达', () => {
       const healthRoute = require('../../src/server/routes/coreRoutes');
@@ -80,52 +72,11 @@ describe('Hermes 特性端到端验证 — 20项', () => {
   });
 
   describe('Planner 智能特性', () => {
-    test('6. CoT 推理过程注入', async () => {
-      const { Planner } = await import('../../src/harness/loop/Planner');
-      const planner = new Planner({ llm: mockLLM });
-      expect(typeof planner.plan).toBe('function');
-    });
+    // 6/7/8 已迁移到 Python 端，测试见 python/tests/
+  });
 
-    test('7. ToT 智能启用策略', async () => {
-      const { Planner } = await import('../../src/harness/loop/Planner');
-      const planner = new Planner({
-        llm: mockLLM,
-        totConfig: { enabled: true, enableBacktracking: true },
-      });
-      expect(
-        typeof (planner as unknown as { shouldEnableToT: unknown })
-          .shouldEnableToT === 'function' || planner
-      ).toBeTruthy();
-    });
-
-    test('8. 动态回溯能力', async () => {
-      const { Planner } = await import('../../src/harness/loop/Planner');
-      const planner = new Planner({
-        llm: mockLLM,
-        totConfig: {
-          enabled: true,
-          enableBacktracking: true,
-          maxBacktracks: 1,
-        },
-      });
-      expect(
-        typeof (planner as unknown as { backtrackToAlternative: unknown })
-          .backtrackToAlternative
-      ).toBe('function');
-    });
-
-    test('9. 反思经验闭环注入', async () => {
-      const { Planner } = await import('../../src/harness/loop/Planner');
-      const planner = new Planner({
-        llm: mockLLM,
-        reflectionEngine: {
-          getTaskReflectionExperiences: () => [],
-        },
-      });
-      expect(planner).toBeDefined();
-    });
-
-    test('10. 工具列表参数提示', async () => {
+  describe('工具注册表智能特性', () => {
+    test('10. 动态工具注册', async () => {
       const { ToolRegistry } =
         await import('../../src/harness/tools/registry/ToolRegistry');
       const registry = new ToolRegistry();
@@ -136,83 +87,11 @@ describe('Hermes 特性端到端验证 — 20项', () => {
   });
 
   describe('Executor 智能特性', () => {
-    test('11. FC 循环执行框架', async () => {
-      const { Executor } = await import('../../src/harness/loop/Executor');
-      const { ToolRegistry } =
-        await import('../../src/harness/tools/registry/ToolRegistry');
-      const executor = new Executor({
-        llm: mockLLM,
-        toolRegistry: new ToolRegistry(),
-        schemaValidator:
-          mockSchemaValidator as unknown as import('../../src/harness/tools/registry/SchemaValidator').SchemaValidator,
-        permissionGuard:
-          mockPermissionGuard as unknown as import('../../src/harness/tools/registry/PermissionGuard').PermissionGuard,
-      });
-      expect(typeof executor.execute).toBe('function');
-    });
-
-    test('12. 跨轮次失败记忆', async () => {
-      const { Executor } = await import('../../src/harness/loop/Executor');
-      const { ToolRegistry } =
-        await import('../../src/harness/tools/registry/ToolRegistry');
-      const executor = new Executor({
-        llm: mockLLM,
-        toolRegistry: new ToolRegistry(),
-        schemaValidator:
-          mockSchemaValidator as unknown as import('../../src/harness/tools/registry/SchemaValidator').SchemaValidator,
-        permissionGuard:
-          mockPermissionGuard as unknown as import('../../src/harness/tools/registry/PermissionGuard').PermissionGuard,
-      });
-      // 验证Executor可正常实例化（跨轮次失败记忆为内部机制）
-      expect(typeof executor.execute).toBe('function');
-    });
-
-    test('13. 即时反思重试机制', async () => {
-      const { Executor } = await import('../../src/harness/loop/Executor');
-      const { ToolRegistry } =
-        await import('../../src/harness/tools/registry/ToolRegistry');
-      const executor = new Executor({
-        llm: mockLLM,
-        toolRegistry: new ToolRegistry(),
-        schemaValidator:
-          mockSchemaValidator as unknown as import('../../src/harness/tools/registry/SchemaValidator').SchemaValidator,
-        permissionGuard:
-          mockPermissionGuard as unknown as import('../../src/harness/tools/registry/PermissionGuard').PermissionGuard,
-        reflectionEngine: {
-          reflect: jest.fn().mockResolvedValue({
-            rootCause: '测试根因',
-            correctedArgs: null,
-            alternativeTool: null,
-            shouldRetry: false,
-          }),
-        },
-      });
-      expect(executor).toBeDefined();
-    });
+    // 11/12/13 已迁移到 Python 端，测试见 python/tests/
   });
 
   describe('ReflectionEngine 智能特性', () => {
-    test('14. 工具级反思', async () => {
-      const { ReflectionEngine } =
-        await import('../../src/harness/loop/ReflectionEngine');
-      const engine = new ReflectionEngine(
-        { chat: jest.fn().mockResolvedValue('{}') },
-        undefined
-      );
-      expect(typeof engine.reflect).toBe('function');
-    });
-
-    test('15. 任务级反思闭环', async () => {
-      const { ReflectionEngine } =
-        await import('../../src/harness/loop/ReflectionEngine');
-      const engine = new ReflectionEngine(
-        { chat: jest.fn().mockResolvedValue('{}') },
-        undefined,
-        { enableDeepReflection: true }
-      );
-      expect(typeof engine.reflectOnTaskFailure).toBe('function');
-      expect(typeof engine.getTaskReflectionExperiences).toBe('function');
-    });
+    // 14/15 已迁移到 Python 端，测试见 python/tests/
   });
 
   describe('LLM 能力探测与策略适配', () => {
@@ -245,17 +124,6 @@ describe('Hermes 特性端到端验证 — 20项', () => {
       const orchestrator = EvolutionOrchestrator.getInstance();
       expect(orchestrator).toBeDefined();
       expect(typeof orchestrator.registerEngines).toBe('function');
-    });
-
-    test('19. LLM 能力探测集成到进化编排器', async () => {
-      const { EvolutionOrchestrator } =
-        await import('../../src/evolution/EvolutionOrchestrator');
-      const orchestrator = EvolutionOrchestrator.getInstance();
-      expect(typeof orchestrator.detectAndAdaptLLMCapabilities).toBe(
-        'function'
-      );
-      expect(typeof orchestrator.getCurrentLLMCapabilities).toBe('function');
-      expect(typeof orchestrator.getCurrentStrategy).toBe('function');
     });
   });
 

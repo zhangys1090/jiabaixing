@@ -228,8 +228,15 @@ class ThreatPatternDetector:
                         max_level = pattern.level
 
                     self._stats[pattern.name] = self._stats.get(pattern.name, 0) + 1
-            except re.error:
-                pass
+            except re.error as _re_exc:
+                # D2（审计 §1.7）：正则执行异常此前被静默吞掉，
+                # 后果是整条威胁检测规则失效，攻击流量零信号通过。必须留痕。
+                log.error(
+                    "威胁检测正则执行异常，该规则本次已跳过",
+                    pattern=pattern.name,
+                    category=pattern.category.value,
+                    error=str(_re_exc),
+                )
 
         is_safe = max_level in (ThreatLevel.NONE, ThreatLevel.LOW)
 

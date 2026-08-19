@@ -120,9 +120,13 @@ export class DesktopSkillRegistry extends EventEmitter {
     this.registerBuiltinSkills();
   }
 
+  public static create(): DesktopSkillRegistry {
+    return new DesktopSkillRegistry();
+  }
+
   public static getInstance(): DesktopSkillRegistry {
     if (!DesktopSkillRegistry.instance) {
-      DesktopSkillRegistry.instance = new DesktopSkillRegistry();
+      DesktopSkillRegistry.instance = DesktopSkillRegistry.create();
     }
     return DesktopSkillRegistry.instance;
   }

@@ -13,6 +13,7 @@ from agent.tools.registry import (
     ToolParameterDef,
     ToolResult,
 )
+from agent.core.logger import log_ignored
 
 
 MORNING_BRIEF_DEF = ToolDefinition(
@@ -82,8 +83,8 @@ class _ScheduleStore:
                 data = json.loads(f.read_text(encoding="utf-8"))
                 tid = data.get("id", f.stem)
                 self._tasks[tid] = data
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(None, "daily_enhanced_tools._ScheduleStore._load", _exc)
 
     def _save(self, tid: str) -> None:
         task = self._tasks.get(tid)

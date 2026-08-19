@@ -4,7 +4,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { Evaluator } from '../../src/harness/loop/Evaluator';
+import { IndependentEvaluationService } from '../../src/harness/evaluation/IndependentEvaluationService';
 import type { LoopTrace, ChatMessage } from '../../src/harness/types';
 
 interface EvalTestCase {
@@ -22,7 +22,7 @@ interface EvalTestCase {
 async function runEvaluations() {
   const testCasesPath = path.join(__dirname, 'test-cases.json');
   const testCases: EvalTestCase[] = JSON.parse(fs.readFileSync(testCasesPath, 'utf-8'));
-  const evaluator = new Evaluator({});
+  const evalService = new IndependentEvaluationService({ enableLLMEvaluation: false });
 
   console.log('Running evaluations...');
   

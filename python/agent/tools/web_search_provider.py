@@ -7,10 +7,15 @@ WebSearchRegistry 按优先级自动选择可用后端。
 from __future__ import annotations
 
 import os
+import time
 from abc import ABC, abstractmethod
 from typing import Any
 
 import httpx
+
+from agent.core.logger import StructuredLogger
+
+_log = StructuredLogger("tools.web_search")
 
 
 # ---------------------------------------------------------------------------
@@ -81,7 +86,8 @@ class SearXNGProvider(WebSearchProvider):
             async with httpx.AsyncClient(timeout=self._timeout) as client:
                 resp = await client.get(f"{self._base_url}/healthz")
                 return resp.status_code == 200
-        except Exception:
+        except Exception as exc:
+            _log.debug("SearXNG 不可达", base_url=self._base_url, error=str(exc))
             return False
 
     async def search(
@@ -321,13 +327,15 @@ class WebSearchRegistry:
         results = await registry.search("Python 异步编程")
     """
 
+    _CACHE_TTL = 300.0
+
     def __init__(self, providers: list[WebSearchProvider] | None = None) -> None:
         self._providers: list[WebSearchProvider] = providers or [
             SearXNGProvider(),
             TavilyProvider(),
             DuckDuckGoProvider(),
         ]
-        self._available_cache: dict[str, bool] = {}
+        self._available_cache: dict[str, tuple[bool, float]] = {}
 
     async def _pick_provider(self) -> WebSearchProvider | None:
         """按优先级选择第一个可用的 provider。
@@ -335,14 +343,26 @@ class WebSearchRegistry:
         Returns:
             可用的 WebSearchProvider 实例，均不可用时返回 None。
         """
+        now = time.monotonic()
         for provider in self._providers:
             name = type(provider).__name__
-            if name not in self._available_cache:
+            cached = self._available_cache.get(name)
+            if cached is not None:
+                available, cached_time = cached
+                if now - cached_time > self._CACHE_TTL:
+                    del self._available_cache[name]
+                    cached = None
+            if cached is None:
                 try:
-                    self._available_cache[name] = await provider.is_available()
-                except Exception:
-                    self._available_cache[name] = False
-            if self._available_cache[name]:
+                    available = await provider.is_available()
+                    self._available_cache[name] = (available, now)
+                except Exception as exc:
+                    _log.warning("Provider 可用性检测失败", provider=name, error=str(exc))
+                    self._available_cache[name] = (False, now)
+                    available = False
+            else:
+                available = cached[0]
+            if available:
                 return provider
         return None
 
@@ -365,17 +385,21 @@ class WebSearchRegistry:
         Returns:
             搜索结果列表；所有后端不可用时返回空列表。
         """
-        provider = await self._pick_provider()
-        if provider is None:
-            return []
-        try:
-            return await provider.search(query, max_results=max_results)
-        except Exception:
-            # 当前 provider 失败，标记不可用并尝试下一个
-            name = type(provider).__name__
-            self._available_cache[name] = False
-            # 递归尝试剩余 provider
-            return await self.search(query, max_results=max_results)
+        last_error: Exception | None = None
+        for _ in range(len(self._providers)):
+            provider = await self._pick_provider()
+            if provider is None:
+                break
+            try:
+                return await provider.search(query, max_results=max_results)
+            except Exception as exc:
+                last_error = exc
+                name = type(provider).__name__
+                _log.warning("Provider 搜索失败，尝试下一个", provider=name, error=str(exc))
+                self._available_cache[name] = (False, time.monotonic())
+        if last_error is not None:
+            _log.warning("所有搜索后端均失败", error=str(last_error))
+        return []
 
     @property
     def providers(self) -> list[WebSearchProvider]:

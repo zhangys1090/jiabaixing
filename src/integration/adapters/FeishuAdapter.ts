@@ -19,7 +19,7 @@ const FEISHU_BASE_URL = 'https://open.feishu.cn/open-apis';
 export class FeishuAdapter extends BaseIntegrationAdapter {
   private client: AxiosInstance;
   private larkClient: lark.Client | null = null;
-  private wsClient: any = null;
+  private wsClient: lark.WSClient | null = null;
   private appId = '';
   private appSecret = '';
 
@@ -62,7 +62,7 @@ export class FeishuAdapter extends BaseIntegrationAdapter {
       encryptKey: '',
       verificationToken: '',
     }).register({
-      'im.message.receive_v1': async (data: any) => {
+      'im.message.receive_v1': async (data: Record<string, unknown>) => {
         await this.handleMessageEvent(data);
       },
     });
@@ -73,7 +73,9 @@ export class FeishuAdapter extends BaseIntegrationAdapter {
       // 每次尝试新建 WSClient（SDK 限制，start() 后不能再用同一实例）
       if (this.wsClient) {
         try {
-          await this.wsClient.stop();
+          await (
+            this.wsClient as unknown as { stop: () => Promise<void> }
+          ).stop();
         } catch {
           /* ignore */
         }
@@ -121,7 +123,9 @@ export class FeishuAdapter extends BaseIntegrationAdapter {
   async disconnect(): Promise<void> {
     try {
       if (this.wsClient) {
-        await this.wsClient.stop();
+        await (
+          this.wsClient as unknown as { stop: () => Promise<void> }
+        ).stop();
         this.wsClient = null;
       }
     } catch (e) {
@@ -158,7 +162,9 @@ export class FeishuAdapter extends BaseIntegrationAdapter {
       const content = JSON.stringify({ text: message });
 
       const resp = await this.larkClient.im.message.create({
-        params: { receive_id_type: receiveIdType as any },
+        params: {
+          receive_id_type: receiveIdType as 'open_id' | 'chat_id' | 'user_id',
+        },
         data: {
           receive_id: to,
           msg_type: 'text',
@@ -168,7 +174,9 @@ export class FeishuAdapter extends BaseIntegrationAdapter {
 
       return {
         success: true,
-        messageId: (resp as any)?.data?.message_id || `fs_msg_${Date.now()}`,
+        messageId:
+          (resp as { data?: { message_id?: string } })?.data?.message_id ||
+          `fs_msg_${Date.now()}`,
         timestamp: new Date().toISOString(),
       };
     } catch (error) {
@@ -192,13 +200,15 @@ export class FeishuAdapter extends BaseIntegrationAdapter {
   /**
    * 处理收到的飞书消息
    */
-  private async handleMessageEvent(data: any): Promise<void> {
+  private async handleMessageEvent(
+    data: Record<string, unknown>
+  ): Promise<void> {
     try {
-      const event = data?.event || data;
-      const message = event?.message || {};
-      const sender = event?.sender || {};
+      const event = (data?.event || data) as Record<string, unknown>;
+      const message = (event?.message || {}) as Record<string, unknown>;
+      const sender = (event?.sender || {}) as Record<string, unknown>;
 
-      const senderId = sender?.sender_id || {};
+      const senderId = (sender?.sender_id || {}) as Record<string, string>;
       const contentRaw = message?.content || '{}';
       const messageType = message?.message_type || 'text';
 
@@ -212,13 +222,14 @@ export class FeishuAdapter extends BaseIntegrationAdapter {
 
       let textContent = '';
       if (messageType === 'text') {
-        textContent = (content as any)?.text || '';
+        textContent =
+          ((content as Record<string, unknown>)?.text as string) || '';
       } else if (messageType === 'post') {
         textContent = this.extractPostText(content);
       } else if (messageType === 'image') {
         textContent = '[图片消息]';
       } else if (messageType === 'file') {
-        textContent = `[文件: ${(content as any)?.file_name || '未知'}]`;
+        textContent = `[文件: ${(content as Record<string, unknown>)?.file_name || '未知'}]`;
       } else if (messageType === 'audio') {
         textContent = '[语音消息]';
       } else {
@@ -229,8 +240,12 @@ export class FeishuAdapter extends BaseIntegrationAdapter {
         platform: 'feishu',
         type: messageType === 'image' ? 'image' : 'text',
         content: textContent,
-        from: senderId?.open_id || senderId?.user_id || sender?.open_id || '',
-        fromName: sender?.name || '',
+        from:
+          (senderId as Record<string, string>)?.open_id ||
+          (senderId as Record<string, string>)?.user_id ||
+          (sender as Record<string, string>)?.open_id ||
+          '',
+        fromName: (sender as Record<string, string>)?.name || '',
         timestamp: new Date().toISOString(),
         rawData: data,
       };

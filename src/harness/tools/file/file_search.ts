@@ -96,10 +96,6 @@ async function searchWithFs(
     match: string;
   }>
 > {
-  const resolvedDir = path.isAbsolute(directory)
-    ? directory
-    : path.resolve(projectRoot, directory);
-
   const results: Array<{
     filePath: string;
     line: number;
@@ -168,7 +164,7 @@ async function searchWithFs(
     }
   }
 
-  await walkAndSearch(resolvedDir, 0);
+  await walkAndSearch(directory, 0);
   return results;
 }
 
@@ -195,6 +191,38 @@ export function createFileSearchExecutor(deps: FileSearchDeps = {}) {
     }
 
     try {
+      // Validate directory exists
+      const resolvedDir = path.isAbsolute(directory)
+        ? directory
+        : path.resolve(deps.projectRoot || process.cwd(), directory);
+
+      let dirStat;
+      try {
+        dirStat = await fs.stat(resolvedDir);
+      } catch {
+        Logger.warn(
+          `file_search: 目录不存在或无法访问 "${resolvedDir}"`,
+          'FileSearch'
+        );
+        return {
+          success: false,
+          output: `搜索目录不存在: "${directory}"`,
+          error: `Directory not found: ${resolvedDir}`,
+          duration: Date.now() - startTime,
+          validated: false,
+        };
+      }
+
+      if (!dirStat.isDirectory()) {
+        return {
+          success: false,
+          output: `搜索路径不是一个目录: "${directory}"`,
+          error: `Path is not a directory: ${resolvedDir}`,
+          duration: Date.now() - startTime,
+          validated: false,
+        };
+      }
+
       let results: Array<{
         filePath: string;
         line: number;
@@ -212,7 +240,7 @@ export function createFileSearchExecutor(deps: FileSearchDeps = {}) {
       } else {
         results = await searchWithFs(
           query,
-          directory,
+          resolvedDir,
           filePattern,
           maxResults,
           deps.projectRoot || process.cwd()

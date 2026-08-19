@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from agent.core.logger import log_ignored
 
 
 @dataclass
@@ -145,8 +146,8 @@ class SubdirectoryHints:
                     try:
                         stat = candidate.stat()
                         entry["size_bytes"] = stat.st_size
-                    except OSError:
-                        pass
+                    except OSError as _exc:
+                        log_ignored(None, "subdirectory_hints.SubdirectoryHints._check_config_files", _exc)
                 result[filename] = entry
         return result
 
@@ -177,8 +178,8 @@ class SubdirectoryHints:
                 try:
                     stat = candidate.stat()
                     entry["size_bytes"] = stat.st_size
-                except OSError:
-                    pass
+                except OSError as _exc:
+                    log_ignored(None, "subdirectory_hints.SubdirectoryHints._check_env_files", _exc)
                 result[filename] = entry
         return result
 
@@ -203,8 +204,8 @@ class SubdirectoryHints:
                     for tool in dir_tools:
                         if tool not in tools:
                             tools.append(tool)
-        except OSError:
-            pass
+        except OSError as _exc:
+            log_ignored(None, "subdirectory_hints.SubdirectoryHints._recommend_tools", _exc)
 
         # 文件规则
         for filename, file_tools in self._FILE_RULES.items():
@@ -235,8 +236,8 @@ class SubdirectoryHints:
                     _, constraints = self._DIR_RULES[child.name]
                     no_delete.extend(constraints.get("no_delete", []))
                     exclude_search.extend(constraints.get("exclude_search", []))
-        except OSError:
-            pass
+        except OSError as _exc:
+            log_ignored(None, "subdirectory_hints.SubdirectoryHints._recommend_constraints", _exc)
 
         return {
             "no_delete": list(dict.fromkeys(no_delete)),

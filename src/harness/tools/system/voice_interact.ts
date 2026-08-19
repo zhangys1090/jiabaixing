@@ -5,7 +5,14 @@
  * 参考 Hermes Agent Voice Mode 功能设计。
  */
 
+import * as fs from 'fs';
 import { Logger } from '../../../utils/Logger';
+import { EventBus } from '../../../shared/EventBus';
+import { SpeechRecognizer } from '../../../multimodal/SpeechRecognizer';
+import {
+  SpeechSynthesizer,
+  type TTSBackend,
+} from '../../../multimodal/SpeechSynthesizer';
 import type { ToolContext, ToolDefinition, ToolResult } from '../../types';
 import { Permission, ToolCategory } from '../../types';
 
@@ -35,6 +42,17 @@ export const VOICE_INTERACT_DEF: ToolDefinition = {
       description: '语音合成的情绪参数',
       enum: ['平静', '开心', '悲伤', '惊讶', '愤怒', '温柔', '宠溺'],
       default: '平静',
+    },
+    audioPath: {
+      type: 'string',
+      description:
+        'listen 操作：待识别的音频文件路径（wav）。提供后执行真实 ASR，替换原先的模拟音频。',
+    },
+    ttsBackend: {
+      type: 'string',
+      description: 'speak 操作：TTS 后端选择（mock=仅记录意图 / real=真实合成）。默认 mock。',
+      enum: ['mock', 'real'],
+      default: 'mock',
     },
   },
   requiredParams: ['action'],
@@ -83,6 +101,8 @@ export interface VoiceInteractDeps {
         error?: string;
       }>;
     };
+    /** 真实麦克风采集器（返回 PCM/wav Buffer）；未注入则 listen 需要 audioPath */
+    audioCapturer?: (language: string) => Promise<Buffer>;
   };
 }
 
@@ -96,6 +116,12 @@ function ok(
 
 function fail(error: string, duration: number): ToolResult {
   return { success: false, output: '', error, duration, validated: false };
+}
+
+let _sharedRecognizer: SpeechRecognizer | null = null;
+function getSharedRecognizer(): SpeechRecognizer {
+  if (!_sharedRecognizer) _sharedRecognizer = new SpeechRecognizer();
+  return _sharedRecognizer;
 }
 
 /**
@@ -121,10 +147,10 @@ export function createVoiceInteractExecutor(deps: VoiceInteractDeps = {}) {
           return handleStopSession(deps, startTime);
 
         case 'speak':
-          return handleSpeak(deps, text, emotion, startTime);
+          return handleSpeak(deps, text, emotion, params, startTime);
 
         case 'listen':
-          return handleListen(deps, startTime);
+          return handleListen(deps, params, startTime);
 
         case 'status':
           return handleStatus(deps, startTime);
@@ -216,56 +242,46 @@ async function handleSpeak(
   deps: VoiceInteractDeps,
   text: string,
   emotion: string,
+  params: Record<string, unknown>,
   startTime: number
 ): Promise<ToolResult> {
   if (!text || text.trim().length === 0) {
     return fail('speak 操作需要提供 text 参数', Date.now() - startTime);
   }
 
-  if (deps.interactionEngine?.speechSynthesizer) {
-    try {
-      const result = await deps.interactionEngine.speechSynthesizer.speak(
-        text,
-        emotion
-      );
-      if (result.success) {
-        Logger.info(
-          `🔊 voice_interact speak: "${text.substring(0, 30)}..."`,
-          'VoiceInteract'
-        );
-        return ok(
-          `语音已生成并播放 (${result.duration || 0}ms)`,
-          Date.now() - startTime,
-          {
-            duration: result.duration,
-            emotion,
-            textLength: text.length,
-            synthesized: true,
-          }
-        );
-      }
-      return fail(result.error || '语音合成失败', Date.now() - startTime);
-    } catch (synthErr) {
-      Logger.warn(
-        `🔊 voice_interact SpeechSynthesizer 调用失败: ${(synthErr as Error).message}，降级到模拟模式`,
-        'VoiceInteract'
-      );
-      return ok(
-        `语音指令已接收: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`,
-        Date.now() - startTime,
-        { emotion, textLength: text.length, simulated: true }
-      );
-    }
+  // P1-3：TTS 后端切换（real 走真实合成器，mock 仅记录意图）
+  const ttsBackend = (
+    (params.ttsBackend as TTSBackend) ||
+    (deps.interactionEngine?.speechSynthesizer ? 'real' : 'mock')
+  ) as TTSBackend;
+
+  const synthesizer = new SpeechSynthesizer(
+    ttsBackend,
+    deps.interactionEngine?.speechSynthesizer
+      ? (t, e) => deps.interactionEngine!.speechSynthesizer!.speak(t, e)
+      : undefined
+  );
+
+  const result = await synthesizer.speak(text, emotion);
+  if (!result.success) {
+    return fail(result.error || '语音合成失败', Date.now() - startTime);
   }
 
   Logger.info(
-    `🔊 voice_interact (模拟): "${text.substring(0, 30)}..."`,
+    `🔊 voice_interact speak [${result.backend}]: "${text.substring(0, 30)}..."`,
     'VoiceInteract'
   );
   return ok(
-    `语音指令已接收: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`,
+    result.backend === 'real'
+      ? `语音已生成并播放 (${(result.duration ?? 0)}ms)`
+      : `语音指令已接收: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`,
     Date.now() - startTime,
-    { emotion, textLength: text.length, simulated: true }
+    {
+      emotion,
+      textLength: text.length,
+      synthesized: result.backend === 'real',
+      backend: result.backend,
+    }
   );
 }
 
@@ -275,52 +291,83 @@ async function handleSpeak(
  */
 async function handleListen(
   deps: VoiceInteractDeps,
+  params: Record<string, unknown>,
   startTime: number
 ): Promise<ToolResult> {
-  if (deps.interactionEngine) {
-    const session = deps.interactionEngine.getVoiceSession();
-    if (!session) {
+  const language = (params.language as string) || 'zh-CN';
+
+  // P1-3：获取真实音频数据源，替换原先硬编码的 Buffer.from('模拟音频输入数据')
+  let audioBuffer: Buffer | null = null;
+  const audioPath = params.audioPath as string | undefined;
+  if (audioPath) {
+    try {
+      audioBuffer = fs.readFileSync(audioPath);
+    } catch (readErr) {
       return fail(
-        '没有活跃的语音会话，请先使用 start_session',
+        `无法读取音频文件: ${audioPath} (${(readErr as Error).message})`,
         Date.now() - startTime
       );
     }
-
-    // 模拟音频输入（实际实现需要平台特定 API 捕获麦克风数据）
-    const mockAudioData = Buffer.from('模拟音频输入数据');
+  } else if (deps.audioCapturer) {
     try {
-      const result =
-        await deps.interactionEngine.processVoiceInput(mockAudioData);
-      Logger.info(
-        `🎤 voice_interact listen: 识别完成 turn=${result.turnCount}`,
+      audioBuffer = await deps.audioCapturer(language);
+    } catch (capErr) {
+      Logger.warn(
+        `🎤 麦克风采集失败: ${(capErr as Error).message}`,
         'VoiceInteract'
-      );
-      return ok(
-        result.text
-          ? `语音识别结果: "${result.text}" (轮次=${result.turnCount})`
-          : '未检测到语音输入',
-        Date.now() - startTime,
-        {
-          text: result.text,
-          turnCount: result.turnCount,
-          duration: result.duration,
-          hasAudio: !!result.audioData,
-        }
-      );
-    } catch (error) {
-      return fail(
-        `语音识别失败: ${(error as Error).message}`,
-        Date.now() - startTime
       );
     }
   }
 
-  // 模拟模式
-  Logger.info('🎤 voice_interact (模拟): listen 操作', 'VoiceInteract');
-  return ok('语音监听已就绪 (模拟模式，等待音频输入)', Date.now() - startTime, {
-    simulated: true,
-    note: '实际音频设备访问需要平台特定 API',
-  });
+  if (audioBuffer && audioBuffer.length > 0) {
+    // 真实 ASR：经 SpeechRecognizer（识别过程会自动写入感知总线 EventBus）
+    const recognizer = getSharedRecognizer();
+    const result = await recognizer.recognize(audioBuffer);
+
+    // ASR 结果写入感知总线（voice_recognized 事件供对话/感知链路消费）
+    EventBus.emit('voice_recognized', {
+      text: result.text,
+      language,
+      confidence: result.confidence,
+      timestamp: new Date().toISOString(),
+    });
+
+    // 回灌对话引擎（若已装配真实交互引擎）
+    if (deps.interactionEngine && result.text) {
+      try {
+        (
+          deps.interactionEngine as {
+            handleUserSpeech?: (t: string) => void;
+          }
+        ).handleUserSpeech?.(result.text);
+      } catch {
+        /* 交互引擎不一定实现 handleUserSpeech，忽略 */
+      }
+    }
+
+    Logger.info(
+      `🎤 voice_interact listen: 真实识别="${result.text}"`,
+      'VoiceInteract'
+    );
+    return ok(
+      result.text ? `语音识别结果: "${result.text}"` : '未检测到语音输入',
+      Date.now() - startTime,
+      {
+        text: result.text,
+        confidence: result.confidence,
+        language,
+        hasAudio: true,
+        asr: true,
+        turnCount: deps.interactionEngine?.getVoiceSession?.()?.turnCount ?? 0,
+      }
+    );
+  }
+
+  // 无音频源：fail-closed（不再回退到静默 mock）
+  return fail(
+    '未提供音频源（audioPath 参数），且当前环境无可用的麦克风采集，无法执行真实语音识别',
+    Date.now() - startTime
+  );
 }
 
 /**

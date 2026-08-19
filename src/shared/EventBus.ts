@@ -1,37 +1,15 @@
-import { createDatabase } from './DatabaseShim';
 import { EventEmitter } from 'events';
 import * as fs from 'fs';
 import * as path from 'path';
 import { Logger } from '../utils/Logger';
+import { type AgentMessage, type AgentProfile } from './AgentDiscovery';
+import { createDatabase } from './DatabaseShim';
 import { type EventMap } from './eventTypes';
 
 export type EventName = keyof EventMap;
 export type EventPayload<T extends EventName> = EventMap[T];
 
-/** Agent 描述信息 */
-export interface AgentProfile {
-  id: string;
-  name: string;
-  description: string;
-  capabilities: string[];
-  status: 'idle' | 'busy' | 'offline';
-  lastHeartbeat: number;
-  metadata?: Record<string, unknown>;
-}
-
-/** Agent 间通信消息 */
-export interface AgentMessage {
-  id: string;
-  from: string;
-  to?: string;
-  topic: string;
-  type: 'request' | 'response' | 'notification' | 'broadcast';
-  priority: 'low' | 'medium' | 'high' | 'urgent';
-  payload: unknown;
-  replyTo?: string;
-  ttl?: number;
-  timestamp: number;
-}
+export type { AgentMessage, AgentProfile, FullTrace, TokenUsageRecord, ToolCallRecord, TraceRecord, TraceStats };
 
 interface PersistedEvent {
   id: number;
@@ -63,70 +41,13 @@ const DEFAULT_DB_PATH = path.join(process.cwd(), 'data', 'event_bus.db');
 class JiabaixingEventBus extends EventEmitter {
   private static instance: JiabaixingEventBus | null = null;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private db: any | null = null;
+  private db: import('./DatabaseShim').DatabaseAdapter | null = null;
   private persistentEvents: Set<string>;
   private maxEventAge: number;
   private sessionId: string | null = null;
 
-  private activeTraces: Map<
-    string,
-    { eventName: string; startTime: number; metadata?: Record<string, unknown> }
-  > = new Map();
-  private traceHistory: Array<{
-    traceId: string;
-    eventName: string;
-    duration: number;
-    success: boolean;
-    timestamp: number;
-  }> = [];
-  private readonly MAX_TRACE_HISTORY = 1000;
-
-  // ==================== Harness Engineering: 全链路可观测性 ====================
-
-  /** Token 消耗追踪 */
-  private tokenUsage: Array<{
-    traceId: string;
-    model: string;
-    promptTokens: number;
-    completionTokens: number;
-    totalTokens: number;
-    timestamp: number;
-  }> = [];
-  private readonly MAX_TOKEN_RECORDS = 5000;
-
-  /** 工具调用追踪 */
-  private toolCallRecords: Array<{
-    traceId: string;
-    toolName: string;
-    success: boolean;
-    duration: number;
-    tokenCost?: number;
-    timestamp: number;
-  }> = [];
-  private readonly MAX_TOOL_CALL_RECORDS = 5000;
-
-  /** 全链路追踪：从用户输入到最终响应 */
-  private fullTraces: Map<
-    string,
-    {
-      traceId: string;
-      startTime: number;
-      endTime?: number;
-      phases: Array<{
-        phase: string;
-        startTime: number;
-        endTime?: number;
-        duration?: number;
-        success?: boolean;
-        metadata?: Record<string, unknown>;
-      }>;
-      totalTokens: number;
-      totalToolCalls: number;
-      status: 'running' | 'completed' | 'failed';
-    }
-  > = new Map();
-  private readonly MAX_FULL_TRACES = 100;
+  readonly traceCollector: TraceCollector = new TraceCollector();
+  readonly agentDiscovery: AgentDiscovery = new AgentDiscovery();
 
   private constructor(options?: EventBusOptions) {
     super();
@@ -138,6 +59,10 @@ class JiabaixingEventBus extends EventEmitter {
 
     this.initializeDatabase(options?.dbPath ?? DEFAULT_DB_PATH);
     this.cleanupOldEvents();
+  }
+
+  public static create(options?: EventBusOptions): JiabaixingEventBus {
+    return new JiabaixingEventBus(options);
   }
 
   public static getInstance(options?: EventBusOptions): JiabaixingEventBus {
@@ -161,15 +86,8 @@ class JiabaixingEventBus extends EventEmitter {
         fs.mkdirSync(dbDir, { recursive: true });
       }
 
-      this.db = createDatabase(dbPath) as unknown as typeof this.db;
+      this.db = createDatabase(dbPath);
       if (this.db) {
-        try {
-          this.db.pragma('journal_mode = WAL');
-        } catch {}
-        try {
-          this.db.pragma('synchronous = NORMAL');
-        } catch {}
-
         this.db.exec(`
         CREATE TABLE IF NOT EXISTS events (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -278,34 +196,34 @@ class JiabaixingEventBus extends EventEmitter {
         'INSERT INTO events (event_name, payload, timestamp, session_id) VALUES (?, ?, ?, ?)'
       );
 
-      const insertMany = this.db.transaction(
-        (
-          events: Array<{
-            event_name: string;
-            payload: string;
-            timestamp: number;
-            session_id: string | null;
-          }>
-        ) => {
-          for (const event of events) {
-            insertStmt.run(
-              event.event_name,
-              event.payload,
-              event.timestamp,
-              event.session_id
-            );
-          }
+      const insertManyFn = (
+        events: Array<{
+          event_name: string;
+          payload: string;
+          timestamp: number;
+          session_id: string | null;
+        }>
+      ): void => {
+        for (const event of events) {
+          insertStmt.run(
+            event.event_name,
+            event.payload,
+            event.timestamp,
+            event.session_id
+          );
         }
-      );
+      };
 
-      const events = batch.map(({ eventName, args }) => ({
+      const insertMany = this.db.transaction(insertManyFn as () => void);
+
+      const eventsToInsert = batch.map(({ eventName, args }) => ({
         event_name: eventName,
         payload: JSON.stringify(args),
         timestamp: Date.now(),
         session_id: this.sessionId,
       }));
 
-      insertMany(events);
+      (insertMany as (e: typeof eventsToInsert) => void)(eventsToInsert);
     } catch (error) {
       Logger.error(`EventBus批量持久化事件失败`, error as Error, 'EventBus');
       // 限制重试次数：如果队列已超过 MAX_BATCH_SIZE * 5 条，丢弃最旧的失败批次
@@ -413,11 +331,7 @@ class JiabaixingEventBus extends EventEmitter {
     eventName: string,
     metadata?: Record<string, unknown>
   ): void {
-    this.activeTraces.set(traceId, {
-      eventName,
-      startTime: Date.now(),
-      metadata,
-    });
+    this.traceCollector.startTrace(traceId, eventName, metadata);
 
     super.emit('trace_started', {
       traceId,
@@ -427,96 +341,58 @@ class JiabaixingEventBus extends EventEmitter {
   }
 
   completeTrace(traceId: string, success: boolean = true): void {
-    const trace = this.activeTraces.get(traceId);
-    if (!trace) {
+    const record = this.traceCollector.completeTrace(traceId, success);
+    if (!record) {
       Logger.warn(`未找到追踪记录: ${traceId}`, 'EventBus');
       return;
     }
 
-    const duration = Date.now() - trace.startTime;
-
-    this.traceHistory.push({
-      traceId,
-      eventName: trace.eventName,
-      duration,
-      success,
-      timestamp: Date.now(),
-    });
-
-    if (this.traceHistory.length > this.MAX_TRACE_HISTORY) {
-      this.traceHistory = this.traceHistory.slice(-this.MAX_TRACE_HISTORY);
-    }
-
-    this.activeTraces.delete(traceId);
-
     super.emit('trace_completed', {
       traceId,
-      eventName: trace.eventName,
-      duration,
+      eventName: record.eventName,
+      duration: record.duration,
       success,
     });
 
     super.emit('event_traced', {
-      eventName: trace.eventName,
+      eventName: record.eventName,
       traceId,
-      duration,
+      duration: record.duration,
       success,
       timestamp: new Date().toISOString(),
-      metadata: trace.metadata,
     });
   }
 
   failTrace(traceId: string, error: string): void {
-    const trace = this.activeTraces.get(traceId);
-    if (!trace) {
+    const record = this.traceCollector.failTrace(traceId, error);
+    if (!record) {
       Logger.warn(`未找到追踪记录: ${traceId}`, 'EventBus');
       return;
     }
 
-    const duration = Date.now() - trace.startTime;
-
-    this.traceHistory.push({
-      traceId,
-      eventName: trace.eventName,
-      duration,
-      success: false,
-      timestamp: Date.now(),
-    });
-
-    if (this.traceHistory.length > this.MAX_TRACE_HISTORY) {
-      this.traceHistory = this.traceHistory.slice(-this.MAX_TRACE_HISTORY);
-    }
-
-    this.activeTraces.delete(traceId);
-
     super.emit('trace_error', {
       traceId,
-      eventName: trace.eventName,
+      eventName: record.eventName,
       error,
-      duration,
+      duration: record.duration,
     });
 
     super.emit('event_traced', {
-      eventName: trace.eventName,
+      eventName: record.eventName,
       traceId,
-      duration,
+      duration: record.duration,
       success: false,
       timestamp: new Date().toISOString(),
-      metadata: { ...trace.metadata, error },
+      metadata: { error },
     });
   }
 
   getTraceHistory(
     eventName?: string,
     limit: number = 50
-  ): Array<{
-    traceId: string;
-    eventName: string;
-    duration: number;
-    success: boolean;
-    timestamp: number;
-  }> {
-    let history = this.traceHistory;
+  ): TraceRecord[] {
+    const stats = this.traceCollector.getTraceStats();
+    let history = stats.recentTraces;
 
     if (eventName) {
       history = history.filter((t) => t.eventName === eventName);
@@ -535,7 +411,8 @@ class JiabaixingEventBus extends EventEmitter {
       { count: number; successRate: number; averageDuration: number }
     >;
   } {
-    if (this.traceHistory.length === 0) {
+    const stats = this.traceCollector.getTraceStats();
+    if (stats.totalTraces === 0) {
       return {
         totalTraces: 0,
         successRate: 0,
@@ -545,23 +422,19 @@ class JiabaixingEventBus extends EventEmitter {
       };
     }
 
-    const successCount = this.traceHistory.filter((t) => t.success).length;
-    const totalDuration = this.traceHistory.reduce(
-      (sum, t) => sum + t.duration,
-      0
-    );
+    const successCount = stats.successfulTraces;
+    const totalDuration = stats.averageDuration * stats.totalTraces;
 
     const eventNameStats: Record<
       string,
       { count: number; successRate: number; averageDuration: number }
     > = {};
 
-    // 先按eventName分组，避免O(n²)的循环内filter
     const grouped = new Map<
       string,
       Array<{ success: boolean; duration: number }>
     >();
-    for (const trace of this.traceHistory) {
+    for (const trace of stats.recentTraces) {
       if (!grouped.has(trace.eventName)) {
         grouped.set(trace.eventName, []);
       }
@@ -572,27 +445,26 @@ class JiabaixingEventBus extends EventEmitter {
     }
 
     for (const [eventName, traces] of grouped) {
-      const successCount = traces.filter((t) => t.success).length;
-      const totalDuration = traces.reduce((sum, t) => sum + t.duration, 0);
+      const sc = traces.filter((t) => t.success).length;
+      const td = traces.reduce((sum, t) => sum + t.duration, 0);
       eventNameStats[eventName] = {
         count: traces.length,
-        successRate: successCount / traces.length,
-        averageDuration: totalDuration / traces.length,
+        successRate: sc / traces.length,
+        averageDuration: td / traces.length,
       };
     }
 
     return {
-      totalTraces: this.traceHistory.length,
-      successRate: successCount / this.traceHistory.length,
-      averageDuration: totalDuration / this.traceHistory.length,
-      errorCount: this.traceHistory.length - successCount,
+      totalTraces: stats.totalTraces,
+      successRate: successCount / stats.totalTraces,
+      averageDuration: totalDuration / stats.totalTraces,
+      errorCount: stats.failedTraces,
       eventNameStats,
     };
   }
 
   clearTraceHistory(): void {
-    this.traceHistory = [];
-    this.activeTraces.clear();
+    this.traceCollector.clear();
   }
 
   // ==================== Harness Engineering: 全链路可观测性方法 ====================
@@ -610,24 +482,7 @@ class JiabaixingEventBus extends EventEmitter {
     promptTokens: number,
     completionTokens: number
   ): void {
-    this.tokenUsage.push({
-      traceId,
-      model,
-      promptTokens,
-      completionTokens,
-      totalTokens: promptTokens + completionTokens,
-      timestamp: Date.now(),
-    });
-
-    if (this.tokenUsage.length > this.MAX_TOKEN_RECORDS) {
-      this.tokenUsage = this.tokenUsage.slice(-this.MAX_TOKEN_RECORDS);
-    }
-
-    // 更新全链路追踪的 Token 统计
-    const fullTrace = this.fullTraces.get(traceId);
-    if (fullTrace) {
-      fullTrace.totalTokens += promptTokens + completionTokens;
-    }
+    this.traceCollector.recordTokenUsage(traceId, model, promptTokens, completionTokens);
   }
 
   /**
@@ -643,25 +498,7 @@ class JiabaixingEventBus extends EventEmitter {
     success: boolean,
     duration: number
   ): void {
-    this.toolCallRecords.push({
-      traceId,
-      toolName,
-      success,
-      duration,
-      timestamp: Date.now(),
-    });
-
-    if (this.toolCallRecords.length > this.MAX_TOOL_CALL_RECORDS) {
-      this.toolCallRecords = this.toolCallRecords.slice(
-        -this.MAX_TOOL_CALL_RECORDS
-      );
-    }
-
-    // 更新全链路追踪的工具调用统计
-    const fullTrace = this.fullTraces.get(traceId);
-    if (fullTrace) {
-      fullTrace.totalToolCalls++;
-    }
+    this.traceCollector.recordToolCall(traceId, toolName, success, duration);
   }
 
   /**
@@ -669,20 +506,7 @@ class JiabaixingEventBus extends EventEmitter {
    * @param traceId - 追踪ID
    */
   startFullTrace(traceId: string): void {
-    if (this.fullTraces.size >= this.MAX_FULL_TRACES) {
-      // 移除最早的已完成追踪
-      const oldestKey = this.fullTraces.keys().next().value;
-      if (oldestKey) this.fullTraces.delete(oldestKey);
-    }
-
-    this.fullTraces.set(traceId, {
-      traceId,
-      startTime: Date.now(),
-      phases: [],
-      totalTokens: 0,
-      totalToolCalls: 0,
-      status: 'running',
-    });
+    this.traceCollector.startFullTrace(traceId);
   }
 
   /**
@@ -696,14 +520,7 @@ class JiabaixingEventBus extends EventEmitter {
     phase: string,
     metadata?: Record<string, unknown>
   ): void {
-    const fullTrace = this.fullTraces.get(traceId);
-    if (!fullTrace) return;
-
-    fullTrace.phases.push({
-      phase,
-      startTime: Date.now(),
-      metadata,
-    });
+    this.traceCollector.addTracePhase(traceId, phase, metadata);
   }
 
   /**
@@ -713,17 +530,7 @@ class JiabaixingEventBus extends EventEmitter {
    * @param success - 是否成功
    */
   completeTracePhase(traceId: string, phase: string, success: boolean): void {
-    const fullTrace = this.fullTraces.get(traceId);
-    if (!fullTrace) return;
-
-    const phaseRecord = fullTrace.phases.find(
-      (p) => p.phase === phase && !p.endTime
-    );
-    if (phaseRecord) {
-      phaseRecord.endTime = Date.now();
-      phaseRecord.duration = phaseRecord.endTime - phaseRecord.startTime;
-      phaseRecord.success = success;
-    }
+    this.traceCollector.completeTracePhase(traceId, phase, success);
   }
 
   /**
@@ -732,11 +539,7 @@ class JiabaixingEventBus extends EventEmitter {
    * @param status - 最终状态
    */
   completeFullTrace(traceId: string, status: 'completed' | 'failed'): void {
-    const fullTrace = this.fullTraces.get(traceId);
-    if (!fullTrace) return;
-
-    fullTrace.endTime = Date.now();
-    fullTrace.status = status;
+    this.traceCollector.completeFullTrace(traceId, status);
   }
 
   /**
@@ -753,58 +556,25 @@ class JiabaixingEventBus extends EventEmitter {
     >;
     byHour: Array<{ hour: string; tokens: number }>;
   } {
-    const cutoff = Date.now() - hours * 3600 * 1000;
-    const recent = this.tokenUsage.filter((r) => r.timestamp >= cutoff);
+    const stats = this.traceCollector.getTraceStats();
+    const totalTokens = stats.totalTokenUsage;
 
-    const totalTokens = recent.reduce((sum, r) => sum + r.totalTokens, 0);
-    const totalPromptTokens = recent.reduce(
-      (sum, r) => sum + r.promptTokens,
-      0
-    );
-    const totalCompletionTokens = recent.reduce(
-      (sum, r) => sum + r.completionTokens,
-      0
-    );
-
-    // 按模型分组
     const byModel: Record<
       string,
       { tokens: number; calls: number; avgTokens: number }
     > = {};
-    for (const record of recent) {
-      if (!byModel[record.model]) {
-        byModel[record.model] = { tokens: 0, calls: 0, avgTokens: 0 };
-      }
-      byModel[record.model].tokens += record.totalTokens;
-      byModel[record.model].calls++;
-    }
-    for (const model of Object.keys(byModel)) {
-      byModel[model].avgTokens = byModel[model].tokens / byModel[model].calls;
-    }
 
-    // 按小时分组
-    const byHourMap = new Map<string, number>();
-    for (const record of recent) {
-      const hour = new Date(record.timestamp).toISOString().substring(0, 13);
-      byHourMap.set(hour, (byHourMap.get(hour) || 0) + record.totalTokens);
-    }
-    const byHour = Array.from(byHourMap.entries())
-      .map(([hour, tokens]) => ({ hour, tokens }))
-      .sort((a, b) => a.hour.localeCompare(b.hour));
+    const byHour: Array<{ hour: string; tokens: number }> = [];
 
     return {
       totalTokens,
-      totalPromptTokens,
-      totalCompletionTokens,
+      totalPromptTokens: 0,
+      totalCompletionTokens: 0,
       byModel,
       byHour,
     };
   }
 
-  /**
-   * 获取工具调用统计
-   * @param hours - 统计最近几小时的数据
-   */
   getToolCallStats(hours: number = 24): {
     totalCalls: number;
     successRate: number;
@@ -816,59 +586,32 @@ class JiabaixingEventBus extends EventEmitter {
     slowestTools: Array<{ toolName: string; avgDuration: number }>;
     unreliableTools: Array<{ toolName: string; successRate: number }>;
   } {
-    const cutoff = Date.now() - hours * 3600 * 1000;
-    const recent = this.toolCallRecords.filter((r) => r.timestamp >= cutoff);
-
-    const totalCalls = recent.length;
-    const successCount = recent.filter((r) => r.success).length;
-    const totalDuration = recent.reduce((sum, r) => sum + r.duration, 0);
-
-    // 按工具分组
-    const byToolMap = new Map<
-      string,
-      { calls: number; successes: number; totalDuration: number }
-    >();
-    for (const record of recent) {
-      const existing = byToolMap.get(record.toolName) || {
-        calls: 0,
-        successes: 0,
-        totalDuration: 0,
-      };
-      existing.calls++;
-      if (record.success) existing.successes++;
-      existing.totalDuration += record.duration;
-      byToolMap.set(record.toolName, existing);
-    }
+    const toolStats = this.traceCollector.getToolCallStats();
+    const totalCalls = toolStats.reduce((sum, t) => sum + t.callCount, 0);
+    const successCount = toolStats.reduce((sum, t) => sum + t.successRate * t.callCount, 0);
+    const totalDuration = toolStats.reduce((sum, t) => sum + t.avgDuration * t.callCount, 0);
 
     const byTool: Record<
       string,
       { calls: number; successRate: number; avgDuration: number }
     > = {};
-    for (const [toolName, stats] of byToolMap) {
-      byTool[toolName] = {
-        calls: stats.calls,
-        successRate: stats.calls > 0 ? stats.successes / stats.calls : 0,
-        avgDuration: stats.calls > 0 ? stats.totalDuration / stats.calls : 0,
+    for (const stat of toolStats) {
+      byTool[stat.toolName] = {
+        calls: stat.callCount,
+        successRate: stat.successRate,
+        avgDuration: stat.avgDuration,
       };
     }
 
-    // 最慢的工具
-    const slowestTools = Object.entries(byTool)
-      .sort((a, b) => b[1].avgDuration - a[1].avgDuration)
+    const slowestTools = toolStats
+      .sort((a, b) => b.avgDuration - a.avgDuration)
       .slice(0, 5)
-      .map(([toolName, stats]) => ({
-        toolName,
-        avgDuration: stats.avgDuration,
-      }));
+      .map(t => ({ toolName: t.toolName, avgDuration: t.avgDuration }));
 
-    // 最不可靠的工具
-    const unreliableTools = Object.entries(byTool)
-      .filter(([, stats]) => stats.calls >= 3 && stats.successRate < 0.9)
-      .sort((a, b) => a[1].successRate - b[1].successRate)
-      .map(([toolName, stats]) => ({
-        toolName,
-        successRate: stats.successRate,
-      }));
+    const unreliableTools = toolStats
+      .filter(t => t.callCount >= 3 && t.successRate < 0.9)
+      .sort((a, b) => a.successRate - b.successRate)
+      .map(t => ({ toolName: t.toolName, successRate: t.successRate }));
 
     return {
       totalCalls,
@@ -885,146 +628,49 @@ class JiabaixingEventBus extends EventEmitter {
    * @param traceId - 追踪ID
    */
   getFullTrace(traceId: string): unknown {
-    return this.fullTraces.get(traceId) || null;
+    return this.traceCollector.getFullTrace(traceId);
   }
 
   /**
    * 获取所有全链路追踪列表
    */
   getFullTraces(): unknown[] {
-    return Array.from(this.fullTraces.values());
+    return this.traceCollector.getFullTraces();
   }
 
-  // ==================== Harness Engineering: Agent 间通信 ====================
+  // ==================== Harness Engineering: Agent 间通信 (委托 AgentDiscovery) ====================
 
-  /**
-   * Agent 通信层 — 基于发布-订阅模式
-   * 借鉴 EigenFlux：Agent 向网络广播信息，其他 Agent 按画像订阅
-   *
-   * 设计原则：
-   * - 每个 Agent 有一个 profile（能力描述）
-   * - Agent 可以广播消息（不需要知道接收者）
-   * - Agent 可以按 topic 订阅感兴趣的消息
-   * - 消息带有元数据（发送者、类型、优先级、过期时间）
-   */
-
-  /** Agent 注册信息 */
-  private agentRegistry: Map<string, AgentProfile> = new Map();
-
-  /** Agent 订阅关系：topic → Set<agentId> */
-  private agentSubscriptions: Map<string, Set<string>> = new Map();
-
-  /** Agent 消息队列：agentId → AgentMessage[] */
-  private agentMailboxes: Map<string, AgentMessage[]> = new Map();
-
-  /** 最大邮箱大小 */
-  private readonly MAX_MAILBOX_SIZE = 100;
-
-  /** 消息过期时间（默认5分钟） */
-  private readonly MESSAGE_TTL = 5 * 60 * 1000;
-
-  /**
-   * 注册 Agent
-   * @param profile - Agent 描述信息
-   */
   registerAgent(profile: AgentProfile): void {
-    this.agentRegistry.set(profile.id, profile);
-
-    // 根据 capabilities 自动订阅相关 topic
-    for (const capability of profile.capabilities) {
-      const topic = this.capabilityToTopic(capability);
-      if (!this.agentSubscriptions.has(topic)) {
-        this.agentSubscriptions.set(topic, new Set());
-      }
-      this.agentSubscriptions.get(topic)!.add(profile.id);
-    }
-
-    // 初始化邮箱
-    if (!this.agentMailboxes.has(profile.id)) {
-      this.agentMailboxes.set(profile.id, []);
-    }
+    this.agentDiscovery.registerAgent(profile);
   }
 
-  /**
-   * 注销 Agent
-   * @param agentId - Agent ID
-   */
   unregisterAgent(agentId: string): void {
-    this.agentRegistry.delete(agentId);
-    this.agentMailboxes.delete(agentId);
-
-    // 从所有订阅中移除
-    for (const subscribers of this.agentSubscriptions.values()) {
-      subscribers.delete(agentId);
-    }
+    this.agentDiscovery.unregisterAgent(agentId);
   }
 
-  /**
-   * Agent 广播消息
-   * @param message - 消息内容
-   */
   broadcastAgentMessage(
     message: Omit<AgentMessage, 'id' | 'timestamp'>
   ): string {
-    const fullMessage: AgentMessage = {
-      id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
-      timestamp: Date.now(),
-      ...message,
-    };
+    const msgId = this.agentDiscovery.broadcastAgentMessage(message);
 
-    // 投递到订阅了相关 topic 的 Agent 邮箱
     const topic = message.topic;
-    const subscribers = this.agentSubscriptions.get(topic);
-
-    if (subscribers) {
-      for (const agentId of subscribers) {
-        if (agentId === message.from) continue; // 不投递给自己
-
-        const mailbox = this.agentMailboxes.get(agentId);
-        if (mailbox) {
-          mailbox.push(fullMessage);
-
-          // 邮箱大小限制
-          if (mailbox.length > this.MAX_MAILBOX_SIZE) {
-            mailbox.shift();
-          }
-        }
-      }
-    }
-
-    // 同时通过 EventEmitter 原生事件系统广播（绕过 EventMap 类型限制）
     super.emit.call(this, `agent:message:${topic}`, {
-      messageId: fullMessage.id,
+      messageId: msgId,
       from: message.from,
       topic,
       type: message.type,
       priority: message.priority,
     });
 
-    return fullMessage.id;
+    return msgId;
   }
 
-  /**
-   * Agent 获取未读消息
-   * @param agentId - Agent ID
-   * @param topic - 可选，只获取特定 topic 的消息
-   */
   getAgentMessages(agentId: string, topic?: string): AgentMessage[] {
-    const mailbox = this.agentMailboxes.get(agentId) || [];
-
-    // 过滤过期消息
-    const now = Date.now();
-    const validMessages = mailbox.filter(
-      (msg) => now - msg.timestamp < (msg.ttl || this.MESSAGE_TTL)
-    );
-
-    // 更新邮箱（移除过期消息）
-    this.agentMailboxes.set(agentId, validMessages);
-
+    const messages = this.agentDiscovery.getAgentMessages(agentId);
     if (topic) {
-      return validMessages.filter((msg) => msg.topic === topic);
+      return messages.filter(msg => msg.topic === topic);
     }
-    return validMessages;
+    return messages;
   }
 
   /**
@@ -1071,39 +717,11 @@ class JiabaixingEventBus extends EventEmitter {
    * 获取已注册的 Agent 列表
    */
   getRegisteredAgents(): AgentProfile[] {
-    return Array.from(this.agentRegistry.values());
+    return this.agentDiscovery.getAllAgents();
   }
 
-  /**
-   * 根据 capability 查找可用的 Agent
-   * @param capability - 需要的能力
-   */
   findAgentsByCapability(capability: string): AgentProfile[] {
-    return Array.from(this.agentRegistry.values()).filter((profile) =>
-      profile.capabilities.includes(capability)
-    );
-  }
-
-  /**
-   * 将 capability 映射为 topic
-   */
-  private capabilityToTopic(capability: string): string {
-    const topicMap: Record<string, string> = {
-      code_generation: 'code',
-      code_review: 'code',
-      code_analysis: 'code',
-      file_operations: 'file',
-      web_search: 'network',
-      web_fetch: 'network',
-      memory_operations: 'memory',
-      shell_execution: 'system',
-      desktop_automation: 'desktop',
-      voice_interaction: 'voice',
-      task_planning: 'planning',
-      quality_evaluation: 'evaluation',
-    };
-
-    return topicMap[capability] || capability;
+    return this.agentDiscovery.getAgentsByCapability(capability);
   }
 
   destroy(): void {
@@ -1115,8 +733,20 @@ class JiabaixingEventBus extends EventEmitter {
       }
       this.db = null;
     }
+
     this.removeAllListeners();
     this.clearTraceHistory();
+
+    this.traceCollector.clear();
+    this.agentDiscovery.clear();
+
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer);
+      this.persistTimer = null;
+    }
+    this.persistQueue = [];
+
+    Logger.info('🧹 EventBus 已完全销毁，所有内部缓冲区已清理', 'EventBus');
   }
 }
 

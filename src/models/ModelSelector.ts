@@ -7,6 +7,10 @@ export class ModelSelector {
 
   private constructor() {}
 
+  public static create(): ModelSelector {
+    return new ModelSelector();
+  }
+
   public static getInstance(): ModelSelector {
     if (!ModelSelector.instance) {
       ModelSelector.instance = new ModelSelector();

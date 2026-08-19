@@ -44,19 +44,101 @@ export interface ResolveResult {
   references: ResolvedReference[];
   resolvedContent: string;
   cleanedInput: string;
+  /** 多模态 @引用（@截图区域 / @设备状态 / @visual#0 …），来自感知融合 */
+  multimodalReferences?: MultimodalReference[];
 }
+
+/** 多模态感知通道（与 Python perception.reference_resolver 对齐） */
+export type MultimodalModality =
+  | 'visual'
+  | 'audio'
+  | 'text'
+  | 'uia'
+  | 'ocr'
+  | 'proprioception'
+  | 'environment';
+
+/** 已解析的多模态 @引用：引用到 FusedPerception.structured 的具体感知片段 */
+export interface MultimodalReference {
+  token: string; // 完整 @引用（含 @）
+  kind: 'named' | 'modality' | 'sample' | 'unresolved';
+  modality: MultimodalModality | null;
+  content: string;
+  confidence: number;
+  sourceIndex: number; // -1 表示整通道聚合
+}
+
+/**
+ * 多模态 @引用 provider（TS 入口透传）。
+ * 实际解析由 Python 端 PerceptionReferenceResolver 完成（感知融合数据所在），
+ * TS 仅负责调用与渲染，符合 AGENTS.md §0.1（Agent 核心逻辑在 Python）。
+ */
+export type MultimodalReferenceProvider = (
+  tokens: string[]
+) => Promise<MultimodalReference[]>;
 
 /** @ 引用正则：@url 优先匹配，再匹配 @path */
 const REFERENCE_PATTERN = /@(https?:\/\/[^\s]+)|@([\w./\-]+(?:\.[\w]+)?)/g;
+
+/** 多模态 @引用：CJK 或拉丁（具名类型 / 通道名），可选 #样本索引 */
+const MULTIMODAL_REFERENCE_PATTERN = /@([\u4e00-\u9fffA-Za-z][\u4e00-\u9fffA-Za-z0-9_]*(?:#\d+)?)/g;
+/** 已知感知通道名（拉丁），用于区分"多模态 @引用"与普通 @文件/@配置 引用 */
+const KNOWN_MODALITIES = new Set<string>([
+  'visual',
+  'audio',
+  'text',
+  'uia',
+  'ocr',
+  'proprioception',
+  'environment',
+]);
 
 /** 文件最大字符数 */
 const MAX_FILE_CHARS = 15000;
 
 export class ContextReferenceResolver {
   private projectRoot: string;
+  /** 多模态 @引用 provider（TS 入口透传 → Python 感知融合核心） */
+  private multimodalProvider?: MultimodalReferenceProvider;
 
   constructor(options: { projectRoot: string }) {
     this.projectRoot = options.projectRoot;
+  }
+
+  /**
+   * 注入多模态 @引用 provider。不设置时，多模态引用原样保留在文本中（降级）。
+   */
+  setMultimodalReferenceProvider(provider: MultimodalReferenceProvider): void {
+    this.multimodalProvider = provider;
+  }
+
+  /**
+   * 提取文本中的多模态 @引用 token（不含 @），供测试 / 透传使用。
+   * 仅识别：CJK 具名类型（截图区域…）、已知通道名（visual…）、带 #索引的通道样本。
+   */
+  static collectMultimodalTokens(input: string): string[] {
+    if (!input) return [];
+    const tokens: string[] = [];
+    const seen = new Set<string>();
+    const re = new RegExp(
+      MULTIMODAL_REFERENCE_PATTERN.source,
+      MULTIMODAL_REFERENCE_PATTERN.flags
+    );
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(input)) !== null) {
+      const token = m[1];
+      if (seen.has(token)) continue;
+      seen.add(token);
+      const isCjk = /[\u4e00-\u9fff]/.test(token);
+      const hashIdx = token.indexOf('#');
+      const isModalityOrSample =
+        KNOWN_MODALITIES.has(token) ||
+        (hashIdx > 0 && KNOWN_MODALITIES.has(token.slice(0, hashIdx)));
+      if (isCjk || isModalityOrSample) {
+        tokens.push(token);
+      }
+    }
+    return tokens;
   }
 
   /**
@@ -66,6 +148,7 @@ export class ContextReferenceResolver {
    */
   async resolve(input: string): Promise<ResolveResult> {
     const references: ResolvedReference[] = [];
+    const multimodalReferences: MultimodalReference[] = [];
     const contentParts: string[] = [];
     let cleanedInput = input;
 
@@ -86,7 +169,13 @@ export class ContextReferenceResolver {
       });
     }
 
-    if (matches.length === 0) {
+    // 多模态 @引用（@截图区域 / @设备状态 / @visual#0 …）由感知 provider 解析，
+    // 不应走文件/路径解析通道，提前剔除以避免误判。
+    const multimodalTokens =
+      ContextReferenceResolver.collectMultimodalTokens(input);
+    const multimodalSet = new Set(multimodalTokens);
+
+    if (matches.length === 0 && multimodalTokens.length === 0) {
       return {
         hasReferences: false,
         references: [],
@@ -95,8 +184,11 @@ export class ContextReferenceResolver {
       };
     }
 
-    // 逐个解析引用
+    // 逐个解析文件/URL/git_diff 引用（跳过多模态引用）
     for (const m of matches) {
+      if (multimodalSet.has(m.target)) {
+        continue;
+      }
       const ref = this.resolveReference(m.target);
       references.push(ref);
 
@@ -110,14 +202,33 @@ export class ContextReferenceResolver {
       cleanedInput = cleanedInput.replace(m.fullMatch, m.target);
     }
 
-    Logger.info(
-      `📎 解析了 ${references.length} 个 @ 引用`,
-      'ContextReferenceResolver'
-    );
+    // 多模态 @引用：委托给注入的感知 provider（数据在 Python 端融合，TS 仅透传渲染）
+    if (this.multimodalProvider && multimodalTokens.length > 0) {
+      const resolved = await this.multimodalProvider(multimodalTokens);
+      let refNum = references.length;
+      for (const ref of resolved) {
+        refNum += 1;
+        multimodalReferences.push(ref);
+        const placeholder = `[ref#${refNum}]`;
+        cleanedInput = cleanedInput.split(ref.token).join(placeholder);
+        contentParts.push(
+          `--- @${ref.token} (多模态/${ref.modality ?? 'unknown'}) ---\n${ref.content}\n--- end @${ref.token} ---`
+        );
+      }
+    }
+
+    const hasRefs = references.length > 0 || multimodalReferences.length > 0;
+    if (hasRefs) {
+      Logger.info(
+        `📎 解析了 ${references.length} 个文件引用 / ${multimodalReferences.length} 个多模态引用`,
+        'ContextReferenceResolver'
+      );
+    }
 
     return {
-      hasReferences: true,
+      hasReferences: hasRefs,
       references,
+      multimodalReferences,
       resolvedContent: contentParts.join('\n\n'),
       cleanedInput,
     };

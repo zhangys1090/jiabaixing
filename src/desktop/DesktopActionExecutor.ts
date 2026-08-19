@@ -5,13 +5,13 @@
  *     clickElement, typeIntoElement, getElementText
  */
 
-import { ScreenCapture } from './ScreenCapture';
-import { WindowManager } from './WindowManager';
-import { SystemInput } from './SystemInput';
-import { DesktopVisionEngine, DesktopObservation } from './DesktopVisionEngine';
-import { DesktopUIInspector } from './DesktopUIInspector';
-import { Logger } from '../utils/Logger';
 import { exec, execSync } from 'child_process';
+import { Logger } from '../utils/Logger';
+import { DesktopUIInspector } from './DesktopUIInspector';
+import { DesktopObservation, DesktopVisionEngine } from './DesktopVisionEngine';
+import { ScreenCapture } from './ScreenCapture';
+import { SystemInput } from './SystemInput';
+import { WindowManager } from './WindowManager';
 
 export interface DesktopAction {
   type:
@@ -72,6 +72,10 @@ export class DesktopActionExecutor {
     this.systemInput = SystemInput.getInstance();
     this.visionEngine = DesktopVisionEngine.getInstance();
     this.uiInspector = DesktopUIInspector.getInstance();
+  }
+
+  public static create(): DesktopActionExecutor {
+    return new DesktopActionExecutor();
   }
 
   public static getInstance(): DesktopActionExecutor {

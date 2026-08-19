@@ -5,7 +5,15 @@
  * 替代 SkillRegistry 的基础设施工具注册功能
  */
 
+import { createHash } from 'crypto';
+import { capMetrics } from '../../../monitoring/CapabilityMetrics';
 import { perf } from '../../../monitoring/PerformanceMonitor';
+import {
+  ApprovalDecision,
+  ApprovalType,
+  getApprovalEngine,
+} from '../../../security/ApprovalEngine';
+import { EventBus } from '../../../shared/EventBus';
 import { Logger } from '../../../utils/Logger';
 import type {
   RegisteredTool,
@@ -17,6 +25,7 @@ import type {
   ToolResult,
 } from '../../types';
 import { ToolCategory } from '../../types';
+import { ToolCallGuard } from './ToolCallGuard';
 
 /** OpenAI Function Calling 工具格式 */
 interface OpenAIToolDef {
@@ -31,6 +40,49 @@ interface OpenAIToolDef {
     };
   };
 }
+
+/** P2-4: 熔断器状态 */
+interface CircuitBreakerState {
+  state: 'closed' | 'open' | 'half-open';
+  failureCount: number;
+  lastFailureTime: number;
+}
+
+/** P1-3/B1: 仅对瞬时网络/限流类错误重试 */
+const RETRYABLE_ERROR_RE =
+  /(ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|429|5\d{2}|timeout|timed out|rate.?limit|too many requests|service unavailable|bad gateway|gateway timeout|connection reset)/i;
+
+/** B1: 默认启用重试的工具类别（网络/LLM 类） */
+const RETRY_DEFAULT_TOOL_CATEGORIES: ReadonlySet<ToolCategory> = new Set([
+  ToolCategory.NETWORK,
+]);
+
+/** B3: 强制熔断覆盖的付费/外部 API 工具 */
+const PAID_EXTERNAL_TOOLS: ReadonlySet<string> = new Set([
+  'image_generate',
+  'tts_speak',
+  'web_search',
+]);
+
+/** B2: 自愈动作枚举（参数修正 → 替代工具 → 降级） */
+export enum ToolHealAction {
+  PARAM_FIX = 'param_fix',
+  ALT_TOOL = 'alt_tool',
+  DEGRADE = 'degrade',
+  NONE = 'none',
+}
+
+/** B2: 自愈处理器签名（由 Python 后端经 bridge 注入） */
+export type SelfHealHandler = (ctx: {
+  toolName: string;
+  params: Record<string, unknown>;
+  lastError: string;
+  context: ToolContext;
+}) => Promise<{
+  action: ToolHealAction;
+  params?: Record<string, unknown>;
+  alternativeTool?: string;
+}>;
 
 /** 发现的工具描述 */
 export interface DiscoveredTool {
@@ -54,6 +106,32 @@ export class ToolRegistry {
   private tools: Map<string, RegisteredTool> = new Map();
   /** toOpenAITools() 缓存 */
   private cachedOpenAITools: OpenAIToolDef[] | null = null;
+  /** Schema 验证器（P0-1: 参数校验接入执行链路） */
+  private schemaValidator: SchemaValidator = new SchemaValidator();
+  /** 权限守卫（P0-2: 权限检查接入执行链路） */
+  private permissionGuard: PermissionGuard = new PermissionGuard();
+  /** 是否启用执行前置校验（默认 true，生产环境可按需关闭） */
+  private enablePreChecks: boolean = true;
+
+  // P2-4: 工具熔断器（Circuit Breaker）
+  private static readonly CB_FAILURE_THRESHOLD = 5;
+  private static readonly CB_RESET_TIMEOUT_MS = 60_000;
+  private runtimeState: ToolRuntimeState = new InMemoryToolRuntimeState();
+
+  // C1: 统一结果缓存/去重/限速守卫（复用既有 ToolCallGuard；此前为死代码未接线）。
+  // 仅对幂等且属 NETWORK/FILE/MEMORY 类的工具生效（逻辑在 execute 内按工具判定）。
+  private callGuard = new ToolCallGuard();
+
+  // B2: 自愈处理器（由 Python 后端经 bridge 注入；默认无 → 诚实失败）
+  private selfHealHandler: SelfHealHandler | null = null;
+
+  // C2: 每-agent 并发信号量（默认 4）
+  private static readonly MAX_CONCURRENT_TOOLS = (() => {
+    const v = parseInt(process.env['TOOL_MAX_CONCURRENT'] || '4', 10);
+    return Number.isFinite(v) && v > 0 ? v : 4;
+  })();
+
+  private metadataEnhancer: ToolMetadataEnhancer = new ToolMetadataEnhancer();
 
   /**
    * 注册工具
@@ -76,6 +154,8 @@ export class ToolRegistry {
     this.tools.set(definition.name, { definition, execute });
     this.cachedOpenAITools = null;
 
+    this.metadataEnhancer.registerTool(definition);
+
     Logger.info(
       `🔧 注册工具: ${definition.name} [${definition.category}] 风险=${definition.riskLevel}`,
       'ToolRegistry'
@@ -89,6 +169,7 @@ export class ToolRegistry {
     const removed = this.tools.delete(name);
     if (removed) {
       this.cachedOpenAITools = null;
+      this.metadataEnhancer.unregisterTool(name);
       Logger.info(`🔧 注销工具: ${name}`, 'ToolRegistry');
     }
     return removed;
@@ -134,6 +215,83 @@ export class ToolRegistry {
   }
 
   /**
+   * 按语义标签过滤工具
+   */
+  getByTags(tags: string[]): RegisteredTool[] {
+    if (tags.length === 0) return [];
+    const tagSet = new Set(tags.map((t) => t.toLowerCase()));
+    return Array.from(this.tools.values()).filter((t) =>
+      t.definition.tags?.some((tag) => tagSet.has(tag.toLowerCase()))
+    );
+  }
+
+  /**
+   * 按场景过滤工具
+   */
+  getByScene(scene: string): RegisteredTool[] {
+    const s = scene.toLowerCase();
+    return Array.from(this.tools.values()).filter(
+      (t) => t.definition.scenes?.some((sc) => sc.toLowerCase() === s) ?? false
+    );
+  }
+
+  /**
+   * 按能力等级过滤（渐进式披露）
+   * @param maxLevel 最大暴露等级 (1-3)
+   */
+  getByCapabilityLevel(maxLevel: 1 | 2 | 3): RegisteredTool[] {
+    return Array.from(this.tools.values()).filter(
+      (t) => (t.definition.capabilityLevel ?? 1) <= maxLevel
+    );
+  }
+
+  /**
+   * 多条件组合过滤：标签 + 场景 + 能力等级
+   * 返回的交集满足所有非空条件
+   */
+  filterBy({
+    tags,
+    scene,
+    maxCapabilityLevel,
+    excludeCategories,
+  }: {
+    tags?: string[];
+    scene?: string;
+    maxCapabilityLevel?: 1 | 2 | 3;
+    excludeCategories?: ToolCategory[];
+  }): RegisteredTool[] {
+    let results = Array.from(this.tools.values());
+
+    if (tags && tags.length > 0) {
+      const tagSet = new Set(tags.map((t) => t.toLowerCase()));
+      results = results.filter((t) =>
+        t.definition.tags?.some((tag) => tagSet.has(tag.toLowerCase()))
+      );
+    }
+
+    if (scene) {
+      const s = scene.toLowerCase();
+      results = results.filter(
+        (t) =>
+          t.definition.scenes?.some((sc) => sc.toLowerCase() === s) ?? false
+      );
+    }
+
+    if (maxCapabilityLevel) {
+      results = results.filter(
+        (t) => (t.definition.capabilityLevel ?? 1) <= maxCapabilityLevel
+      );
+    }
+
+    if (excludeCategories && excludeCategories.length > 0) {
+      const catSet = new Set(excludeCategories);
+      results = results.filter((t) => !catSet.has(t.definition.category));
+    }
+
+    return results;
+  }
+
+  /**
    * 检查工具是否存在
    */
   has(name: string): boolean {
@@ -167,60 +325,225 @@ export class ToolRegistry {
     }
 
     const startTime = Date.now();
+
+    // P2-4: 熔断器检查 — 工具连续失败超过阈值时自动熔断
+    const cbState = this.runtimeState.getCircuitBreaker(name);
+    if (cbState && cbState.state === 'open') {
+      const elapsed = Date.now() - cbState.lastFailureTime;
+      if (elapsed < ToolRegistry.CB_RESET_TIMEOUT_MS) {
+        Logger.warn(
+          `⚡ P2-4: 工具 ${name} 已熔断 (连续失败 ${cbState.failureCount} 次，${Math.ceil((ToolRegistry.CB_RESET_TIMEOUT_MS - elapsed) / 1000)}s 后半开)`,
+          'ToolRegistry'
+        );
+        return {
+          success: false,
+          output: null,
+          error: `工具 ${name} 已熔断，请稍后重试`,
+          duration: 0,
+          validated: false,
+        };
+      }
+      cbState.state = 'half-open';
+      Logger.info(`⚡ P2-4: 工具 ${name} 进入半开状态，尝试恢复`, 'ToolRegistry');
+    }
+
+    // P0-1: Schema 参数验证 — 前置拦截非法/缺失参数
+    if (this.enablePreChecks) {
+      const schemaResult = this.schemaValidator.validate(
+        params,
+        tool.definition.parameters,
+        tool.definition.requiredParams
+      );
+      if (!schemaResult.valid) {
+        Logger.warn(
+          `🛡️ Schema 验证拒绝: ${name} — ${schemaResult.errors.join('; ')}`,
+          'ToolRegistry'
+        );
+        return {
+          success: false,
+          output: null,
+          error: `参数验证失败: ${schemaResult.errors.join('; ')}`,
+          duration: Date.now() - startTime,
+          validated: false,
+          metadata: { schemaErrors: schemaResult.errors },
+        };
+      }
+    }
+
+    // P0-2: 权限检查 — 前置拦截无权限调用
+    // 注意：permResult 必须在外层声明（此前为 if 块内 const，导致 permission-less
+    // 工具在第 404 行引用未定义变量抛 ReferenceError，使 execute 直接崩溃）。
+    let permResult:
+      | { allowed: boolean; reason?: string; policy?: string; needsConfirmation?: boolean; missing?: unknown }
+      | undefined;
+    if (
+      this.enablePreChecks &&
+      tool.definition.requiredPermissions.length > 0
+    ) {
+      permResult = this.permissionGuard.check(
+        name,
+        tool.definition.requiredPermissions as Permission[],
+        tool.definition.riskLevel,
+        context
+      ) as { allowed: boolean; reason?: string; policy?: string; needsConfirmation?: boolean; missing?: unknown } | undefined;
+      if (!permResult.allowed) {
+        Logger.warn(
+          `🚫 权限拒绝: ${name} — ${permResult.reason}`,
+          'ToolRegistry'
+        );
+        return {
+          success: false,
+          output: null,
+          error: permResult.reason || `权限不足: ${name}`,
+          duration: Date.now() - startTime,
+          validated: false,
+          metadata: {
+            missingPermissions: permResult.missing,
+            policy: permResult.policy,
+          },
+        };
+      }
+    }
+
+    // P0-2: 执行层审批强制 — 当权限检查要求人工确认（ask 策略或 high/critical 风险）
+    // 时，调用 ApprovalEngine 进行审批。smart/auto 模式对低/中风险自动放行，
+    // high/critical 或无可用审批方时 fail-closed 拒绝执行，杜绝此前 needsConfirmation
+    // 被计算却从未强制执行的安全缺口。
+    if (this.enablePreChecks && permResult?.needsConfirmation) {
+      const decision = await this.requestApprovalForTool(
+        name,
+        tool,
+        params,
+        context,
+        permResult.reason
+      );
+      if (!decision.approved) {
+        Logger.warn(
+          `🔒 审批拒绝: ${name} (${decision.method}) — ${decision.reason}`,
+          'ToolRegistry'
+        );
+        return {
+          success: false,
+          output: null,
+          error: `操作未获批准: ${decision.reason || '审批被拒绝'}`,
+          duration: Date.now() - startTime,
+          validated: false,
+          metadata: {
+            approvalMethod: decision.method,
+            policy: permResult.policy,
+          },
+        };
+      }
+    }
+
+    // C1: 统一结果缓存 / 去重 / 限速（D4 统一门禁的一部分）。
+    // 仅对幂等且属 NETWORK/FILE/MEMORY 类的工具生效（审计要求缓存 web_fetch/file_read/search 类），
+    // 排除 result_cache 自身以免自递归。命中即短路返回，避免重复外部调用与费用。
+    if (
+      tool.definition.idempotent &&
+      name !== 'result_cache'
+    ) {
+      const cat = tool.definition.category;
+      const c1Eligible =
+        cat === ToolCategory.NETWORK ||
+        cat === ToolCategory.FILE ||
+        cat === ToolCategory.MEMORY;
+      if (c1Eligible) {
+        const g = await this.callGuard.guard(name, params);
+        if (g.blocked && g.result) {
+          const cached: ToolResult = {
+            ...g.result,
+            duration: Date.now() - startTime,
+            validated: g.result.validated ?? false,
+          };
+          this.standardizeToolResult(cached, name);
+          this.truncateToolOutput(cached);
+          this.recordCapability(name, cat, true);
+          return cached;
+        }
+      }
+    }
+
+    // C2: 付费/外部 API 工具 — 并发配额 + 去重（熔断 B3 已在执行链路覆盖）
+    if (PAID_EXTERNAL_TOOLS.has(name)) {
+      const quota = this.checkQuota(name, context);
+      if (!quota.allowed) {
+        Logger.warn(`💰 C2: ${quota.reason}`, 'ToolRegistry');
+        return {
+          success: false,
+          output: null,
+          error: quota.reason || `会话配额已耗尽: ${name}`,
+          duration: Date.now() - startTime,
+          validated: false,
+          metadata: { quotaExceeded: true },
+        };
+      }
+      const dKey = this.dedupKey(name, params);
+      const cached = this.runtimeState.getDedupResult(dKey);
+      if (cached) {
+        Logger.info(`♻️ C2: ${name} 命中去重缓存，直接返回`, 'ToolRegistry');
+        const deduped: ToolResult = {
+          ...cached,
+          duration: Date.now() - startTime,
+          metadata: { ...(cached.metadata || {}), dedupHit: true },
+        };
+        this.truncateToolOutput(deduped);
+        return deduped;
+      }
+    }
+
+    // C2: 获取每-agent 并发信号量（默认 4），执行后释放
+    const releaseSem = await this.acquireSemaphore(this.agentKey(context));
     try {
       Logger.info(
         `🧠 执行工具: ${name} | 风险=${tool.definition.riskLevel}`,
         'ToolRegistry'
       );
 
-      // 超时控制
-      const result = await perf.measure(
-        `tool.${name}`,
-        () =>
-          Promise.race([
-            tool.execute(params, context),
-            this.createTimeoutPromise(tool.definition.timeout, name),
-          ]),
-        'tool'
-      );
+      // B1: 最大重试次数（网络/LLM 类默认 3，其他默认 0；env 可覆盖；上限 3）
+      const maxRetries = this.computeMaxRetries(name, tool.definition.category);
+      const baseDelay = parseFloat(process.env['TOOL_RETRY_BASE_DELAY'] || '0.5');
+      const maxDelay = parseFloat(process.env['TOOL_RETRY_MAX_DELAY'] || '30');
 
-      const finalResult: ToolResult = {
-        ...result,
-        duration: Date.now() - startTime,
-        validated: result.validated ?? false,
-      };
+      let lastResult: ToolResult | null = null;
 
-      // Harness Engineering: 输出标准化 + Hashline 锚点
-      this.standardizeToolResult(finalResult, name);
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        const attemptResult = await this.runSingleAttempt(name, params, context);
+        lastResult = attemptResult;
 
-      this.reliabilityTracker.recordCall(
-        name,
-        finalResult.success,
-        finalResult.duration,
-        finalResult.error
-      );
+        if (attemptResult.success) {
+          // C2: 付费工具成功 → 计配额 + 写去重缓存
+          this.afterPaidSuccess(name, params, context, attemptResult);
+          return attemptResult;
+        }
 
-      return finalResult;
-    } catch (err) {
-      const errorResult: ToolResult = {
-        success: false,
-        output: null,
-        error: (err as Error).message,
-        duration: Date.now() - startTime,
-        validated: false,
-      };
+        // 已达最大重试次数 → 交由自愈/原失败返回
+        if (attempt === maxRetries) break;
 
-      // 错误结果也做标准化
-      this.standardizeToolResult(errorResult, name);
+        // B1: 仅对瞬时可重试错误（429/5xx/ETIMEDOUT/网络抖动）重试，其他立即终止
+        if (!this.isRetryableError(attemptResult.error)) {
+          Logger.info(
+            `🚫 B1: ${name} 错误不可重试，停止重试: ${attemptResult.error}`,
+            'ToolRegistry'
+          );
+          break;
+        }
 
-      this.reliabilityTracker.recordCall(
-        name,
-        false,
-        errorResult.duration,
-        errorResult.error
-      );
+        // P1-4: full jitter 指数退避
+        const rawDelay = baseDelay * Math.pow(2, attempt);
+        const cappedDelay = Math.min(maxDelay, rawDelay);
+        const jitteredDelay = Math.random() * cappedDelay;
+        Logger.info(
+          `🔄 P1-4: 工具 ${name} 第 ${attempt + 1} 次重试 (延迟=${jitteredDelay.toFixed(2)}s)`,
+          'ToolRegistry'
+        );
+        await new Promise((r) => setTimeout(r, jitteredDelay * 1000));
+      }
 
-      return errorResult;
+      // B2: 自愈接入（Python 经 bridge 注入；未注入则诚实返回原失败）
+      return this.maybeSelfHeal(name, params, context, lastResult!);
+    } finally {
+      releaseSem();
     }
   }
 
@@ -399,6 +722,489 @@ export class ToolRegistry {
     return this.reliabilityTracker;
   }
 
+  /**
+   * 获取 Schema 验证器
+   */
+  getSchemaValidator(): SchemaValidator {
+    return this.schemaValidator;
+  }
+
+  /**
+   * 获取权限守卫
+   */
+  getPermissionGuard(): PermissionGuard {
+    return this.permissionGuard;
+  }
+
+  /**
+   * 注入外部 SchemaValidator（覆盖默认实例）
+   */
+  setSchemaValidator(validator: SchemaValidator): void {
+    this.schemaValidator = validator;
+  }
+
+  /**
+   * 注入外部 PermissionGuard（覆盖默认实例）
+   */
+  setPermissionGuard(guard: PermissionGuard): void {
+    this.permissionGuard = guard;
+  }
+
+  /**
+   * 启用/禁用执行前置校验（Schema + Permission）
+   * 生产环境调试时可临时关闭
+   */
+  setPreChecksEnabled(enabled: boolean): void {
+    this.enablePreChecks = enabled;
+    Logger.info(
+      `🛡️ 执行前置校验: ${enabled ? '已启用' : '已禁用'}`,
+      'ToolRegistry'
+    );
+  }
+
+  /**
+   * P2-4: 更新熔断器状态
+   *
+   * - 成功执行：半开→关闭（恢复），关闭→重置失败计数
+   * - 失败执行：累计失败计数，达到阈值→打开（熔断）
+   */
+  private updateCircuitBreaker(toolName: string, success: boolean): void {
+    let state = this.runtimeState.getCircuitBreaker(toolName);
+    if (!state) {
+      state = { state: 'closed', failureCount: 0, lastFailureTime: 0 };
+      this.runtimeState.setCircuitBreaker(toolName, state);
+    }
+
+    if (success) {
+      if (state.state === 'half-open') {
+        state.state = 'closed';
+        state.failureCount = 0;
+        Logger.info(
+          `⚡ P2-4: 工具 ${toolName} 恢复正常，熔断器关闭`,
+          'ToolRegistry'
+        );
+      } else if (state.state === 'closed') {
+        state.failureCount = 0;
+      }
+    } else {
+      state.failureCount++;
+      state.lastFailureTime = Date.now();
+      if (
+        state.state === 'half-open' ||
+        (state.state === 'closed' &&
+          state.failureCount >= ToolRegistry.CB_FAILURE_THRESHOLD)
+      ) {
+        state.state = 'open';
+        Logger.error(
+          `⚡ P2-4: 工具 ${toolName} 连续失败 ${state.failureCount} 次，熔断器打开`,
+          'ToolRegistry'
+        );
+      }
+    }
+  }
+
+  /**
+   * P2-4: 获取工具熔断器状态（用于监控/诊断）
+   */
+  getCircuitBreakerState(
+    toolName: string
+  ): CircuitBreakerState | undefined {
+    return this.runtimeState.getCircuitBreaker(toolName);
+  }
+
+  /**
+   * P2-4: 手动重置工具熔断器（运维操作）
+   */
+  resetCircuitBreaker(toolName: string): boolean {
+    const state = this.runtimeState.getCircuitBreaker(toolName);
+    if (state) {
+      state.state = 'closed';
+      state.failureCount = 0;
+      state.lastFailureTime = 0;
+      Logger.info(
+        `⚡ P2-4: 工具 ${toolName} 熔断器已手动重置`,
+        'ToolRegistry'
+      );
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * B1: 计算单工具最大重试次数
+   * - 网络/LLM 类工具默认 3 次；其他默认 0（不重试）
+   * - 环境变量 TOOL_RETRY_<name> / TOOL_RETRY_DEFAULT 可覆盖
+   * - 上限 3（B1 约束）
+   */
+  private computeMaxRetries(name: string, category: ToolCategory): number {
+    const envRaw =
+      process.env[`TOOL_RETRY_${name}`] ?? process.env['TOOL_RETRY_DEFAULT'];
+    const envMax = envRaw !== undefined ? parseInt(envRaw, 10) : NaN;
+    const defaultMax = RETRY_DEFAULT_TOOL_CATEGORIES.has(category) ? 3 : 0;
+    const max = Number.isFinite(envMax) && envMax >= 0 ? envMax : defaultMax;
+    return Math.min(max, 3);
+  }
+
+  /**
+   * B1: 瞬时可重试错误判定（429/5xx/ETIMEDOUT/网络抖动）
+   */
+  private isRetryableError(error?: string): boolean {
+    if (!error) return false;
+    return RETRYABLE_ERROR_RE.test(error);
+  }
+
+  /**
+   * 单次执行尝试（含超时竞速 + 标准化 + 可靠性记录 + 熔断更新）。
+   * 任何异常都被捕获为失败 ToolResult，绝不向外抛出。
+   */
+  private async runSingleAttempt(
+    name: string,
+    params: Record<string, unknown>,
+    context: ToolContext
+  ): Promise<ToolResult> {
+    const tool = this.tools.get(name);
+    if (!tool) {
+      return {
+        success: false,
+        output: null,
+        error: `工具不存在: ${name}`,
+        duration: 0,
+        validated: false,
+      };
+    }
+    const startTime = Date.now();
+    try {
+      const result = await perf.measure(
+        `tool.${name}`,
+        () =>
+          Promise.race([
+            tool.execute(params, context),
+            this.createTimeoutPromise(tool.definition.timeout, name),
+          ]),
+        'tool'
+      );
+      const finalResult: ToolResult = {
+        ...result,
+        duration: Date.now() - startTime,
+        validated: result.validated ?? false,
+      };
+      this.standardizeToolResult(finalResult, name);
+      this.reliabilityTracker.recordCall(
+        name,
+        finalResult.success,
+        finalResult.duration,
+        finalResult.error
+      );
+      // P2-4: 熔断状态更新（成功/失败均更新）
+      this.updateCircuitBreaker(name, finalResult.success);
+      // C3: 包装层输出截断（保护上下文窗口，填充 truncation 元数据）
+      this.truncateToolOutput(finalResult);
+      // D4: 能力指标观测（此前 capMetrics 零调用，现按工具类别记录）
+      this.recordCapability(name, tool.definition.category, finalResult.success);
+      // D2: 认知类工具完成后回灌认知总线（情绪/反思总线），供 ReAct 循环消费
+      if (tool.definition.category === ToolCategory.COGNITION) {
+        // D2: 从 ToolContext 捕获会话标识, 便于转发到对应 Python 会话(缺失则 null, 诚实降级不转发)
+        const sessionId =
+          context.sessionId ??
+          (context.metadata?.sessionId as string | undefined) ??
+          null;
+        EventBus.emit('cognition_result', {
+          tool: name,
+          category: tool.definition.category,
+          success: finalResult.success,
+          durationMs: finalResult.duration,
+          outputPreview:
+            typeof finalResult.output === 'string'
+              ? finalResult.output.slice(0, 200)
+              : null,
+          error: finalResult.error ?? null,
+          timestamp: new Date().toISOString(),
+          sessionId,
+        });
+      }
+      // C1: 幂等外部工具成功 → 写入统一结果缓存（TTL 5min，去重窗口 30s）
+      if (
+        finalResult.success &&
+        tool.definition.idempotent &&
+        name !== 'result_cache'
+      ) {
+        const cat = tool.definition.category;
+        if (
+          cat === ToolCategory.NETWORK ||
+          cat === ToolCategory.FILE ||
+          cat === ToolCategory.MEMORY
+        ) {
+          this.callGuard.record(name, params, finalResult);
+        }
+      }
+      return finalResult;
+    } catch (err) {
+      const errorResult: ToolResult = {
+        success: false,
+        output: null,
+        error: (err as Error).message,
+        duration: Date.now() - startTime,
+        validated: false,
+      };
+      this.standardizeToolResult(errorResult, name);
+      this.reliabilityTracker.recordCall(
+        name,
+        false,
+        errorResult.duration,
+        errorResult.error
+      );
+      // B3: 抛出异常也计入熔断（此前仅成功路径更新，吞噬型异常会绕过熔断）
+      this.updateCircuitBreaker(name, false);
+      return errorResult;
+    }
+  }
+
+  /**
+   * B2: 自愈接入。仅当存在注入的自愈处理器（Python bridge）时尝试：
+   * 参数修正(PARAM_FIX) → 替代工具(ALT_TOOL) → 降级(DEGRADE)。
+   * 未注入或自愈失败 → 诚实返回原失败（不假成功）。
+   */
+  private async maybeSelfHeal(
+    name: string,
+    params: Record<string, unknown>,
+    context: ToolContext,
+    failed: ToolResult
+  ): Promise<ToolResult> {
+    if (failed.success || !this.selfHealHandler) return failed;
+    try {
+      const heal = await this.selfHealHandler({
+        toolName: name,
+        params,
+        lastError: failed.error || '',
+        context,
+      });
+      if (heal.action === ToolHealAction.PARAM_FIX && heal.params) {
+        Logger.info(`🩹 B2: ${name} 参数修正后重试一次`, 'ToolRegistry');
+        const r = await this.runSingleAttempt(name, heal.params, context);
+        return {
+          ...r,
+          metadata: { ...(r.metadata || {}), healed: ToolHealAction.PARAM_FIX },
+        };
+      }
+      if (heal.action === ToolHealAction.ALT_TOOL && heal.alternativeTool) {
+        Logger.info(
+          `🩹 B2: ${name} 降级至替代工具 ${heal.alternativeTool}`,
+          'ToolRegistry'
+        );
+        return this.execute(heal.alternativeTool, heal.params ?? params, context);
+      }
+      if (heal.action === ToolHealAction.DEGRADE) {
+        Logger.warn(
+          `🩹 B2: ${name} 降级执行（部分能力可用）`,
+          'ToolRegistry'
+        );
+        return {
+          ...failed,
+          success: true,
+          error: undefined,
+          metadata: {
+            ...(failed.metadata || {}),
+            healed: ToolHealAction.DEGRADE,
+            degraded: true,
+          },
+        };
+      }
+    } catch (e) {
+      Logger.warn(
+        `🩹 B2: 自愈处理异常 ${name}: ${(e as Error).message}`,
+        'ToolRegistry'
+      );
+    }
+    return failed;
+  }
+
+  /**
+   * B2: 注入自愈处理器（由 Python 后端经 bridge 注册；传入 null 关闭）。
+   */
+  setSelfHealHandler(handler: SelfHealHandler | null): void {
+    this.selfHealHandler = handler;
+  }
+
+  setRuntimeState(state: ToolRuntimeState): void {
+    this.runtimeState = state;
+  }
+
+  // ---- C2: 并发配额 / 每日配额 / 去重 ----
+
+  private sessionKey(context: ToolContext): string {
+    const m = context.metadata || {};
+    return (m.sessionId as string) || context.userId || context.traceId || 'default';
+  }
+
+  private agentKey(context: ToolContext): string {
+    const m = context.metadata || {};
+    return (m.agentId as string) || 'default';
+  }
+
+  /**
+   * C2: 每-agent 信号量（默认 4 并发），返回释放函数。
+   */
+  private async acquireSemaphore(agentKey: string): Promise<() => void> {
+    let sem = this.runtimeState.getSemaphore(agentKey);
+    if (!sem) {
+      sem = { permits: ToolRegistry.MAX_CONCURRENT_TOOLS, waiters: [] };
+      this.runtimeState.setSemaphore(agentKey, sem);
+    }
+    if (sem.permits > 0) {
+      sem.permits--;
+      return () => this.releaseSemaphore(agentKey);
+    }
+    return new Promise((resolve) => {
+      sem!.waiters.push(() => {
+        sem!.permits--;
+        resolve(() => this.releaseSemaphore(agentKey));
+      });
+    });
+  }
+
+  private releaseSemaphore(agentKey: string): void {
+    const sem = this.runtimeState.getSemaphore(agentKey);
+    if (!sem) return;
+    if (sem.waiters.length > 0) {
+      const w = sem.waiters.shift()!;
+      w();
+    } else {
+      sem.permits++;
+    }
+  }
+
+  /**
+   * C2: 检查付费工具会话级每日配额（默认 50/天，env 可覆盖）。
+   */
+  private checkQuota(
+    toolName: string,
+    context: ToolContext
+  ): { allowed: boolean; reason?: string } {
+    if (!PAID_EXTERNAL_TOOLS.has(toolName)) return { allowed: true };
+    const sessionKey = this.sessionKey(context);
+    const today = new Date().toISOString().slice(0, 10);
+    const key = `${sessionKey}:${toolName}`;
+    const rawLimit =
+      process.env[`TOOL_QUOTA_${toolName}`] ||
+      process.env['TOOL_QUOTA_DEFAULT'] ||
+      '50';
+    // 防御：环境变量为非数字时 parseInt 返回 NaN，而 `count >= NaN` 恒为 false，
+    // 会导致付费工具配额检查被静默绕过（任意调用都被放行）。NaN 时回退默认 50。
+    const parsedLimit = parseInt(rawLimit, 10);
+    const limit = Number.isFinite(parsedLimit) ? parsedLimit : 50;
+    const rec = this.runtimeState.getQuota(key);
+    if (rec && rec.date === today && rec.count >= limit) {
+      return {
+        allowed: false,
+        reason: `会话 ${sessionKey} 的 ${toolName} 已达每日配额 ${limit}`,
+      };
+    }
+    return { allowed: true };
+  }
+
+  private bumpQuota(toolName: string, context: ToolContext): void {
+    if (!PAID_EXTERNAL_TOOLS.has(toolName)) return;
+    const sessionKey = this.sessionKey(context);
+    const today = new Date().toISOString().slice(0, 10);
+    const key = `${sessionKey}:${toolName}`;
+    const rec = this.runtimeState.getQuota(key);
+    if (rec && rec.date === today) rec.count++;
+    else this.runtimeState.setQuota(key, { date: today, count: 1 });
+  }
+
+  /**
+   * C2: 付费工具成功后计配额 + 写去重缓存（按 日期+工具+参数哈希）。
+   */
+  private afterPaidSuccess(
+    toolName: string,
+    params: Record<string, unknown>,
+    context: ToolContext,
+    result: ToolResult
+  ): void {
+    if (!PAID_EXTERNAL_TOOLS.has(toolName)) return;
+    this.bumpQuota(toolName, context);
+    const dKey = this.dedupKey(toolName, params);
+    this.runtimeState.setDedupResult(dKey, result);
+  }
+
+  private dedupKey(toolName: string, params: Record<string, unknown>): string {
+    const today = new Date().toISOString().slice(0, 10);
+    const hash = createHash('sha256')
+      .update(JSON.stringify(params))
+      .digest('hex')
+      .slice(0, 16);
+    return `${today}:${toolName}:${hash}`;
+  }
+
+  /**
+   * 为需要确认的工具调用发起审批（P0-2: 执行层审批强制）。
+   * 失败时 fail-closed 返回未批准，确保不绕过审批直接执行。
+   */
+  private async requestApprovalForTool(
+    name: string,
+    tool: RegisteredTool,
+    params: Record<string, unknown>,
+    context: ToolContext,
+    reason?: string
+  ): Promise<ApprovalDecision> {
+    try {
+      const engine = getApprovalEngine();
+      return await engine.requestApproval({
+        type: this.mapToolToApprovalType(name),
+        description: reason || `执行工具 ${name}`,
+        target: this.extractApprovalTarget(name, params),
+        risk: tool.definition.riskLevel,
+        params,
+        traceId: context.traceId,
+        userId: (context as { userId?: string }).userId,
+      });
+    } catch (err) {
+      Logger.error(
+        '❌ ApprovalEngine 调用失败，fail-closed 拒绝执行',
+        err as Error,
+        'ToolRegistry'
+      );
+      return {
+        approved: false,
+        method: 'deny',
+        reason: '审批引擎不可用（fail-closed）',
+        timestamp: Date.now(),
+      };
+    }
+  }
+
+  /** 工具名 → 审批类型映射 */
+  private mapToolToApprovalType(name: string): ApprovalType {
+    if (name === 'shell_exec' || name === 'desktop_automate')
+      return 'shell_exec';
+    if (name === 'multi_file_edit') return 'multi_file_edit';
+    if (name === 'file_write' || name === 'file_edit') return 'file_write';
+    if (name === 'file_delete') return 'file_delete';
+    if (name.startsWith('web_')) return 'network_request';
+    return 'shell_exec';
+  }
+
+  /** 从参数中提取审批目标（命令 / URL / 路径） */
+  private extractApprovalTarget(
+    name: string,
+    params: Record<string, unknown>
+  ): string {
+    const pick = (...keys: string[]): string | undefined => {
+      for (const k of keys) {
+        const v = params[k];
+        if (typeof v === 'string') return v;
+      }
+      return undefined;
+    };
+    if (name === 'shell_exec') {
+      return pick('command', 'cmd', 'args') || JSON.stringify(params).slice(0, 200);
+    }
+    if (name === 'web_fetch' || name === 'web_search') {
+      return pick('url', 'query') || name;
+    }
+    return pick('file_path', 'path', 'directory', 'target') || name;
+  }
+
   // ==================== Harness Engineering: 输出标准化 ====================
 
   /**
@@ -409,6 +1215,61 @@ export class ToolRegistry {
    * @param result - 工具执行结果（会被原地修改）
    * @param toolName - 工具名称（用于判断输出类型）
    */
+  /**
+   * C3: 包装层输出截断 — 防止 web_fetch/file_read/大响应撑爆上下文窗口。
+   * 按 env TOOL_OUTPUT_MAX_CHARS（默认 8000 字符）截断 output，
+   * 填充 types.ts 的 truncation 元数据（metadata 为 Record<string, unknown>）。
+   */
+  private truncateToolOutput(result: ToolResult): void {
+    if (result.output == null) return;
+    const parsedChars = parseInt(process.env['TOOL_OUTPUT_MAX_CHARS'] || '8000', 10);
+    // 环境变量为非数字时 parseInt 返回 NaN，`output.length > NaN` 恒为 false，
+    // 会导致输出截断被静默跳过。NaN 时回退默认 8000。
+    const maxChars = Number.isFinite(parsedChars) ? parsedChars : 8000;
+    if (typeof result.output === 'string') {
+      if (result.output.length > maxChars) {
+        const originalLength = result.output.length;
+        result.output =
+          result.output.slice(0, maxChars) + '\n...[输出已截断]';
+        result.metadata = result.metadata || {};
+        result.metadata.truncation = {
+          truncated: true,
+          truncatedLength: maxChars,
+          originalLength,
+        };
+      }
+    } else if (typeof result.output === 'object') {
+      // 对象型输出仅记录超限标记，不破坏结构
+      const serialized = JSON.stringify(result.output);
+      if (serialized.length > maxChars) {
+        result.metadata = result.metadata || {};
+        result.metadata.truncation = {
+          truncated: true,
+          truncatedLength: maxChars,
+          originalLength: serialized.length,
+        };
+      }
+    }
+  }
+
+  /**
+   * D4: 能力指标观测 — 按工具类别记录能力成功/失败，激活此前零调用的 CapabilityMetrics。
+   */
+  private recordCapability(
+    toolName: string,
+    category: ToolCategory,
+    success: boolean
+  ): void {
+    try {
+      capMetrics.record(category, success);
+    } catch (err) {
+      Logger.debug(
+        `⚠️ D4: capMetrics 记录失败 (${toolName}): ${(err as Error).message}`,
+        'ToolRegistry'
+      );
+    }
+  }
+
   private standardizeToolResult(result: ToolResult, toolName: string): void {
     // 如果工具已经提供了 structuredOutput，跳过自动标准化
     if (result.structuredOutput) return;
@@ -993,6 +1854,34 @@ export class ToolRegistry {
    */
   getDiscoveredTools(): DiscoveredTool[] {
     return Array.from(this.discoveredTools.values());
+  }
+
+  /**
+   * Phase 3: 语义工具发现 — 根据自然语言意图搜索最匹配的工具
+   */
+  searchByIntent(query: string, options?: ToolSearchOptions): ToolSearchResult[] {
+    return this.metadataEnhancer.searchByIntent(query, options);
+  }
+
+  /**
+   * Phase 3: 工具推荐 — 根据上下文推荐最相关的工具
+   */
+  recommendTools(context: string, recentToolCalls?: string[], limit?: number): ToolSearchResult[] {
+    return this.metadataEnhancer.recommendTools(context, recentToolCalls, limit);
+  }
+
+  /**
+   * Phase 3: 获取工具增强元数据
+   */
+  getToolEnhancedMetadata(toolName: string) {
+    return this.metadataEnhancer.getEnhancedMetadata(toolName);
+  }
+
+  /**
+   * Phase 3: 获取工具关系图谱
+   */
+  getToolRelations(toolName: string) {
+    return this.metadataEnhancer.getToolRelations(toolName);
   }
 }
 

@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>家百星 Agent 应用 — 架构审计与用户使用优化报告</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --card-bg: #161b22;
+    --border: #30363d;
+    --text: #c9d1d9;
+    --text-secondary: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --red: #f85149;
+    --orange: #d2991d;
+    --purple: #a371f7;
+    --cyan: #39d2c0;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    background: var(--bg); color: var(--text);
+    line-height: 1.6; padding: 2rem;
+    max-width: 1200px; margin: 0 auto;
+  }
+  h1 { font-size: 2rem; color: var(--accent); border-bottom: 2px solid var(--border); padding-bottom: 0.5rem; margin-bottom: 1rem; }
+  h2 { font-size: 1.4rem; color: var(--purple); margin-top: 2rem; margin-bottom: 1rem; border-left: 4px solid var(--purple); padding-left: 0.75rem; }
+  h3 { font-size: 1.1rem; color: var(--cyan); margin-top: 1.5rem; margin-bottom: 0.5rem; }
+  .subtitle { color: var(--text-secondary); font-size: 0.95rem; margin-bottom: 2rem; }
+  .card {
+    background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px;
+    padding: 1.25rem; margin: 1rem 0;
+  }
+  .grid { display: grid; gap: 1rem; }
+  .grid-2 { grid-template-columns: 1fr 1fr; }
+  .grid-3 { grid-template-columns: 1fr 1fr 1fr; }
+  .grid-4 { grid-template-columns: 1fr 1fr 1fr 1fr; }
+  .tag {
+    display: inline-block; padding: 0.15rem 0.6rem; border-radius: 12px;
+    font-size: 0.8rem; font-weight: 600;
+  }
+  .tag-green { background: rgba(63,185,80,0.15); color: var(--green); }
+  .tag-red { background: rgba(248,81,73,0.15); color: var(--red); }
+  .tag-orange { background: rgba(210,153,29,0.15); color: var(--orange); }
+  .tag-blue { background: rgba(88,166,255,0.15); color: var(--accent); }
+  .tag-purple { background: rgba(163,113,247,0.15); color: var(--purple); }
+  table { width: 100%; border-collapse: collapse; margin: 0.75rem 0; }
+  th, td { padding: 0.6rem 0.75rem; text-align: left; border-bottom: 1px solid var(--border); }
+  th { color: var(--text-secondary); font-weight: 600; font-size: 0.85rem; text-transform: uppercase; }
+  td { font-size: 0.9rem; }
+  .metric-value { font-size: 1.4rem; font-weight: 700; color: var(--accent); }
+  .metric-label { font-size: 0.8rem; color: var(--text-secondary); }
+  .flow-step { padding: 0.5rem 0.75rem; border-left: 3px solid var(--border); margin: 0.25rem 0; }
+  .flow-step.active { border-color: var(--green); }
+  .flow-step.warning { border-color: var(--orange); }
+  .flow-step.danger { border-color: var(--red); }
+  .priority-badge {
+    display: inline-block; width: 24px; height: 24px; border-radius: 50%;
+    text-align: center; line-height: 24px; font-size: 0.7rem; font-weight: 700; color: #fff;
+  }
+  .p0 { background: var(--red); }
+  .p1 { background: var(--orange); }
+  .p2 { background: var(--accent); }
+  .stat-box {
+    text-align: center; padding: 1rem;
+  }
+  hr { border: none; border-top: 1px solid var(--border); margin: 1.5rem 0; }
+  ul { margin: 0.5rem 0 0.5rem 1.25rem; }
+  li { margin: 0.3rem 0; }
+  .code { background: rgba(240,246,252,0.06); padding: 0.15rem 0.4rem; border-radius: 4px; font-family: monospace; font-size: 0.85rem; }
+  .highlight-box { background: rgba(88,166,255,0.08); border: 1px solid rgba(88,166,255,0.2); border-radius: 8px; padding: 1rem; margin: 1rem 0; }
+  @media (max-width: 768px) {
+    body { padding: 1rem; }
+    .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<h1>家百星 Agent 应用 — 架构审计与用户使用优化报告</h1>
+<p class="subtitle">生成日期：2026-06-29 | 审计范围：TS + Python 混合架构全量 | 版本：V5.0</p>
+
+<!-- ===== 第一部分：项目理解 ===== -->
+<h2>一、项目整体认知</h2>
+
+<div class="grid grid-2">
+  <div class="card">
+    <h3>定位</h3>
+    <p>家百星是一个 <strong>Agent Harness 框架</strong>，核心理念是将 LLM 推理能力与六层工程管控（E-T-C-S-L-V）相结合，打造可控、可信、可持续进化的智能体系统。</p>
+  </div>
+  <div class="card">
+    <h3>当前架构形态</h3>
+    <p><strong>混合架构</strong>：TS 薄网关层 (Express :3111) + Python FastAPI 后端 (:3112)，通过 <span class="code">AGENT_BACKEND=python</span> 环境变量控制启用。TS 层约 350 个文件，Python 层约 215 个文件。</p>
+  </div>
+</div>
+
+<div class="grid grid-4">
+  <div class="card stat-box">
+    <div class="metric-value">215</div>
+    <div class="metric-label">Python 源文件</div>
+  </div>
+  <div class="card stat-box">
+    <div class="metric-value">350+</div>
+    <div class="metric-label">TS 源文件（含废弃）</div>
+  </div>
+  <div class="card stat-box">
+    <div class="metric-value">60+</div>
+    <div class="metric-label">REST API 端点</div>
+  </div>
+  <div class="card stat-box">
+    <div class="metric-value">30+</div>
+    <div class="metric-label">WebSocket 事件类型</div>
+  </div>
+</div>
+
+<h3>核心执行链路</h3>
+<div class="card">
+  <div class="flow-step active">用户输入 (Web/CLI/IM网关) → TS Express :3111</div>
+  <div class="flow-step active">JiabaixingCore.processInput() → PythonAgentBridge</div>
+  <div class="flow-step warning">HTTP POST /v1/chat → Python FastAPI :3112</div>
+  <div class="flow-step active">AgentEngine.processInput() 路由决策</div>
+  <div class="flow-step active">简单问答 → ConversationLoop (ReAct)</div>
+  <div class="flow-step active">复杂任务 → LoopController (Plan-Execute-Evaluate-Report 状态机)</div>
+  <div class="flow-step active">极复杂任务 → MultiAgentOrchestrator (多Agent协作)</div>
+  <div class="flow-step active">HookManager → PersistenceService → EventBus → 响应返回</div>
+</div>
+
+<hr>
+
+<!-- ===== 第二部分：架构审计 ===== -->
+<h2>二、架构审计</h2>
+
+<h3>2.1 架构评级总览</h3>
+<div class="grid grid-3">
+  <div class="card stat-box">
+    <div class="metric-value" style="color:var(--green)">A</div>
+    <div class="metric-label">模块化设计</div>
+  </div>
+  <div class="card stat-box">
+    <div class="metric-value" style="color:var(--orange)">B-</div>
+    <div class="metric-label">代码清爽度</div>
+  </div>
+  <div class="card stat-box">
+    <div class="metric-value" style="color:var(--orange)">C+</div>
+    <div class="metric-label">通信架构</div>
+  </div>
+  <div class="card stat-box">
+    <div class="metric-value" style="color:var(--green)">A-</div>
+    <div class="metric-label">安全纵深</div>
+  </div>
+  <div class="card stat-box">
+    <div class="metric-value" style="color:var(--orange)">B</div>
+    <div class="metric-label">测试覆盖</div>
+  </div>
+  <div class="card stat-box">
+    <div class="metric-value" style="color:var(--green)">A</div>
+    <div class="metric-label">功能完整性</div>
+  </div>
+</div>
+
+<h3>2.2 🚨 严重问题 (P0)</h3>
+
+<div class="card" style="border-left: 4px solid var(--red);">
+  <h3><span class="priority-badge p0">P0</span> 「双轨代码库」幽灵文件问题</h3>
+  <p>当前 TS 层有<b>大量文件被标记为 <span class="code">@deprecated</span></b>，声称"已迁移到 Python"，总计约 30+ 个文件：</p>
+  <table>
+    <tr><th>模块</th><th>文件数</th><th>状态</th></tr>
+    <tr><td><span class="code">src/models/</span></td><td>6</td><td><span class="tag tag-orange">@deprecated</span> LLMProvider, ProviderManager, PromptCacheManager, SqliteCacheStore, RequestQueue, LLMResponseCache</td></tr>
+    <tr><td><span class="code">src/memory/</span></td><td>2</td><td><span class="tag tag-orange">@deprecated</span> MemoryEngine, ChineseTokenizer</td></tr>
+    <tr><td><span class="code">src/evolution/</span></td><td>1</td><td><span class="tag tag-orange">@deprecated</span> EvolutionEngine</td></tr>
+    <tr><td><span class="code">src/harness/loop/</span></td><td>1</td><td><span class="tag tag-orange">@deprecated</span> LoopController</td></tr>
+    <tr><td><span class="code">src/harness/context/</span></td><td>2</td><td><span class="tag tag-orange">@deprecated</span> ContextManager, TokenBudgetAllocator</td></tr>
+    <tr><td><span class="code">src/harness/</span></td><td>1</td><td><span class="tag tag-orange">@deprecated</span> AgentHarness</td></tr>
+  </table>
+  <p><strong>风险</strong>：这些文件仍在 git 中，仍可被构建，但实际上默认不被执行。大量死代码导致新开发者困惑、CI 编译浪费时间、潜在的维护二义性。</p>
+  <p><strong>建议</strong>：统一清理废弃文件，保留 README 说明迁移映射，或在 <span class="code">AGENT_BACKEND=local</span> 回退模式中显式隔离。</p>
+</div>
+
+<div class="card" style="border-left: 4px solid var(--red);">
+  <h3><span class="priority-badge p0">P0</span> 三层路由决策链的边界模糊</h3>
+  <p>AgentEngine.processInput() 中存在 <strong>三层调度决策</strong>：</p>
+  <table>
+    <tr><th>层级</th><th>触发条件</th><th>组件</th></tr>
+    <tr><td>L1 - 超复杂任务</td><td><span class="code">complexity == "very_complex" && agents > 1</span></td><td>MultiAgentOrchestrator</td></tr>
+    <tr><td>L2 - 复杂任务</td><td><span class="code">_should_use_loop()</span> 关键词匹配 ≥ 2</td><td>LoopController (状态机)</td></tr>
+    <tr><td>L3 - 一般对话</td><td>默认</td><td>ConversationLoop (ReAct) 或纯 LLM</td></tr>
+  </table>
+  <p><strong>风险</strong>：<span class="code">_should_use_loop()</span> 使用简单的关键词匹配（"分析""设计""实现"等12个词），过于粗糙且不可配置。复杂任务可能误判为简单对话，导致能力降级。</p>
+  <p><strong>每次用户交互经过 TS→Python HTTP 调用</strong>，引入约 5-20ms 网络延迟（即使是 localhost）。高频对话场景下，HTTP 往返开销不可忽略。</p>
+</div>
+
+<h3>2.3 ⚠️ 重要问题 (P1)</h3>
+
+<div class="card" style="border-left: 4px solid var(--orange);">
+  <h3><span class="priority-badge p1">P1</span> WebSocket 模拟流式响应问题</h3>
+  <p>Python main.py 的 WS handler 使用 <strong>伪流式</strong>：等待完整响应后，按 20 字符切块发送：</p>
+  <pre style="background:rgba(240,246,252,0.04);padding:0.75rem;border-radius:4px;overflow-x:auto;font-size:0.85rem;"><code># main.py L170 - 伪流式实现
+content = result.get("content", "")
+chunk_size = 20
+for i in range(0, len(content), chunk_size):
+    chunk = content[i:i + chunk_size]
+    await websocket.send_json({"type": "stream_chunk", "content": chunk, ...})</code></pre>
+  <p><strong>影响</strong>：用户感知到的是"完全无输出 → 一次性全部出现"的体验，而非真正的流式逐字输出。这严重降低了交互的即时感。</p>
+  <p><strong>根本原因</strong>：LoopController 和 ConversationLoop 目前都是同步返回完整结果，不支持 streaming generator。</p>
+</div>
+
+<div class="card" style="border-left: 4px solid var(--orange);">
+  <h3><span class="priority-badge p1">P1</span> 上下文管理系统碎片化</h3>
+  <p>项目存在<strong>至少 5 套上下文构建系统</strong>同时存活：</p>
+  <ul>
+    <li><span class="code">UnifiedContextOrchestrator</span> (Python) — 7个组件，管道模式</li>
+    <li><span class="code">ContextManager</span> (Python) — 传统建造器</li>
+    <li><span class="code">ConstitutionPromptBuilder</span> (TS) — 宪法提示词</li>
+    <li><span class="code">ContextManager</span> (TS @deprecated) — 旧版实现</li>
+    <li><span class="code">LLMContextBuilder</span> (TS) — 记忆专用</li>
+  </ul>
+  <p>实际使用中不同路径混用不同的上下文组件：ConversationLoop 用 ContextManager+ContextWindowManager，LoopController 使用 UnifiedContextOrchestrator，简单对话不用任何上下文系统。</p>
+  <p><strong>影响</strong>：不同场景下的上下文质量不一致，Token 预算分配混乱，记忆注入时有时无。</p>
+</div>
+
+<h3>2.4 ℹ️ 需关注 (P2)</h3>
+
+<table>
+  <tr><th style="width:60px">等级</th><th>问题</th><th>说明</th></tr>
+  <tr>
+    <td><span class="priority-badge p2">P2</span></td>
+    <td>CLI IPC 通道服务端缺失</td>
+    <td>CLI 设计了 IPC（Named Pipe）优先策略，但服务端 net.createServer 处理请求的代码未完成，始终回退到 HTTP</td>
+  </tr>
+  <tr>
+    <td><span class="priority-badge p2">P2</span></td>
+    <td>TS 与 Python 的 API 兼容层</td>
+    <td><span class="code">/api/*</span> (TS 原有) 与 <span class="code">/v1/*</span> (Python 新版) 两套路径共存，<span class="code">compat_router</span> 在 Python 侧做适配</td>
+  </tr>
+  <tr>
+    <td><span class="priority-badge p2">P2</span></td>
+    <td>前端管理功能缺失</td>
+    <td>审批门控、工作流管理、热键、托盘等 API 已定义但前端无对应 UI</td>
+  </tr>
+  <tr>
+    <td><span class="priority-badge p2">P2</span></td>
+    <td>事件总线不对称</td>
+    <td>TS EventBus 27+事件类型 vs Python 3个 WS 端点，双向桥接不完整</td>
+  </tr>
+  <tr>
+    <td><span class="priority-badge p2">P2</span></td>
+    <td>缓存系统不统一</td>
+    <td>4种缓存实现（内存Map/SQLite/Redis/PromptCache），无统一接口</td>
+  </tr>
+</table>
+
+<h3>2.5 ✅ 架构优势</h3>
+
+<div class="grid grid-2">
+  <div class="card">
+    <h3>六层 Harness 分层清晰</h3>
+    <p>E-T-C-S-L-V 每层职责单一，可独立开关，比 Hermes 的单一 <span class="code">_run()</span> 方法更可维护。</p>
+  </div>
+  <div class="card">
+    <h3>安全纵深防御</h3>
+    <p>SecurityGuard → PermissionGuard → SchemaValidator → OutputGuardrail → VerificationService 五道安全防线。</p>
+  </div>
+  <div class="card">
+    <h3>进化引擎闭环</h3>
+    <p>交互 → 反馈收集 → 策略优化 → 技能自动生成 → 权重调整，完整的自我改进循环。</p>
+  </div>
+  <div class="card">
+    <h3>工具守卫完善</h3>
+    <p>ToolCallGuard (去重+缓存+限速+意图过滤) + ApprovalManager (人工审批门控)，有效防止工具滥用。</p>
+  </div>
+  <div class="card">
+    <h3>Hook 系统统一</h3>
+    <p>9 个生命周期钩子，统一在 HookManager 管理，避免双轨执行。</p>
+  </div>
+  <div class="card">
+    <h3>记忆系统丰富</h3>
+    <p>三层记忆 (瞬时/短期/长期) + 向量检索 + 知识图谱 + 4种外部记忆适配器。</p>
+  </div>
+</div>
+
+<hr>
+
+<!-- ===== 第三部分：用户使用优化方向 ===== -->
+<h2>三、jiabaixing Agent 用户使用优化方向</h2>
+
+<p>以下优化方向基于对代码架构的深入分析，从<strong>终端用户使用体验</strong>视角出发，覆盖交互响应、可靠性、智能性、可观测性四个维度。</p>
+
+<!-- 3.1 -->
+<h3>3.1 响应体验优化（降低延迟，提升即时感）</h3>
+
+<div class="card">
+  <h3><span class="priority-badge p0">P0</span> 实现真正的流式输出</h3>
+  <p><strong>现状</strong>：Python 后端返回完整结果后，WS 层按 20 字符切块模拟流式。LLM API 调用使用的是 <span class="code">chat()</span> 而非 <span class="code">chat_stream()</span>。</p>
+  <p><strong>方案</strong>：</p>
+  <ul>
+    <li>LLMProvider 已具备 <span class="code">chat_stream()</span> 流式能力（engine.py L1226 已实现），但 LoopController 和 ConversationLoop 未对接</li>
+    <li>改造 Executor.execute() 为 async generator，逐 token yield</li>
+    <li>WS 层直接转发 token 流，不做分段切割</li>
+    <li>预期效果：用户从 "等待 3-10 秒后一次性出现" 变为 "100ms 内看到第一个字"</li>
+  </ul>
+</div>
+
+<div class="card">
+  <h3><span class="priority-badge p0">P0</span> 工具调用过程可视化</h3>
+  <p><strong>现状</strong>：WS 有 <span class="code">tool_trace</span> 事件定义，但 LoopController 中工具执行完成后才批量发送结果。用户无法看到 Agent "正在做什么"。</p>
+  <p><strong>方案</strong>：</p>
+  <ul>
+    <li>工具开始执行时立即发送 <span class="code">tool_start</span> 事件（含工具名+参数摘要）</li>
+    <li>工具完成时发送 <span class="code">tool_end</span> 事件（含结果摘要）</li>
+    <li>前端展示为实时进度条 + 工具调用时间线</li>
+    <li>预期效果：用户感知到 Agent 在"动"，而非"卡住"——这对复杂任务尤其关键</li>
+  </ul>
+</div>
+
+<div class="card">
+  <h3><span class="priority-badge p1">P1</span> 任务进度可见性</h3>
+  <p><strong>现状</strong>：LoopController 的 Plan-Execute-Evaluate-Report 状态机有 <span class="code">LoopObserver</span> 但未与前端连通。用户不知道任务完成了多少步、还剩多少步。</p>
+  <p><strong>方案</strong>：</p>
+  <ul>
+    <li>LoopObserver 在 Phase 变更时通过 HookManager 广播进度事件</li>
+    <li>前端展示步骤进度条：Planning → Executing (2/5) → Evaluating → Reporting</li>
+    <li>支持取消当前步骤（cancel_task WS 事件已定义但未在 LoopController 中实现中断检查）</li>
+  </ul>
+</div>
+
+<div class="card">
+  <h3><span class="priority-badge p2">P2</span> 减少 HTTP 往返开销</h3>
+  <p><strong>现状</strong>：每次对话 TS→Python HTTP POST，WS 仅用于事件同步和前端通信。</p>
+  <p><strong>方案</strong>：</p>
+  <ul>
+    <li>将 TS→Python 的 /v1/chat 也迁移到 WS 持久连接</li>
+    <li>或使用 Unix Domain Socket（同机通信，比 TCP 快 20-30%）</li>
+    <li>配合 PythonAgentBridge 的连接池复用 HTTP 连接</li>
+  </ul>
+</div>
+
+<!-- 3.2 -->
+<h3>3.2 智能性优化（提升回答质量和任务完成率）</h3>
+
+<div class="card">
+  <h3><span class="priority-badge p0">P0</span> 自适应路由决策升级</h3>
+  <p><strong>现状</strong>：<span class="code">_should_use_loop()</span> 用 12 个关键词做硬匹配。这会导致：</p>
+  <ul>
+    <li>"帮我分析一下今天天气"（含"分析"但明显是简单任务）</li>
+    <li>"设计一下数据库表结构"（触发 Loop 但用 ReAct 更高效）</li>
+    <li>真正需要规划的复杂任务却因关键词不足而走简单路径</li>
+  </ul>
+  <p><strong>方案</strong>：</p>
+  <ul>
+    <li>引入轻量级 LLM 分类器（一次调用，1-2 tokens 输出 "simple/medium/complex"），成本极低</li>
+    <li>或基于 ConversationLoop 的首轮试探：先用 ReAct 尝试，30秒内无进展自动升级到 LoopController</li>
+    <li>将 <span class="code">TaskComplexityAnalyzer</span> (已存在于 core) 实际接入路由决策，而非仅在 MultiAgentOrchestrator 中使用</li>
+  </ul>
+</div>
+
+<div class="card">
+  <h3><span class="priority-badge p1">P1</span> 统一上下文管道</h3>
+  <p><strong>现状</strong>：不同执行路径使用不同的上下文组件，导致记忆、人格、文件上下文在不同场景下表现不一致。</p>
+  <p><strong>方案</strong>：</p>
+  <ul>
+    <li>强制所有路径使用 UnifiedContextOrchestrator（目前仅 LoopController 使用）</li>
+    <li>ConversationLoop 和 _process_simple 也应走统一上下文构建</li>
+    <li>添加场景感知上下文权重：代码场景加大文件上下文比重，聊天场景加大记忆比重</li>
+  </ul>
+</div>
+
+<div class="card">
+  <h3><span class="priority-badge p1">P1</span> 记忆召回质量提升</h3>
+  <p><strong>现状</strong>：MemoryEngine.search_with_context() 固定 48小时窗口 + 5条限制。对跨会话的长期记忆和偏好召回不够精准。</p>
+  <p><strong>方案</strong>：</p>
+  <ul>
+    <li>向量检索 + 关键词检索的混合召回（MemoryRetriever 已实现 RRF 融合但未在默认路径中使用）</li>
+    <li>记忆时效衰减：近期记忆权重高，远期记忆权重低</li>
+    <li>用户画像在每次交互中自动更新（USER.md/profile 已定义但未动态更新）</li>
+    <li>知识图谱增强：跨记忆的结构化关联（KnowledgeGraphBuilder 已实现但未实际注入上下文）</li>
+  </ul>
+</div>
+
+<div class="card">
+  <h3><span class="priority-badge p2">P2</span> 工具发现与推荐</h3>
+  <p><strong>现状</strong>：57+ 工具全量注入 system prompt。Token 消耗大，且对小任务（如简单问候）也携带全部工具定义。</p>
+  <p><strong>方案</strong>：</p>
+  <ul>
+    <li>利用 ToolsetRegistry (Python) 按场景加载工具集</li>
+    <li>意图过滤：安全扫描 → 识别场景 → 注入相关工具子集</li>
+    <li>渐进式工具披露：先注入高频工具，需要时动态加载专用工具</li>
+  </ul>
+</div>
+
+<!-- 3.3 -->
+<h3>3.3 可靠性优化（减少失败和异常体验）</h3>
+
+<div class="card">
+  <h3><span class="priority-badge p0">P0</span> 优雅降级与重试策略</h3>
+  <p><strong>现状</strong>：AgentEngine.initialize() 有完善的"逐个初始化、失败不阻塞"策略。但在运行时，单次工具失败或 LLM 超时会导致整个任务失败。</p>
+  <p><strong>方案</strong>：</p>
+  <ul>
+    <li>Executor 已有超时+重试（30s 超时），但应加入智能退避（指数退避 + jitter）</li>
+    <li>Planner 应支持失败步骤的自动重规划：第 N 步失败 → 生成替代步骤 → 继续执行</li>
+    <li>LLM 调用失败时：主提供商 → 备用提供商 → 本地模型的自动故障转移（ProviderManager 已实现但 LoopController 未使用）</li>
+    <li>全局超时控制：单次对话设置最大执行时间（如 5 分钟），超时后优雅返回部分结果</li>
+  </ul>
+</div>
+
+<div class="card">
+  <h3><span class="priority-badge p1">P1</span> 错误信息对用户友好</h3>
+  <p><strong>现状</strong>：工具执行失败时，错误信息直接透传（如 "ConnectionError: [Errno 111] Connection refused"），用户无法理解。</p>
+  <p><strong>方案</strong>：</p>
+  <ul>
+    <li>Reporter 层增加错误翻译：将技术错误映射为用户可理解的描述</li>
+    <li>示例：Connection refused → "网络连接失败，正在重试..."</li>
+    <li>失败时附带操作建议："您可以尝试刷新页面，或检查网络连接"</li>
+  </ul>
+</div>
+
+<div class="card">
+  <h3><span class="priority-badge p1">P1</span> 澄清式交互</h3>
+  <p><strong>现状</strong>：Executor 有 intent_filter 但未做澄清式交互。当用户意图模糊时，Agent 直接猜测执行，可能偏离用户预期。</p>
+  <p><strong>方案</strong>：</p>
+  <ul>
+    <li>意图置信度 < 0.6 时触发 <span class="code">clarification_request</span> WS 事件</li>
+    <li>前端展示选项卡片，用户点击确认后继续</li>
+    <li>已有的 clarification_request / clarification_response WS 事件可以复用</li>
+    <li>参考 ask_clarification 工具的设计理念</li>
+  </ul>
+</div>
+
+<!-- 3.4 -->
+<h3>3.4 可观测性优化（让用户理解 Agent 行为）</h3>
+
+<div class="card">
+  <h3><span class="priority-badge p1">P1</span> 执行轨迹回放</h3>
+  <p><strong>现状</strong>：TrajectoryDatabase 完整记录了每次执行（输入/输出/工具调用/状态转换），但无前端可视化。</p>
+  <p><strong>方案</strong>：</p>
+  <ul>
+    <li>建立 /v1/trajectory API 的前端消费页面</li>
+    <li>展示：时间线视图 + 工具调用链 + 状态流转图</li>
+    <li>支持按 session_id / trace_id 检索和回放</li>
+    <li>用途：用户理解 Agent 为什么做了某个操作、排查失败原因</li>
+  </ul>
+</div>
+
+<div class="card">
+  <h3><span class="priority-badge p1">P1</span> 思考过程可见</h3>
+  <p><strong>现状</strong>：ThinkScrubber 可以分离 <span class="code">&lt;think&gt;</span> 标签中的思考内容，但在实际对话流程中未启用。用户看不到 Agent 的推理过程。</p>
+  <p><strong>方案</strong>：</p>
+  <ul>
+    <li>启用 ThinkScrubber，将思考过程与最终回复分离</li>
+    <li>前端使用折叠面板展示"AI 思考过程"（默认折叠，用户可展开）</li>
+    <li>WS 事件 <span class="code">thinking</span> 已定义但未使用</li>
+  </ul>
+</div>
+
+<div class="card">
+  <h3><span class="priority-badge p2">P2</span> 性能仪表盘</h3>
+  <p><strong>现状</strong>：/v1/metrics 提供基础指标（请求数/错误率/延迟/QPS），但无前端可视化。</p>
+  <p><strong>方案</strong>：</p>
+  <ul>
+    <li>前端管理面板增加"Agent 性能"标签页</li>
+    <li>展示：LLM 延迟分布、工具调用成功率、任务完成率、Token 消耗趋势</li>
+    <li>帮助用户了解 Agent 是否在退化</li>
+  </ul>
+</div>
+
+<!-- 3.5 -->
+<h3>3.5 交互模式优化（提升使用便利性）</h3>
+
+<div class="card">
+  <h3><span class="priority-badge p1">P1</span> 中断与恢复</h3>
+  <p><strong>现状</strong>：WS cancel_task 事件已定义，但 LoopController.run() 中没有检查取消标志。用户无法中断正在执行中的长任务。</p>
+  <p><strong>方案</strong>：</p>
+  <ul>
+    <li>在 LoopController 主循环的每个阶段切换点检查取消信号</li>
+    <li>取消时保留已完成步骤的部分结果，存入 session</li>
+    <li>前端支持"继续上次任务"——从 checkpoint 恢复</li>
+    <li>CheckpointService（TS）可复用到 Python 侧</li>
+  </ul>
+</div>
+
+<div class="card">
+  <h3><span class="priority-badge p2">P2</span> 多模态输入补全</h3>
+  <p><strong>现状</strong>：支持文本 + 图片输入（processInput 有 images 参数），但不支持文件拖拽、语音输入的前端落地。</p>
+  <p><strong>方案</strong>：</p>
+  <ul>
+    <li>VoiceSessionManager 全双工语音 → 对接前端录音按钮</li>
+    <li>文件拖拽上传 → 自动识别类型 → 注入上下文</li>
+    <li>剪贴板图片粘贴 → 自动 OCR/识别 → 注入为参考素材</li>
+  </ul>
+</div>
+
+<div class="card">
+  <h3><span class="priority-badge p2">P2</span> 会话历史与搜索</h3>
+  <p><strong>现状</strong>：SessionStore + /v1/sessions API 就绪，但前端展示不完善。</p>
+  <p><strong>方案</strong>：</p>
+  <ul>
+    <li>会话列表页：按时间/标签/摘要排列</li>
+    <li>全文搜索历史对话（已通过 memory_search 支持但体验不友好）</li>
+    <li>书签/收藏功能：标记重要对话</li>
+  </ul>
+</div>
+
+<hr>
+
+<h2>四、优化优先级路线图</h2>
+
+<div class="highlight-box">
+  <h3>Phase 1 — 体验突破（1-2 周）</h3>
+  <ul>
+    <li><span class="tag tag-red">P0</span> 真正的流式输出 — 用户感知延迟降低 80%</li>
+    <li><span class="tag tag-red">P0</span> 工具调用过程可视化 — 消除"黑盒等待"焦虑</li>
+    <li><span class="tag tag-red">P0</span> 自适应路由决策 — 避免能力降级</li>
+    <li><span class="tag tag-red">P0</span> 优雅降级 + 智能重试 — 减少失败率</li>
+  </ul>
+</div>
+
+<div class="highlight-box">
+  <h3>Phase 2 — 能力夯实（2-4 周）</h3>
+  <ul>
+    <li><span class="tag tag-orange">P1</span> 任务进度可见性 + 中断取消</li>
+    <li><span class="tag tag-orange">P1</span> 统一上下文管道 — 回答质量一致性</li>
+    <li><span class="tag tag-orange">P1</span> 记忆召回质量 + 思考过程可见</li>
+    <li><span class="tag tag-orange">P1</span> 错误信息人性化 + 澄清式交互</li>
+    <li><span class="tag tag-orange">P1</span> 执行轨迹回放</li>
+  </ul>
+</div>
+
+<div class="highlight-box">
+  <h3>Phase 3 — 精益求精（4-8 周）</h3>
+  <ul>
+    <li><span class="tag tag-blue">P2</span> 代码清理：删除 30+ 废弃 TS 文件</li>
+    <li><span class="tag tag-blue">P2</span> HTTP→WS 通信优化</li>
+    <li><span class="tag tag-blue">P2</span> 多模态输入 (语音/文件拖拽)</li>
+    <li><span class="tag tag-blue">P2</span> 会话历史搜索 + 书签</li>
+    <li><span class="tag tag-blue">P2</span> 性能仪表盘 + 工具发现推荐</li>
+  </ul>
+</div>
+
+<hr>
+
+<h2>五、关键指标建议</h2>
+
+<div class="grid grid-4">
+  <div class="card stat-box">
+    <div class="metric-label">首字延迟 (TTFB)</div>
+    <div class="metric-value" style="color:var(--red)">3-10s</div>
+    <div class="metric-label">目标: &lt; 500ms</div>
+  </div>
+  <div class="card stat-box">
+    <div class="metric-label">任务完成率</div>
+    <div class="metric-value" style="color:var(--orange)">~70%</div>
+    <div class="metric-label">目标: &gt; 90%</div>
+  </div>
+  <div class="card stat-box">
+    <div class="metric-label">工具调用成功率</div>
+    <div class="metric-value" style="color:var(--orange)">~80%</div>
+    <div class="metric-label">目标: &gt; 95%</div>
+  </div>
+  <div class="card stat-box">
+    <div class="metric-label">用户满意度</div>
+    <div class="metric-value" style="color:var(--text-secondary)">? / 10</div>
+    <div class="metric-label">需建立评分机制</div>
+  </div>
+</div>
+
+<p style="text-align:center;color:var(--text-secondary);margin-top:3rem;font-size:0.85rem;">
+  家百星 Agent 架构审计报告 · 2026-06-29 · 审计范围：TS 350+ 文件 + Python 215 文件
+</p>
+
+</body>
+</html>

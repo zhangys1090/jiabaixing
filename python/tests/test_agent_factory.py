@@ -254,3 +254,136 @@ async def test_process_goal_with_failing_agent():
     result = await orchestrator.process_goal("帮我写代码")
     assert result.success is False
     assert result.failed_tasks == 1
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# DAG 目标分解测试
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@pytest.mark.anyio
+async def test_decompose_goal_with_deps_no_llm():
+    factory = _fresh_factory()
+    orchestrator = MultiAgentOrchestrator(factory)
+    complexity = TaskComplexity(
+        complexity="complex",
+        estimated_steps=3,
+        parallelizable=True,
+        recommended_agents=3,
+    )
+
+    result = await orchestrator._decompose_goal_with_deps(
+        "分析代码然后重构再写测试",
+        complexity,
+        llm=None,
+    )
+
+    assert isinstance(result, list)
+    assert len(result) > 0
+    for item in result:
+        assert "id" in item
+        assert "goal" in item
+        assert "dependencies" in item
+        assert isinstance(item["dependencies"], list)
+
+
+@pytest.mark.anyio
+async def test_decompose_goal_with_deps_respects_limit():
+    factory = _fresh_factory()
+    orchestrator = MultiAgentOrchestrator(factory)
+    complexity = TaskComplexity(
+        complexity="complex",
+        estimated_steps=2,
+        parallelizable=True,
+        recommended_agents=2,
+    )
+
+    result = await orchestrator._decompose_goal_with_deps(
+        "重构整个模块架构",
+        complexity,
+        llm=None,
+    )
+
+    assert len(result) <= 2
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# process_goal_with_dag — DAG编排测试
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@pytest.mark.anyio
+async def test_process_goal_with_dag_simple():
+    factory = _fresh_factory()
+    orchestrator = MultiAgentOrchestrator(factory)
+    result = await orchestrator.process_goal_with_dag("帮我写个函数")
+
+    assert result.success is True
+    assert result.total_tasks >= 1
+
+
+@pytest.mark.anyio
+async def test_process_goal_with_dag_complex():
+    factory = _fresh_factory()
+    orchestrator = MultiAgentOrchestrator(factory)
+    result = await orchestrator.process_goal_with_dag("同时并行处理代码重构和文件搜索")
+
+    assert result.total_tasks >= 1
+
+
+@pytest.mark.anyio
+async def test_process_goal_with_dag_history():
+    factory = _fresh_factory()
+    orchestrator = MultiAgentOrchestrator(factory)
+    await orchestrator.process_goal_with_dag("任务A")
+    await orchestrator.process_goal_with_dag("任务B")
+
+    history = orchestrator.get_history()
+    assert len(history) == 2
+
+
+@pytest.mark.anyio
+async def test_process_goal_with_dag_simple_goal():
+    factory = _fresh_factory()
+    orchestrator = MultiAgentOrchestrator(factory)
+    result = await orchestrator.process_goal_with_dag("hello world")
+
+    assert result.success is True
+    assert result.total_tasks == 1
+
+
+@pytest.mark.anyio
+async def test_process_goal_with_dag_fallback():
+    factory = _fresh_factory()
+
+    class FailingExecutor:
+        async def execute(self, task: str, context=None):
+            raise RuntimeError("agent failed")
+
+    factory.register_executor(AgentScene.CODING, FailingExecutor())
+    orchestrator = MultiAgentOrchestrator(factory)
+    result = await orchestrator.process_goal_with_dag("帮我写代码")
+
+    assert result.success is False
+
+
+@pytest.mark.anyio
+async def test_decompose_goal_with_deps_flat_structure():
+    factory = _fresh_factory()
+    orchestrator = MultiAgentOrchestrator(factory)
+    complexity = TaskComplexity(
+        complexity="complex",
+        estimated_steps=4,
+        parallelizable=True,
+        recommended_agents=4,
+    )
+
+    result = await orchestrator._decompose_goal_with_deps(
+        "创建新项目结构",
+        complexity,
+        llm=None,
+    )
+
+    assert len(result) > 0
+    for item in result:
+        assert item["dependencies"] == []

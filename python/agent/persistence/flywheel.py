@@ -9,6 +9,7 @@ from agent.persistence.trajectory import (
     ToolInvocationRecord,
     TrajectoryDatabase,
 )
+from agent.core.logger import log_ignored
 
 
 @dataclass
@@ -132,8 +133,8 @@ class TrajectoryFlywheel:
                                 new_weight = min(1.0, engine._tool_weights[tool_name] + 0.1)
                                 engine._update_tool_weight(tool_name, new_weight)
                                 applied = True
-        except Exception:
-            pass
+        except Exception as _exc:
+            log_ignored(None, "flywheel.TrajectoryFlywheel.apply_suggestion", _exc)
 
         self._applied_optimizations[suggestion_id] = {
             "timestamp": time.time(),

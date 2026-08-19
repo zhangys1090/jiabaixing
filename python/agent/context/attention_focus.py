@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
 
 log = StructuredLogger("attention_focus")
 
@@ -62,8 +63,8 @@ class AttentionFocusEngine:
         if self._llm:
             try:
                 return self._extract_keywords_semantic(task)
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "attention_focus.AttentionFocusEngine.extract_keywords", _exc)
         return self._extract_keywords_rule(task)
 
     def _extract_keywords_semantic(self, task: str) -> list[str]:
@@ -86,8 +87,8 @@ class AttentionFocusEngine:
                 keywords = json.loads(json_match.group())
                 if isinstance(keywords, list) and keywords:
                     return [str(k).strip() for k in keywords if k]
-        except Exception:
-            pass
+        except Exception as _exc:
+            log_ignored(log, "attention_focus.AttentionFocusEngine._extract_keywords_semantic", _exc)
         return self._extract_keywords_rule(task)
 
     def _extract_keywords_rule(self, task: str) -> list[str]:

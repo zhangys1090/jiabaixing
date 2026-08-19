@@ -1,4 +1,7 @@
 /**
+ * @deprecated TS 本地 LLM 传输层（AGENT_BACKEND=local 回退）。
+ * AGENT_BACKEND=python（默认）经 PythonAgentBridge /v1/llm/* 委派 Python agent.llm，不再使用本层。
+ *
  * Provider 传输层系统
  *
  * 统一入口: TransportFactory → BaseTransport → ModelOutput

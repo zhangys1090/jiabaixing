@@ -61,6 +61,12 @@ interface LLMClient {
  * - SelfModificationEngine：自我修改引擎
  * - EvolutionRollback：进化回滚机制
  */
+/**
+ * @deprecated TS 侧自我进化引擎（会直接写文件）已收口（P2-3，2026-08-03）。
+ * 生产路径（AGENT_BACKEND=python，默认）下，`initEvolution.ts` 禁止实例化本引擎，
+ * 代码级自我修改改由 Python `agent.evolution.v2_engine` 负责。
+ * 本类仅作为 AGENT_BACKEND=local 的废弃回退存根保留，且被 `EvolutionEngineV2.test.ts` 引用，文件不删。
+ */
 export class EvolutionEngineV2 {
   private rollback: EvolutionRollback;
   private modifier: SelfModificationEngine;

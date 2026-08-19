@@ -1,6 +1,6 @@
+import { Logger } from '../../../utils/Logger';
 import type { ToolContext, ToolDefinition, ToolResult } from '../../types';
 import { Permission, ToolCategory } from '../../types';
-import { Logger } from '../../../utils/Logger';
 
 export const IMAGE_GENERATE_DEF: ToolDefinition = {
   name: 'image_generate',
@@ -90,11 +90,38 @@ export function createImageGenerateExecutor(deps: ImageGenerateDeps = {}) {
         });
       }
 
-      const imageUrl = `https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=${encodedPrompt}&image_size=${size}`;
+      const imageApiBaseUrl =
+        process.env.TRAE_IMAGE_API_URL || 'https://trae-api-cn.mchost.guru';
+      const imageUrl = `${imageApiBaseUrl}/api/ide/v1/text_to_image?prompt=${encodedPrompt}&image_size=${size}`;
 
-      const response = await fetch(imageUrl, {
-        signal: AbortSignal.timeout(55000),
-      });
+      let response: Response;
+      let lastError: Error | null = null;
+      const maxRetries = 2;
+
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+          response = await fetch(imageUrl, {
+            signal: AbortSignal.timeout(55000),
+          });
+          break;
+        } catch (fetchErr) {
+          lastError = fetchErr as Error;
+          if (attempt < maxRetries) {
+            Logger.info(
+              `🎨 image_generate 重试 (${attempt + 1}/${maxRetries}): "${prompt}"`,
+              'ImageGenerate'
+            );
+            await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+          }
+        }
+      }
+
+      if (!response!) {
+        return fail(
+          `图像生成失败: ${lastError?.message || '网络错误'}`,
+          Date.now() - startTime
+        );
+      }
 
       if (!response.ok) {
         return fail(

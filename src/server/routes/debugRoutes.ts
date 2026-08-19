@@ -52,7 +52,7 @@ export function registerDebugRoutes(
       }
 
       const toolExecutor = (
-        core as unknown as {
+        core as {
           toolExecutor?: {
             getExecutionStats?: () => unknown;
             getToolCallLogs?: () => unknown;

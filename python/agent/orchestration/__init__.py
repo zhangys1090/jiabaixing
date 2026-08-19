@@ -17,6 +17,34 @@ from agent.orchestration.result_aggregator import (
     ResultConflict,
     TaskDetail,
 )
+from agent.orchestration.perception_bus import (
+    PerceptionAgentTemplate,
+    PerceptionBusEntry,
+    PERCEPTION_AGENT_TEMPLATES,
+    SharedPerceptionBus,
+    get_perception_template,
+)
+from agent.orchestration.fanout import (
+    FanoutResult,
+    SubAgentFanout,
+    SubTaskResult,
+    TaskNode,
+)
+from agent.orchestration.dynamic_dag_replanner import (
+    DynamicDAGReplanner,
+    ReplanTrigger,
+    ReplanAction,
+    ReplanRule,
+    DAGCheckpoint,
+    ReplanEvent,
+)
+from agent.orchestration.task_dsl import (
+    TaskBuilder,
+    PipelineBuilder,
+    TaskDSLParser,
+    pipeline,
+    task,
+)
 
 __all__ = [
     "OrchestrationExecutor",
@@ -32,4 +60,23 @@ __all__ = [
     "ResultConflict",
     "TaskDetail",
     "LLMChatProtocol",
+    "PerceptionAgentTemplate",
+    "PerceptionBusEntry",
+    "PERCEPTION_AGENT_TEMPLATES",
+    "SharedPerceptionBus",
+    "get_perception_template",
+    "SubAgentFanout",
+    "SubTaskResult",
+    "FanoutResult",
+    "DynamicDAGReplanner",
+    "ReplanTrigger",
+    "ReplanAction",
+    "ReplanRule",
+    "DAGCheckpoint",
+    "ReplanEvent",
+    "TaskBuilder",
+    "PipelineBuilder",
+    "TaskDSLParser",
+    "pipeline",
+    "task",
 ]

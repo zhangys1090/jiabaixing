@@ -1,4 +1,4 @@
-import { errorMonitor, ErrorLevel } from './errorMonitoring';
+import { ErrorLevel, errorMonitor } from './errorMonitoring';
 
 // 在 Node.js 测试环境中模拟浏览器 API
 // 有些测试环境可能已经定义了 window（如 jsdom），合并而不是替换
@@ -27,7 +27,7 @@ describe('ErrorMonitor', () => {
 
   test('should initialize error monitoring', () => {
     // 模拟 window.addEventListener
-    const addEventListenerSpy = jest.spyOn(window as unknown as { addEventListener: jest.Mock }, 'addEventListener');
+    const addEventListenerSpy = jest.spyOn(window, 'addEventListener');
 
     // 初始化错误监控
     errorMonitor.initialize();

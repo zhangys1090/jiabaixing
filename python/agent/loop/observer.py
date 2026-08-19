@@ -74,8 +74,10 @@ ENV_OBSERVER_VERBOSE = "LOOP_OBSERVER_VERBOSE"
 
 class LoopPhase(str, Enum):
     """循环阶段"""
+    PERCEIVER = "perceiver"
     PLANNER = "planner"
     EXECUTOR = "executor"
+    VERIFIER = "verifier"
     EVALUATOR = "evaluator"
     REPORTER = "reporter"
     IDLE = "idle"
@@ -162,8 +164,10 @@ class LoopObserver:
         # 统计数据
         self._statistics = LoopStatistics(
             phase_durations={
+                LoopPhase.PERCEIVER.value: 0.0,
                 LoopPhase.PLANNER.value: 0.0,
                 LoopPhase.EXECUTOR.value: 0.0,
+                LoopPhase.VERIFIER.value: 0.0,
                 LoopPhase.EVALUATOR.value: 0.0,
                 LoopPhase.REPORTER.value: 0.0,
                 LoopPhase.IDLE.value: 0.0,
@@ -172,8 +176,10 @@ class LoopObserver:
 
         # 各阶段总耗时
         self._phase_total_durations: dict[str, float] = {
+            LoopPhase.PERCEIVER.value: 0.0,
             LoopPhase.PLANNER.value: 0.0,
             LoopPhase.EXECUTOR.value: 0.0,
+            LoopPhase.VERIFIER.value: 0.0,
             LoopPhase.EVALUATOR.value: 0.0,
             LoopPhase.REPORTER.value: 0.0,
             LoopPhase.IDLE.value: 0.0,
@@ -181,8 +187,10 @@ class LoopObserver:
 
         # 各阶段计数
         self._phase_counts: dict[str, int] = {
+            LoopPhase.PERCEIVER.value: 0,
             LoopPhase.PLANNER.value: 0,
             LoopPhase.EXECUTOR.value: 0,
+            LoopPhase.VERIFIER.value: 0,
             LoopPhase.EVALUATOR.value: 0,
             LoopPhase.REPORTER.value: 0,
             LoopPhase.IDLE.value: 0,
@@ -511,8 +519,10 @@ class LoopObserver:
         """重置统计数据"""
         self._statistics = LoopStatistics(
             phase_durations={
+                LoopPhase.PERCEIVER.value: 0.0,
                 LoopPhase.PLANNER.value: 0.0,
                 LoopPhase.EXECUTOR.value: 0.0,
+                LoopPhase.VERIFIER.value: 0.0,
                 LoopPhase.EVALUATOR.value: 0.0,
                 LoopPhase.REPORTER.value: 0.0,
                 LoopPhase.IDLE.value: 0.0,
@@ -520,16 +530,20 @@ class LoopObserver:
         )
 
         self._phase_total_durations = {
+            LoopPhase.PERCEIVER.value: 0.0,
             LoopPhase.PLANNER.value: 0.0,
             LoopPhase.EXECUTOR.value: 0.0,
+            LoopPhase.VERIFIER.value: 0.0,
             LoopPhase.EVALUATOR.value: 0.0,
             LoopPhase.REPORTER.value: 0.0,
             LoopPhase.IDLE.value: 0.0,
         }
 
         self._phase_counts = {
+            LoopPhase.PERCEIVER.value: 0,
             LoopPhase.PLANNER.value: 0,
             LoopPhase.EXECUTOR.value: 0,
+            LoopPhase.VERIFIER.value: 0,
             LoopPhase.EVALUATOR.value: 0,
             LoopPhase.REPORTER.value: 0,
             LoopPhase.IDLE.value: 0,

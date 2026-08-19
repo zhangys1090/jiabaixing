@@ -15,9 +15,9 @@
  * 使得"记忆"不再是短期存储，而是持久可检索的知识库。
  */
 
-import Database from 'better-sqlite3';
 import * as fs from 'fs';
 import * as path from 'path';
+import { createDatabase, type DatabaseAdapter } from '../shared/DatabaseShim';
 import { Logger } from '../utils/Logger';
 
 /** 会话记录 */
@@ -75,7 +75,7 @@ export interface ShareGPTTrajectory {
 }
 
 export class ConversationStore {
-  private db: Database.Database;
+  private db: DatabaseAdapter;
   private dbPath: string;
 
   constructor(dbPath?: string) {
@@ -88,9 +88,10 @@ export class ConversationStore {
       fs.mkdirSync(dataDir, { recursive: true });
     }
 
-    this.db = new Database(this.dbPath);
-    this.db.pragma('journal_mode = WAL');
-    this.db.pragma('foreign_keys = ON');
+    this.db = createDatabase(this.dbPath);
+    try {
+      this.db.pragma('foreign_keys = ON');
+    } catch {}
     this.initialize();
   }
 

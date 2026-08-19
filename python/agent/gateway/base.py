@@ -115,6 +115,30 @@ class PlatformAdapter(ABC):
         """
         ...
 
+    @property
+    def simulated(self) -> bool:
+        """适配器是否处于模拟（未真实连接）模式。
+
+        子类在进入模拟模式（缺凭证 / 缺 SDK 等无法真实连接）时，
+        应调用 :meth:`_enter_simulated` 声明模拟态，而不是把
+        ``_connected`` 谎报为 ``True``。默认 ``False``（真实连接模式）。
+        """
+        return getattr(self, "_simulated", False)
+
+    @property
+    def mode(self) -> str:
+        """返回连接模式标签：``"real"`` 或 ``"simulated"``。"""
+        return "simulated" if self.simulated else "real"
+
+    def _enter_simulated(self) -> None:
+        """声明进入模拟模式。
+
+        模拟态意味着：既未真正连接平台，也不应被统计为「已连接」。
+        子类在无法真实连接的降级分支调用本方法即可，无需各自重复赋值。
+        """
+        self._simulated = True
+        self._connected = False
+
 
 @dataclass
 class GatewayConfig:

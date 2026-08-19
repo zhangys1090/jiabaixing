@@ -12,6 +12,8 @@ class ChatRequest(BaseModel):
 
 
 class ChatResponse(BaseModel):
+    model_config = {"extra": "allow"}
+
     content: str
     session_id: str
     trace_id: str | None = None
@@ -31,6 +33,7 @@ class StreamChunk(BaseModel):
     session_id: str = ""
     trace_id: str | None = None
     done: bool = False
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class HealthResponse(BaseModel):

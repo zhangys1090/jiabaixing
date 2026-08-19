@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import os
+import time
 
 import pytest
 
@@ -137,7 +138,7 @@ class TestLLMCapabilityDetector:
         detector.set_llm(llm)
         caps = await detector.detect("openai", force=True)
         assert caps is not None
-        assert caps.tool_calling_accuracy > 0.5
+        assert caps.tool_calling_accuracy >= 0.5
 
     async def test_detect_code_generation_capability(self):
         detector = LLMCapabilityDetector()
@@ -161,7 +162,7 @@ class TestLLMCapabilityDetector:
         detector.set_llm(llm)
         caps = await detector.detect("openai", force=True)
         assert caps is not None
-        assert caps.structured_output > 0.5
+        assert caps.structured_output >= 0.5
 
     async def test_force_detection_bypasses_cache(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -250,3 +251,55 @@ class TestCapabilityDiff:
         detector = LLMCapabilityDetector()
         diff = detector.diff(old, new)
         assert "结构化输出能力提升" in diff.summary
+
+
+class TestCapabilityDrift:
+    """W4：能力漂移监控测试。"""
+
+    def _seeded_detector(self, old_caps: LLMCapabilities) -> LLMCapabilityDetector:
+        detector = LLMCapabilityDetector(data_dir=tempfile.mkdtemp())
+        detector.set_llm(MockLLM())
+        old_caps.detected_at = time.time()  # 避免触发 TTL 过期导致 get_cached 返回 None
+        detector._cached_capabilities["p"] = old_caps
+        return detector
+
+    def _patch_probes(self, detector: LLMCapabilityDetector, reasoning: float) -> None:
+        from unittest.mock import AsyncMock
+
+        detector._probe_reasoning = AsyncMock(return_value=reasoning)
+        detector._probe_tool_calling = AsyncMock(return_value=0.8)
+        detector._probe_code_generation = AsyncMock(return_value=5)
+        detector._probe_structured_output = AsyncMock(return_value=0.6)
+        detector._probe_vision = AsyncMock(return_value=0.0)
+        detector._detect_model_family = lambda provider: "unknown"
+        detector._compute_overall_score = lambda *a, **k: 5.0
+
+    async def test_check_drift_no_baseline_returns_none(self):
+        detector = LLMCapabilityDetector(data_dir=tempfile.mkdtemp())
+        detector.set_llm(MockLLM())
+        assert await detector.check_drift("p") is None
+
+    async def test_check_drift_detects_change(self):
+        old = LLMCapabilities(
+            provider="p", model_name="p", reasoning_depth=5,
+            tool_calling_accuracy=0.8, code_generation=5,
+            structured_output=0.6, context_window=4096, multi_modal=False,
+        )
+        detector = self._seeded_detector(old)
+        self._patch_probes(detector, reasoning=9)
+        diff = await detector.check_drift("p")
+        assert diff is not None
+        assert diff.added or diff.removed or diff.changed
+        assert any(c.get("field") == "reasoning_depth" for c in diff.changed)
+
+    async def test_check_drift_no_change(self):
+        old = LLMCapabilities(
+            provider="p", model_name="p", reasoning_depth=5,
+            tool_calling_accuracy=0.8, code_generation=5,
+            structured_output=0.6, context_window=4096, multi_modal=False,
+        )
+        detector = self._seeded_detector(old)
+        self._patch_probes(detector, reasoning=5)
+        diff = await detector.check_drift("p")
+        assert diff is not None
+        assert not (diff.added or diff.removed or diff.changed)

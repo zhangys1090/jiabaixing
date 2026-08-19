@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from agent.config import DATA_DIR
+from agent.core.logger import log_ignored
 
 
 class RotationStrategy(str, Enum):
@@ -277,6 +278,8 @@ _MODEL_PRICING: dict[str, dict[str, float]] = {
     "gemini-2.0-flash": {"input": 0.10 / 1_000_000, "output": 0.40 / 1_000_000},
     "deepseek-chat": {"input": 0.14 / 1_000_000, "output": 0.28 / 1_000_000},
     "deepseek-reasoner": {"input": 0.55 / 1_000_000, "output": 2.19 / 1_000_000},
+    "deepseek-v4-flash": {"input": 0.14 / 1_000_000, "output": 0.28 / 1_000_000},
+    "deepseek-v4-pro": {"input": 0.42 / 1_000_000, "output": 0.83 / 1_000_000},
     "qwen-plus": {"input": 0.80 / 1_000_000, "output": 2.00 / 1_000_000},
     "qwen-turbo": {"input": 0.30 / 1_000_000, "output": 0.60 / 1_000_000},
     "qwen-max": {"input": 2.40 / 1_000_000, "output": 9.60 / 1_000_000},
@@ -371,8 +374,8 @@ class CostGuard:
         for cb in self._alert_callbacks:
             try:
                 cb(alert)
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(None, "credential_pool.CostGuard.check_budget_alert", _exc)
         return alert
 
     def estimate_request_cost(
@@ -431,9 +434,6 @@ class CostGuard:
             return False
         return True
 
-    def get_daily_spent(self) -> float:
-        return sum(r.cost_usd for r in self._records)
-
     def get_daily_stats(self) -> dict[str, Any]:
         self._check_daily_reset()
         total_input = sum(r.input_tokens for r in self._records)
@@ -466,11 +466,9 @@ class CostGuard:
             self._records = []
             self._daily_reset = now
 
-
-
-# =============================================================================
-# 凭据持久化与多源发现（P1 增强）
-# =============================================================================
+    def get_daily_spent(self) -> float:
+        self._check_daily_reset()
+        return sum(r.cost_usd for r in self._records)
 
 
 class CredentialPersistence:

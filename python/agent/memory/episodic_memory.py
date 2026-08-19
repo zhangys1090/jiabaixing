@@ -369,11 +369,12 @@ class EpisodicMemoryStore:
                         importance=row[6],
                         access_count=row[7],
                         last_accessed=row[8],
-                        tags=json.loads(row[9]),
-                        metadata=json.loads(row[10]),
+                        tags=safe_json_loads(row[9], [], context="episodic.tags"),
+                        metadata=safe_json_loads(row[10], {}, context="episodic.metadata"),
                     )
                     self._episodes.append(ep)
-                except Exception:
+                except Exception as e:
+                    log.warning("跳过损坏的 episode 记录", error=str(e))
                     continue
             conn.close()
             log.info("Loaded episodes from DB", count=len(self._episodes))

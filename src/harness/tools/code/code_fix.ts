@@ -4,11 +4,12 @@
 
 import type { ToolContext, ToolDefinition, ToolResult } from '../../types';
 import { Permission, ToolCategory } from '../../types';
+import { scanGeneratedCode } from './codeShared';
 
 export const CODE_FIX_DEF: ToolDefinition = {
   name: 'code_fix',
   description:
-    '修复代码中的错误或问题。适用场景：代码有bug需要修复、代码有安全漏洞需要修补、代码不符合规范需要调整。不适用：生成全新代码（用 code_generate）、仅分析不修复（用 code_analyze）。',
+    '修复代码中的错误或问题。适用场景：代码有bug需要修复、代码有安全漏洞需要修补、代码不符合规范需要调整。不适用：生成全新代码（用 code_generate）、仅分析不修复（用 code_analyze）。（轻量规则模式：返回修复后的代码预览，不自动写盘；落地请用文件编辑工具或文件写工具）',
   category: ToolCategory.CODE,
   parameters: {
     code: {
@@ -27,7 +28,7 @@ export const CODE_FIX_DEF: ToolDefinition = {
     },
   },
   requiredParams: ['code', 'errorDescription'],
-  requiredPermissions: [Permission.CODE_EXECUTE, Permission.FILE_WRITE],
+  requiredPermissions: [Permission.CODE_EXECUTE],
   riskLevel: 'medium',
   idempotent: false,
   timeout: 30000,
@@ -68,6 +69,8 @@ export function createCodeFixExecutor(deps: CodeFixDeps) {
         result.changes.length > 0
           ? `基础修复完成（LLM不可用，仅执行模式匹配修复），变更如下：\n${changeList}\n\n\`\`\`${language}\n${result.fixedCode}\n\`\`\``
           : `基础修复未发现可自动修复的问题（LLM不可用）。建议手动修复或启用LLM服务。`;
+      // D3: 兜底路径同样过安全扫描
+      const scan = scanGeneratedCode(result.fixedCode);
       return {
         success: result.changes.length > 0,
         output: note,
@@ -77,6 +80,8 @@ export function createCodeFixExecutor(deps: CodeFixDeps) {
           changeCount: result.changes.length,
           language,
           fallback: true,
+          securityWarnings: scan.warnings,
+          secretHits: scan.secrets,
         },
       };
     }
@@ -94,6 +99,15 @@ export function createCodeFixExecutor(deps: CodeFixDeps) {
 
       const output = `修复完成，变更如下：\n${changeList}\n\n\`\`\`${language}\n${result.fixedCode}\n\`\`\``;
 
+      // D3: 修复物安全扫描（与 code_generate 共用中间件）
+      const scan = scanGeneratedCode(result.fixedCode);
+      if (scan.warnings.length > 0) {
+        Logger.warn(
+          `🔍 D3: code_fix 安全扫描告警: ${scan.warnings.join('; ')}`,
+          'CodeFix'
+        );
+      }
+
       return {
         success: true,
         output,
@@ -102,6 +116,8 @@ export function createCodeFixExecutor(deps: CodeFixDeps) {
         metadata: {
           changeCount: result.changes.length,
           language,
+          securityWarnings: scan.warnings,
+          secretHits: scan.secrets,
         },
       };
     } catch (error) {

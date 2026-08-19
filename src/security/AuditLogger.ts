@@ -5,6 +5,7 @@
 import fs from 'fs';
 import path from 'path';
 import { createLogger, format, Logger, transports } from 'winston';
+import Transport from 'winston-transport';
 import { createDatabase } from '../shared/DatabaseShim';
 import { Logger as AppLogger } from '../utils/Logger';
 import { AuditConfig, AuditLogEntry } from './types';
@@ -38,7 +39,7 @@ export interface ExportOptions {
 export class AuditLogger {
   private config: AuditConfig;
   private logger!: Logger;
-  private db: any = null;
+  private db: import('../shared/DatabaseShim').DatabaseAdapter | null = null;
   private initialized: boolean = false;
   private cleanupTimer?: NodeJS.Timeout;
   private dbPath: string;
@@ -121,7 +122,7 @@ export class AuditLogger {
       format.json()
     );
 
-    const logTransports: transports.ConsoleTransportInstance[] = [
+    const logTransports: Transport[] = [
       new transports.Console({
         format: format.combine(
           format.colorize(),
@@ -149,9 +150,7 @@ export class AuditLogger {
         tailable: true,
         zippedArchive: true,
       });
-      logTransports.push(
-        fileTransport as unknown as transports.ConsoleTransportInstance
-      );
+      logTransports.push(fileTransport);
 
       const errorFileTransport = new transports.File({
         filename: path.join(this.config.storage.path, 'audit-error.log'),
@@ -162,9 +161,7 @@ export class AuditLogger {
         tailable: true,
         zippedArchive: true,
       });
-      logTransports.push(
-        errorFileTransport as unknown as transports.ConsoleTransportInstance
-      );
+      logTransports.push(errorFileTransport);
     }
 
     this.logger = createLogger({
@@ -185,6 +182,7 @@ export class AuditLogger {
 
   private cleanupOldLogs(): void {
     try {
+      if (!this.db) return;
       const retentionTime =
         Date.now() - this.config.retentionDays * 24 * 60 * 60 * 1000;
 
@@ -242,6 +240,7 @@ export class AuditLogger {
         ...entry,
       };
 
+      if (!this.db) return;
       const stmt = this.db.prepare(`
         INSERT INTO audit_logs (
           id, timestamp, action, actor, target, result, category, details,
@@ -261,10 +260,8 @@ export class AuditLogger {
         result: logEntry.result,
         category: logEntry.category || null,
         details: logEntry.details ? JSON.stringify(logEntry.details) : null,
-        ip_address:
-          (logEntry as unknown as Record<string, unknown>).ipAddress || null,
-        user_agent:
-          (logEntry as unknown as Record<string, unknown>).userAgent || null,
+        ip_address: logEntry.ipAddress || null,
+        user_agent: logEntry.userAgent || null,
         created_at: Date.now(),
       });
 
@@ -339,7 +336,7 @@ export class AuditLogger {
 
       sql += ' ORDER BY timestamp DESC';
 
-      // 对于 LIMIT/OFFSET，我们在 mock 中特殊处理
+      if (!this.db) return [];
       const stmt = this.db.prepare(sql);
       let rows = stmt.all(params) as Array<{
         id: string;

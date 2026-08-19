@@ -7,10 +7,10 @@
 import { EventBus } from '../shared/EventBus';
 import { Logger } from '../utils/Logger';
 import {
-  OptimizationLog,
-  ToneAdjustment,
-  SkillWeightAdjustment,
-  PromptExample,
+    OptimizationLog,
+    PromptExample,
+    SkillWeightAdjustment,
+    ToneAdjustment,
 } from './StrategyOptimizer';
 
 /**
@@ -45,10 +45,13 @@ export class OptimizationResultDispatcher {
 
   private constructor() {}
 
+  public static create(): OptimizationResultDispatcher {
+    return new OptimizationResultDispatcher();
+  }
+
   public static getInstance(): OptimizationResultDispatcher {
     if (!OptimizationResultDispatcher.instance) {
-      OptimizationResultDispatcher.instance =
-        new OptimizationResultDispatcher();
+      OptimizationResultDispatcher.instance = OptimizationResultDispatcher.create();
     }
     return OptimizationResultDispatcher.instance;
   }

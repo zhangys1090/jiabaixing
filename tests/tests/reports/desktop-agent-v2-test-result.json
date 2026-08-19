@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-06-23T15:08:03.859Z",
+  "timestamp": "2026-07-09T08:47:36.272Z",
   "totalTests": 35,
   "passed": 35,
   "failed": 0,
@@ -14,7 +14,7 @@
       "module": "NormalizedCoordinates",
       "test": "归一化→像素转换",
       "passed": true,
-      "message": "结果: (960, 540)"
+      "message": "结果: (960, 520)"
     },
     {
       "module": "NormalizedCoordinates",
@@ -26,13 +26,13 @@
       "module": "NormalizedCoordinates",
       "test": "边界值转换",
       "passed": true,
-      "message": "左上角: (0, 0)，右下角: (1920, 1080)"
+      "message": "左上角: (0, 0)，右下角: (1920, 1040)"
     },
     {
       "module": "NormalizedCoordinates",
       "test": "屏幕尺寸获取",
       "passed": true,
-      "message": "屏幕尺寸: 1920x1080"
+      "message": "屏幕尺寸: 1920x1040"
     },
     {
       "module": "NormalizedCoordinates",
@@ -50,7 +50,7 @@
       "module": "DesktopEventStream",
       "test": "开始任务",
       "passed": true,
-      "message": "任务ID: 1782227283..."
+      "message": "任务ID: 1783586856..."
     },
     {
       "module": "DesktopEventStream",
@@ -152,19 +152,19 @@
       "module": "DesktopSkillRegistry",
       "test": "获取所有技能",
       "passed": true,
-      "message": "共 4 个内置技能"
+      "message": "共 21 个内置技能"
     },
     {
       "module": "DesktopSkillRegistry",
       "test": "获取分类",
       "passed": true,
-      "message": "分类: 浏览器, 办公, 工具, 窗口管理"
+      "message": "分类: 浏览器, 办公, 工具, 窗口管理, 系统工具, 常用应用, 编辑操作"
     },
     {
       "module": "DesktopSkillRegistry",
       "test": "按分类获取技能",
       "passed": true,
-      "message": "浏览器技能: 1 个"
+      "message": "浏览器技能: 3 个"
     },
     {
       "module": "DesktopSkillRegistry",

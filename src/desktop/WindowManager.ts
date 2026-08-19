@@ -52,9 +52,13 @@ export class WindowManager {
 
   private constructor() {}
 
+  public static create(): WindowManager {
+    return new WindowManager();
+  }
+
   public static getInstance(): WindowManager {
     if (!WindowManager.instance) {
-      WindowManager.instance = new WindowManager();
+      WindowManager.instance = WindowManager.create();
     }
     return WindowManager.instance;
   }

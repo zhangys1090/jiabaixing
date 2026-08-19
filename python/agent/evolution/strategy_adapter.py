@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
 
 log = StructuredLogger("strategy_adapter")
 
@@ -194,6 +195,12 @@ class StrategyAdapter:
             "exploitation_count": 0,
             "total_outcomes": 0,
         }
+
+        # 实时信号累积（供 record_signal 使用）
+        self._signal_buffer: list[dict[str, Any]] = []
+        self._signal_scores: dict[str, float] = {}
+        self._current_model_family: str = "generic"
+        self._prompt_registry: Any = None
 
         log.info(
             "StrategyAdapter initialized",
@@ -528,6 +535,86 @@ class StrategyAdapter:
             "version": strategy.version,
         }
 
+    def record_signal(self, signal_type: str, value: float = 0.0) -> None:
+        """记录实时学习信号，用于微调策略参数。
+
+        由 EvolutionOrchestrator 在每轮交互后调用，
+        累积信号用于驱动策略自适应微调。
+
+        Args:
+            signal_type: 信号类型（如 "high_failure_rate", "high_quality_streak", "slow_response"）。
+            value: 信号值（-1.0 到 1.0，负值表示惩罚，正值表示奖励）。
+        """
+        if not self._enabled:
+            return
+
+        self._signal_buffer.append({
+            "type": signal_type,
+            "value": value,
+            "timestamp": time.time(),
+        })
+
+        if len(self._signal_buffer) > 20:
+            self._signal_buffer = self._signal_buffer[-20:]
+
+        current = self._signal_scores.get(signal_type, 0.0)
+        self._signal_scores[signal_type] = current * 0.7 + value * 0.3
+
+        if len(self._signal_buffer) >= 5:
+            self._apply_signal_micro_adaptation()
+
+    def _apply_signal_micro_adaptation(self) -> None:
+        """根据累积信号进行微调。"""
+        recent = self._signal_buffer[-5:]
+        avg_value = sum(s["value"] for s in recent) / len(recent)
+
+        if avg_value < -0.3 and self._current_config:
+            self._current_config.reflection.max_retries = min(
+                4, self._current_config.reflection.max_retries + 1
+            )
+            self._current_config.reflection.enable_deep_reflection = True
+            self._current_config.execution.risk_assessment_threshold = max(
+                0.3, self._current_config.execution.risk_assessment_threshold - 0.1
+            )
+        elif avg_value > 0.3 and self._current_config:
+            self._current_config.reflection.max_retries = max(
+                1, self._current_config.reflection.max_retries - 1
+            )
+            self._current_config.execution.risk_assessment_threshold = min(
+                0.95, self._current_config.execution.risk_assessment_threshold + 0.05
+            )
+
+    def set_model_family(self, model_name: str) -> None:
+        """设置当前使用的模型家族，用于选择最佳 prompt 模板。
+
+        Args:
+            model_name: 模型名称（如 "claude-sonnet-4-20250514"）。
+        """
+        from agent.evolution.prompt_templates import _detect_model_family
+        self._current_model_family = _detect_model_family(model_name)
+        log.debug("Model family set", model_name=model_name, family=self._current_model_family)
+
+    def get_prompt_template(self, category: str, **kwargs: Any) -> str:
+        """获取当前模型家族对应的 prompt 模板。
+
+        Args:
+            category: 模板类别（"planning", "evaluation", "reflection", "code_generation", "tool_calling"）。
+            **kwargs: 模板渲染参数。
+
+        Returns:
+            str: 渲染后的 prompt 模板文本。
+        """
+        try:
+            from agent.evolution.prompt_templates import get_prompt_template_registry
+            if self._prompt_registry is None:
+                self._prompt_registry = get_prompt_template_registry()
+            template = self._prompt_registry.get_template(
+                self._current_model_family, category
+            )
+            return template.render(**kwargs)
+        except Exception:
+            return kwargs.get("user_input", "")
+
     def get_metrics(self) -> StrategyAdapterMetrics:
         """获取统计指标。
 
@@ -593,13 +680,16 @@ class StrategyAdapter:
         self._callbacks = callbacks
 
     async def adapt(self, caps: Any) -> StrategyConfig:
-        reasoning = getattr(caps, "reasoning_depth", 0) / 10.0
+        reasoning = getattr(caps, "reasoning_depth", 0) / 9.0
         tool_acc = getattr(caps, "tool_calling_accuracy", 0)
-        code_gen = getattr(caps, "code_generation", 0) / 10.0
+        code_gen = getattr(caps, "code_generation", 0) / 9.0
         struct_out = getattr(caps, "structured_output", 0)
-        overall = (reasoning + tool_acc + code_gen + struct_out) / 4.0
+        overall = reasoning * 0.30 + tool_acc * 0.25 + code_gen * 0.25 + struct_out * 0.20
 
-        prompt = self._build_prompt(reasoning, overall)
+        model_family = getattr(caps, "model_family", "")
+        if model_family:
+            self._current_model_family = model_family
+        prompt = self._build_prompt_for_model(reasoning, overall, caps)
         planning = self._build_planning(reasoning, overall)
         tool_use = self._build_tool_use(tool_acc, overall)
         reflection = self._build_reflection(reasoning, overall)
@@ -626,8 +716,8 @@ class StrategyAdapter:
         if "on_strategy_adapted" in self._callbacks:
             try:
                 self._callbacks["on_strategy_adapted"](config)
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "strategy_adapter.StrategyAdapter.adapt", _exc)
 
         return config
 
@@ -648,6 +738,60 @@ class StrategyAdapter:
                 max_examples=3,
             )
         return PromptStrategy()
+
+    def _build_prompt_for_model(
+        self, reasoning: float, overall: float, caps: Any = None
+    ) -> PromptStrategy:
+        """根据模型家族构建最优 prompt 策略。
+
+        利用模型特有能力的策略：
+        - Claude: 启用 extended thinking，更自由的推理
+        - GPT: 利用 structured output 原生支持
+        - DeepSeek: 中文优化，更多 few-shot 示例
+        - Gemini: 简洁指令，减少冗余
+        - 通用: 默认策略
+
+        Args:
+            reasoning: 推理能力评分 (0.0-1.0)。
+            overall: 综合评分 (0.0-1.0)。
+            caps: 能力画像 (LLMCapabilities)，可选。
+
+        Returns:
+            PromptStrategy: 模型家族优化的 prompt 策略。
+        """
+        family = self._current_model_family
+        extended_thinking = getattr(caps, "extended_thinking", False) if caps else False
+        structured_native = getattr(caps, "structured_output_native", False) if caps else False
+
+        if family == "claude":
+            return PromptStrategy(
+                reasoning_freedom="open",
+                enable_chain_of_thought=extended_thinking,
+                enable_few_shot=True,
+                max_examples=5 if reasoning >= 0.6 else 3,
+            )
+        elif family == "gpt":
+            return PromptStrategy(
+                reasoning_freedom="structured" if structured_native else "guided",
+                enable_chain_of_thought=overall >= 0.5,
+                enable_few_shot=True,
+                max_examples=4 if reasoning >= 0.6 else 2,
+            )
+        elif family == "deepseek":
+            return PromptStrategy(
+                reasoning_freedom="guided",
+                enable_chain_of_thought=True,
+                enable_few_shot=True,
+                max_examples=5,
+            )
+        elif family == "gemini":
+            return PromptStrategy(
+                reasoning_freedom="guided",
+                enable_chain_of_thought=False,
+                enable_few_shot=False,
+                max_examples=2,
+            )
+        return StrategyAdapter._build_prompt(reasoning, overall)
 
     @staticmethod
     def _build_planning(reasoning: float, overall: float) -> PlanningStrategy:

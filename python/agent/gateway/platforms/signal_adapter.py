@@ -21,6 +21,7 @@ from typing import Any, AsyncIterator
 
 from agent.gateway.base import Message, PlatformAdapter
 from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
 
 log = StructuredLogger("gateway.signal_adapter")
 
@@ -54,8 +55,8 @@ class SignalAdapter(PlatformAdapter):
 
     async def start(self) -> None:
         if not self._phone_number:
-            log.warning("Signal 手机号未配置，适配器以模拟模式运行")
-            self._connected = True
+            log.warning("Signal 手机号未配置，适配器以模拟模式运行（不会真实连接）")
+            self._enter_simulated()
             return
 
         try:
@@ -73,8 +74,8 @@ class SignalAdapter(PlatformAdapter):
             self._connected = True
             log.info("Signal 适配器已启动")
         except ImportError:
-            log.warning("httpx 未安装，Signal 适配器以模拟模式运行")
-            self._connected = True
+            log.warning("httpx 未安装，Signal 适配器以模拟模式运行（不会真实连接）")
+            self._enter_simulated()
         except Exception as e:
             log.error("Signal 适配器启动失败", error=str(e))
             self._connected = False
@@ -94,11 +95,11 @@ class SignalAdapter(PlatformAdapter):
                             messages = resp.json()
                             for msg_data in messages if isinstance(messages, list) else [messages]:
                                 await self._process_signal_message(msg_data)
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        log_ignored(log, "signal_adapter.SignalAdapter._poll_messages", _exc)
                     await asyncio.sleep(2)
-        except asyncio.CancelledError:
-            pass
+        except asyncio.CancelledError as _exc:
+            log_ignored(log, "signal_adapter.SignalAdapter._poll_messages", _exc)
 
     async def _process_signal_message(self, msg_data: dict) -> None:
         try:
@@ -139,8 +140,9 @@ class SignalAdapter(PlatformAdapter):
 
     async def send_message(self, chat_id: str, text: str) -> bool:
         if not self._phone_number:
-            log.debug("Signal 模拟发送", chat_id=chat_id, text=text[:50])
-            return True
+            # 诚实化：模拟态（未配置手机号 / 未安装 httpx）未真实发送
+            log.warning("Signal 适配器未连接，消息未真实发送", chat_id=chat_id)
+            return False
 
         try:
             import httpx

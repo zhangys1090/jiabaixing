@@ -11,7 +11,8 @@ const MESSAGES_PER_CONNECTION = 10;
 const MAX_RESPONSE_TIME_MS = 5000;
 
 describe('WebSocket 压力测试', () => {
-  // 跳过压力测试（需要后端运行）
+  // 压力测试默认跳过，需设置环境变量 RUN_STRESS_TEST=true 并启动后端后方可运行
+  // 原因：该测试依赖 WebSocket 后端服务处于运行状态，CI 环境下不可用
   const runStressTest = process.env.RUN_STRESS_TEST === 'true';
 
   (runStressTest ? describe : describe.skip)('100 并发连接测试', () => {

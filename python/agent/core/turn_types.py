@@ -99,6 +99,9 @@ class IterationBudget:
     max_total_tokens: int = 50000
     max_consecutive_failures: int = 3
     consecutive_failures: int = 0
+    total_failures: int = 0
+    total_tool_calls: int = 0
+    max_failure_rate: float = 0.8
 
     @property
     def remaining_rounds(self) -> int:
@@ -117,8 +120,12 @@ class IterationBudget:
 
     @property
     def is_failure_exhausted(self) -> bool:
-        """连续失败次数是否已达上限。"""
-        return self.consecutive_failures >= self.max_consecutive_failures
+        """连续失败次数是否已达上限，或总失败率是否过高。"""
+        if self.consecutive_failures >= self.max_consecutive_failures:
+            return True
+        if self.total_tool_calls >= 3 and self.total_failures / self.total_tool_calls >= self.max_failure_rate:
+            return True
+        return False
 
     def increment(self) -> None:
         """递增当前轮数。"""
@@ -133,12 +140,15 @@ class IterationBudget:
         self.total_tokens_used += count
 
     def record_failure(self) -> None:
-        """记录一次连续失败，递增 consecutive_failures。"""
+        """记录一次连续失败，递增 consecutive_failures 和 total_failures。"""
         self.consecutive_failures += 1
+        self.total_failures += 1
+        self.total_tool_calls += 1
 
     def reset_failure_streak(self) -> None:
-        """重置连续失败计数为 0，在成功后调用。"""
+        """重置连续失败计数为 0，在成功后调用。同时记录总调用数。"""
         self.consecutive_failures = 0
+        self.total_tool_calls += 1
 
 
 @dataclass
@@ -152,4 +162,5 @@ class ConversationResult:
     total_tokens: int = 0
     duration: float = 0.0
     finish_reason: str = "stop"
+    quality_score: float = 0.0
     metadata: dict[str, Any] = field(default_factory=dict)

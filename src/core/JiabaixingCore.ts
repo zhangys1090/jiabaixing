@@ -1,8 +1,9 @@
 import fs from 'fs';
 import path from 'path';
-import { EvolutionEngine } from '../evolution/EvolutionEngine';
 import { EvolutionOrchestrator } from '../evolution/EvolutionOrchestrator';
 import { FeedbackCollector } from '../evolution/FeedbackCollector';
+import { getActivePythonBridge } from '../ide/bridgeRegistry';
+import type { PythonAgentBridge } from '../ide/PythonAgentBridge';
 import { LLMProvider } from '../models/LLMProvider';
 import { PerformanceMonitor } from '../monitoring/PerformanceMonitor';
 import { SecurityAuditor } from '../monitoring/SecurityAuditor';
@@ -17,6 +18,7 @@ import {
   TrajectoryExporter,
 } from '../training/TrajectoryExporter';
 import { Logger } from '../utils/Logger';
+import { MemoryLeakGuard } from '../utils/MemoryLeakGuard';
 import {
   ConstitutionPromptBuilder,
   type PromptBuilderDependencies,
@@ -29,6 +31,14 @@ import {
 } from './OptimizationScheduler';
 import { ScenarioAwareScheduler } from './ScenarioAwareScheduler';
 import { StreamResponseService } from './StreamResponseService';
+import type { ToTOptions, ToTResult } from './TreeOfThought';
+import { TreeOfThoughtEngine } from './TreeOfThought';
+
+function adaptMemoryEngineForPromptBuilder(
+  me: JiabaixingCore['memoryEngine']
+): PromptBuilderDependencies['memoryEngine'] {
+  return me as PromptBuilderDependencies['memoryEngine'];
+}
 
 /**
  * 记忆引擎接口（避免循环依赖）
@@ -145,14 +155,13 @@ export class JiabaixingCore {
   private performanceMonitor: PerformanceMonitor;
   private securityAuditor: SecurityAuditor;
   private traeOptimizationIntegrator: ITRAEOptimizationIntegrator | null = null;
-  // V1 stub for evolution routes backward compat (V2 EvolutionEngineV2 is active)
-  public evolutionEngine: EvolutionEngine = new EvolutionEngine();
-  // 反馈收集器 — 闭合 Loop B
+  // 反馈收集器 — 闭合 Loop B（进化反馈经 Python 后端 python/agent/evolution 采集）
   public feedbackCollector: FeedbackCollector = new FeedbackCollector();
   private optimizationSchedulerManager!: OptimizationScheduler;
   private scenarioScheduler: ScenarioAwareScheduler | null = null;
 
-  public orchestrator: EvolutionOrchestrator;
+  /** 进化编排器（AGENT_BACKEND=python 模式下为 null，进化由 Python agent.evolution 经 PythonAgentBridge 接管） */
+  public orchestrator: EvolutionOrchestrator | null = null;
 
   // V5.0: 核心组件
   private harness: import('../harness/AgentHarness').AgentHarness | null = null;
@@ -164,6 +173,7 @@ export class JiabaixingCore {
   // RL 训练轨迹导出器
   private trajectoryExporter: TrajectoryExporter = new TrajectoryExporter();
   private trajectoryBuffer: TrajectoryData[] = [];
+  private memoryLeakGuard: MemoryLeakGuard = MemoryLeakGuard.getInstance();
 
   // 项目上下文文件缓存
   private _contextFileCache: ContextFileEntry[] = [];
@@ -172,7 +182,7 @@ export class JiabaixingCore {
   constructor() {
     this.personaCore = new PersonaCore();
     this.personaGuard = new PersonaRules(this.personaCore);
-    this.llm = new LLMProvider(process.env.LLM_MODEL || 'deepseek-chat');
+    this.llm = new LLMProvider(process.env.LLM_MODEL || 'deepseek-v4-flash');
     this.performanceMonitor = PerformanceMonitor.getInstance();
     this.streamResponseService = new StreamResponseService();
     this.securityAuditor = new SecurityAuditor({
@@ -186,16 +196,24 @@ export class JiabaixingCore {
 
     // 初始化宪法 prompt 构建器 (V1 evolution removed)
     this.constitutionPromptBuilder = new ConstitutionPromptBuilder({
-      memoryEngine: this
-        .memoryEngine as unknown as PromptBuilderDependencies['memoryEngine'],
+      memoryEngine: adaptMemoryEngineForPromptBuilder(this.memoryEngine),
       evolutionEngine: undefined,
     });
 
     // 初始化进化编排器
-    this.orchestrator = EvolutionOrchestrator.getInstance();
+    // P2-3 收口：python 模式不实例化 TS 进化编排器（避免 TS 独立运行 Agent 核心，§0.1）。
+    this.orchestrator = getActivePythonBridge()
+      ? null
+      : EvolutionOrchestrator.getInstance();
 
     // 初始化对话历史管理器
     this.conversationHistoryManager = new ConversationHistoryManager();
+
+    this.memoryLeakGuard.registerBuffer<TrajectoryData>(
+      'trajectoryBuffer',
+      this.trajectoryBuffer,
+      { maxSize: 1000, warningThreshold: 0.8 }
+    );
   }
 
   public getLLM(): LLMProvider {
@@ -209,6 +227,19 @@ export class JiabaixingCore {
   async initialize(): Promise<void> {
     if (this.initialized) {
       Logger.info('JiabaixingCore 已初始化，跳过', 'JiabaixingCore');
+      return;
+    }
+
+    const isPythonBackend =
+      (process.env.AGENT_BACKEND ?? 'python') === 'python' &&
+      this.pythonBridgeResolver;
+
+    if (isPythonBackend) {
+      Logger.info(
+        'JiabaixingCore 轻量初始化 (Python后端模式 — 跳过本地AI组件)',
+        'JiabaixingCore'
+      );
+      this.initialized = true;
       return;
     }
 
@@ -235,7 +266,7 @@ export class JiabaixingCore {
           'JiabaixingCore'
         );
         Logger.info(
-          `   LLM模型: ${process.env.LLM_MODEL || 'deepseek-chat'}`,
+          `   LLM模型: ${process.env.LLM_MODEL || 'deepseek-v4-flash'}`,
           'JiabaixingCore'
         );
       }
@@ -289,10 +320,37 @@ export class JiabaixingCore {
   setMemoryEngine(memoryEngine: IMemoryEngine): void {
     this.memoryEngine = memoryEngine;
     this.constitutionPromptBuilder = new ConstitutionPromptBuilder({
-      memoryEngine: this
-        .memoryEngine as unknown as PromptBuilderDependencies['memoryEngine'],
+      memoryEngine: adaptMemoryEngineForPromptBuilder(this.memoryEngine),
       evolutionEngine: undefined,
     });
+  }
+
+  /**
+   * Python 后端桥接解析器（由 bootstrap.ts 注入，避免循环依赖）
+   *
+   * 当 AGENT_BACKEND=python 时，processInput 会优先通过此解析器
+   * 获取 PythonAgentBridge 实例并转发请求，实现统一路由。
+   */
+  private pythonBridgeResolver: (() => PythonAgentBridge | null) | null = null;
+
+  /**
+   * 注入 Python 后端桥接解析器
+   *
+   * @param resolver - 返回 PythonAgentBridge 实例或 null 的回调函数
+   *
+   * Usage:
+   *   core.setPythonBridgeResolver(() => pythonBridge);
+   */
+  setPythonBridgeResolver(resolver: () => PythonAgentBridge | null): void {
+    this.pythonBridgeResolver = resolver;
+    Logger.info(
+      '🔌 Python 后端桥接解析器已注入，processInput 将统一路由到 Python 后端',
+      'JiabaixingCore'
+    );
+  }
+
+  getPythonBridgeResolver(): (() => PythonAgentBridge | null) | null {
+    return this.pythonBridgeResolver;
   }
 
   /**
@@ -501,6 +559,34 @@ export class JiabaixingCore {
       await this.initialize();
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    // 统一 Python 后端路由
+    // 当 AGENT_BACKEND=python 且 bridge 可用时，所有调用 core.processInput
+    // 的入口（HTTP路由/WebSocket/CLI/调度器/集成管理器）一次性全部走 Python 后端
+    // ═══════════════════════════════════════════════════════════════
+    // V5.0 默认启用 Python 后端（真后端）：AGENT_BACKEND 未设置时按 python 处理；
+    // 仅当显式设置 AGENT_BACKEND=local 时回退到 TS 本地（已废弃）。
+    // pythonBridgeResolver 守卫确保：未桥接 / 测试场景下安全降级到 TS 本地。
+    if (
+      (process.env.AGENT_BACKEND ?? 'python') === 'python' &&
+      this.pythonBridgeResolver
+    ) {
+      const bridge = this.pythonBridgeResolver();
+      if (bridge) {
+        const bridgeResult = await bridge.processInput(
+          input,
+          userId,
+          traceId,
+          images
+        );
+        return {
+          response: bridgeResult.response,
+          traceId: bridgeResult.traceId || traceId || Logger.generateTraceId(),
+          intent: bridgeResult.intent || 'python_backend',
+        };
+      }
+    }
+
     const finalTraceId = traceId || Logger.generateTraceId();
     Logger.setTraceId(finalTraceId);
     Logger.info(
@@ -569,8 +655,8 @@ export class JiabaixingCore {
         );
         requestSuccess = qualityScore >= 0.5;
 
-        // 累积 RL 训练轨迹
-        this.trajectoryBuffer.push({
+        // 累积 RL 训练轨迹 (通过 MemoryLeakGuard 管理防止内存泄漏)
+        const trajectoryEntry: TrajectoryData = {
           id: finalTraceId,
           steps: [
             { role: 'user', content: input },
@@ -582,7 +668,9 @@ export class JiabaixingCore {
             toolCalls: harnessResult.trace.totalToolCalls,
             userId,
           },
-        });
+        };
+        this.trajectoryBuffer.push(trajectoryEntry);
+        this.memoryLeakGuard.pushToBuffer('trajectoryBuffer', trajectoryEntry);
         if (this.trajectoryBuffer.length > 1000) {
           this.trajectoryBuffer.splice(0, this.trajectoryBuffer.length - 1000);
         }
@@ -783,4 +871,19 @@ export class JiabaixingCore {
     };
     return fallbacks[reason] || '在呢，需要什么帮忙吗？';
   }
+
+  // ═══════════════════════════════════════════════════════════
+  // P1 #8: Tree-of-Thought 推理框架
+  // 多路径探索 + 评估 + 回溯，增强复杂推理能力
+  // ═══════════════════════════════════════════════════════════
+
+  public async treeOfThoughtReasoning(
+    problem: string,
+    options?: ToTOptions
+  ): Promise<ToTResult> {
+    const engine = new TreeOfThoughtEngine(this.llm);
+    return engine.reason(problem, options);
+  }
 }
+
+export { type ToTNode, type ToTOptions, type ToTResult } from './TreeOfThought';

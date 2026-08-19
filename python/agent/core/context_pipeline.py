@@ -5,6 +5,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from agent.core.logger import log_ignored
 
 
 CONTEXT_FILE_PRIORITY = [
@@ -103,7 +104,11 @@ class TokenBudgetAllocator:
 
     @staticmethod
     def estimate_tokens(text: str) -> int:
-        """估算文本 Token 数（4 字符 ≈ 1 Token）。
+        """估算文本 Token 数，区分 CJK 和拉丁字符。
+
+        中文约 1.5 token/字，日文假名约 1.2 token/字，
+        韩文约 1.3 token/字，英文约 4 字符/token。
+        与 ContextCompressor._approximate_tokens 保持一致。
 
         Args:
             text: 输入文本。
@@ -111,7 +116,25 @@ class TokenBudgetAllocator:
         Returns:
             int: 估算 Token 数（最小为 1）。
         """
-        return max(1, len(text) // 4)
+        cn_chars = 0
+        jp_chars = 0
+        kr_chars = 0
+        other_chars = 0
+        for ch in text:
+            cp = ord(ch)
+            if 0x4E00 <= cp <= 0x9FFF or 0x3400 <= cp <= 0x4DBF or 0x20000 <= cp <= 0x2A6DF:
+                cn_chars += 1
+            elif 0x3040 <= cp <= 0x309F or 0x30A0 <= cp <= 0x30FF:
+                jp_chars += 1
+            elif 0xAC00 <= cp <= 0xD7AF or 0x1100 <= cp <= 0x11FF:
+                kr_chars += 1
+            else:
+                other_chars += 1
+        cn_tokens = int(cn_chars * 1.5)
+        jp_tokens = int(jp_chars * 1.2)
+        kr_tokens = int(kr_chars * 1.3)
+        en_tokens = max(1, other_chars // 4) if other_chars > 0 else 0
+        return max(1, cn_tokens + jp_tokens + kr_tokens + en_tokens)
 
     def truncate_to_budget(self, text: str, budget: int) -> str:
         """将文本截断到指定 Token 预算内。
@@ -224,9 +247,11 @@ class ContextManager:
 
         if system_prompt:
             truncated = self._allocator.truncate_to_budget(system_prompt, allocation.system_prompt)
-            messages.append({"role": "system", "content": truncated})
+            # 关键信息保护标记：系统指令不可被压缩丢弃
+            protected = f"<!-- key:system_prompt -->{truncated}"
+            messages.append({"role": "system", "content": protected})
             self._entries.append(ContextEntry(
-                id="constitutional", type="system", content=truncated,
+                id="constitutional", type="system", content=protected,
                 priority=10, source="ConstitutionalBuilder",
             ))
 
@@ -234,17 +259,21 @@ class ContextManager:
             tone = self._get_tone_instruction(scene)
             persona_content = f"{persona_summary}\n\n{tone}"
             truncated = self._allocator.truncate_to_budget(persona_content, allocation.dynamic_context)
-            messages.append({"role": "system", "content": truncated})
+            # 关键信息保护标记：人格指令不可被压缩丢弃
+            protected = f"<!-- key:persona_tone -->{truncated}"
+            messages.append({"role": "system", "content": protected})
             self._entries.append(ContextEntry(
-                id="persona_tone", type="dynamic", content=truncated,
+                id="persona_tone", type="dynamic", content=protected,
                 priority=9, source="PersonaCore",
             ))
 
         if dynamic_context:
             truncated = self._allocator.truncate_to_budget(dynamic_context, allocation.dynamic_context)
-            messages.append({"role": "system", "content": truncated})
+            # 关键信息保护标记：动态上下文不可被压缩丢弃
+            protected = f"<!-- key:dynamic_context -->{truncated}"
+            messages.append({"role": "system", "content": protected})
             self._entries.append(ContextEntry(
-                id="dynamic", type="dynamic", content=truncated,
+                id="dynamic", type="dynamic", content=protected,
                 priority=9, source="DynamicContext",
             ))
 
@@ -293,8 +322,8 @@ class ContextManager:
                         final_user_input = f"{resolved.cleaned_input}\n\n[引用内容]\n{resolved.resolved_content}"
                     else:
                         final_user_input = resolved.cleaned_input
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(None, "context_pipeline.ContextManager.build_context", _exc)
 
         messages.append({"role": "user", "content": final_user_input})
         return messages

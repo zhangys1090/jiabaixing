@@ -3,16 +3,23 @@
  *
  * 提供安全的代码执行环境，防止恶意操作
  * 支持：资源限制、网络隔离、文件系统访问控制
+ *
+ * V5.6 增强：
+ * - Worker 线程真隔离（替代 new Function 伪沙箱）
+ * - 资源限制（memory/CPU/timeout）通过 worker_threads resourceLimits
+ * - 双模式：isolated (Worker) / inline (Function, 仅 low 安全级别)
  */
 
 import { Logger } from '../../utils/Logger';
 
 // 安全级别定义
 export type SandboxSecurityLevel = 'low' | 'medium' | 'high' | 'critical';
+export type SandboxMode = 'isolated' | 'inline';
 
 // 沙箱执行配置
 export interface SandboxConfig {
   securityLevel: SandboxSecurityLevel;
+  mode: SandboxMode;
   timeoutMs: number;
   maxMemoryMb: number;
   maxCpuPercent: number;
@@ -51,6 +58,7 @@ export interface ResourceUsage {
 // 默认配置
 export const DEFAULT_SANDBOX_CONFIG: SandboxConfig = {
   securityLevel: 'low',
+  mode: 'isolated',
   timeoutMs: 30000,
   maxMemoryMb: 256,
   maxCpuPercent: 50,
@@ -181,33 +189,89 @@ export class SandboxExecutor {
     return { allowed: true, riskLevel: 'low' };
   }
 
-  /**
-   * 在沙箱环境中执行代码
-   */
   private async executeInSandbox(code: string): Promise<unknown> {
-    // 创建安全的执行上下文
+    const effectiveMode = this.config.mode === 'inline' && this.config.securityLevel !== 'low'
+      ? 'isolated'
+      : this.config.mode;
+
+    if (effectiveMode === 'isolated') {
+      return this.executeInWorker(code);
+    }
+    return this.executeInline(code);
+  }
+
+  private async executeInWorker(code: string): Promise<unknown> {
+    const workerPath = path.join(__dirname, 'sandboxWorker.js');
+
+    return new Promise<unknown>((resolve, reject) => {
+      let settled = false;
+
+      const worker = new Worker(workerPath, {
+        resourceLimits: {
+          maxOldGenerationSizeMb: this.config.maxMemoryMb,
+          maxYoungGenerationSizeMb: Math.floor(this.config.maxMemoryMb / 4),
+          stackSizeMb: 4,
+        },
+        eval: false,
+      });
+
+      const timeoutId = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          worker.terminate();
+          reject(new Error(`Worker 执行超时 (${this.config.timeoutMs}ms)`));
+        }
+      }, this.config.timeoutMs);
+
+      worker.on('message', (msg: { success: boolean; output?: unknown; error?: string; logs?: string[] }) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+
+        if (msg.logs && msg.logs.length > 0) {
+          this.logs.push(...msg.logs);
+        }
+
+        if (msg.success) {
+          resolve(msg.output);
+        } else {
+          reject(new Error(msg.error || 'Worker 执行失败'));
+        }
+      });
+
+      worker.on('error', (err: Error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        reject(err);
+      });
+
+      worker.on('exit', (code: number) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeoutId);
+          reject(new Error(`Worker 异常退出 (code=${code})`));
+        }
+      });
+
+      worker.postMessage({ code });
+    });
+  }
+
+  private async executeInline(code: string): Promise<unknown> {
     const safeContext = this.createSafeContext();
 
-    // 使用 Promise 包装，支持超时
     return new Promise((resolve, reject) => {
-      // 超时控制
       const timeoutId = setTimeout(() => {
         reject(new Error(`执行超时 (${this.config.timeoutMs}ms)`));
       }, this.config.timeoutMs);
 
       try {
-        // 使用严格模式和受限上下文执行
         const asyncFunction = new Function(
           ...Object.keys(safeContext),
-          `
-          'use strict';
-          return (async () => {
-            ${code}
-          })();
-        `
+          `'use strict'; return (async () => { ${code} })();`
         );
 
-        // 执行代码
         asyncFunction(...Object.values(safeContext))
           .then((result: unknown) => {
             clearTimeout(timeoutId);

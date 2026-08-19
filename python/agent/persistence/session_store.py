@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -10,6 +11,8 @@ from typing import Any
 
 from agent.config import DATA_DIR
 from agent.persistence.database import get_sync_connection
+from agent.core.logger import log_ignored
+from agent.infrastructure.safe_json import safe_json_loads
 
 # P1 修复：FTS5 中文分词 — jieba 可选加载，失败则回退空格分词
 _jieba_available = False
@@ -54,6 +57,7 @@ class SessionSearchEngine:
         self._path = Path(db_path) if db_path else DATA_DIR / "session_search.db"
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = get_sync_connection(db_path=str(self._path), check_same_thread=False)
+        self._lock = __import__("threading").Lock()
         self._init_tables()
 
     def _init_tables(self) -> None:
@@ -85,20 +89,22 @@ class SessionSearchEngine:
         self._conn.commit()
 
     def index_message(self, session_id: str, role: str, content: str, timestamp: float) -> None:
-        self._conn.execute(
-            "INSERT INTO messages_fts (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)",
-            (session_id, role, content, timestamp),
-        )
-        self._conn.commit()
-
-    def index_session_messages(self, session_id: str, messages: list[SessionMessage]) -> None:
-        self._conn.execute("DELETE FROM messages_fts WHERE session_id = ?", (session_id,))
-        for msg in messages:
+        with self._lock:
             self._conn.execute(
                 "INSERT INTO messages_fts (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)",
-                (session_id, msg.role, msg.content, msg.timestamp),
+                (session_id, role, content, timestamp),
             )
-        self._conn.commit()
+            self._conn.commit()
+
+    def index_session_messages(self, session_id: str, messages: list[SessionMessage]) -> None:
+        with self._lock:
+            self._conn.execute("DELETE FROM messages_fts WHERE session_id = ?", (session_id,))
+            for msg in messages:
+                self._conn.execute(
+                    "INSERT INTO messages_fts (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)",
+                    (session_id, msg.role, msg.content, msg.timestamp),
+                )
+            self._conn.commit()
 
     def search(
         self,
@@ -151,7 +157,8 @@ class SessionSearchEngine:
         params.append(limit)
 
         try:
-            rows = self._conn.execute(sql, params).fetchall()
+            with self._lock:
+                rows = self._conn.execute(sql, params).fetchall()
         except Exception:
             return []
 
@@ -175,7 +182,14 @@ class SessionSearchEngine:
         session_id: str | None,
         role_filter: str | None,
     ) -> list[SearchResult]:
-        """LIKE 回退搜索，用于 FTS5 无结果时（如中文无分词器场景）。"""
+        """LIKE 回退搜索，用于 FTS5 无结果时（如中文无分词器场景）。
+
+        注意：LIKE '%query%' 为全表扫描，大数据量下性能较差。
+        限制：查询长度不超过 100 字符，结果数不超过 limit（默认 20）。
+        """
+        if len(query) > 100:
+            query = query[:100]
+        effective_limit = min(limit, 50)
         sql = """
             SELECT session_id, role, content, timestamp
             FROM messages_fts
@@ -191,9 +205,10 @@ class SessionSearchEngine:
             params.append(role_filter)
 
         sql += " ORDER BY timestamp DESC LIMIT ?"
-        params.append(limit)
+        params.append(effective_limit)
 
-        rows = self._conn.execute(sql, params).fetchall()
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
         results = []
         for row in rows:
             session_title = self._get_session_title(row[0])
@@ -226,16 +241,26 @@ class SessionSearchEngine:
         return sorted(session_map.values(), key=lambda x: x["best_rank"])
 
     def delete_session(self, session_id: str) -> int:
-        cursor = self._conn.execute("DELETE FROM messages_fts WHERE session_id = ?", (session_id,))
-        self._conn.commit()
-        return cursor.rowcount
+        with self._lock:
+            cursor = self._conn.execute("DELETE FROM messages_fts WHERE session_id = ?", (session_id,))
+            self._conn.commit()
+            return cursor.rowcount
 
     def get_stats(self) -> dict[str, int]:
-        count = self._conn.execute("SELECT COUNT(*) FROM messages_fts").fetchone()[0]
+        with self._lock:
+            count = self._conn.execute("SELECT COUNT(*) FROM messages_fts").fetchone()[0]
         return {"indexed_messages": count}
 
     def close(self) -> None:
-        self._conn.close()
+        if self._conn:
+            self._conn.close()
+            self._conn = None
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
 
     @staticmethod
     def _build_fts_query(query: str) -> str:
@@ -265,10 +290,11 @@ class SessionSearchEngine:
         return " AND ".join(f'"{t}"' for t in escaped)
 
     def _get_session_title(self, session_id: str) -> str:
-        row = self._conn.execute(
-            "SELECT content FROM messages_fts WHERE session_id = ? AND role = 'user' ORDER BY timestamp ASC LIMIT 1",
-            (session_id,),
-        ).fetchone()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT content FROM messages_fts WHERE session_id = ? AND role = 'user' ORDER BY timestamp ASC LIMIT 1",
+                (session_id,),
+            ).fetchone()
         if row:
             return row[0][:50] + ("..." if len(row[0]) > 50 else "")
         return session_id
@@ -281,14 +307,23 @@ class SessionStore:
         self._sessions: dict[str, Session] = {}
         self._search_engine: SessionSearchEngine | None = None
         self._search_index: Any = None
+        self._lock = threading.Lock()
         self._load()
 
     def _load(self) -> None:
         json_path = self._path.with_suffix(".json")
         if json_path.exists():
             try:
-                data = json.loads(json_path.read_text(encoding="utf-8"))
+                data = safe_json_loads(
+                    json_path.read_text(encoding="utf-8"), {}, context="session_store.load"
+                )
+                if not isinstance(data, dict):
+                    # sessions.json 被覆盖为数组/标量（版本错配或外部工具写入）时，
+                    # 旧代码会在 data.items() 抛 AttributeError 逃逸构造器 → SessionStore() 崩溃。
+                    data = {}
                 for sid, sdata in data.items():
+                    if not isinstance(sdata, dict):
+                        continue
                     msgs = [
                         SessionMessage(
                             role=m.get("role", ""),
@@ -306,11 +341,12 @@ class SessionStore:
                         updated_at=sdata.get("updated_at", 0.0),
                         metadata=sdata.get("metadata", {}),
                     )
-            except (json.JSONDecodeError, OSError):
-                pass
+            except Exception as _exc:
+                log_ignored(None, "session_store.SessionStore._load", _exc)
 
     def _save(self) -> None:
         json_path = self._path.with_suffix(".json")
+        tmp_path = json_path.with_suffix(".json.tmp")
         data = {}
         for sid, session in self._sessions.items():
             data[sid] = {
@@ -324,10 +360,11 @@ class SessionStore:
                 "updated_at": session.updated_at,
                 "metadata": session.metadata,
             }
-        json_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp_path.replace(json_path)
 
     def create_session(self, user_id: str = "default", title: str = "") -> Session:
-        sid = str(uuid.uuid4())[:8]
+        sid = str(uuid.uuid4())
         now = time.time()
         session = Session(
             session_id=sid,
@@ -337,7 +374,8 @@ class SessionStore:
             updated_at=now,
         )
         self._sessions[sid] = session
-        self._save()
+        with self._lock:
+            self._save()
         return session
 
     def get_session(self, session_id: str) -> Session | None:
@@ -355,15 +393,16 @@ class SessionStore:
         role: str,
         content: str,
     ) -> bool:
-        session = self._sessions.get(session_id)
-        if not session:
-            return False
-        now = time.time()
-        session.messages.append(
-            SessionMessage(role=role, content=content, timestamp=now)
-        )
-        session.updated_at = now
-        self._save()
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                return False
+            now = time.time()
+            session.messages.append(
+                SessionMessage(role=role, content=content, timestamp=now)
+            )
+            session.updated_at = now
+            self._save()
         if self._search_engine:
             self._search_engine.index_message(session_id, role, content, now)
         if self._search_index:
@@ -384,10 +423,11 @@ class SessionStore:
         return msgs
 
     def delete_session(self, session_id: str) -> bool:
-        if session_id not in self._sessions:
-            return False
-        del self._sessions[session_id]
-        self._save()
+        with self._lock:
+            if session_id not in self._sessions:
+                return False
+            del self._sessions[session_id]
+            self._save()
         if self._search_engine:
             self._search_engine.delete_session(session_id)
         if self._search_index:
@@ -429,7 +469,36 @@ class SessionStore:
             self.enable_search()
         return self._search_engine.search_sessions(query, limit)
 
+    def get_metadata(self, key: str) -> Any:
+        with self._lock:
+            json_path = self._path.with_suffix(".meta.json")
+            if not json_path.exists():
+                return None
+            try:
+                data = json.loads(json_path.read_text(encoding="utf-8"))
+                return data.get(key)
+            except (json.JSONDecodeError, OSError):
+                return None
+
+    def set_metadata(self, key: str, value: Any) -> None:
+        with self._lock:
+            json_path = self._path.with_suffix(".meta.json")
+            try:
+                data = json.loads(json_path.read_text(encoding="utf-8")) if json_path.exists() else {}
+            except (json.JSONDecodeError, OSError):
+                data = {}
+            data[key] = value
+            tmp_path = json_path.with_suffix(".meta.json.tmp")
+            tmp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            tmp_path.replace(json_path)
+
     def close(self) -> None:
         self._save()
         if self._search_engine:
             self._search_engine.close()
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass

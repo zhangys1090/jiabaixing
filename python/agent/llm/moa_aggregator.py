@@ -84,6 +84,8 @@ _DEFAULT_WEIGHTS: dict[str, float] = {
     "anthropic/claude-3-haiku-20240307": 0.85,
     "gemini/gemini-2.0-flash": 0.8,
     "deepseek/deepseek-chat": 0.75,
+    "deepseek/deepseek-v4-flash": 0.85,
+    "deepseek/deepseek-v4-pro": 0.90,
     "ollama/qwen2.5": 0.6,
 }
 

@@ -17,6 +17,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
+from agent.core.logger import log_ignored
 
 router = APIRouter()
 
@@ -135,8 +136,8 @@ async def store_multimodal(req: MultimodalStoreRequest) -> MultimodalStoreRespon
         try:
             stats = await mem.get_stats()
             model_name = str(stats.get("multimodal_model", ""))
-        except Exception:
-            pass
+        except Exception as _exc:
+            log_ignored(None, "multimodal.store_multimodal", _exc)
         return MultimodalStoreResponse(
             id=mem_id, success=bool(mem_id), model=model_name
         )

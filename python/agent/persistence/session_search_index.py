@@ -23,6 +23,7 @@ Usage::
 from __future__ import annotations
 
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -60,6 +61,7 @@ class SessionSearchIndex:
         self._path = Path(db_path) if db_path else DATA_DIR / "session_search_index.db"
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = get_sync_connection(db_path=str(self._path), check_same_thread=False)
+        self._lock = threading.Lock()
         self._lineage_tracker: SessionLineageTracker | None = None
         self._init_tables()
 
@@ -121,32 +123,34 @@ class SessionSearchIndex:
             int: 索引的消息总数。
         """
         # 清除已有数据
-        self._conn.execute("DELETE FROM search_messages")
-        self._conn.execute("DELETE FROM session_tags")
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute("DELETE FROM search_messages")
+            self._conn.execute("DELETE FROM session_tags")
+            self._conn.commit()
 
         count = 0
-        for session in session_store.list_sessions():
-            sid = session.session_id
-            for msg in session.messages:
-                self._conn.execute(
-                    "INSERT INTO search_messages (session_id, role, content, timestamp) "
-                    "VALUES (?, ?, ?, ?)",
-                    (sid, msg.role, msg.content, msg.timestamp),
-                )
-                count += 1
+        with self._lock:
+            for session in session_store.list_sessions():
+                sid = session.session_id
+                for msg in session.messages:
+                    self._conn.execute(
+                        "INSERT INTO search_messages (session_id, role, content, timestamp) "
+                        "VALUES (?, ?, ?, ?)",
+                        (sid, msg.role, msg.content, msg.timestamp),
+                    )
+                    count += 1
 
-            # 同步血缘标签
-            if self._lineage_tracker:
-                lineage = self._lineage_tracker.get_lineage(sid)
-                if lineage and lineage.tags:
-                    for tag in lineage.tags:
-                        self._conn.execute(
-                            "INSERT OR IGNORE INTO session_tags (session_id, tag) VALUES (?, ?)",
-                            (sid, tag),
-                        )
+                # 同步血缘标签
+                if self._lineage_tracker:
+                    lineage = self._lineage_tracker.get_lineage(sid)
+                    if lineage and lineage.tags:
+                        for tag in lineage.tags:
+                            self._conn.execute(
+                                "INSERT OR IGNORE INTO session_tags (session_id, tag) VALUES (?, ?)",
+                                (sid, tag),
+                            )
 
-        self._conn.commit()
+            self._conn.commit()
         log.info("Search index built", indexed_messages=count)
         return count
 
@@ -165,12 +169,13 @@ class SessionSearchIndex:
             content: 消息内容。
             timestamp: 消息时间戳。
         """
-        self._conn.execute(
-            "INSERT INTO search_messages (session_id, role, content, timestamp) "
-            "VALUES (?, ?, ?, ?)",
-            (session_id, role, content, timestamp),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO search_messages (session_id, role, content, timestamp) "
+                "VALUES (?, ?, ?, ?)",
+                (session_id, role, content, timestamp),
+            )
+            self._conn.commit()
 
     def index_session_tags(self, session_id: str, tags: list[str]) -> None:
         """索引会话标签。
@@ -179,16 +184,17 @@ class SessionSearchIndex:
             session_id: 会话唯一标识。
             tags: 标签列表。
         """
-        self._conn.execute(
-            "DELETE FROM session_tags WHERE session_id = ?",
-            (session_id,),
-        )
-        for tag in tags:
+        with self._lock:
             self._conn.execute(
-                "INSERT OR IGNORE INTO session_tags (session_id, tag) VALUES (?, ?)",
-                (session_id, tag),
+                "DELETE FROM session_tags WHERE session_id = ?",
+                (session_id,),
             )
-        self._conn.commit()
+            for tag in tags:
+                self._conn.execute(
+                    "INSERT OR IGNORE INTO session_tags (session_id, tag) VALUES (?, ?)",
+                    (session_id, tag),
+                )
+            self._conn.commit()
 
     def search(
         self,
@@ -319,16 +325,17 @@ class SessionSearchIndex:
         Returns:
             int: 删除的消息数量。
         """
-        cursor = self._conn.execute(
-            "DELETE FROM search_messages WHERE session_id = ?",
-            (session_id,),
-        )
-        self._conn.execute(
-            "DELETE FROM session_tags WHERE session_id = ?",
-            (session_id,),
-        )
-        self._conn.commit()
-        return cursor.rowcount
+        with self._lock:
+            cursor = self._conn.execute(
+                "DELETE FROM search_messages WHERE session_id = ?",
+                (session_id,),
+            )
+            self._conn.execute(
+                "DELETE FROM session_tags WHERE session_id = ?",
+                (session_id,),
+            )
+            self._conn.commit()
+            return cursor.rowcount
 
     def get_stats(self) -> dict[str, int]:
         """获取索引统计信息。
@@ -336,12 +343,13 @@ class SessionSearchIndex:
         Returns:
             dict[str, int]: 包含 indexed_messages 和 tagged_sessions 的统计。
         """
-        msg_count = self._conn.execute(
-            "SELECT COUNT(*) FROM search_messages"
-        ).fetchone()[0]
-        tag_count = self._conn.execute(
-            "SELECT COUNT(DISTINCT session_id) FROM session_tags"
-        ).fetchone()[0]
+        with self._lock:
+            msg_count = self._conn.execute(
+                "SELECT COUNT(*) FROM search_messages"
+            ).fetchone()[0]
+            tag_count = self._conn.execute(
+                "SELECT COUNT(DISTINCT session_id) FROM session_tags"
+            ).fetchone()[0]
         return {"indexed_messages": msg_count, "tagged_sessions": tag_count}
 
     def close(self) -> None:
@@ -365,10 +373,11 @@ class SessionSearchIndex:
             return set()
 
         placeholders = ",".join("?" for _ in tags)
-        rows = self._conn.execute(
-            f"SELECT DISTINCT session_id FROM session_tags WHERE tag IN ({placeholders})",
-            tags,
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT DISTINCT session_id FROM session_tags WHERE tag IN ({placeholders})",
+                tags,
+            ).fetchall()
         return {r[0] for r in rows}
 
     def _execute_search(
@@ -416,7 +425,8 @@ class SessionSearchIndex:
         params.append(limit)
 
         try:
-            rows = self._conn.execute(sql, params).fetchall()
+            with self._lock:
+                rows = self._conn.execute(sql, params).fetchall()
         except Exception:
             log.warning("FTS5 search failed", fts_query=fts_query)
             return []
@@ -454,6 +464,9 @@ class SessionSearchIndex:
         Returns:
             list[dict[str, Any]]: 搜索结果列表。
         """
+        if len(query) > 100:
+            query = query[:100]
+        effective_limit = min(limit, 50)
         sql = """
             SELECT session_id, role, content, timestamp
             FROM search_messages
@@ -473,9 +486,10 @@ class SessionSearchIndex:
             params.extend(tag_filtered_sessions)
 
         sql += " ORDER BY timestamp DESC LIMIT ?"
-        params.append(limit)
+        params.append(effective_limit)
 
-        rows = self._conn.execute(sql, params).fetchall()
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
         results = []
         for row in rows:
             session_title = self._get_session_title(row[0])
@@ -504,12 +518,13 @@ class SessionSearchIndex:
             list[dict[str, Any]]: 相关会话列表。
         """
         # 获取目标会话的关键消息
-        rows = self._conn.execute(
-            "SELECT content FROM search_messages "
-            "WHERE session_id = ? AND role = 'user' "
-            "ORDER BY timestamp DESC LIMIT 3",
-            (session_id,),
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT content FROM search_messages "
+                "WHERE session_id = ? AND role = 'user' "
+                "ORDER BY timestamp DESC LIMIT 3",
+                (session_id,),
+            ).fetchall()
         if not rows:
             return []
 
@@ -528,12 +543,13 @@ class SessionSearchIndex:
         Returns:
             str: 会话标题。
         """
-        row = self._conn.execute(
-            "SELECT content FROM search_messages "
-            "WHERE session_id = ? AND role = 'user' "
-            "ORDER BY timestamp ASC LIMIT 1",
-            (session_id,),
-        ).fetchone()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT content FROM search_messages "
+                "WHERE session_id = ? AND role = 'user' "
+                "ORDER BY timestamp ASC LIMIT 1",
+                (session_id,),
+            ).fetchone()
         if row:
             return row[0][:50] + ("..." if len(row[0]) > 50 else "")
         return session_id

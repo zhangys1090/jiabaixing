@@ -1,5 +1,5 @@
 import { Logger } from '../../utils/Logger';
-import { COLORS } from '../constants';
+import { backendUrl, COLORS } from '../constants';
 import { extractResponse, ipcSend } from '../ipc';
 
 /**

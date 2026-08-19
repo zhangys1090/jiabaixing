@@ -77,7 +77,9 @@ export class DesktopVisionEngine {
 
   public static reset(): void {
     if (DesktopVisionEngine.instance) {
-      DesktopVisionEngine.instance.shutdown().catch(() => {});
+      DesktopVisionEngine.instance.shutdown().catch((err) =>
+        Logger.warn('关闭 DesktopVisionEngine 失败', err as Error, 'DesktopVisionEngine')
+      );
     }
     DesktopVisionEngine.instance = null;
   }

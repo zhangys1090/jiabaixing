@@ -2,6 +2,7 @@
   display: inline;
   cursor: pointer;
   transition: opacity 0.2s ease;
+  position: relative;
 }
 
 .typewriter-text.typing {
@@ -12,6 +13,14 @@
   opacity: 0.8;
 }
 
+.typewriter-text.paused {
+  opacity: 0.9;
+}
+
+.typewriter-text.paused .typewriter-cursor {
+  animation: cursor-pulse 0.8s ease-in-out infinite;
+}
+
 .typewriter-cursor {
   display: inline-block;
   width: 2px;
@@ -20,6 +29,12 @@
   margin-left: 2px;
   animation: cursor-blink 1s step-end infinite;
   vertical-align: text-bottom;
+  transition: width 0.15s ease;
+}
+
+.typewriter-text.typing:hover .typewriter-cursor {
+  width: 3px;
+  background-color: var(--accent-color, #6366f1);
 }
 
 @keyframes cursor-blink {
@@ -32,6 +47,43 @@
   }
 }
 
+@keyframes cursor-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scaleY(0.8);
+  }
+}
+
 .typewriter-text.complete .typewriter-cursor {
   display: none;
+}
+
+.typewriter-progress {
+  position: absolute;
+  bottom: -4px;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background-color: rgba(128, 128, 128, 0.15);
+  border-radius: 1px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.typewriter-progress-bar {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-color, #6366f1), var(--accent-secondary, #8b5cf6));
+  border-radius: 1px;
+  transition: width 0.1s ease-out;
+}
+
+.typewriter-text.complete .typewriter-progress {
+  opacity: 0;
+  transition: opacity 0.3s ease 0.5s;
 }

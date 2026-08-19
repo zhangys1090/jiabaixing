@@ -32,7 +32,11 @@ export class FileSystem {
   private static instance: FileSystem;
   private cache: Map<string, CacheEntry> = new Map();
   private writeQueue: Map<string, Promise<void>> = new Map();
-  private readonly defaultCacheTtl = 30000; // 30秒
+  private readonly defaultCacheTtl = 30000;
+
+  static create(): FileSystem {
+    return new FileSystem();
+  }
 
   static getInstance(): FileSystem {
     if (!FileSystem.instance) {

@@ -2,9 +2,9 @@
  * WebSocket 自动化任务处理
  */
 
-import { Logger } from '../../../utils/Logger';
-import { EventBus } from '../../../shared/EventBus';
 import { JiabaixingCore } from '../../../core/JiabaixingCore';
+import { EventBus } from '../../../shared/EventBus';
+import { Logger } from '../../../utils/Logger';
 
 // 导入 WebSocket 类型
 type WebSocket = import('ws').WebSocket;
@@ -49,7 +49,11 @@ export function handleAutomationTaskCreate(
 
   if (core?.getScenarioScheduler()) {
     // 使用类型断言，因为客户端传入的数据是动态的
-    core.getScenarioScheduler()!.addTask(data.task as any);
+    core
+      .getScenarioScheduler()!
+      .addTask(
+        data.task as unknown as import('../../../core/ScenarioAwareScheduler').ScheduledTask
+      );
   }
 
   EventBus.emit('automation_task_create', {

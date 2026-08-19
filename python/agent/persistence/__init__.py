@@ -1,5 +1,6 @@
 from agent.persistence.database import (
     DatabaseMigration,
+    database_session,
     get_async_engine,
     get_database_backend,
     get_sync_connection,

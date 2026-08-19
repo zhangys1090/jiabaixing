@@ -1,0 +1,27 @@
+jest-haste-map: duplicate manual mock found: electron-updater
+  The following files share their name; please delete one of them:
+    * <rootDir>\src\frontend\electron\__mocks__\electron-updater.js
+    * <rootDir>\src\frontend\release\app\electron\__mocks__\electron-updater.js
+
+jest-haste-map: duplicate manual mock found: electron
+  The following files share their name; please delete one of them:
+    * <rootDir>\src\frontend\electron\__mocks__\electron.js
+    * <rootDir>\src\frontend\release\app\electron\__mocks__\electron.js
+
+ts-jest[config] (WARN) 
+    The "ts-jest" config option "isolatedModules" is deprecated and will be removed in v30.0.0. Please use "isolatedModules: true" in C:/zy/jiabaixing/tsconfig.json instead, see https://www.typescriptlang.org/tsconfig/#isolatedModules
+  
+DBG_INIT_SIZE=0
+DBG_REG_SIZE=1
+DBG_FIRST_PY=true
+PASS tests/unit/models/_dbg.test.ts
+  √ dbg (9 ms)
+
+Test Suites: 1 passed, 1 total
+Tests:       1 passed, 1 total
+Snapshots:   0 total
+Time:        1.218 s, estimated 2 s
+Ran all test suites matching /tests\\unit\\models\\_dbg.test.ts/i.
+Jest did not exit one second after the test run has completed.
+
+'This usually means that there are asynchronous operations that weren't stopped in your tests. Consider running Jest with `--detectOpenHandles` to troubleshoot this issue.

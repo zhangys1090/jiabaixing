@@ -7,6 +7,7 @@ import { Permission, ToolCategory } from '../../types';
 import { Logger } from '../../../utils/Logger';
 import fs from 'fs/promises';
 import path from 'path';
+import { resolveWithinRoot } from './file_read';
 
 export const FILE_LIST_DEF: ToolDefinition = {
   name: 'file_list',
@@ -143,6 +144,22 @@ export function createFileListExecutor(deps: FileListDeps = {}) {
     const pattern = (params.pattern as string) || '*';
     const recursive = Boolean(params.recursive);
 
+    // P0-1 沙箱 containment: 越界目录在此抛出，杜绝 file_list 沙箱逃逸。
+    // 约束后的 safeDir 同时用于注入分支（deps.listDirectory）与本地 fs 分支（listWithFs）。
+    let safeDir: string;
+    try {
+      safeDir = resolveWithinRoot(directory, deps.projectRoot);
+    } catch (err) {
+      Logger.error('❌ file_list 路径越界被拒绝', err as Error, 'FileList');
+      return {
+        success: false,
+        output: `目录列表失败: ${(err as Error).message}`,
+        error: (err as Error).message,
+        duration: 0,
+        validated: false,
+      };
+    }
+
     try {
       let entries: Array<{
         name: string;
@@ -153,13 +170,13 @@ export function createFileListExecutor(deps: FileListDeps = {}) {
 
       if (deps.listDirectory) {
         entries = await deps.listDirectory({
-          directory,
+          directory: safeDir,
           pattern,
           recursive,
         });
       } else {
         entries = await listWithFs(
-          directory,
+          safeDir,
           pattern,
           recursive,
           deps.projectRoot || process.cwd()

@@ -14,12 +14,12 @@
  * 设计参考 Hermes Agent 的 skill_preprocessing.py
  */
 
-import { EventBus } from '../shared/EventBus';
 import {
-  getApprovalEngine,
   ApprovalType,
+  getApprovalEngine,
   RiskLevel,
 } from '../security/ApprovalEngine';
+import { EventBus } from '../shared/EventBus';
 import { Logger } from '../utils/Logger';
 import type { SkillContext, SkillResult } from './SkillInterface';
 
@@ -328,8 +328,8 @@ export function createLoggingMiddleware(): MiddlewareEntry {
     enabled: true,
     before: (ctx) => {
       Logger.info(`🔧 准备执行 Skill: ${ctx.skillName}`, 'SkillMiddleware');
-      EventBus.emit('skill_execution_update' as any, {
-        traceId: ctx.traceId,
+      EventBus.emit('skill_execution_update', {
+        traceId: ctx.traceId ?? '',
         skillName: ctx.skillName,
         step: 'started',
         timestamp: new Date().toISOString(),
@@ -342,8 +342,8 @@ export function createLoggingMiddleware(): MiddlewareEntry {
         `${ctx.result.success ? '✅' : '❌'} Skill ${ctx.skillName} ${status} (${ctx.duration}ms)`,
         'SkillMiddleware'
       );
-      EventBus.emit('skill_execution_update' as any, {
-        traceId: ctx.traceId,
+      EventBus.emit('skill_execution_update', {
+        traceId: ctx.traceId ?? '',
         skillName: ctx.skillName,
         step: status,
         duration: ctx.duration,
@@ -363,7 +363,7 @@ export function createMetricsMiddleware(): MiddlewareEntry {
     priority: 30,
     enabled: true,
     after: (ctx) => {
-      EventBus.emit('tool_trace' as any, {
+      EventBus.emit('tool_trace', {
         timestamp: new Date().toISOString(),
         traceId: ctx.traceId || '',
         toolCallId: `skill_${ctx.skillName}_${Date.now()}`,

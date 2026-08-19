@@ -40,21 +40,6 @@ class OutputGuardrail:
     check: Callable[[str], GuardrailResult] = field(default=lambda _: GuardrailResult(passed=True))
 
 
-class OutputGuardrailEngine:
-    """输出护栏引擎——检测和过滤Agent输出中的敏感/有害内容。
-
-    内置三类护栏：
-    1. 敏感信息检测：密钥、API Key、密码、身份证号等。
-    2. 有害内容过滤：暴力、自杀、非法制造等。
-    3. 系统提示泄露防护：检测System Prompt泄露风险。
-
-    Usage:
-        engine = OutputGuardrailEngine()
-        result = engine.check("这是一段输出文本")
-        if not result.get("passed"):
-            print(result["reason"])
-    """
-
 _SENSITIVE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"sk-[a-zA-Z0-9]{20,}"), "OpenAI API Key"),
     (re.compile(r"AKIA[A-Z0-9]{16}"), "AWS Access Key"),
@@ -83,6 +68,20 @@ _LEAK_PATTERNS: list[re.Pattern[str]] = [
 
 
 class OutputGuardrailEngine:
+    """输出护栏引擎——检测和过滤 Agent 输出中的敏感/有害内容。
+
+    内置三类护栏：
+    1. 敏感信息检测：密钥、API Key、密码、身份证号等。
+    2. 有害内容过滤：暴力、自杀、非法制造等。
+    3. 系统提示泄露防护：检测 System Prompt 泄露风险。
+
+    Usage:
+        engine = OutputGuardrailEngine()
+        result = engine.check("这是一段输出文本")
+        if not result.get("passed"):
+            print(result["reason"])
+    """
+
     def __init__(self) -> None:
         self._guardrails: list[OutputGuardrail] = []
         self._enabled: bool = True

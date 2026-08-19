@@ -24,6 +24,7 @@ import logging
 import os
 import sys
 from typing import Any
+from agent.core.logger import log_ignored
 
 log = logging.getLogger("sandbox.windows_hard")
 
@@ -161,5 +162,5 @@ class WindowsHardSandbox:
 def log_ignored_hard(_exc: Exception) -> None:
     try:
         log.debug("windows_hard close ignored", exc_info=_exc)
-    except Exception:
-        pass
+    except Exception as _exc:
+        log_ignored(log, "windows_hard.log_ignored_hard", _exc)

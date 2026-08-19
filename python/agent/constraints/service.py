@@ -89,6 +89,8 @@ class BudgetState:
     max_duration_ms: int = 120000
     tool_calls_used: int = 0
     max_tool_calls: int = 20
+    agent_native: bool = False
+    verification_level: str = "full"
 
 
 @dataclass
@@ -142,6 +144,9 @@ class AdaptiveBudgetConfig:
     moderate: BudgetAllocation = field(default_factory=lambda: BudgetAllocation(max_rounds=8, max_tool_calls=10, max_tokens=5000, max_duration_ms=60000))
     complex: BudgetAllocation = field(default_factory=lambda: BudgetAllocation(max_rounds=12, max_tool_calls=15, max_tokens=8000, max_duration_ms=120000))
     creative_bonus: BudgetAllocation = field(default_factory=lambda: BudgetAllocation(max_rounds=3, max_tool_calls=4, max_tokens=2000, max_duration_ms=30000))
+    agent_native_simple: BudgetAllocation = field(default_factory=lambda: BudgetAllocation(max_rounds=6, max_tool_calls=8, max_tokens=4000, max_duration_ms=45000))
+    agent_native_moderate: BudgetAllocation = field(default_factory=lambda: BudgetAllocation(max_rounds=12, max_tool_calls=15, max_tokens=8000, max_duration_ms=90000))
+    agent_native_complex: BudgetAllocation = field(default_factory=lambda: BudgetAllocation(max_rounds=18, max_tool_calls=25, max_tokens=12000, max_duration_ms=180000))
 
 
 @dataclass
@@ -431,6 +436,7 @@ class ConstraintsService:
         complexity: str = "moderate",
         enable_creative: bool = False,
         historical_estimate: Any | None = None,
+        agent_native: bool = False,
     ) -> BudgetAllocation:
         """解析自适应预算分配方案。
 
@@ -439,22 +445,33 @@ class ConstraintsService:
         estimated_ms 和 confidence 字段，供调用方（如 LoopController）
         做更精准的时间预算决策。样本不足时降级到静态 AdaptiveBudgetConfig。
 
+        agent_native 模型（如 DeepSeek V4 Flash）具备原生 Agent 能力，
+        工具调用准确率更高，可放宽轮数和工具调用限制，同时降低验证强度。
+
         Args:
             complexity: 任务复杂度（simple/moderate/complex）。
             enable_creative: 是否启用创造性探索附加预算。
             historical_estimate: 历史执行时间预估（ExecutionEstimate），
                 传入 None 表示无历史数据，降级到静态配置。
+            agent_native: 模型是否具备原生 Agent 能力。
 
         Returns:
             BudgetAllocation: 预算分配方案，含 max_duration_ms 和（如有）预估信息。
         """
         budget = self.get_adaptive_budget()
-        base_map = {
-            "simple": budget.simple,
-            "moderate": budget.moderate,
-            "complex": budget.complex,
-        }
-        base = base_map.get(complexity, budget.moderate)
+        if agent_native:
+            base_map = {
+                "simple": budget.agent_native_simple,
+                "moderate": budget.agent_native_moderate,
+                "complex": budget.agent_native_complex,
+            }
+        else:
+            base_map = {
+                "simple": budget.simple,
+                "moderate": budget.moderate,
+                "complex": budget.complex,
+            }
+        base = base_map.get(complexity, budget.moderate if not agent_native else budget.agent_native_moderate)
 
         # 计算创造性探索附加预算
         bonus = budget.creative_bonus if (enable_creative and self.get_creative_config().enabled) else None

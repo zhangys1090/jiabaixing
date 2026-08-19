@@ -32,8 +32,11 @@ export async function standaloneDaemon(args: string[]): Promise<void> {
       const status = await dm.status();
       if (status.running) {
         const uptime = dm.formatUptime(status.uptime!);
+        const pythonInfo = status.pythonReady
+          ? `  Python: PID ${status.state!.pythonPid} :${status.state!.pythonPort}`
+          : '  Python: 未运行';
         Logger.info(
-          `🟢 运行中  PID: ${status.state!.pid}  端口: ${status.state!.port}  运行: ${uptime}${status.memoryUsage ? `  内存: ${status.memoryUsage}` : ''}`,
+          `🟢 运行中  PID: ${status.state!.pid}  端口: ${status.state!.port}  运行: ${uptime}${status.memoryUsage ? `  内存: ${status.memoryUsage}` : ''}${pythonInfo}`,
           'CLI'
         );
       } else {

@@ -14,6 +14,7 @@
 
 import { TaskComplexityAnalyzer } from '../../core/TaskComplexityAnalyzer';
 import { EvolutionOrchestrator } from '../../evolution/EvolutionOrchestrator';
+import { getActivePythonBridge } from '../../ide/bridgeRegistry';
 import { Logger } from '../../utils/Logger';
 import { AgentFactory } from '../agents/AgentFactory';
 import { QualityScorer, ScorerMetadata } from '../evaluation/QualityScorer';
@@ -175,7 +176,7 @@ export class OrchestratorAgent {
         'OrchestratorAgent'
       );
 
-      // 动态角色分配
+      // 动态角色分配 — P0-4: 将分配结果实际写入 TaskNode，消除空转
       try {
         const roleAssignments = await this.assignDynamicRoles(tasks);
         if (roleAssignments.length > 0) {
@@ -183,11 +184,21 @@ export class OrchestratorAgent {
             `🎭 动态角色分配完成: ${roleAssignments.length}/${tasks.length} 个任务已分配角色`,
             'OrchestratorAgent'
           );
+          // P0-4: 将角色分配结果写入 TaskNode，影响后续执行路径
           for (const assignment of roleAssignments) {
-            Logger.debug(
-              `  → 任务 ${assignment.taskId} → Agent ${assignment.agentId} (角色: ${assignment.role})`,
-              'OrchestratorAgent'
-            );
+            const task = tasks.find(t => t.id === assignment.taskId);
+            if (task) {
+              task.assignedTo = assignment.agentId;
+              task.metadata = {
+                ...task.metadata,
+                assignedRole: assignment.role,
+                assignedCapability: assignment.capability,
+              };
+              Logger.debug(
+                `  → 任务 ${assignment.taskId} → Agent ${assignment.agentId} (角色: ${assignment.role})`,
+                'OrchestratorAgent'
+              );
+            }
           }
         }
       } catch (roleError) {
@@ -256,6 +267,36 @@ export class OrchestratorAgent {
           `🔄 检测到 ${failedTasks.length} 个失败任务，尝试重平衡...`,
           'OrchestratorAgent'
         );
+
+        // P1-8: 优先尝试动态重规划（Python端9种动作）
+        try {
+          const replannedTasks = await this.dynamicReplan(
+            tasks,
+            failedTasks.map((t) => t.id),
+            `${failedTasks.length} 个子任务执行失败`
+          );
+          if (replannedTasks !== tasks) {
+            Logger.info(
+              `🔄 P1-8: 动态重规划产出新任务图，重新执行...`,
+              'OrchestratorAgent'
+            );
+            const replanResults = await this.dispatcher.dispatch(replannedTasks);
+            const replanAggregated = this.aggregator.aggregate(replanResults, replannedTasks);
+            if (replanAggregated.success) {
+              const replanDuration = Date.now() - startTime;
+              return {
+                ...replanAggregated,
+                duration: replanDuration,
+                summary: `✅ 目标完成(重规划): ${userGoal.substring(0, 60)}`,
+              };
+            }
+          }
+        } catch (replanErr) {
+          Logger.warn(
+            `⚠️ 动态重规划执行失败，回退到角色重平衡: ${(replanErr as Error).message}`,
+            'OrchestratorAgent'
+          );
+        }
         try {
           const roleAssignments = await this.assignDynamicRoles(tasks);
           const rebalanced = await this.rebalanceRoles(tasks, roleAssignments);
@@ -715,9 +756,37 @@ export class OrchestratorAgent {
     duration: number
   ): void {
     try {
-      const orchestrator = EvolutionOrchestrator.getInstance();
       const qualityScore = result.qualityScore?.overall || 0;
-
+      const bridge = getActivePythonBridge();
+      if (bridge) {
+        void bridge
+          .submitFeedback({
+            kind: 'interaction',
+            traceId: `orch_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            input: userGoal,
+            response: result.summary || '',
+            success: result.success && result.failedTasks === 0,
+            qualityScore: qualityScore / 100,
+            executionDuration: duration,
+            toolCalls: Array.from(result.details.entries()).map(
+              ([taskId, detail]) => {
+                const d = detail as unknown as Record<string, unknown>;
+                return {
+                  toolName: (d.agentId as string) || taskId,
+                  success: d.success !== false,
+                  executionTime: 0,
+                };
+              }
+            ),
+              scene: 'orchestration',
+          })
+          .catch((err) =>
+            Logger.warn('记录编排执行结果到进化引擎失败', err as Error, 'OrchestratorAgent')
+          );
+        Logger.debug('已记录编排执行结果到 Python 后端进化引擎', 'OrchestratorAgent');
+        return;
+      }
+      const orchestrator = EvolutionOrchestrator.getInstance();
       orchestrator.recordInteraction({
         traceId: `orch_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         input: userGoal,
@@ -745,5 +814,99 @@ export class OrchestratorAgent {
         'OrchestratorAgent'
       );
     }
+  }
+
+  /**
+   * P1-8: TS 侧动态重规划桥接
+   *
+   * 当编排执行检测到失败任务时，通过 PythonBridge 调用
+   * Python 端 dynamic_dag_replanner 进行任务级重规划，
+   * 支持 INSERT/REMOVE/REPLACE/RETRY 等 9 种动作。
+   *
+   * @param tasks - 当前任务列表
+   * @param failedTaskIds - 失败的任务 ID 列表
+   * @param reason - 重规划原因
+   * @returns 重规划后的任务列表（可能增/删/替换任务）
+   */
+  async dynamicReplan(
+    tasks: TaskNode[],
+    failedTaskIds: string[],
+    reason: string
+  ): Promise<TaskNode[]> {
+    Logger.info(
+      `🔄 P1-8: 请求动态重规划 (${failedTaskIds.length} 个失败任务): ${reason}`,
+      'OrchestratorAgent'
+    );
+
+    try {
+      const bridge = getActivePythonBridge();
+      if (bridge) {
+        const replanResult = await bridge.callPython({
+          module: 'agent.orchestration.dynamic_dag_replanner',
+          function: 'replan_from_ts',
+          args: {
+            tasks: tasks.map((t) => ({
+              id: t.id,
+              goal: t.goal,
+              status: t.status,
+              assignedTo: t.assignedTo,
+            })),
+            failed_task_ids: failedTaskIds,
+            reason,
+          },
+        });
+
+        if (replanResult && Array.isArray(replanResult.tasks)) {
+          const updatedTasks = replanResult.tasks.map(
+            (t: Record<string, unknown>) =>
+              ({
+                id: t.id,
+                goal: t.goal || t.description,
+                context: t.context || '',
+                dependencies: (t.dependencies as string[]) || [],
+                priority: (t.priority as number) || 5,
+                status: (t.status as TaskNode['status']) || 'pending',
+                assignedTo: t.assignedTo as string | undefined,
+              }) as TaskNode
+          );
+
+          Logger.info(
+            `🔄 P1-8: 动态重规划完成: ${tasks.length} → ${updatedTasks.length} 个任务`,
+            'OrchestratorAgent'
+          );
+          return updatedTasks;
+        }
+      }
+
+      Logger.warn(
+        'P1-8: PythonBridge 不可用或重规划返回空，使用本地降级重规划',
+        'OrchestratorAgent'
+      );
+    } catch (err) {
+      Logger.warn(
+        `P1-8: 动态重规划桥接失败: ${(err as Error).message}，使用本地降级`,
+        'OrchestratorAgent'
+      );
+    }
+
+    return this.localFallbackReplan(tasks, failedTaskIds);
+  }
+
+  /**
+   * P1-8: 本地降级重规划（PythonBridge 不可用时）
+   *
+   * 简单策略：将失败任务重置为 pending，降低优先级
+   */
+  private localFallbackReplan(
+    tasks: TaskNode[],
+    failedTaskIds: string[]
+  ): TaskNode[] {
+    const failedSet = new Set(failedTaskIds);
+    return tasks.map((t) => {
+      if (failedSet.has(t.id)) {
+        return { ...t, status: 'pending' as const, priority: Math.max(1, t.priority - 2) };
+      }
+      return t;
+    });
   }
 }

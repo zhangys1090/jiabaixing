@@ -19,6 +19,7 @@ from agent.gateway.base import Message, PlatformAdapter
 from agent.gateway.mirror import MessageMirror
 from agent.gateway.pairing import PairingAuth
 from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
 
 log = StructuredLogger("gateway.dispatcher")
 
@@ -118,8 +119,8 @@ class MessageDispatcher:
             # 同步调用 stop 可能不安全，但注册通常在启动前完成
             try:
                 asyncio.get_event_loop().create_task(self._adapters[name].stop())
-            except RuntimeError:
-                pass
+            except RuntimeError as _exc:
+                log_ignored(log, "dispatcher.MessageDispatcher.register_adapter", _exc)
         self._adapters[name] = adapter
         log.info("适配器已注册", name=name, adapter_type=type(adapter).__name__)
 
@@ -133,8 +134,8 @@ class MessageDispatcher:
         if adapter is not None:
             try:
                 asyncio.get_event_loop().create_task(adapter.stop())
-            except RuntimeError:
-                pass
+            except RuntimeError as _exc:
+                log_ignored(log, "dispatcher.MessageDispatcher.unregister_adapter", _exc)
             log.info("适配器已注销", name=name)
         else:
             log.warning("注销不存在的适配器", name=name)
@@ -246,8 +247,8 @@ class MessageDispatcher:
                     if result and hasattr(adapter, "send_message"):
                         try:
                             await adapter.send_message(message.chat_id, result)
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            log_ignored(log, "dispatcher.MessageDispatcher._consume_adapter", _exc)
                 except Exception as exc:
                     log.error("消费循环处理消息失败", adapter=name, error=str(exc))
         except asyncio.CancelledError:

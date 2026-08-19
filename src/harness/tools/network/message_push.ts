@@ -10,9 +10,9 @@
  * 测试用 jest.fn() mock global.fetch。
  */
 
+import { Logger } from '../../../utils/Logger';
 import type { ToolContext, ToolDefinition, ToolResult } from '../../types';
 import { Permission, ToolCategory } from '../../types';
-import { Logger } from '../../../utils/Logger';
 
 export const MESSAGE_PUSH_DEF: ToolDefinition = {
   name: 'message_push',
@@ -267,7 +267,8 @@ export function createMessagePushExecutor(_deps: MessagePushDeps = {}) {
       const errMsg = (error as Error).message;
       Logger.error(
         `消息推送失败 [${channel}]: ${errMsg}`,
-        'MessagePush' as any
+        error as Error,
+        'MessagePush'
       );
       return fail(`推送失败: ${errMsg}`, Date.now() - startTime);
     }

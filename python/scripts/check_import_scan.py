@@ -48,6 +48,10 @@ def _is_code_defect(exc: BaseException) -> bool:
     """区分代码缺陷与环境缺失。"""
     t = type(exc).__name__
     msg = str(exc)
+    # 模块级 sys.exit()：生产包里不允许，且会中断扫描本身（SystemExit 继承
+    # BaseException，普通 except Exception 接不住），必须判为代码缺陷。
+    if isinstance(exc, SystemExit):
+        return True
     if t in ("SyntaxError", "IndentationError", "NameError", "AttributeError"):
         return True
     if t in ("ImportError", "ModuleNotFoundError"):
@@ -87,7 +91,12 @@ def main() -> int:
         try:
             importlib.import_module(name)
             ok += 1
-        except Exception as e:  # noqa: BLE001
+        except KeyboardInterrupt:
+            raise
+        # 必须捕获 BaseException：模块级 sys.exit() 抛 SystemExit，
+        # 若只 except Exception 会让扫描自身静默中断并误报 exit 0（真实事故，
+        # 见 agent/core/_check_syntax.py 遗留调试脚本）。
+        except BaseException as e:  # noqa: BLE001
             if _is_code_defect(e):
                 defects.append((name, f"{type(e).__name__}: {str(e)[:160]}"))
             else:
@@ -100,7 +109,9 @@ def main() -> int:
             mod = importlib.import_module(mod_name)
             cls = getattr(mod, cls_name)
             cls()  # 无参安全构造
-        except Exception as e:  # noqa: BLE001
+        except KeyboardInterrupt:
+            raise
+        except BaseException as e:  # noqa: BLE001
             instance_defects.append(
                 (f"{mod_name}.{cls_name}", f"{type(e).__name__}: {str(e)[:160]}")
             )

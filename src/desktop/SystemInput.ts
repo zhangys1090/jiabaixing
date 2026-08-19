@@ -36,9 +36,13 @@ export class SystemInput {
 
   private constructor() {}
 
+  public static create(): SystemInput {
+    return new SystemInput();
+  }
+
   public static getInstance(): SystemInput {
     if (!SystemInput.instance) {
-      SystemInput.instance = new SystemInput();
+      SystemInput.instance = SystemInput.create();
     }
     return SystemInput.instance;
   }

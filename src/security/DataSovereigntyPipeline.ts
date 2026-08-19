@@ -5,9 +5,9 @@
  * 用户可随时查看"谁在什么时候访问了我的什么数据"
  */
 
-import { createDatabase } from '../shared/DatabaseShim';
 import * as fs from 'fs';
 import * as path from 'path';
+import { createDatabase } from '../shared/DatabaseShim';
 import { Logger } from '../utils/Logger';
 
 export interface DataAccessRecord {
@@ -33,7 +33,8 @@ export interface DataSovereigntyReport {
 }
 
 export class DataSovereigntyPipeline {
-  private auditDb: any = null;
+  private auditDb: import('../shared/DatabaseShim').DatabaseAdapter | null =
+    null;
   private dbPath: string;
   private static readonly MAX_AUDIT_RECORDS = 50000;
 

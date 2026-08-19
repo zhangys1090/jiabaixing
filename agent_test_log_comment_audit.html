@@ -1,0 +1,1238 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>家百星 V5.0 — 测试/日志/注释全面审计报告</title>
+    <style>
+      :root {
+        --bg: #0d1117;
+        --card-bg: #161b22;
+        --border: #30363d;
+        --text: #c9d1d9;
+        --text-secondary: #8b949e;
+        --accent: #58a6ff;
+        --green: #3fb950;
+        --red: #f85149;
+        --orange: #d2991d;
+        --purple: #a371f7;
+        --cyan: #39d2c0;
+        --pink: #db61a2;
+      }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei',
+          Helvetica, Arial, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.7;
+        padding: 2rem;
+        max-width: 1600px;
+        margin: 0 auto;
+      }
+      h1 {
+        font-size: 2rem;
+        color: var(--accent);
+        border-bottom: 2px solid var(--border);
+        padding-bottom: 0.5rem;
+        margin-bottom: 0.5rem;
+      }
+      h2 {
+        font-size: 1.4rem;
+        color: var(--purple);
+        margin-top: 2.5rem;
+        margin-bottom: 1rem;
+        border-left: 4px solid var(--purple);
+        padding-left: 0.75rem;
+      }
+      h3 {
+        font-size: 1.1rem;
+        color: var(--cyan);
+        margin-top: 1.5rem;
+        margin-bottom: 0.5rem;
+      }
+      .subtitle {
+        color: var(--text-secondary);
+        font-size: 0.95rem;
+        margin-bottom: 2rem;
+      }
+      .card {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 1.25rem;
+        margin: 1rem 0;
+      }
+      .grid {
+        display: grid;
+        gap: 1rem;
+      }
+      .grid-2 {
+        grid-template-columns: 1fr 1fr;
+      }
+      .grid-3 {
+        grid-template-columns: 1fr 1fr 1fr;
+      }
+      .grid-4 {
+        grid-template-columns: 1fr 1fr 1fr 1fr;
+      }
+      .tag {
+        display: inline-block;
+        padding: 0.15rem 0.6rem;
+        border-radius: 12px;
+        font-size: 0.78rem;
+        font-weight: 600;
+      }
+      .tag-green {
+        background: rgba(63, 185, 80, 0.15);
+        color: var(--green);
+      }
+      .tag-red {
+        background: rgba(248, 81, 73, 0.15);
+        color: var(--red);
+      }
+      .tag-orange {
+        background: rgba(210, 153, 29, 0.15);
+        color: var(--orange);
+      }
+      .tag-blue {
+        background: rgba(88, 166, 255, 0.15);
+        color: var(--accent);
+      }
+      .tag-purple {
+        background: rgba(163, 113, 247, 0.15);
+        color: var(--purple);
+      }
+      .tag-pink {
+        background: rgba(219, 97, 178, 0.15);
+        color: var(--pink);
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 0.75rem 0;
+      }
+      th,
+      td {
+        padding: 0.4rem 0.5rem;
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+        font-size: 0.82rem;
+      }
+      th {
+        color: var(--text-secondary);
+        font-weight: 600;
+        font-size: 0.78rem;
+        white-space: nowrap;
+      }
+      .code {
+        background: rgba(240, 246, 252, 0.06);
+        padding: 0.1rem 0.35rem;
+        border-radius: 4px;
+        font-family: 'Cascadia Code', 'Fira Code', monospace;
+        font-size: 0.78rem;
+      }
+      .highlight-box {
+        background: rgba(88, 166, 255, 0.08);
+        border: 1px solid rgba(88, 166, 255, 0.2);
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 1rem 0;
+      }
+      .warn-box {
+        background: rgba(210, 153, 29, 0.08);
+        border: 1px solid rgba(210, 153, 29, 0.2);
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 1rem 0;
+      }
+      .success-box {
+        background: rgba(63, 185, 80, 0.08);
+        border: 1px solid rgba(63, 185, 80, 0.2);
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 1rem 0;
+      }
+      .danger-box {
+        background: rgba(248, 81, 73, 0.08);
+        border: 1px solid rgba(248, 81, 73, 0.2);
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 1rem 0;
+      }
+      pre {
+        background: rgba(240, 246, 252, 0.04);
+        padding: 1rem;
+        border-radius: 6px;
+        overflow-x: auto;
+        font-size: 0.78rem;
+        line-height: 1.4;
+        border: 1px solid var(--border);
+        white-space: pre-wrap;
+      }
+      code {
+        font-family: 'Cascadia Code', 'Fira Code', monospace;
+      }
+      ul,
+      ol {
+        margin: 0.5rem 0 0.5rem 1.25rem;
+      }
+      li {
+        margin: 0.2rem 0;
+      }
+      hr {
+        border: none;
+        border-top: 1px solid var(--border);
+        margin: 1.5rem 0;
+      }
+      .score-bar {
+        height: 6px;
+        border-radius: 3px;
+        margin: 0.3rem 0;
+        background: var(--border);
+      }
+      .score-fill {
+        height: 100%;
+        border-radius: 3px;
+      }
+      .score-fill-green {
+        background: var(--green);
+      }
+      .score-fill-orange {
+        background: var(--orange);
+      }
+      .score-fill-red {
+        background: var(--red);
+      }
+      .score-fill-blue {
+        background: var(--accent);
+      }
+      @media (max-width: 768px) {
+        body {
+          padding: 1rem;
+        }
+        .grid-2,
+        .grid-3,
+        .grid-4 {
+          grid-template-columns: 1fr;
+        }
+      }
+      .path-link {
+        color: var(--accent);
+        font-family: monospace;
+        font-size: 0.8rem;
+      }
+      .stat-num {
+        font-size: 1.5rem;
+        font-weight: 800;
+      }
+      .stat-label {
+        font-size: 0.8rem;
+        color: var(--text-secondary);
+      }
+    </style>
+  </head>
+  <body>
+    <h1>家百星 V5.0 — 测试/日志/注释全面审计报告</h1>
+    <p class="subtitle">
+      审计范围：<code>python/agent/</code> 下 200+ 模块 | 测试文件 100+ |
+      设计文档 150+ | 日期：2026-07-18
+    </p>
+
+    <!-- ===== Part 1: 总览仪表盘 ===== -->
+    <h2>一、审计总览仪表盘</h2>
+
+    <div class="grid grid-4">
+      <div class="card" style="text-align: center">
+        <div class="stat-num" style="color: var(--green)">~100</div>
+        <div class="stat-label">测试文件</div>
+        <div class="score-bar">
+          <div class="score-fill score-fill-green" style="width: 50%"></div>
+        </div>
+        <div style="font-size: 0.7rem; color: var(--text-secondary)">
+          覆盖率 ~50%
+        </div>
+      </div>
+      <div class="card" style="text-align: center">
+        <div class="stat-num" style="color: var(--orange)">599</div>
+        <div class="stat-label">log 调用</div>
+        <div class="score-bar">
+          <div class="score-fill score-fill-orange" style="width: 60%"></div>
+        </div>
+        <div style="font-size: 0.7rem; color: var(--text-secondary)">
+          100/200+ 文件有日志
+        </div>
+      </div>
+      <div class="card" style="text-align: center">
+        <div class="stat-num" style="color: var(--accent)">1,241</div>
+        <div class="stat-label">注释行</div>
+        <div class="score-bar">
+          <div class="score-fill score-fill-blue" style="width: 50%"></div>
+        </div>
+        <div style="font-size: 0.7rem; color: var(--text-secondary)">
+          100/200+ 文件有注释
+        </div>
+      </div>
+      <div class="card" style="text-align: center">
+        <div class="stat-num" style="color: var(--red)">44</div>
+        <div class="stat-label">TODO/FIXME</div>
+        <div class="score-bar">
+          <div class="score-fill score-fill-red" style="width: 20%"></div>
+        </div>
+        <div style="font-size: 0.7rem; color: var(--text-secondary)">
+          9 个文件有待办
+        </div>
+      </div>
+    </div>
+
+    <hr />
+
+    <!-- ===== Part 2: 测试覆盖 ===== -->
+    <h2>二、测试覆盖审计</h2>
+
+    <h3>2.1 测试覆盖分级总览</h3>
+
+    <div class="grid grid-3">
+      <div class="card">
+        <div style="font-size: 1.2rem; font-weight: 700; color: var(--green)">
+          ✅ 有测试覆盖
+        </div>
+        <div style="font-size: 0.85rem; color: var(--text-secondary)">
+          约 50 个模块
+        </div>
+        <div style="font-size: 0.75rem; margin-top: 0.5rem">
+          <code>controller</code> <code>executor</code> <code>planner</code>
+          <code>evolution</code> <code>memory</code> <code>mcp</code>
+          <code>lsp</code> <code>gateway</code> <code>a2a</code>
+          <code>otel</code> <code>toolsets</code> <code>reflection</code>
+          <code>feedback_loops</code> <code>batch_processor</code>
+          <code>output_guardrail</code> <code>agent_factory</code>
+          <code>canary</code> <code>plugins</code>
+        </div>
+      </div>
+      <div class="card">
+        <div style="font-size: 1.2rem; font-weight: 700; color: var(--orange)">
+          ⚠️ 部分覆盖
+        </div>
+        <div style="font-size: 0.85rem; color: var(--text-secondary)">
+          约 30 个模块
+        </div>
+        <div style="font-size: 0.75rem; margin-top: 0.5rem">
+          <code>tools(p1/p2/p3)</code> <code>llm</code> <code>persistence</code>
+          <code>security</code> <code>infrastructure</code> <code>context</code>
+          <code>orchestration</code>
+        </div>
+      </div>
+      <div class="card">
+        <div style="font-size: 1.2rem; font-weight: 700; color: var(--red)">
+          ❌ 无测试
+        </div>
+        <div style="font-size: 0.85rem; color: var(--text-secondary)">
+          约 120 个模块
+        </div>
+        <div style="font-size: 0.75rem; margin-top: 0.5rem">
+          <code>新建工具(3)</code> <code>CLI(7)</code>
+          <code>Gateway平台(6)</code> <code>LSP底层(8)</code>
+          <code>安全工具(6)</code> <code>Evolution(8)</code>
+          <code>Models(5)</code> <code>MCP(3)</code> <code>LLM(8)</code>
+        </div>
+      </div>
+    </div>
+
+    <h3>2.2 无测试覆盖的关键模块（P0）</h3>
+
+    <table>
+      <tr>
+        <th>#</th>
+        <th>模块</th>
+        <th>文件</th>
+        <th>风险</th>
+        <th>建议</th>
+      </tr>
+      <tr>
+        <td><span class="tag tag-red">1</span></td>
+        <td><strong>Kanban 看板</strong></td>
+        <td><code>tools/kanban_swarm.py</code></td>
+        <td>新功能无回归保护</td>
+        <td>创建 <code>test_kanban_swarm.py</code></td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-red">2</span></td>
+        <td><strong>Cronjob 模板</strong></td>
+        <td><code>tools/cronjob_tools.py</code></td>
+        <td>定时任务无验证</td>
+        <td>创建 <code>test_cronjob_tools.py</code></td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-red">3</span></td>
+        <td><strong>Windows UIA</strong></td>
+        <td><code>tools/windows_uia.py</code></td>
+        <td>桌面自动化无验证</td>
+        <td>创建 <code>test_windows_uia.py</code></td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-red">4</span></td>
+        <td><strong>Debater 辩论</strong></td>
+        <td><code>loop/debater.py</code></td>
+        <td>P0 接入但无测试</td>
+        <td>创建 <code>test_debater.py</code></td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-red">5</span></td>
+        <td><strong>委派系统</strong></td>
+        <td>
+          <code>tools/delegate_tool.py</code> + <code>async_delegation.py</code>
+        </td>
+        <td>多Agent委托无测试</td>
+        <td>创建 <code>test_delegation.py</code></td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-red">6</span></td>
+        <td><strong>Vision 管道</strong></td>
+        <td><code>tools/vision_pipeline.py</code></td>
+        <td>多模态核心无测试</td>
+        <td>创建 <code>test_vision_pipeline.py</code></td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-red">7</span></td>
+        <td><strong>LSP 完整栈</strong></td>
+        <td><code>lsp/client_manager.py</code> 等8文件</td>
+        <td>仅 <code>test_lsp.py</code> 覆盖不全</td>
+        <td>扩展 LSP 测试</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-red">8</span></td>
+        <td><strong>浏览器自动化</strong></td>
+        <td><code>tools/browser_automation.py</code></td>
+        <td>有测试文件但未验证引擎</td>
+        <td>扩展浏览器测试</td>
+      </tr>
+    </table>
+
+    <h3>2.3 无测试模块（P1）</h3>
+
+    <table>
+      <tr>
+        <th>目录</th>
+        <th>无测试模块</th>
+        <th>数量</th>
+      </tr>
+      <tr>
+        <td><strong>tools/</strong></td>
+        <td>
+          <code>framework_integration</code> <code>platform_toolset</code>
+          <code>auto_discovery</code> <code>daily_tools</code>
+          <code>daily_enhanced_tools</code> <code>network_enhanced_tools</code>
+          <code>homeassistant_tool</code> <code>sanbao_tools</code>
+          <code>cognition_tools</code> <code>vision_tools</code>
+          <code>memory_tools</code> <code>desktop_tools</code>
+          <code>perception_tools</code> <code>session_search_tool</code>
+          <code>tool_result_cache</code> <code>tool_search</code>
+        </td>
+        <td>16</td>
+      </tr>
+      <tr>
+        <td><strong>loop/</strong></td>
+        <td>
+          <code>robustness</code> <code>causal</code> <code>observer</code>
+          <code>reporter</code> <code>evaluator</code>
+          <code>plan_quality_checker</code> <code>incremental_planner</code>
+          <code>reflection_application</code> <code>reflection_applier</code>
+          <code>types</code>
+        </td>
+        <td>10</td>
+      </tr>
+      <tr>
+        <td><strong>memory/</strong></td>
+        <td>
+          <code>curator</code> <code>background_review</code>
+          <code>experience_migrator</code> <code>insights</code>
+          <code>memory_manager</code> <code>providers</code>
+          <code>tokenizer</code>
+        </td>
+        <td>7</td>
+      </tr>
+      <tr>
+        <td><strong>evolution/</strong></td>
+        <td>
+          <code>skill_hub</code> <code>skill_audit</code>
+          <code>skill_provenance</code> <code>skill_usage_tracker</code>
+          <code>multi_agent</code> <code>trigger</code> <code>monitor</code>
+          <code>learning_signals</code> <code>learning_reporter</code>
+          <code>learning_graph</code> <code>implicit_feedback</code>
+        </td>
+        <td>11</td>
+      </tr>
+      <tr>
+        <td><strong>lsp/</strong></td>
+        <td>
+          <code>workspace</code> <code>servers</code> <code>protocol</code>
+          <code>completion_provider</code> <code>diagnostics_provider</code>
+          <code>transport</code> <code>types</code> <code>client_manager</code>
+        </td>
+        <td>8</td>
+      </tr>
+      <tr>
+        <td><strong>security/</strong></td>
+        <td>
+          <code>osv_check</code> <code>sensitive_detector</code>
+          <code>streaming_scrubber</code> <code>threat_patterns</code>
+          <code>write_approval</code> <code>redact</code>
+          <code>security_guidance</code>
+        </td>
+        <td>7</td>
+      </tr>
+      <tr>
+        <td><strong>cli/</strong></td>
+        <td>
+          <code>cli_output</code> <code>clipboard</code> <code>curses_tui</code>
+          <code>display_formatter</code> <code>plugin_manager</code>
+          <code>pty_bridge</code> <code>shell_completion</code>
+          <code>profile_manager</code>
+        </td>
+        <td>8</td>
+      </tr>
+      <tr>
+        <td><strong>gateway/</strong></td>
+        <td>
+          <code>forensics</code> <code>mirror</code> <code>pairing</code>
+          <code>restart</code> <code>slash_commands</code> <code>hooks</code>
+          <code>markdown_tables</code> <code>message_content</code>
+          <code>platforms/*(6)</code>
+        </td>
+        <td>14</td>
+      </tr>
+      <tr>
+        <td><strong>其他</strong></td>
+        <td>
+          <code>mcp/logging</code> <code>mcp/progress</code>
+          <code>mcp/sampling</code> <code>infrastructure/api_gateway</code>
+          <code>infrastructure/disk_cleanup</code>
+          <code>infrastructure/lazy_deps</code>
+          <code>orchestration/executor</code>
+          <code>orchestration/task_dispatcher</code>
+          <code>orchestration/fanout</code>
+          <code>scheduler/blueprint_catalog</code> <code>sandbox/executor</code>
+          <code>verification/service</code> <code>llm/*(8)</code>
+          <code>models/*(5)</code> <code>acp/*(3)</code>
+          <code>persistence/*(8)</code>
+        </td>
+        <td>35</td>
+      </tr>
+    </table>
+
+    <hr />
+
+    <!-- ===== Part 3: 日志覆盖 ===== -->
+    <h2>三、日志覆盖审计</h2>
+
+    <div class="grid grid-3">
+      <div class="card" style="text-align: center">
+        <div class="stat-num" style="color: var(--green)">100/200+</div>
+        <div class="stat-label">有日志的文件</div>
+      </div>
+      <div class="card" style="text-align: center">
+        <div class="stat-num" style="color: var(--orange)">599</div>
+        <div class="stat-label">总 log 调用</div>
+      </div>
+      <div class="card" style="text-align: center">
+        <div class="stat-num" style="color: var(--red)">100+</div>
+        <div class="stat-label">无日志的文件</div>
+      </div>
+    </div>
+
+    <h3>3.1 日志密集度排行（Top 10）</h3>
+
+    <table>
+      <tr>
+        <th>#</th>
+        <th>文件</th>
+        <th>log 调用</th>
+        <th>评级</th>
+      </tr>
+      <tr>
+        <td>1</td>
+        <td><code>loop/controller.py</code></td>
+        <td>94</td>
+        <td><span class="tag tag-green">优秀</span> 含结构化日志</td>
+      </tr>
+      <tr>
+        <td>2</td>
+        <td><code>loop/executor.py</code></td>
+        <td>57</td>
+        <td><span class="tag tag-green">优秀</span> 含错误追踪</td>
+      </tr>
+      <tr>
+        <td>3</td>
+        <td><code>mcp/server_manager.py</code></td>
+        <td>47</td>
+        <td><span class="tag tag-green">优秀</span> 含生命周期日志</td>
+      </tr>
+      <tr>
+        <td>4</td>
+        <td><code>memory/engine.py</code></td>
+        <td>43</td>
+        <td><span class="tag tag-green">优秀</span> 含审计日志</td>
+      </tr>
+      <tr>
+        <td>5</td>
+        <td><code>main.py</code></td>
+        <td>34</td>
+        <td><span class="tag tag-green">优秀</span> 含启动日志</td>
+      </tr>
+      <tr>
+        <td>6</td>
+        <td><code>loop/observer.py</code></td>
+        <td>33</td>
+        <td><span class="tag tag-green">良好</span></td>
+      </tr>
+      <tr>
+        <td>7</td>
+        <td><code>loop/debater.py</code></td>
+        <td>33</td>
+        <td><span class="tag tag-green">良好</span></td>
+      </tr>
+      <tr>
+        <td>8</td>
+        <td><code>memory/experience_migrator.py</code></td>
+        <td>27</td>
+        <td><span class="tag tag-green">良好</span></td>
+      </tr>
+      <tr>
+        <td>9</td>
+        <td><code>evolution/trigger.py</code></td>
+        <td>31</td>
+        <td><span class="tag tag-green">良好</span></td>
+      </tr>
+      <tr>
+        <td>10</td>
+        <td><code>evolution/orchestrator.py</code></td>
+        <td>15</td>
+        <td><span class="tag tag-green">良好</span></td>
+      </tr>
+    </table>
+
+    <h3>3.2 零日志的关键模块（P0 需修复）</h3>
+
+    <table>
+      <tr>
+        <th>#</th>
+        <th>模块</th>
+        <th>文件</th>
+        <th>风险</th>
+      </tr>
+      <tr>
+        <td><span class="tag tag-red">1</span></td>
+        <td><strong>Kanban 看板</strong></td>
+        <td><code>tools/kanban_swarm.py</code></td>
+        <td>任务流转无追踪</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-red">2</span></td>
+        <td><strong>Cronjob 模板</strong></td>
+        <td><code>tools/cronjob_tools.py</code></td>
+        <td>定时执行无审计</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-red">3</span></td>
+        <td><strong>Windows UIA</strong></td>
+        <td><code>tools/windows_uia.py</code></td>
+        <td>桌面操作无日志</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-red">4</span></td>
+        <td><strong>委派工具</strong></td>
+        <td><code>tools/delegate_tool.py</code></td>
+        <td>Agent 委派无日志</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-red">5</span></td>
+        <td><strong>Vision 管道</strong></td>
+        <td><code>tools/vision_pipeline.py</code></td>
+        <td>多模态处理无日志</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-red">6</span></td>
+        <td><strong>Daily 工具</strong></td>
+        <td><code>tools/daily_tools.py</code></td>
+        <td>日程操作无日志</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-red">7</span></td>
+        <td><strong>System 工具</strong></td>
+        <td><code>tools/system_tools.py</code></td>
+        <td>系统操作无日志</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-red">8</span></td>
+        <td><strong>Perception 工具</strong></td>
+        <td><code>tools/perception_tools.py</code></td>
+        <td>感知操作无日志</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-red">9</span></td>
+        <td><strong>Browser 工具</strong></td>
+        <td><code>tools/browser_tools.py</code></td>
+        <td>浏览器操作无日志</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-red">10</span></td>
+        <td><strong>Robustness 韧性</strong></td>
+        <td><code>loop/robustness.py</code></td>
+        <td>异常处理无日志</td>
+      </tr>
+    </table>
+
+    <h3>3.3 日志质量分析</h3>
+
+    <div class="grid grid-2">
+      <div class="warn-box">
+        <h4>⚠️ 日志格式不统一</h4>
+        <ul>
+          <li>
+            部分文件使用 <code>log.info("msg")</code>，部分使用
+            <code>log.info("msg", key=val)</code> 结构化
+          </li>
+          <li>没有统一的 request_id / trace_id 传播</li>
+          <li>部分异常捕获未记录日志（try/except 唯 pass）</li>
+        </ul>
+      </div>
+      <div class="success-box">
+        <h4>✅ 日志基础设施良好</h4>
+        <ul>
+          <li><code>StructuredLogger</code> 已全局使用</li>
+          <li>OTEL 追踪已集成</li>
+          <li>核心模块（controller/executor/memory）日志完善</li>
+        </ul>
+      </div>
+    </div>
+
+    <hr />
+
+    <!-- ===== Part 4: 注释覆盖 ===== -->
+    <h2>四、注释覆盖审计</h2>
+
+    <h3>4.1 注释密度排行（Top 10 注释最多的文件）</h3>
+
+    <table>
+      <tr>
+        <th>#</th>
+        <th>文件</th>
+        <th>注释行</th>
+        <th>密度评级</th>
+      </tr>
+      <tr>
+        <td>1</td>
+        <td><code>loop/controller.py</code></td>
+        <td>94</td>
+        <td><span class="tag tag-green">高</span> 含阶段标记</td>
+      </tr>
+      <tr>
+        <td>2</td>
+        <td><code>loop/executor.py</code></td>
+        <td>57</td>
+        <td><span class="tag tag-green">高</span> 含审计标记</td>
+      </tr>
+      <tr>
+        <td>3</td>
+        <td><code>memory/engine.py</code></td>
+        <td>43</td>
+        <td><span class="tag tag-green">高</span> 含审计标记</td>
+      </tr>
+      <tr>
+        <td>4</td>
+        <td><code>tools/file_parse_tools.py</code></td>
+        <td>36</td>
+        <td><span class="tag tag-green">高</span></td>
+      </tr>
+      <tr>
+        <td>5</td>
+        <td><code>persistence/title_generator.py</code></td>
+        <td>35</td>
+        <td><span class="tag tag-green">高</span></td>
+      </tr>
+      <tr>
+        <td>6</td>
+        <td><code>main.py</code></td>
+        <td>34</td>
+        <td><span class="tag tag-green">高</span> 含配置注释</td>
+      </tr>
+      <tr>
+        <td>7</td>
+        <td><code>loop/debater.py</code></td>
+        <td>33</td>
+        <td><span class="tag tag-green">高</span></td>
+      </tr>
+      <tr>
+        <td>8</td>
+        <td><code>loop/observer.py</code></td>
+        <td>33</td>
+        <td><span class="tag tag-green">高</span></td>
+      </tr>
+      <tr>
+        <td>9</td>
+        <td><code>evolution/trigger.py</code></td>
+        <td>31</td>
+        <td><span class="tag tag-green">高</span></td>
+      </tr>
+      <tr>
+        <td>10</td>
+        <td><code>memory/experience_migrator.py</code></td>
+        <td>27</td>
+        <td><span class="tag tag-green">高</span></td>
+      </tr>
+    </table>
+
+    <h3>4.2 零注释/低注释的关键模块</h3>
+
+    <table>
+      <tr>
+        <th>#</th>
+        <th>模块</th>
+        <th>注释行</th>
+        <th>评级</th>
+      </tr>
+      <tr>
+        <td><span class="tag tag-red">1</span></td>
+        <td><code>tools/kanban_swarm.py</code></td>
+        <td>1</td>
+        <td><span class="tag tag-red">极低</span></td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-red">2</span></td>
+        <td><code>tools/cronjob_tools.py</code></td>
+        <td>1</td>
+        <td><span class="tag tag-red">极低</span></td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-red">3</span></td>
+        <td><code>tools/windows_uia.py</code></td>
+        <td>2</td>
+        <td><span class="tag tag-red">极低</span></td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-red">4</span></td>
+        <td><code>tools/daily_tools.py</code></td>
+        <td>4</td>
+        <td><span class="tag tag-red">低</span></td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-red">5</span></td>
+        <td><code>tools/system_tools.py</code></td>
+        <td>4</td>
+        <td><span class="tag tag-red">低</span></td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-red">6</span></td>
+        <td><code>tools/network_tools.py</code></td>
+        <td>4</td>
+        <td><span class="tag tag-red">低</span></td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-red">7</span></td>
+        <td><code>tools/delegate_tool.py</code></td>
+        <td>3</td>
+        <td><span class="tag tag-red">低</span></td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-red">8</span></td>
+        <td><code>tools/async_delegation.py</code></td>
+        <td>1</td>
+        <td><span class="tag tag-red">极低</span></td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-red">9</span></td>
+        <td><code>tools/code_tools.py</code></td>
+        <td>3</td>
+        <td><span class="tag tag-red">低</span></td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-red">10</span></td>
+        <td><code>tools/code_execution_tool.py</code></td>
+        <td>1</td>
+        <td><span class="tag tag-red">极低</span></td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-red">11</span></td>
+        <td><code>tools/clarify_tool.py</code></td>
+        <td>6</td>
+        <td><span class="tag tag-orange">中低</span></td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-red">12</span></td>
+        <td><code>tools/browser_tools.py</code></td>
+        <td>24</td>
+        <td><span class="tag tag-orange">中</span></td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-red">13</span></td>
+        <td><code>tools/desktop_tools.py</code></td>
+        <td>27</td>
+        <td><span class="tag tag-orange">中</span></td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-red">14</span></td>
+        <td><code>tools/perception_tools.py</code></td>
+        <td>24</td>
+        <td><span class="tag tag-orange">中</span></td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-red">15</span></td>
+        <td><code>tools/web_search_provider.py</code></td>
+        <td>24</td>
+        <td><span class="tag tag-orange">中</span></td>
+      </tr>
+    </table>
+
+    <h3>4.3 TODO/FIXME 清单</h3>
+
+    <table>
+      <tr>
+        <th>文件</th>
+        <th>数量</th>
+        <th>说明</th>
+      </tr>
+      <tr>
+        <td><code>tools/todo_tool.py</code></td>
+        <td>15</td>
+        <td>大量 TODO 待处理</td>
+      </tr>
+      <tr>
+        <td><code>tools/kanban_swarm.py</code></td>
+        <td>6</td>
+        <td>新模块待完善</td>
+      </tr>
+      <tr>
+        <td><code>persistence/session_recap.py</code></td>
+        <td>6</td>
+        <td>会话摘要待完善</td>
+      </tr>
+      <tr>
+        <td><code>mcp/logging.py</code></td>
+        <td>5</td>
+        <td>MCP 日志规范待定</td>
+      </tr>
+      <tr>
+        <td><code>core/engine.py</code></td>
+        <td>4</td>
+        <td>引擎初始化 TODO</td>
+      </tr>
+      <tr>
+        <td><code>evolution/v2_engine.py</code></td>
+        <td>2</td>
+        <td>V2 引擎待完善</td>
+      </tr>
+      <tr>
+        <td><code>cli/cli_output.py</code></td>
+        <td>4</td>
+        <td>CLI 输出待完善</td>
+      </tr>
+      <tr>
+        <td><code>tools/file_parse_tools.py</code></td>
+        <td>1</td>
+        <td>文件解析 TODO</td>
+      </tr>
+      <tr>
+        <td><code>tools/registry.py</code></td>
+        <td>1</td>
+        <td>注册中心 TODO</td>
+      </tr>
+    </table>
+
+    <hr />
+
+    <!-- ===== Part 5: 设计/代码一致性 ===== -->
+    <h2>五、设计文档与代码一致性审计</h2>
+
+    <h3>5.1 设计文档清单（150+ 篇）</h3>
+
+    <div class="grid grid-2">
+      <div class="success-box">
+        <h4>✅ 架构设计文档</h4>
+        <ul>
+          <li><code>ARCHITECTURE_AUDIT_V6.md</code> — V6 架构审计</li>
+          <li><code>TOP_LEVEL_DESIGN.md</code> — 顶层设计</li>
+          <li><code>V5_ARCHITECTURE_REFACTORING.md</code> — V5 架构重构</li>
+          <li>
+            <code>UNIFIED_CONTEXT_ORCHESTRATOR_DESIGN.md</code> — 统一上下文编排
+          </li>
+          <li><code>PLANNING_REASONING_DESIGN.md</code> — 规划推理设计</li>
+          <li><code>THIN_HARNESS_FAT_SKILLS.md</code> — 瘦框架胖技能</li>
+        </ul>
+      </div>
+      <div class="warn-box">
+        <h4>⚠️ 需要验证的设计文档</h4>
+        <ul>
+          <li><code>BUSINESS_LOGIC.md</code> — 业务逻辑 vs 代码实现</li>
+          <li>
+            <code>DESKTOP_EXECUTION_AGENT_V2.md</code> — 桌面执行 Agent V2
+          </li>
+          <li><code>EXECUTION_AGENT_ROADMAP.md</code> — 执行 Agent 路线图</li>
+          <li><code>HERMES_GAP_ANALYSIS.md</code> — Hermes 差距分析</li>
+          <li><code>DEPRECATION_SCHEDULE.md</code> — 废弃计划</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>5.2 关键设计/代码一致性检查</h3>
+
+    <table>
+      <tr>
+        <th>设计文档声明</th>
+        <th>代码实现</th>
+        <th>一致性</th>
+      </tr>
+      <tr>
+        <td><strong>THIN_HARNESS_FAT_SKILLS:</strong> 技能系统独立可插拔</td>
+        <td>
+          <code>skills/registry.py</code> +
+          <code>tools/registry.py</code> 已实现工具注册分离
+        </td>
+        <td><span class="tag tag-green">一致</span></td>
+      </tr>
+      <tr>
+        <td>
+          <strong>DESKTOP_EXECUTION_AGENT_V2:</strong> Windows UIA 精确自动化
+        </td>
+        <td><code>tools/windows_uia.py</code> 已实现，含 pyautogui 降级</td>
+        <td><span class="tag tag-green">一致</span></td>
+      </tr>
+      <tr>
+        <td>
+          <strong>PLANNING_REASONING_DESIGN:</strong> ToT + Debater 双检查
+        </td>
+        <td>
+          <code>loop/tot_planner.py</code> 已接入，<code>loop/debater.py</code>
+          已接入
+        </td>
+        <td><span class="tag tag-green">一致</span></td>
+      </tr>
+      <tr>
+        <td><strong>BUSINESS_LOGIC:</strong> 记忆写入审批门</td>
+        <td>
+          <code>memory/engine.py</code> 已实现 <code>_write_gate_enabled</code>
+        </td>
+        <td><span class="tag tag-green">一致</span></td>
+      </tr>
+      <tr>
+        <td><strong>ARCHITECTURE_AUDIT_V6:</strong> 子系统依赖拓扑排序</td>
+        <td>
+          <code>core/dependencies.py</code> 已实现 <code>SUBSYSTEM_DEPS</code>
+        </td>
+        <td><span class="tag tag-green">一致</span></td>
+      </tr>
+      <tr>
+        <td><strong>DEPRECATION_SCHEDULE:</strong> 标记废弃模块</td>
+        <td>
+          <code>DEPRECATION_MAP.md</code> 存在但代码中无
+          <code>@deprecated</code> 标记
+        </td>
+        <td><span class="tag tag-orange">部分一致</span></td>
+      </tr>
+      <tr>
+        <td><strong>HERMES_GAP_ANALYSIS:</strong> 12项功能对标</td>
+        <td>代码中已实现全部 12 项，Kanban/Cronjob/UIA 已注册</td>
+        <td><span class="tag tag-green">一致</span></td>
+      </tr>
+      <tr>
+        <td><strong>EXECUTION_AGENT_ROADMAP:</strong> 多 Agent 编排</td>
+        <td>
+          <code>orchestration/agent_factory.py</code> 已接入，但
+          <code>executor.py</code> 和 <code>task_dispatcher.py</code> 未接入
+        </td>
+        <td><span class="tag tag-orange">部分一致</span></td>
+      </tr>
+    </table>
+
+    <h3>5.3 设计/代码不一致项</h3>
+
+    <div class="danger-box">
+      <table>
+        <tr>
+          <th>#</th>
+          <th>不一致项</th>
+          <th>设计文档</th>
+          <th>代码现状</th>
+          <th>严重度</th>
+        </tr>
+        <tr>
+          <td><span class="tag tag-red">1</span></td>
+          <td>
+            <strong>Orchestration executor/task_dispatcher 未接入</strong>
+          </td>
+          <td>EXECUTION_AGENT_ROADMAP 声明编排层可用</td>
+          <td>
+            <code>executor.py</code>
+            <code>task_dispatcher.py</code> 未在依赖图中注册
+          </td>
+          <td><span class="tag tag-red">高</span></td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-orange">2</span></td>
+          <td><strong>废弃模块无代码标注</strong></td>
+          <td>DEPRECATION_SCHEDULE 列出废弃模块</td>
+          <td>
+            代码中无 <code>@deprecated</code> 或 <code>DeprecationWarning</code>
+          </td>
+          <td><span class="tag tag-orange">中</span></td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-orange">3</span></td>
+          <td><strong>代码注释规范未统一</strong></td>
+          <td><code>development/code-comment-guide.md</code> 存在</td>
+          <td>实际注释风格不统一：审计标记 vs 普通注释 vs 无注释</td>
+          <td><span class="tag tag-orange">中</span></td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-orange">4</span></td>
+          <td><strong>测试计划 vs 实际测试</strong></td>
+          <td><code>tests/TEST_PLAN.md</code> 规划了全面测试</td>
+          <td>实际仅 ~50% 模块有测试</td>
+          <td><span class="tag tag-orange">中</span></td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-orange">5</span></td>
+          <td><strong>LSP 工具已注册但底层未初始化</strong></td>
+          <td>设计文档声明 LSP 可用</td>
+          <td><code>client_manager.py</code> 未在依赖图中初始化</td>
+          <td><span class="tag tag-orange">中</span></td>
+        </tr>
+      </table>
+    </div>
+
+    <hr />
+
+    <!-- ===== Part 6: 总结 ===== -->
+    <h2>六、总结与改进建议</h2>
+
+    <div class="grid grid-3">
+      <div class="card" style="text-align: center">
+        <div class="stat-num" style="color: var(--red)">50%</div>
+        <div class="stat-label">测试覆盖率</div>
+        <div style="font-size: 0.75rem; color: var(--text-secondary)">
+          100+ 模块无测试
+        </div>
+      </div>
+      <div class="card" style="text-align: center">
+        <div class="stat-num" style="color: var(--orange)">50%</div>
+        <div class="stat-label">日志覆盖率</div>
+        <div style="font-size: 0.75rem; color: var(--text-secondary)">
+          100+ 模块无日志
+        </div>
+      </div>
+      <div class="card" style="text-align: center">
+        <div class="stat-num" style="color: var(--accent)">85%</div>
+        <div class="stat-label">设计/代码一致性</div>
+        <div style="font-size: 0.75rem; color: var(--text-secondary)">
+          5 项不一致
+        </div>
+      </div>
+    </div>
+
+    <h3>6.1 立即行动项（P0）</h3>
+
+    <div class="danger-box">
+      <ol>
+        <li>
+          <strong>为 3 个新工具补充测试</strong>：<code
+            >test_kanban_swarm.py</code
+          >
+          <code>test_cronjob_tools.py</code> <code>test_windows_uia.py</code>
+        </li>
+        <li>
+          <strong>为 Debater 补充测试</strong>：<code>test_debater.py</code> —
+          刚接入 P0 无回归保护
+        </li>
+        <li>
+          <strong>为委派系统补充测试</strong>：<code>test_delegation.py</code> —
+          多 Agent 核心功能无测试
+        </li>
+        <li>
+          <strong>10 个零日志工具模块补充日志</strong
+          >：kanban/cronjob/uia/delegate/daily/system/perception/browser/vision_pipeline/robustness
+        </li>
+        <li>
+          <strong>Orchestration 层接入依赖图</strong>：<code>executor.py</code>
+          <code>task_dispatcher.py</code> 需在 dependencies.py 中注册
+        </li>
+      </ol>
+    </div>
+
+    <h3>6.2 短期改进项（P1）</h3>
+
+    <div class="warn-box">
+      <ol>
+        <li>
+          <strong>统一日志格式</strong>：所有模块使用结构化日志，传递
+          request_id/trace_id
+        </li>
+        <li>
+          <strong>补齐 16 个工具模块测试</strong>：framework_integration,
+          daily_tools, vision_tools 等
+        </li>
+        <li>
+          <strong>补齐 10 个 loop 模块测试</strong>：robustness, observer,
+          reporter, evaluator 等
+        </li>
+        <li>
+          <strong>补齐 7 个 memory 模块测试</strong>：curator,
+          background_review, insights 等
+        </li>
+        <li>
+          <strong>补齐 11 个 evolution 模块测试</strong>：skill_hub,
+          skill_audit, multi_agent 等
+        </li>
+        <li>
+          <strong>补齐 8 个 LSP 底层模块测试</strong>：workspace, servers,
+          protocol 等
+        </li>
+        <li>
+          <strong>废弃模块标注</strong>：在代码中添加
+          <code>@deprecated</code> 标记
+        </li>
+        <li>
+          <strong>注释规范统一</strong>：按
+          <code>code-comment-guide.md</code> 统一注释风格
+        </li>
+      </ol>
+    </div>
+
+    <h3>6.3 长期改进项（P2）</h3>
+
+    <div class="highlight-box">
+      <ol>
+        <li><strong>CLI 模块测试</strong>：8 个 CLI 模块目前 0 测试</li>
+        <li><strong>Gateway 平台适配器测试</strong>：6 个平台适配器 0 测试</li>
+        <li><strong>安全工具测试</strong>：7 个安全模块 0 测试</li>
+        <li><strong>LLM 子模块测试</strong>：8 个 LLM 子模块 0 测试</li>
+        <li><strong>Models 层测试</strong>：5 个数据模型 0 测试</li>
+        <li>
+          <strong>清理 44 个 TODO/FIXME</strong>：优先处理
+          <code>todo_tool.py</code>（15个）和
+          <code>kanban_swarm.py</code>（6个）
+        </li>
+        <li>
+          <strong>自动化测试覆盖率门禁</strong>：CI 中添加覆盖率检查，禁止低于
+          60%
+        </li>
+      </ol>
+    </div>
+
+    <p
+      style="
+        text-align: center;
+        color: var(--text-secondary);
+        margin-top: 2rem;
+        padding-top: 1rem;
+        border-top: 1px solid var(--border);
+      "
+    >
+      家百星 V5.0 测试/日志/注释全面审计 | 日期：2026-07-18
+    </p>
+  </body>
+</html>

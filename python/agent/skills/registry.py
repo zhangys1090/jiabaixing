@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from agent.config import DATA_DIR
+from agent.core.logger import log_ignored
 
 
 @dataclass
@@ -387,8 +388,8 @@ class SkillHub:
                 for item in data:
                     entry = HubSkillEntry.from_dict(item)
                     self._entries[entry.name] = entry
-            except (json.JSONDecodeError, OSError):
-                pass
+            except (json.JSONDecodeError, OSError) as _exc:
+                log_ignored(None, "registry.SkillHub._load_index", _exc)
 
     def _save_index(self) -> None:
         data = [e.to_dict() for e in self._entries.values()]
@@ -561,7 +562,8 @@ class SkillSync:
                 entry = HubSkillEntry.from_dict(item)
                 entry.hub_url = url
                 entries.append(entry)
-            except Exception:
+            except Exception as e:
+                log_ignored(None, "registry.SkillHub._parse_index", e)
                 continue
         return entries
 

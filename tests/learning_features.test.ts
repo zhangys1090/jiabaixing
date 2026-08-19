@@ -7,10 +7,6 @@ import {
   ComplexityLLMDeps,
   TaskComplexityAnalyzer,
 } from '../src/core/TaskComplexityAnalyzer';
-import {
-  EvolutionEngine,
-  FewShotExample,
-} from '../src/evolution/EvolutionEngine';
 import { FeedbackCollector } from '../src/evolution/FeedbackCollector';
 import {
   SkillInsightReport,
@@ -211,81 +207,9 @@ describe('Learning Features', () => {
     });
   });
 
-  // ==================== 3. Few-shot 学习 ====================
-  describe('3. Few-shot Learning', () => {
-    let engine: EvolutionEngine;
-
-    beforeEach(() => {
-      engine = new EvolutionEngine(undefined);
-    });
-
-    it('示例不足2个时不应泛化', () => {
-      const examples: FewShotExample[] = [
-        {
-          input: '帮我写一个排序函数',
-          output: '调用 sort_utils',
-          category: 'coding',
-          quality_score: 0.8,
-          timestamp: Date.now(),
-        },
-      ];
-
-      const skill = engine.learnFromFewShots(examples, 'coding');
-      expect(skill).toBeNull();
-    });
-
-    it('2个以上同类别示例应生成泛化技能', () => {
-      const examples: FewShotExample[] = [
-        {
-          input: '帮我写一个排序函数',
-          output: '调用 sort_utils 工具',
-          category: 'coding',
-          quality_score: 0.9,
-          timestamp: Date.now(),
-        },
-        {
-          input: '帮我写一个排序算法',
-          output: '调用 sort_utils 工具',
-          category: 'coding',
-          quality_score: 0.85,
-          timestamp: Date.now(),
-        },
-      ];
-
-      const skill = engine.learnFromFewShots(examples, 'coding');
-
-      expect(skill).not.toBeNull();
-      expect(skill!.name).toContain('fewshot-coding');
-      expect(skill!.confidence).toBeGreaterThan(0);
-      expect(skill!.triggerKeywords.length).toBeGreaterThanOrEqual(0);
-    });
-
-    it('addFewShotExample 应自动触发泛化', () => {
-      engine.addFewShotExample({
-        input: '帮我写一个排序函数',
-        output: '调用 sort_utils',
-        category: 'coding',
-        quality_score: 0.9,
-        timestamp: Date.now(),
-      });
-
-      engine.addFewShotExample({
-        input: '帮我写一个排序算法',
-        output: '调用 sort_utils',
-        category: 'coding',
-        quality_score: 0.85,
-        timestamp: Date.now(),
-      });
-
-      const matched = engine.matchFewShotSkill('帮我写排序');
-      // 匹配结果可能为 null（取决于关键词重叠度），但不应抛出
-    });
-
-    it('matchFewShotSkill 无泛化技能时返回 null', () => {
-      const result = engine.matchFewShotSkill('随便什么输入');
-      expect(result).toBeNull();
-    });
-  });
+  // ==================== 3. Few-shot 学习（已迁移 Python 后端）====================
+  // 注：原 TS EvolutionEngine 的 few-shot 泛化能力已迁移到 Python 进化引擎，
+  // 相关 TS 单测不再适用，由 python/agent 的 pytest 覆盖。
 
   // ==================== 4. 协作学习 ====================
   describe('4. Collaborative Learning', () => {

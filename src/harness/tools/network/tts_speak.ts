@@ -1,6 +1,6 @@
+import { Logger } from '../../../utils/Logger';
 import type { ToolContext, ToolDefinition, ToolResult } from '../../types';
 import { Permission, ToolCategory } from '../../types';
-import { Logger } from '../../../utils/Logger';
 
 export const TTS_SPEAK_DEF: ToolDefinition = {
   name: 'tts_speak',
@@ -20,7 +20,12 @@ export const TTS_SPEAK_DEF: ToolDefinition = {
     },
     speed: {
       type: 'number',
-      description: '语速倍率',
+      description: '语速倍率（0.5-2.0，1.0为正常语速）',
+      default: 1.0,
+    },
+    pitch: {
+      type: 'number',
+      description: '音调倍率（0.5-2.0，1.0为正常音调）',
       default: 1.0,
     },
   },
@@ -78,7 +83,10 @@ export function createTTSSpeakExecutor(deps: TTSSpeakDeps = {}) {
     const startTime = Date.now();
     const text = params.text as string;
     const voice = (params.voice as string) || 'default';
-    const speed = (params.speed as number) || 1.0;
+    const rawSpeed = (params.speed as number) || 1.0;
+    const speed = Math.min(2.0, Math.max(0.5, rawSpeed));
+    const rawPitch = (params.pitch as number) || 1.0;
+    const pitch = Math.min(2.0, Math.max(0.5, rawPitch));
 
     try {
       if (!text || text.trim().length === 0) {
@@ -107,26 +115,27 @@ export function createTTSSpeakExecutor(deps: TTSSpeakDeps = {}) {
           }
           return fail(result.error || '语音合成失败', Date.now() - startTime);
         } catch (synthErr) {
-          Logger.warn(
-            `🔊 tts_speak SpeechSynthesizer 调用失败: ${(synthErr as Error).message}，降级到模拟模式`,
+          // 合成器调用抛错 → 诚实失败，不再静默降级为"模拟成功"
+          Logger.error(
+            `❌ tts_speak SpeechSynthesizer 调用失败: ${(synthErr as Error).message}`,
+            synthErr as Error,
             'TTSSpeak'
           );
-          return ok(
-            `语音指令已接收: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`,
-            Date.now() - startTime,
-            { voice, speed, textLength: text.length, simulated: true }
+          return fail(
+            `语音合成调用失败: ${(synthErr as Error).message}`,
+            Date.now() - startTime
           );
         }
       }
 
-      Logger.info(
-        `🔊 tts_speak (模拟): "${text.substring(0, 30)}..." voice=${voice} speed=${speed}`,
+      // 未配置真实合成器 → 诚实失败，不再返回 success:true 的"模拟模式"
+      Logger.warn(
+        `🔊 tts_speak 未配置 speechSynthesizer，无法真实合成语音: "${text.substring(0, 30)}..."`,
         'TTSSpeak'
       );
-      return ok(
-        `语音指令已接收: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`,
-        Date.now() - startTime,
-        { voice, speed, textLength: text.length, simulated: true }
+      return fail(
+        '未配置语音合成器(speechSynthesizer)，无法真正合成并播放语音',
+        Date.now() - startTime
       );
     } catch (error) {
       Logger.error('❌ tts_speak 失败', error as Error, 'TTSSpeak');

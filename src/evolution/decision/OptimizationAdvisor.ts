@@ -98,9 +98,13 @@ export class OptimizationAdvisor {
 
   private constructor() {}
 
+  public static create(): OptimizationAdvisor {
+    return new OptimizationAdvisor();
+  }
+
   public static getInstance(): OptimizationAdvisor {
     if (!OptimizationAdvisor.instance) {
-      OptimizationAdvisor.instance = new OptimizationAdvisor();
+      OptimizationAdvisor.instance = OptimizationAdvisor.create();
     }
     return OptimizationAdvisor.instance;
   }

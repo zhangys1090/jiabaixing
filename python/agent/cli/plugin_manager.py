@@ -35,6 +35,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Awaitable
 
+from agent.config import DATA_ROOT
 from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("plugin_manager")
@@ -95,7 +96,7 @@ class PluginManager:
     """
 
     def __init__(self, plugins_dir: Path | None = None) -> None:
-        self._dir = plugins_dir or Path("data/plugins")
+        self._dir = plugins_dir or DATA_ROOT / "plugins"
         self._plugins: dict[str, PluginInstance] = {}
         self._event_handlers: dict[str, list[Callable[..., Awaitable[Any]]]] = defaultdict(list)
         self._hook_manager: Any = None

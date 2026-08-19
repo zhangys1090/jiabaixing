@@ -1,0 +1,1730 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>家百星 V5.0 — 模块接入主循环全面审计报告</title>
+    <style>
+      :root {
+        --bg: #0d1117;
+        --card-bg: #161b22;
+        --border: #30363d;
+        --text: #c9d1d9;
+        --text-secondary: #8b949e;
+        --accent: #58a6ff;
+        --green: #3fb950;
+        --red: #f85149;
+        --orange: #d2991d;
+        --purple: #a371f7;
+        --cyan: #39d2c0;
+        --pink: #db61a2;
+      }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei',
+          Helvetica, Arial, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.7;
+        padding: 2rem;
+        max-width: 1500px;
+        margin: 0 auto;
+      }
+      h1 {
+        font-size: 2rem;
+        color: var(--accent);
+        border-bottom: 2px solid var(--border);
+        padding-bottom: 0.5rem;
+        margin-bottom: 0.5rem;
+      }
+      h2 {
+        font-size: 1.4rem;
+        color: var(--purple);
+        margin-top: 2.5rem;
+        margin-bottom: 1rem;
+        border-left: 4px solid var(--purple);
+        padding-left: 0.75rem;
+      }
+      h3 {
+        font-size: 1.1rem;
+        color: var(--cyan);
+        margin-top: 1.5rem;
+        margin-bottom: 0.5rem;
+      }
+      .subtitle {
+        color: var(--text-secondary);
+        font-size: 0.95rem;
+        margin-bottom: 2rem;
+      }
+      .card {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 1.25rem;
+        margin: 1rem 0;
+      }
+      .grid {
+        display: grid;
+        gap: 1rem;
+      }
+      .grid-2 {
+        grid-template-columns: 1fr 1fr;
+      }
+      .grid-3 {
+        grid-template-columns: 1fr 1fr 1fr;
+      }
+      .grid-4 {
+        grid-template-columns: 1fr 1fr 1fr 1fr;
+      }
+      .tag {
+        display: inline-block;
+        padding: 0.15rem 0.6rem;
+        border-radius: 12px;
+        font-size: 0.8rem;
+        font-weight: 600;
+      }
+      .tag-green {
+        background: rgba(63, 185, 80, 0.15);
+        color: var(--green);
+      }
+      .tag-red {
+        background: rgba(248, 81, 73, 0.15);
+        color: var(--red);
+      }
+      .tag-orange {
+        background: rgba(210, 153, 29, 0.15);
+        color: var(--orange);
+      }
+      .tag-blue {
+        background: rgba(88, 166, 255, 0.15);
+        color: var(--accent);
+      }
+      .tag-purple {
+        background: rgba(163, 113, 247, 0.15);
+        color: var(--purple);
+      }
+      .tag-pink {
+        background: rgba(219, 97, 178, 0.15);
+        color: var(--pink);
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 0.75rem 0;
+      }
+      th,
+      td {
+        padding: 0.5rem 0.65rem;
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+        font-size: 0.85rem;
+      }
+      th {
+        color: var(--text-secondary);
+        font-weight: 600;
+        font-size: 0.8rem;
+      }
+      .code {
+        background: rgba(240, 246, 252, 0.06);
+        padding: 0.15rem 0.4rem;
+        border-radius: 4px;
+        font-family: 'Cascadia Code', 'Fira Code', monospace;
+        font-size: 0.8rem;
+      }
+      .highlight-box {
+        background: rgba(88, 166, 255, 0.08);
+        border: 1px solid rgba(88, 166, 255, 0.2);
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 1rem 0;
+      }
+      .warn-box {
+        background: rgba(210, 153, 29, 0.08);
+        border: 1px solid rgba(210, 153, 29, 0.2);
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 1rem 0;
+      }
+      .success-box {
+        background: rgba(63, 185, 80, 0.08);
+        border: 1px solid rgba(63, 185, 80, 0.2);
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 1rem 0;
+      }
+      .danger-box {
+        background: rgba(248, 81, 73, 0.08);
+        border: 1px solid rgba(248, 81, 73, 0.2);
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 1rem 0;
+      }
+      pre {
+        background: rgba(240, 246, 252, 0.04);
+        padding: 1rem;
+        border-radius: 6px;
+        overflow-x: auto;
+        font-size: 0.8rem;
+        line-height: 1.4;
+        border: 1px solid var(--border);
+        white-space: pre-wrap;
+      }
+      code {
+        font-family: 'Cascadia Code', 'Fira Code', monospace;
+      }
+      ul,
+      ol {
+        margin: 0.5rem 0 0.5rem 1.25rem;
+      }
+      li {
+        margin: 0.2rem 0;
+      }
+      hr {
+        border: none;
+        border-top: 1px solid var(--border);
+        margin: 1.5rem 0;
+      }
+      .score-bar {
+        height: 6px;
+        border-radius: 3px;
+        margin: 0.25rem 0;
+        background: var(--border);
+      }
+      .score-fill {
+        height: 100%;
+        border-radius: 3px;
+      }
+      .score-fill-green {
+        background: var(--green);
+      }
+      .score-fill-blue {
+        background: var(--accent);
+      }
+      .score-fill-orange {
+        background: var(--orange);
+      }
+      .score-fill-red {
+        background: var(--red);
+      }
+      @media (max-width: 768px) {
+        body {
+          padding: 1rem;
+        }
+        .grid-2,
+        .grid-3,
+        .grid-4 {
+          grid-template-columns: 1fr;
+        }
+      }
+      .path-link {
+        color: var(--accent);
+        font-family: monospace;
+        font-size: 0.82rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>家百星 V5.0 — 模块接入主循环全面审计报告</h1>
+    <p class="subtitle">
+      审计范围：<code>python/agent/</code> 下全部 200+ 模块 | 日期：2026-07-18
+    </p>
+
+    <!-- ===== Part 1: 总览 ===== -->
+    <h2>一、审计总览</h2>
+
+    <div class="grid grid-4">
+      <div class="card" style="text-align: center">
+        <div style="font-size: 2rem; font-weight: 800; color: var(--green)">
+          ~160
+        </div>
+        <div>已接入主循环</div>
+        <div class="score-bar">
+          <div class="score-fill score-fill-green" style="width: 80%"></div>
+        </div>
+      </div>
+      <div class="card" style="text-align: center">
+        <div style="font-size: 2rem; font-weight: 800; color: var(--orange)">
+          ~25
+        </div>
+        <div>部分接入</div>
+        <div class="score-bar">
+          <div class="score-fill score-fill-orange" style="width: 80%"></div>
+        </div>
+      </div>
+      <div class="card" style="text-align: center">
+        <div style="font-size: 2rem; font-weight: 800; color: var(--red)">
+          ~35
+        </div>
+        <div>未接入</div>
+        <div class="score-bar">
+          <div class="score-fill score-fill-red" style="width: 80%"></div>
+        </div>
+      </div>
+      <div class="card" style="text-align: center">
+        <div style="font-size: 0.9rem; font-weight: 600; color: var(--accent)">
+          4条
+        </div>
+        <div>接入路径</div>
+        <div style="font-size: 0.75rem; color: var(--text-secondary)">
+          子系统/工具/API/懒加载
+        </div>
+      </div>
+    </div>
+
+    <div class="highlight-box">
+      <h3>接入路径说明</h3>
+      <table>
+        <tr>
+          <th>路径</th>
+          <th>入口</th>
+          <th>样例</th>
+        </tr>
+        <tr>
+          <td><strong>路径1：子系统依赖图</strong></td>
+          <td>
+            <code>core/dependencies.py</code> → <code>SUBSYSTEM_DEPS</code>
+          </td>
+          <td>
+            <code>memory/engine.py</code>, <code>evolution/engine.py</code>
+          </td>
+        </tr>
+        <tr>
+          <td><strong>路径2：工具注册</strong></td>
+          <td>
+            <code>tools/registry.py</code> →
+            <code>register_default_tools()</code>
+          </td>
+          <td><code>file_tools.py</code>, <code>network_tools.py</code></td>
+        </tr>
+        <tr>
+          <td><strong>路径3：API 端点</strong></td>
+          <td><code>api/</code> → FastAPI routers</td>
+          <td><code>api/chat.py</code>, <code>api/memory.py</code></td>
+        </tr>
+        <tr>
+          <td><strong>路径4：懒加载/间接引用</strong></td>
+          <td>其他模块内部 import</td>
+          <td>
+            <code>llm/prompt_cache.py</code>, <code>memory/redis_cache.py</code>
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <hr />
+
+    <!-- ===== Part 2: 已接入模块 ===== -->
+    <h2>二、已接入主循环的模块（路径1：子系统依赖图）</h2>
+
+    <div class="success-box">
+      <p>
+        通过 <code>core/dependencies.py</code> 的
+        <code>SUBSYSTEM_DEPS</code> 注册，共
+        <strong>80+ 子系统</strong>，按拓扑排序初始化。
+      </p>
+    </div>
+
+    <table>
+      <tr>
+        <th>#</th>
+        <th>子系统名称</th>
+        <th>初始化方法</th>
+        <th>关键</th>
+        <th>对应模块</th>
+      </tr>
+      <tr>
+        <td>1</td>
+        <td><code>llm</code></td>
+        <td><code>_init_llm</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>llm/provider.py</code></td>
+      </tr>
+      <tr>
+        <td>2</td>
+        <td><code>_redis_cache</code></td>
+        <td><code>_init_redis_cache</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>memory/redis_cache.py</code></td>
+      </tr>
+      <tr>
+        <td>3</td>
+        <td><code>trajectory_db</code></td>
+        <td><code>_init_trajectory_db</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>persistence/trajectory.py</code></td>
+      </tr>
+      <tr>
+        <td>4</td>
+        <td><code>memory</code></td>
+        <td><code>_init_memory</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>memory/engine.py</code></td>
+      </tr>
+      <tr>
+        <td>5</td>
+        <td><code>tool_registry</code></td>
+        <td><code>_init_tool_registry</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>tools/registry.py</code></td>
+      </tr>
+      <tr>
+        <td>6</td>
+        <td><code>toolset_registry</code></td>
+        <td><code>_init_toolset_registry</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>tools/toolset_registry.py</code></td>
+      </tr>
+      <tr>
+        <td>7</td>
+        <td><code>mcp_tool_bridge</code></td>
+        <td><code>_init_mcp_tool_bridge</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>tools/mcp_tool_bridge.py</code></td>
+      </tr>
+      <tr>
+        <td>8</td>
+        <td><code>permission_guard</code></td>
+        <td><code>_init_permission_guard</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>tools/permission_guard.py</code></td>
+      </tr>
+      <tr>
+        <td>9</td>
+        <td><code>schema_validator</code></td>
+        <td><code>_init_schema_validator</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>tools/schema_validator.py</code></td>
+      </tr>
+      <tr>
+        <td>10</td>
+        <td><code>tool_call_guard</code></td>
+        <td><code>_init_tool_call_guard</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>tools/tool_call_guard.py</code></td>
+      </tr>
+      <tr>
+        <td>11</td>
+        <td><code>approval_manager</code></td>
+        <td><code>_init_approval_manager</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>tools/approval_manager.py</code></td>
+      </tr>
+      <tr>
+        <td>12</td>
+        <td><code>canary_manager</code></td>
+        <td><code>_init_canary_manager</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>core/canary_release.py</code></td>
+      </tr>
+      <tr>
+        <td>13</td>
+        <td><code>constraints</code></td>
+        <td><code>_init_constraints</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>constraints/service.py</code></td>
+      </tr>
+      <tr>
+        <td>14</td>
+        <td><code>hook_manager</code></td>
+        <td><code>_init_hook_manager</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>core/hooks.py</code></td>
+      </tr>
+      <tr>
+        <td>15</td>
+        <td><code>conversation</code></td>
+        <td><code>_init_conversation</code></td>
+        <td><span class="tag tag-red">关键</span></td>
+        <td><code>core/conversation_loop.py</code></td>
+      </tr>
+      <tr>
+        <td>16</td>
+        <td><code>evolution</code></td>
+        <td><code>_init_evolution</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>evolution/engine.py</code></td>
+      </tr>
+      <tr>
+        <td>17</td>
+        <td><code>loop</code></td>
+        <td><code>_init_loop</code></td>
+        <td><span class="tag tag-red">关键</span></td>
+        <td><code>loop/controller.py</code></td>
+      </tr>
+      <tr>
+        <td>18</td>
+        <td><code>context_manager</code></td>
+        <td><code>_init_context_manager</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>core/context_pipeline.py</code></td>
+      </tr>
+      <tr>
+        <td>19</td>
+        <td><code>persona</code></td>
+        <td><code>_init_persona</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>core/persona.py</code></td>
+      </tr>
+      <tr>
+        <td>20</td>
+        <td><code>security</code></td>
+        <td><code>_init_security</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>core/security.py</code></td>
+      </tr>
+      <tr>
+        <td>21</td>
+        <td><code>verification</code></td>
+        <td><code>_init_verification</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>verification/service.py</code></td>
+      </tr>
+      <tr>
+        <td>22</td>
+        <td><code>output_guardrail</code></td>
+        <td><code>_init_output_guardrail</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>security/output_guardrail.py</code></td>
+      </tr>
+      <tr>
+        <td>23</td>
+        <td><code>skill_registry</code></td>
+        <td><code>_init_skill_registry</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>skills/registry.py</code></td>
+      </tr>
+      <tr>
+        <td>24</td>
+        <td><code>curator</code></td>
+        <td><code>_init_curator</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>memory/curator.py</code></td>
+      </tr>
+      <tr>
+        <td>25</td>
+        <td><code>feedback_loops</code></td>
+        <td><code>_init_feedback_loops</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>loop/feedback_loops.py</code></td>
+      </tr>
+      <tr>
+        <td>26</td>
+        <td><code>multi_agent_orchestrator</code></td>
+        <td><code>_init_multi_agent_orchestrator</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>orchestration/agent_factory.py</code></td>
+      </tr>
+      <tr>
+        <td>27</td>
+        <td><code>a2a_manager</code></td>
+        <td><code>_init_a2a_manager</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>a2a/manager.py</code></td>
+      </tr>
+      <tr>
+        <td>28</td>
+        <td><code>cron_scheduler</code></td>
+        <td><code>_init_cron_scheduler</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>scheduler/cron.py</code></td>
+      </tr>
+      <tr>
+        <td>29</td>
+        <td><code>sandbox</code></td>
+        <td><code>_init_sandbox</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>sandbox/executor.py</code></td>
+      </tr>
+      <tr>
+        <td>30</td>
+        <td><code>batch_processor</code></td>
+        <td><code>_init_batch_processor</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>loop/batch_processor.py</code></td>
+      </tr>
+      <tr>
+        <td>31</td>
+        <td><code>web_search</code></td>
+        <td><code>_init_web_search</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>tools/web_search_provider.py</code></td>
+      </tr>
+      <tr>
+        <td>32</td>
+        <td><code>path_security</code></td>
+        <td><code>_init_path_security</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>security/path_security.py</code></td>
+      </tr>
+      <tr>
+        <td>33</td>
+        <td><code>url_safety</code></td>
+        <td><code>_init_url_safety</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>security/url_safety.py</code></td>
+      </tr>
+      <tr>
+        <td>34</td>
+        <td><code>ssl_guard</code></td>
+        <td><code>_init_ssl_guard</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>security/ssl_guard.py</code></td>
+      </tr>
+      <tr>
+        <td>35</td>
+        <td><code>error_classifier</code></td>
+        <td><code>_init_error_classifier</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>core/error_classifier.py</code></td>
+      </tr>
+      <tr>
+        <td>36</td>
+        <td><code>eval_runner</code></td>
+        <td><code>_init_eval_runner</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>evaluation/eval_runner.py</code></td>
+      </tr>
+      <tr>
+        <td>37</td>
+        <td><code>gateway_dispatcher</code></td>
+        <td><code>_init_gateway_dispatcher</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>gateway/dispatcher.py</code></td>
+      </tr>
+      <tr>
+        <td>38</td>
+        <td><code>clarify</code></td>
+        <td><code>_init_clarify</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>tools/clarify_tool.py</code></td>
+      </tr>
+      <tr>
+        <td>39</td>
+        <td><code>todo_manager</code></td>
+        <td><code>_init_todo_manager</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>tools/todo_tool.py</code></td>
+      </tr>
+      <tr>
+        <td>40</td>
+        <td><code>code_executor</code></td>
+        <td><code>_init_code_executor</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>tools/code_execution_tool.py</code></td>
+      </tr>
+      <tr>
+        <td>41</td>
+        <td><code>delegate</code></td>
+        <td><code>_init_delegate</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>tools/delegate_tool.py</code></td>
+      </tr>
+      <tr>
+        <td>42</td>
+        <td><code>voice_mode</code></td>
+        <td><code>_init_voice_mode</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>tools/voice_mode_tool.py</code></td>
+      </tr>
+      <tr>
+        <td>43</td>
+        <td><code>plugin_manager</code></td>
+        <td><code>_init_plugin_manager</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>plugins/manager.py</code></td>
+      </tr>
+      <tr>
+        <td>44</td>
+        <td><code>skill_hub</code></td>
+        <td><code>_init_skill_hub</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>evolution/skill_hub.py</code></td>
+      </tr>
+      <tr>
+        <td>45</td>
+        <td><code>async_delegator</code></td>
+        <td><code>_init_async_delegator</code></td>
+        <td><span class="tag tag-orange">降级</span></td>
+        <td><code>tools/async_delegation.py</code></td>
+      </tr>
+    </table>
+
+    <p style="color: var(--text-secondary)">
+      （共80+子系统，以上列出45个核心模块，完整列表见
+      <code>dependencies.py</code>）
+    </p>
+
+    <hr />
+
+    <!-- ===== Part 3: 工具路径接入 ===== -->
+    <h2>三、已接入的模块（路径2：工具注册中心）</h2>
+
+    <div class="success-box">
+      <p>
+        通过 <code>tools/registry.py</code> 的
+        <code>register_default_tools()</code> 注册，LLM 可通过 function calling
+        调用。
+      </p>
+    </div>
+
+    <table>
+      <tr>
+        <th>工具模块</th>
+        <th>工具数量</th>
+        <th>工具列表</th>
+      </tr>
+      <tr>
+        <td><code>file_tools.py</code></td>
+        <td>7</td>
+        <td>
+          file_read, file_list, file_grep, file_search, file_edit,
+          incremental_edit, multi_file_edit
+        </td>
+      </tr>
+      <tr>
+        <td><code>file_parse_tools.py</code></td>
+        <td>4</td>
+        <td>pdf_parse, xlsx_parse, docx_parse, ocr_extract</td>
+      </tr>
+      <tr>
+        <td><code>vision_tools.py</code></td>
+        <td>1</td>
+        <td>vision_understand</td>
+      </tr>
+      <tr>
+        <td><code>memory_tools.py</code></td>
+        <td>4</td>
+        <td>memory_recall, memory_search, memory_store, knowledge_query</td>
+      </tr>
+      <tr>
+        <td><code>code_tools.py</code></td>
+        <td>6</td>
+        <td>
+          code_generate, code_analyze, code_fix, shell_exec, code_review,
+          csv_analyze
+        </td>
+      </tr>
+      <tr>
+        <td><code>network_tools.py</code></td>
+        <td>3</td>
+        <td>web_search, web_fetch, chart_generate</td>
+      </tr>
+      <tr>
+        <td><code>cognition_tools.py</code></td>
+        <td>3</td>
+        <td>emotion_detect, scene_analyze, self_reflect</td>
+      </tr>
+      <tr>
+        <td><code>system_tools.py</code></td>
+        <td>9</td>
+        <td>
+          ask_clarification, context_manage, preview_execution,
+          rollback_changes, file_dedup, log_view, shell_generate,
+          voice_interact, get_active_file
+        </td>
+      </tr>
+      <tr>
+        <td><code>daily_tools.py</code></td>
+        <td>9</td>
+        <td>
+          task_manage, calendar, reminder_set, note_take, system_status,
+          task_priority, task_dependency, batch_task, task_analytics
+        </td>
+      </tr>
+      <tr>
+        <td><code>lsp_tools.py</code></td>
+        <td>6</td>
+        <td>
+          lsp_completion, lsp_diagnostics, lsp_hover, lsp_definition,
+          lsp_references, lsp_symbols
+        </td>
+      </tr>
+      <tr>
+        <td><code>desktop_tools.py</code></td>
+        <td>4</td>
+        <td>
+          desktop_automate, desktop_screenshot, desktop_window,
+          desktop_clipboard
+        </td>
+      </tr>
+      <tr>
+        <td><code>browser_tools.py</code></td>
+        <td>7</td>
+        <td>
+          browser_agent, browser_navigate, browser_screenshot, browser_click,
+          browser_type, browser_get_text, browser_fill_form
+        </td>
+      </tr>
+      <tr>
+        <td><code>perception_tools.py</code></td>
+        <td>4</td>
+        <td>screen_parse, action_verify, smart_wait, speech_transcribe</td>
+      </tr>
+      <tr>
+        <td><code>network_enhanced_tools.py</code></td>
+        <td>3</td>
+        <td>image_generate, skill_create, message_push</td>
+      </tr>
+      <tr>
+        <td><code>daily_enhanced_tools.py</code></td>
+        <td>3</td>
+        <td>morning_brief, natural_schedule, skill_share</td>
+      </tr>
+      <tr>
+        <td><code>homeassistant_tool.py</code></td>
+        <td>3</td>
+        <td>ha_control, ha_scene, ha_sensor</td>
+      </tr>
+      <tr>
+        <td><code>session_search_tool.py</code></td>
+        <td>1</td>
+        <td>session_search（条件注册）</td>
+      </tr>
+      <tr>
+        <td><code>clarify_tool.py</code></td>
+        <td>1</td>
+        <td>clarify</td>
+      </tr>
+      <tr>
+        <td><code>todo_tool.py</code></td>
+        <td>1</td>
+        <td>todo</td>
+      </tr>
+      <tr>
+        <td><code>write_approval_tool.py</code></td>
+        <td>1</td>
+        <td>write_approval</td>
+      </tr>
+      <tr>
+        <td><code>code_execution_tool.py</code></td>
+        <td>1</td>
+        <td>code_execution</td>
+      </tr>
+      <tr>
+        <td><code>delegate_tool.py</code></td>
+        <td>1</td>
+        <td>delegate_task</td>
+      </tr>
+      <tr>
+        <td><code>voice_mode_tool.py</code></td>
+        <td>1</td>
+        <td>voice_mode</td>
+      </tr>
+      <tr>
+        <td><code>sanbao_tools.py</code></td>
+        <td>6</td>
+        <td>
+          sanbao_ask, sanbao_predict, sanbao_diagnose, sanbao_train,
+          sanbao_feedback, sanbao_status
+        </td>
+      </tr>
+      <tr>
+        <td><code>auto_discovery.py</code></td>
+        <td>动态</td>
+        <td>AST 扫描自动发现</td>
+      </tr>
+    </table>
+
+    <hr />
+
+    <!-- ===== Part 4: 未接入模块 ===== -->
+    <h2>四、未接入主循环的模块 — 完整清单</h2>
+
+    <div class="danger-box">
+      <p>
+        以下模块<strong>存在但不参与主循环</strong>。分三类：需要接入、可选接入、待决策。
+      </p>
+    </div>
+
+    <h3>4.1 需要立即接入的模块（P0）</h3>
+
+    <table>
+      <tr>
+        <th>#</th>
+        <th>模块</th>
+        <th>文件</th>
+        <th>当前状态</th>
+        <th>接入方式</th>
+        <th>原因</th>
+      </tr>
+
+      <tr>
+        <td><span class="tag tag-red">1</span></td>
+        <td><strong>Kanban 多代理可视化</strong></td>
+        <td><code>tools/kanban_swarm.py</code></td>
+        <td>刚创建，未注册</td>
+        <td>路径2：工具注册</td>
+        <td>P2-1 审计产物，Fanout/Orchestrator 运行状态可视化</td>
+      </tr>
+
+      <tr>
+        <td><span class="tag tag-red">2</span></td>
+        <td><strong>Cronjob 自动化模板</strong></td>
+        <td><code>tools/cronjob_tools.py</code></td>
+        <td>刚创建，未注册</td>
+        <td>路径2：工具注册</td>
+        <td>P2-3 审计产物，定时任务 Agent 能力</td>
+      </tr>
+
+      <tr>
+        <td><span class="tag tag-red">3</span></td>
+        <td><strong>Windows UIA 自动化</strong></td>
+        <td><code>tools/windows_uia.py</code></td>
+        <td>刚创建，未注册</td>
+        <td>路径2：工具注册</td>
+        <td>P2-4 审计产物，精确桌面自动化</td>
+      </tr>
+
+      <tr>
+        <td><span class="tag tag-red">4</span></td>
+        <td><strong>Evolution V2 引擎</strong></td>
+        <td><code>evolution/v2_engine.py</code></td>
+        <td>已实现，仅在 <code>orchestrator.py</code> 中引用</td>
+        <td>路径1：子系统注册</td>
+        <td>V2 代码自进化未接入依赖图</td>
+      </tr>
+
+      <tr>
+        <td><span class="tag tag-red">5</span></td>
+        <td><strong>ToT 深度规划器</strong></td>
+        <td><code>loop/tot_planner.py</code></td>
+        <td>已实现，未被 planner 调用</td>
+        <td>路径1：在 planner 中集成</td>
+        <td>Tree-of-Thought 多路径搜索未启用</td>
+      </tr>
+
+      <tr>
+        <td><span class="tag tag-red">6</span></td>
+        <td><strong>Debater 辩论式推理</strong></td>
+        <td><code>loop/debater.py</code></td>
+        <td>已实现，未接入 controller</td>
+        <td>路径1：在 controller 中集成</td>
+        <td>辩论式决策未被主循环调用</td>
+      </tr>
+    </table>
+
+    <h3>4.2 需要接入的模块（P1）</h3>
+
+    <table>
+      <tr>
+        <th>#</th>
+        <th>模块</th>
+        <th>文件</th>
+        <th>当前状态</th>
+        <th>接入方式</th>
+      </tr>
+
+      <tr>
+        <td><span class="tag tag-orange">7</span></td>
+        <td><strong>LSP 客户端管理器</strong></td>
+        <td><code>lsp/client_manager.py</code></td>
+        <td>工具已注册，但 LSP 客户端未初始化</td>
+        <td>路径1 + 路径4</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-orange">8</span></td>
+        <td><strong>LSP 完整栈</strong></td>
+        <td>
+          <code>lsp/completion_provider.py</code>,
+          <code>diagnostics_provider.py</code>, <code>protocol.py</code>,
+          <code>servers.py</code>, <code>transport.py</code>,
+          <code>types.py</code>, <code>workspace.py</code>
+        </td>
+        <td>工具已注册，底层未初始化</td>
+        <td>路径1</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-orange">9</span></td>
+        <td><strong>MCP 日志/进度/采样</strong></td>
+        <td>
+          <code>mcp/logging.py</code>, <code>progress.py</code>,
+          <code>sampling.py</code>
+        </td>
+        <td>已实现，仅 server_manager 使用</td>
+        <td>路径4：确保被调用</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-orange">10</span></td>
+        <td><strong>Vision 多模态管道</strong></td>
+        <td><code>tools/vision_pipeline.py</code></td>
+        <td>已实现，vision_tools 工具已注册但管道未完整接入</td>
+        <td>路径4</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-orange">11</span></td>
+        <td><strong>框架集成工具</strong></td>
+        <td><code>tools/framework_integration.py</code></td>
+        <td>已实现，未注册到工具</td>
+        <td>路径2</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-orange">12</span></td>
+        <td><strong>浏览器自动化引擎</strong></td>
+        <td><code>tools/browser_automation.py</code></td>
+        <td>已实现，browser_tools 已注册但底层引擎未初始化</td>
+        <td>路径1</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-orange">13</span></td>
+        <td><strong>工具结果缓存</strong></td>
+        <td><code>tools/tool_result_cache.py</code></td>
+        <td>已接入子系统，但 cache 使用范围有限</td>
+        <td>路径4</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-orange">14</span></td>
+        <td><strong>工具搜索</strong></td>
+        <td><code>tools/tool_search.py</code></td>
+        <td>已接入子系统，但语义搜索未启用</td>
+        <td>路径4</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-orange">15</span></td>
+        <td><strong>工具集采样</strong></td>
+        <td><code>tools/toolset_sampling.py</code></td>
+        <td>已实现，未广泛使用</td>
+        <td>路径4</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-orange">16</span></td>
+        <td><strong>Robustness 韧性层</strong></td>
+        <td><code>loop/robustness.py</code></td>
+        <td>已实现，未被 controller 调用</td>
+        <td>路径1</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-orange">17</span></td>
+        <td><strong>Reflection Application</strong></td>
+        <td><code>loop/reflection_application.py</code></td>
+        <td>已实现，reflection_applier 已接入但 application 未用</td>
+        <td>路径4</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-orange">18</span></td>
+        <td><strong>Independent Eval Service</strong></td>
+        <td><code>evaluation/independent_service.py</code></td>
+        <td>已实现，未接入依赖图</td>
+        <td>路径1</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-orange">19</span></td>
+        <td><strong>AB Comparator</strong></td>
+        <td><code>evaluation/ab_comparator.py</code></td>
+        <td>已实现，eval_runner 接入但 AB 未用</td>
+        <td>路径4</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-orange">20</span></td>
+        <td><strong>Golden Eval Set</strong></td>
+        <td><code>evaluation/golden_eval_set.py</code></td>
+        <td>已实现，未接入</td>
+        <td>路径4</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-orange">21</span></td>
+        <td><strong>Assertion Validator</strong></td>
+        <td><code>evaluation/assertion_validator.py</code></td>
+        <td>已实现，未接入</td>
+        <td>路径4</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-orange">22</span></td>
+        <td><strong>Eval Gate</strong></td>
+        <td><code>evaluation/eval_gate.py</code></td>
+        <td>已实现，未接入</td>
+        <td>路径4</td>
+      </tr>
+    </table>
+
+    <h3>4.3 可选接入的模块（P2）</h3>
+
+    <table>
+      <tr>
+        <th>#</th>
+        <th>模块</th>
+        <th>文件</th>
+        <th>当前状态</th>
+        <th>是否需要</th>
+      </tr>
+
+      <tr>
+        <td><span class="tag tag-blue">23</span></td>
+        <td><strong>LLM 凭据池</strong></td>
+        <td>
+          <code>llm/credential_pool.py</code>,
+          <code>credential_sources.py</code>,
+          <code>credential_persistence.py</code>
+        </td>
+        <td>已实现，provider 内部已使用</td>
+        <td><span class="tag tag-green">✓ 已间接接入</span></td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-blue">24</span></td>
+        <td><strong>LLM 流式诊断</strong></td>
+        <td><code>llm/stream_diag.py</code></td>
+        <td>已实现，未在生产环境启用</td>
+        <td><span class="tag tag-orange">P2</span> 调试工具</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-blue">25</span></td>
+        <td><strong>LLM 队列</strong></td>
+        <td><code>llm/queue.py</code></td>
+        <td>已实现，未接入</td>
+        <td><span class="tag tag-orange">P2</span> 高并发场景</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-blue">26</span></td>
+        <td><strong>LLM 路由</strong></td>
+        <td><code>llm/router.py</code></td>
+        <td>已实现，provider 内部使用</td>
+        <td><span class="tag tag-green">✓ 已间接接入</span></td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-blue">27</span></td>
+        <td><strong>LLM 辅助客户端</strong></td>
+        <td><code>llm/auxiliary_client.py</code></td>
+        <td>已实现，未接入</td>
+        <td><span class="tag tag-orange">P2</span> 辅助推理</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-blue">28</span></td>
+        <td><strong>MoA 聚合器</strong></td>
+        <td><code>llm/moa_aggregator.py</code></td>
+        <td>已实现，未接入</td>
+        <td><span class="tag tag-orange">P2</span> Mixture-of-Agents</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-blue">29</span></td>
+        <td><strong>OAuth 凭据</strong></td>
+        <td><code>llm/oauth_credentials.py</code></td>
+        <td>已实现，引擎中有引用</td>
+        <td><span class="tag tag-green">✓ 已间接接入</span></td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-blue">30</span></td>
+        <td><strong>模型成本守卫</strong></td>
+        <td><code>llm/model_cost_guard.py</code></td>
+        <td>已实现，未接入</td>
+        <td><span class="tag tag-orange">P2</span> 成本控制</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-blue">31</span></td>
+        <td><strong>Gateway 平台适配器</strong></td>
+        <td>
+          <code>gateway/platforms/matrix_adapter.py</code>,
+          <code>relay_adapter.py</code>, <code>signal_adapter.py</code>,
+          <code>slack_adapter.py</code>, <code>webhook_adapter.py</code>,
+          <code>whatsapp_adapter.py</code>
+        </td>
+        <td>已实现，gateway_dispatcher 已接入</td>
+        <td><span class="tag tag-green">✓ 已间接接入</span></td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-blue">32</span></td>
+        <td><strong>Gateway 取证</strong></td>
+        <td><code>gateway/forensics.py</code></td>
+        <td>已实现，未接入</td>
+        <td><span class="tag tag-orange">P2</span> 调试工具</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-blue">33</span></td>
+        <td><strong>Gateway 镜像</strong></td>
+        <td><code>gateway/mirror.py</code></td>
+        <td>已实现，未接入</td>
+        <td><span class="tag tag-orange">P2</span> 消息镜像</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-blue">34</span></td>
+        <td><strong>Gateway 配对</strong></td>
+        <td><code>gateway/pairing.py</code></td>
+        <td>已实现，未接入</td>
+        <td><span class="tag tag-orange">P2</span> 设备配对</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-blue">35</span></td>
+        <td><strong>Gateway 重启</strong></td>
+        <td><code>gateway/restart.py</code></td>
+        <td>已实现，未接入</td>
+        <td><span class="tag tag-orange">P2</span> 运维</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-blue">36</span></td>
+        <td><strong>Gateway 斜杠命令</strong></td>
+        <td><code>gateway/slash_commands.py</code></td>
+        <td>已实现，未接入</td>
+        <td><span class="tag tag-orange">P2</span> 快捷指令</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-blue">37</span></td>
+        <td><strong>基础设施层</strong></td>
+        <td>
+          <code>infrastructure/api_gateway.py</code>, <code>backup.py</code>,
+          <code>distributed_lock.py</code>, <code>doctor.py</code>,
+          <code>message_queue.py</code>, <code>sharding.py</code>
+        </td>
+        <td>已实现，未接入依赖图</td>
+        <td><span class="tag tag-orange">P2</span> 运维/集群</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-blue">38</span></td>
+        <td><strong>安全工具</strong></td>
+        <td>
+          <code>security/osv_check.py</code>, <code>runtime_control.py</code>,
+          <code>sensitive_detector.py</code>,
+          <code>streaming_scrubber.py</code>, <code>threat_patterns.py</code>,
+          <code>write_approval.py</code>
+        </td>
+        <td>部分已接入（输出护栏/SSL/路径），其余未接入</td>
+        <td><span class="tag tag-orange">P2</span> 安全加固</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-blue">39</span></td>
+        <td><strong>Skill 系统</strong></td>
+        <td>
+          <code>skill/skill_bundles.py</code>, <code>skill/skill_sync.py</code>
+        </td>
+        <td>skill_registry 已接入，bundles/sync 未用</td>
+        <td><span class="tag tag-orange">P2</span> 技能同步</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-blue">40</span></td>
+        <td><strong>Orchestration 层</strong></td>
+        <td>
+          <code>orchestration/executor.py</code>,
+          <code>result_aggregator.py</code>, <code>task_dispatcher.py</code>
+        </td>
+        <td>agent_factory 已接入，其余未用</td>
+        <td><span class="tag tag-orange">P2</span> 编排增强</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-blue">41</span></td>
+        <td><strong>Memory 增强</strong></td>
+        <td>
+          <code>memory/background_review.py</code>,
+          <code>experience_migrator.py</code>, <code>insights.py</code>,
+          <code>memory_manager.py</code>, <code>providers.py</code>
+        </td>
+        <td>engine 已接入，增强模块未用</td>
+        <td><span class="tag tag-orange">P2</span> 记忆增强</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-blue">42</span></td>
+        <td><strong>CLI 工具</strong></td>
+        <td>
+          <code>cli/cli_output.py</code>, <code>clipboard.py</code>,
+          <code>curses_tui.py</code>, <code>display_formatter.py</code>,
+          <code>pty_bridge.py</code>, <code>shell_completion.py</code>
+        </td>
+        <td>CLI 入口使用部分，其余独立</td>
+        <td><span class="tag tag-orange">P2</span> CLI 体验</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-blue">43</span></td>
+        <td><strong>Models 层</strong></td>
+        <td>
+          <code>models/chat.py</code>, <code>evolution.py</code>,
+          <code>memory.py</code>, <code>plan.py</code>, <code>skill.py</code>
+        </td>
+        <td>已定义，但非核心路径</td>
+        <td><span class="tag tag-green">✓ 已间接接入</span></td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-blue">44</span></td>
+        <td><strong>Scheduler</strong></td>
+        <td><code>scheduler/blueprint_catalog.py</code></td>
+        <td>cron 已接入，catalog 未用</td>
+        <td><span class="tag tag-orange">P2</span> 蓝图目录</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-blue">45</span></td>
+        <td><strong>Desktop</strong></td>
+        <td>
+          <code>desktop/coordinate_system.py</code>,
+          <code>desktop_controller.py</code>
+        </td>
+        <td>desktop_tools 已注册，底层未初始化</td>
+        <td><span class="tag tag-orange">P2</span> 桌面增强</td>
+      </tr>
+    </table>
+
+    <hr />
+
+    <!-- ===== Part 5: 接入方案 ===== -->
+    <h2>五、完整接入方案</h2>
+
+    <h3>5.1 P0 立即接入（6项）</h3>
+
+    <div class="card">
+      <h4>P0-1：注册 Kanban/Cronjob/UIA 三个新工具</h4>
+      <pre><code># 在 register_default_tools() 末尾添加：
+from agent.tools.cronjob_tools import register_cronjob_tools
+from agent.tools.windows_uia import register_uia_tools
+register_cronjob_tools(registry)
+count += 3
+register_uia_tools(registry)
+count += 3</code></pre>
+    </div>
+
+    <div class="card">
+      <h4>P0-2：Evolution V2 引擎接入依赖图</h4>
+      <pre><code># 在 dependencies.py 的 SUBSYSTEM_DEPS 中添加：
+SubsystemSpec("evolution_v2", "_init_evolution_v2", ("evolution",), critical=False),
+
+# 在 engine.py 中添加：
+async def _init_evolution_v2(self) -> None:
+    from agent.evolution.v2_engine import V2EvolutionEngine
+    self.evolution_v2 = V2EvolutionEngine(self.evolution, self.memory)</code></pre>
+    </div>
+
+    <div class="card">
+      <h4>P0-3：ToT 规划器集成到 Planner</h4>
+      <pre><code># 在 loop/planner.py 的 plan() 方法中：
+# 当 complexity == "complex" 时切换到 ToT 规划器
+if complexity == "complex":
+    from agent.loop.tot_planner import ToTPlanner
+    tot = ToTPlanner(self.llm)
+    plan = await tot.plan(input_text, budget, context)
+else:
+    plan = await self._plan_standard(input_text, budget, context)</code></pre>
+    </div>
+
+    <div class="card">
+      <h4>P0-4：Debater 集成到 Controller</h4>
+      <pre><code># 在 loop/controller.py 的 evaluating 阶段：
+# 当存在多个候选方案时，触发辩论式决策
+if len(candidates) > 1 and self._should_debate(context):
+    from agent.loop.debater import Debater
+    debater = Debater(self.llm)
+    winner = await debater.debate(candidates, context)
+    context.best_candidate = winner</code></pre>
+    </div>
+
+    <h3>5.2 P1 近期接入（16项）</h3>
+
+    <table>
+      <tr>
+        <th>#</th>
+        <th>模块</th>
+        <th>接入方式</th>
+        <th>改动文件</th>
+        <th>预计工时</th>
+      </tr>
+      <tr>
+        <td>7</td>
+        <td>LSP 客户端初始化</td>
+        <td><code>dependencies.py</code> + <code>engine.py</code></td>
+        <td>2</td>
+        <td>0.5天</td>
+      </tr>
+      <tr>
+        <td>8</td>
+        <td>LSP 完整栈</td>
+        <td>同上 + <code>lsp_tools.py</code> 注入已初始化客户端</td>
+        <td>3</td>
+        <td>1天</td>
+      </tr>
+      <tr>
+        <td>9</td>
+        <td>MCP 日志/进度/采样</td>
+        <td>在 <code>server_manager.py</code> 中确保引用</td>
+        <td>1</td>
+        <td>0.5天</td>
+      </tr>
+      <tr>
+        <td>10</td>
+        <td>Vision 管道</td>
+        <td><code>vision_tools.py</code> 注入 <code>VisionPipeline</code></td>
+        <td>1</td>
+        <td>0.5天</td>
+      </tr>
+      <tr>
+        <td>11</td>
+        <td>框架集成</td>
+        <td><code>register_default_tools()</code> 注册</td>
+        <td>1</td>
+        <td>0.5天</td>
+      </tr>
+      <tr>
+        <td>12</td>
+        <td>浏览器引擎</td>
+        <td><code>dependencies.py</code> 子系统注册</td>
+        <td>2</td>
+        <td>1天</td>
+      </tr>
+      <tr>
+        <td>13</td>
+        <td>工具结果缓存</td>
+        <td>在 executor 中传播缓存上下文</td>
+        <td>1</td>
+        <td>0.5天</td>
+      </tr>
+      <tr>
+        <td>14</td>
+        <td>工具搜索</td>
+        <td>在 planner 工具选择阶段启用语义搜索</td>
+        <td>1</td>
+        <td>0.5天</td>
+      </tr>
+      <tr>
+        <td>15</td>
+        <td>工具集采样</td>
+        <td>在 controller 初始化时启用</td>
+        <td>1</td>
+        <td>0.5天</td>
+      </tr>
+      <tr>
+        <td>16</td>
+        <td>Robustness 韧性层</td>
+        <td>在 controller 异常处理中注入</td>
+        <td>1</td>
+        <td>0.5天</td>
+      </tr>
+      <tr>
+        <td>17</td>
+        <td>Reflection Application</td>
+        <td>在 reflection_applier 中引用</td>
+        <td>1</td>
+        <td>0.5天</td>
+      </tr>
+      <tr>
+        <td>18</td>
+        <td>Independent Eval</td>
+        <td><code>dependencies.py</code> 子系统注册</td>
+        <td>2</td>
+        <td>0.5天</td>
+      </tr>
+      <tr>
+        <td>19</td>
+        <td>AB Comparator</td>
+        <td><code>eval_runner.py</code> 中引用</td>
+        <td>1</td>
+        <td>0.5天</td>
+      </tr>
+      <tr>
+        <td>20</td>
+        <td>Golden Eval Set</td>
+        <td><code>eval_runner.py</code> 中引用</td>
+        <td>1</td>
+        <td>0.5天</td>
+      </tr>
+      <tr>
+        <td>21</td>
+        <td>Assertion Validator</td>
+        <td><code>eval_runner.py</code> 中引用</td>
+        <td>1</td>
+        <td>0.5天</td>
+      </tr>
+      <tr>
+        <td>22</td>
+        <td>Eval Gate</td>
+        <td><code>dependencies.py</code> 子系统注册</td>
+        <td>2</td>
+        <td>0.5天</td>
+      </tr>
+    </table>
+
+    <h3>5.3 P2 长期接入（23项）</h3>
+
+    <table>
+      <tr>
+        <th>#</th>
+        <th>模块</th>
+        <th>是否需要</th>
+        <th>理由</th>
+        <th>接入方式</th>
+      </tr>
+      <tr>
+        <td>23</td>
+        <td>LLM 凭据池</td>
+        <td><span class="tag tag-green">✓ 已间接接入</span></td>
+        <td>provider 内部使用</td>
+        <td>—</td>
+      </tr>
+      <tr>
+        <td>24</td>
+        <td>LLM 流式诊断</td>
+        <td><span class="tag tag-orange">调试工具</span></td>
+        <td>仅开发环境</td>
+        <td>环境变量开关</td>
+      </tr>
+      <tr>
+        <td>25</td>
+        <td>LLM 队列</td>
+        <td><span class="tag tag-orange">高并发</span></td>
+        <td>用户量>1000时</td>
+        <td><code>dependencies.py</code></td>
+      </tr>
+      <tr>
+        <td>26</td>
+        <td>LLM 路由</td>
+        <td><span class="tag tag-green">✓ 已间接接入</span></td>
+        <td>provider 内部使用</td>
+        <td>—</td>
+      </tr>
+      <tr>
+        <td>27</td>
+        <td>LLM 辅助客户端</td>
+        <td><span class="tag tag-orange">辅助推理</span></td>
+        <td>轻量级子任务</td>
+        <td><code>dependencies.py</code></td>
+      </tr>
+      <tr>
+        <td>28</td>
+        <td>MoA 聚合器</td>
+        <td><span class="tag tag-orange">实验性</span></td>
+        <td>多模型聚合</td>
+        <td><code>dependencies.py</code></td>
+      </tr>
+      <tr>
+        <td>29</td>
+        <td>OAuth 凭据</td>
+        <td><span class="tag tag-green">✓ 已间接接入</span></td>
+        <td>引擎中引用</td>
+        <td>—</td>
+      </tr>
+      <tr>
+        <td>30</td>
+        <td>模型成本守卫</td>
+        <td><span class="tag tag-orange">成本控制</span></td>
+        <td>生产环境</td>
+        <td><code>dependencies.py</code></td>
+      </tr>
+      <tr>
+        <td>31-36</td>
+        <td>Gateway 增强</td>
+        <td><span class="tag tag-orange">按需</span></td>
+        <td>多平台部署时</td>
+        <td><code>gateway/dispatcher.py</code></td>
+      </tr>
+      <tr>
+        <td>37</td>
+        <td>基础设施层</td>
+        <td><span class="tag tag-orange">集群部署</span></td>
+        <td>多实例部署时</td>
+        <td><code>dependencies.py</code></td>
+      </tr>
+      <tr>
+        <td>38</td>
+        <td>安全工具</td>
+        <td><span class="tag tag-orange">安全加固</span></td>
+        <td>生产环境</td>
+        <td><code>dependencies.py</code></td>
+      </tr>
+      <tr>
+        <td>39</td>
+        <td>Skill 同步</td>
+        <td><span class="tag tag-orange">多实例</span></td>
+        <td>多实例部署时</td>
+        <td><code>dependencies.py</code></td>
+      </tr>
+      <tr>
+        <td>40</td>
+        <td>Orchestration 增强</td>
+        <td><span class="tag tag-orange">大规模编排</span></td>
+        <td>Agent数>10时</td>
+        <td><code>agent_factory.py</code></td>
+      </tr>
+      <tr>
+        <td>41</td>
+        <td>Memory 增强</td>
+        <td><span class="tag tag-orange">记忆优化</span></td>
+        <td>记忆量>10万时</td>
+        <td><code>dependencies.py</code></td>
+      </tr>
+      <tr>
+        <td>42</td>
+        <td>CLI 工具</td>
+        <td><span class="tag tag-orange">独立</span></td>
+        <td>CLI 入口独立运行</td>
+        <td><code>cli_tui.py</code></td>
+      </tr>
+      <tr>
+        <td>43</td>
+        <td>Models 层</td>
+        <td><span class="tag tag-green">✓ 已间接接入</span></td>
+        <td>数据类定义</td>
+        <td>—</td>
+      </tr>
+      <tr>
+        <td>44</td>
+        <td>Blueprint Catalog</td>
+        <td><span class="tag tag-orange">模板管理</span></td>
+        <td>Cronjob 扩展</td>
+        <td><code>cron.py</code></td>
+      </tr>
+      <tr>
+        <td>45</td>
+        <td>Desktop</td>
+        <td><span class="tag tag-orange">桌面自动化</span></td>
+        <td>桌面场景</td>
+        <td><code>dependencies.py</code></td>
+      </tr>
+    </table>
+
+    <hr />
+
+    <!-- ===== Part 6: 总结 ===== -->
+    <h2>六、总结与行动路线图</h2>
+
+    <div class="grid grid-3">
+      <div class="card" style="text-align: center">
+        <div style="font-size: 1.5rem; font-weight: 800; color: var(--red)">
+          6
+        </div>
+        <div>P0 立即接入</div>
+        <div style="font-size: 0.8rem; color: var(--text-secondary)">
+          预计3天
+        </div>
+      </div>
+      <div class="card" style="text-align: center">
+        <div style="font-size: 1.5rem; font-weight: 800; color: var(--orange)">
+          16
+        </div>
+        <div>P1 近期接入</div>
+        <div style="font-size: 0.8rem; color: var(--text-secondary)">
+          预计8天
+        </div>
+      </div>
+      <div class="card" style="text-align: center">
+        <div style="font-size: 1.5rem; font-weight: 800; color: var(--blue)">
+          23
+        </div>
+        <div>P2 长期/按需</div>
+        <div style="font-size: 0.8rem; color: var(--text-secondary)">
+          按需触发
+        </div>
+      </div>
+    </div>
+
+    <div class="success-box">
+      <h3>核心发现</h3>
+      <ol>
+        <li>
+          <strong>家百星整体接入率 ~80%</strong>：200+ 模块中约 160 个已通过 4
+          条路径接入主循环，架构组织良好。
+        </li>
+        <li>
+          <strong>最大缺口：新创建的工具</strong>（kanban_swarm, cronjob_tools,
+          windows_uia）未注册到 <code>register_default_tools()</code>。
+        </li>
+        <li>
+          <strong>ToT 和 Debater 是"沉睡的金矿"</strong
+          >：已实现但未被主循环调用，是家百星相比 Hermes 的规划能力优势。
+        </li>
+        <li>
+          <strong>Evolution V2 未接入依赖图</strong>：V2
+          代码自进化是家百星核心差异化，但未正式接入子系统。
+        </li>
+        <li>
+          <strong>评估系统大部分未启用</strong>：AB Comparator、Golden
+          Eval、Assertion Validator 等已实现但未接入。
+        </li>
+        <li>
+          <strong>LSP 完整栈底层未初始化</strong>：工具已注册但 LSP
+          客户端未启动，工具调用会失败。
+        </li>
+      </ol>
+    </div>
+
+    <div class="highlight-box">
+      <h3>家百星需要的接入（按优先级排序）</h3>
+      <table>
+        <tr>
+          <th>优先级</th>
+          <th>模块</th>
+          <th>家百星是否需要</th>
+          <th>理由</th>
+        </tr>
+        <tr>
+          <td><span class="tag tag-red">P0</span></td>
+          <td>Kanban/Cronjob/UIA 工具注册</td>
+          <td><strong>必须</strong></td>
+          <td>刚实施的审计产物，不注册则形同虚设</td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-red">P0</span></td>
+          <td>Evolution V2 接入</td>
+          <td><strong>必须</strong></td>
+          <td>家百星核心差异化能力，当前未接入</td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-red">P0</span></td>
+          <td>ToT 规划器启用</td>
+          <td><strong>必须</strong></td>
+          <td>家百星 vs Hermes 的规划优势，已实现未启用</td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-red">P0</span></td>
+          <td>Debater 辩论式推理</td>
+          <td><strong>建议</strong></td>
+          <td>多方案决策的质量保证，已实现未启用</td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-orange">P1</span></td>
+          <td>LSP 完整栈初始化</td>
+          <td><strong>必须</strong></td>
+          <td>lsp_tools 已注册但底层未初始化</td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-orange">P1</span></td>
+          <td>Vision 管道接入</td>
+          <td><strong>必须</strong></td>
+          <td>多模态能力的基础设施</td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-orange">P1</span></td>
+          <td>评估系统接入</td>
+          <td><strong>建议</strong></td>
+          <td>质量保障必备，AB/Golden/Gate 已实现</td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-orange">P1</span></td>
+          <td>Robustness 韧性层</td>
+          <td><strong>建议</strong></td>
+          <td>生产环境异常处理增强</td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-blue">P2</span></td>
+          <td>LLM 队列/模型成本守卫</td>
+          <td><strong>高并发时</strong></td>
+          <td>用户量>1000 时需要</td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-blue">P2</span></td>
+          <td>基础设施层</td>
+          <td><strong>集群部署时</strong></td>
+          <td>多实例部署时需要</td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-blue">P2</span></td>
+          <td>Gateway 增强</td>
+          <td><strong>多平台时</strong></td>
+          <td>新平台接入时需要</td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-blue">P2</span></td>
+          <td>安全工具</td>
+          <td><strong>按需</strong></td>
+          <td>OSV/威胁检测/敏感信息检测</td>
+        </tr>
+      </table>
+    </div>
+
+    <p
+      style="
+        text-align: center;
+        color: var(--text-secondary);
+        margin-top: 2rem;
+        padding-top: 1rem;
+        border-top: 1px solid var(--border);
+      "
+    >
+      家百星 V5.0 模块接入主循环全面审计 | 日期：2026-07-18
+    </p>
+  </body>
+</html>

@@ -100,12 +100,12 @@ describe('PersistenceService 接口兼容性', () => {
         limit: 5,
       });
 
-      expect(mockEngine.preciseHybridRetrieval).toHaveBeenCalledWith({
-        query: '测试查询',
-        scene: 'coding',
-        emotion: undefined,
-        topK: 5,
-      });
+      expect(mockEngine.preciseHybridRetrieval).toHaveBeenCalledWith(
+        '测试查询',
+        'coding',
+        undefined,
+        5
+      );
       expect(results).toHaveLength(1);
       expect(results[0].id).toBe('mem-1');
     });
@@ -163,13 +163,13 @@ describe('PersistenceService 接口兼容性', () => {
       };
 
       service = new PersistenceService(deps);
-      await service.storeFeedback({
-        feedbackType: 'success',
-        rating: 5,
-      });
-
-      // 不抛出异常即表示通过
-      expect(true).toBe(true);
+      // memoryEngine 为 null 时 storeFeedback 应跳过存储且不抛异常
+      await expect(
+        service.storeFeedback({
+          feedbackType: 'success',
+          rating: 5,
+        })
+      ).resolves.not.toThrow();
     });
   });
 

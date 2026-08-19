@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from agent.loop.types import ExecutionPlan, LoopContext, PlanStep
+from agent.core.logger import log_ignored
 
 
 class LLMProtocol(Protocol):
@@ -66,8 +67,8 @@ class DefaultDebater:
         if self.llm:
             try:
                 return await self._llm_debate(plan, input_text)
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(None, "debater.DefaultDebater.debate", _exc)
         return self._rule_based_debate(plan, input_text)
 
     async def _llm_debate(
@@ -116,8 +117,8 @@ class DefaultDebater:
                     quality_score=float(parsed.get("qualityScore", 0.5)),
                     debate_rounds=1,
                 )
-            except (json.JSONDecodeError, ValueError):
-                pass
+            except (json.JSONDecodeError, ValueError) as _exc:
+                log_ignored(None, "debater.DefaultDebater._llm_debate", _exc)
 
         return self._rule_based_debate(plan, input_text)
 
@@ -235,8 +236,8 @@ class DefaultDebater:
                 try:
                     llm_vulns = await self._llm_devils_advocate(plan, input_text)
                     vulnerabilities.extend(llm_vulns)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    log_ignored(None, "debater.DefaultDebater.multi_round_debate", _exc)
 
             # 辩护方回应
             defenses = self._defend_plan(plan, input_text, vulnerabilities)

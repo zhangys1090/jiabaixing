@@ -47,7 +47,6 @@ router.post('/chat', async (req: Request, res: Response) => {
       return;
     }
 
-    // 使用 conversation_id 作为 userId（如果提供），否则使用默认
     const userId = conversation_id || 'default';
     const input = message.trim();
 

@@ -90,6 +90,7 @@
     "test:coverage": "jest --coverage",
     "test:integration": "jest tests/integration",
     "test:e2e": "cd tests/e2e && npx cypress run",
+    "test:e2e:capabilities": "jest tests/e2e/capabilities/ --coverage=false",
     "lint": "eslint",
     "format": "prettier --write src/**/*.ts",
     "format:check": "prettier --check src/**/*.ts",

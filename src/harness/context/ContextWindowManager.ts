@@ -432,4 +432,90 @@ export class ContextWindowManager {
       needsCompression: used > total * this.config.compressionThreshold,
     };
   }
+
+  /**
+   * P1-3: 注入跨会话记忆到上下文窗口
+   *
+   * 在构建上下文时主动召回长期记忆（用户偏好、历史模式、
+   * 相关知识片段），而非仅靠 LLM 主动调用 memory_recall 工具。
+   *
+   * 策略：
+   * 1. 从 crossSessionMemory 提取与当前输入相关的记忆
+   * 2. 按重要性排序，截断到 token 预算内
+   * 3. 注入为 system 消息，确保 LLM 在推理时能利用
+   *
+   * @param messages - 当前消息列表
+   * @param crossSessionMemory - 跨会话记忆条目
+   * @param currentInput - 当前用户输入（用于相关性排序）
+   * @returns 注入记忆后的消息列表
+   */
+  injectCrossSessionMemory(
+    messages: ChatMessage[],
+    crossSessionMemory: CrossSessionMemoryEntry[],
+    currentInput?: string
+  ): ChatMessage[] {
+    if (!crossSessionMemory || crossSessionMemory.length === 0) {
+      return messages;
+    }
+
+    const rawRatio = parseFloat(process.env['MEMORY_INJECT_RATIO'] || '0.1');
+    const memRatio = Number.isFinite(rawRatio) ? rawRatio : 0.1;
+    const maxMemoryTokens = Math.floor(this.config.maxContextTokens * memRatio);
+
+    const sorted = [...crossSessionMemory].sort((a, b) => {
+      const scoreA = a.importance * a.recency;
+      const scoreB = b.importance * b.recency;
+      return scoreB - scoreA;
+    });
+
+    const selected: CrossSessionMemoryEntry[] = [];
+    let usedTokens = 0;
+
+    for (const entry of sorted) {
+      const entryTokens = this.estimateTextTokens(entry.content);
+      if (usedTokens + entryTokens > maxMemoryTokens) break;
+      selected.push(entry);
+      usedTokens += entryTokens;
+    }
+
+    if (selected.length === 0) return messages;
+
+    const memoryLines = selected.map(
+      (e) => `- [${e.type}] ${e.content.substring(0, 200)}`
+    );
+    const memoryBlock = [
+      '【跨会话记忆】以下是从长期记忆中召回的相关信息：',
+      ...memoryLines,
+      '请在推理时参考以上记忆，但以当前对话上下文为准。',
+    ].join('\n');
+
+    const result: ChatMessage[] = [
+      ...messages.slice(0, 1),
+      { role: 'system', content: memoryBlock },
+      ...messages.slice(1),
+    ];
+
+    Logger.info(
+      `🧠 P1-3: 注入跨会话记忆 ${selected.length} 条 (${usedTokens} tokens)`,
+      'ContextWindowManager'
+    );
+
+    return result;
+  }
+}
+
+/** P1-3: 跨会话记忆条目 */
+export interface CrossSessionMemoryEntry {
+  /** 记忆类型（preference/pattern/knowledge/snapshot） */
+  type: string;
+  /** 记忆内容 */
+  content: string;
+  /** 重要性 0-1 */
+  importance: number;
+  /** 时效性 0-1（越近越高） */
+  recency: number;
+  /** 来源会话 ID */
+  sessionId?: string;
+  /** 创建时间 */
+  createdAt?: number;
 }

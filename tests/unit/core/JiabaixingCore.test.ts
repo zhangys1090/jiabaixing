@@ -1,14 +1,16 @@
 /**
  * JiabaixingCore 单元测试
- * 覆盖：classifyIntent、extractFilePath、generateFallbackReply、getTimeContext、
- * processInput 快速/完整路径、generateProactiveMessage、directLLMReply
+ * V5.0 重写：覆盖 processInput（Python后端路由 + Harness路径 + 降级路径）、
+ * generateProactiveMessage、treeOfThoughtReasoning
  */
 
 // ── Mocks must be before imports ──
 
 const mockLLMChat = jest.fn();
 const mockLLMInitialize = jest.fn().mockResolvedValue(undefined);
-const mockLLMHealthCheck = jest.fn().mockResolvedValue({ available: true, message: 'ok' });
+const mockLLMHealthCheck = jest
+  .fn()
+  .mockResolvedValue({ available: true, message: 'ok' });
 const mockLLMAnalyzeCode = jest.fn();
 const mockLLMGenerateModified = jest.fn();
 
@@ -36,17 +38,13 @@ jest.mock('../../../src/persona/PersonaRules', () => ({
   })),
 }));
 
-jest.mock('../../../src/tools/ToolExecutor', () => ({
-  ToolExecutor: jest.fn().mockImplementation(() => ({
-    initialize: jest.fn().mockResolvedValue(undefined),
-    execute: jest.fn().mockResolvedValue('file content'),
-  })),
-}));
-
 jest.mock('../../../src/shared/EventBus', () => ({
   EventBus: {
     emit: jest.fn(),
     on: jest.fn(),
+    startTrace: jest.fn(),
+    failTrace: jest.fn(),
+    endTrace: jest.fn(),
   },
 }));
 
@@ -81,238 +79,100 @@ describe('JiabaixingCore', () => {
     core = new JiabaixingCore();
   });
 
-  // ═══════════════════════════════════════════════════
-  // classifyIntent (v3.3: 已移除，LLM处理意图识别)
-  // ═══════════════════════════════════════════════════
-  describe.skip('intent classification', () => {
-    it('"修改" 关键词触发 modify 意图', () => {
-      const intent = (core as any).classifyIntent('修改 JiabaixingCore.ts');
-      expect(intent).toBe('modify');
+  describe('processInput — Python 后端路由', () => {
+    it('AGENT_BACKEND=python 且 bridge 可用时路由到 Python 后端', async () => {
+      const originalEnv = process.env.AGENT_BACKEND;
+      process.env.AGENT_BACKEND = 'python';
+
+      const mockBridgeResult = {
+        response: 'Python 后端回复',
+        traceId: 'py-trace-001',
+        intent: 'python_backend',
+      };
+      const mockBridge = {
+        processInput: jest.fn().mockResolvedValue(mockBridgeResult),
+      };
+      (core as any).pythonBridgeResolver = () => mockBridge;
+      (core as any).initialized = true;
+
+      const result = await core.processInput('你好', 'user1', 'trace-001');
+
+      expect(mockBridge.processInput).toHaveBeenCalledWith(
+        '你好',
+        'user1',
+        'trace-001',
+        undefined
+      );
+      expect(result.response).toBe('Python 后端回复');
+      expect(result.intent).toBe('python_backend');
+
+      process.env.AGENT_BACKEND = originalEnv;
     });
 
-    it('"重构" 关键词触发 modify 意图', () => {
-      const intent = (core as any).classifyIntent('重构 PersonaRules');
-      expect(intent).toBe('modify');
-    });
+    it('AGENT_BACKEND=python 但 bridge 不可用时走降级路径', async () => {
+      const originalEnv = process.env.AGENT_BACKEND;
+      process.env.AGENT_BACKEND = 'python';
 
-    it('"看" 关键词触发 analyze 意图', () => {
-      const intent = (core as any).classifyIntent('看看这个文件');
-      expect(intent).toBe('analyze');
-    });
-
-    it('"刚才" 关键词触发 context 意图', () => {
-      const intent = (core as any).classifyIntent('刚才说的那个');
-      expect(intent).toBe('context');
-    });
-
-    it('普通对话返回 unknown', () => {
-      const intent = (core as any).classifyIntent('你好');
-      expect(intent).toBe('unknown');
-    });
-  });
-
-  // ═══════════════════════════════════════════════════
-  // extractFilePath (v3.3: 已委托到 DirectExecutor)
-  // ═══════════════════════════════════════════════════
-  describe.skip('extractFilePath', () => {
-    it('从输入中提取 .ts 文件路径', () => {
-      const path = (core as any).extractFilePath('帮我看看 JiabaixingCore.ts');
-      expect(path).toContain('JiabaixingCore.ts');
-    });
-
-    it('从输入中提取 .json 文件路径', () => {
-      const path = (core as any).extractFilePath('修改 package.json');
-      expect(path).toContain('package.json');
-    });
-
-    it('没有文件路径时返回 null', () => {
-      const path = (core as any).extractFilePath('你好世界');
-      expect(path).toBeNull();
-    });
-  });
-
-  // ═══════════════════════════════════════════════════
-  // generateFallbackReply (v3.3: 已委托到 DirectExecutor)
-  // ═══════════════════════════════════════════════════
-  describe.skip('generateFallbackReply', () => {
-    it('"你好" 回复问候', () => {
-      const reply = (core as any).generateFallbackReply('你好');
-      expect(reply).toContain('你好');
-    });
-
-    it('"早安" 回复早晨问候', () => {
-      const reply = (core as any).generateFallbackReply('早安');
-      expect(reply).toContain('早上好');
-      expect(reply).toContain('计划');
-    });
-
-    it('"晚安" 回复晚安', () => {
-      const reply = (core as any).generateFallbackReply('晚安');
-      expect(reply).toContain('晚安');
-    });
-
-    it('"谢谢" 回复不客气', () => {
-      const reply = (core as any).generateFallbackReply('谢谢');
-      expect(reply).toContain('不客气');
-    });
-
-    it('"你是谁" 回复身份介绍', () => {
-      const reply = (core as any).generateFallbackReply('你是谁');
-      expect(reply).toContain('家百星');
-      expect(reply).toContain('秘书');
-    });
-
-    it('"在吗" 回复在', () => {
-      const reply = (core as any).generateFallbackReply('在吗');
-      expect(reply).toContain('在');
-    });
-
-    it('未知输入返回兜底回复', () => {
-      const reply = (core as any).generateFallbackReply('今天天气真好');
-      expect(reply).toContain('收到');
-    });
-  });
-
-  // ═══════════════════════════════════════════════════
-  // getTimeContext (v3.3: 已委托到 ConstitutionPromptBuilder)
-  // ═══════════════════════════════════════════════════
-  describe.skip('getTimeContext', () => {
-    it('清晨 (5-8点)', () => {
-      const ctx = (core as any).getTimeContext(6, 1); // 周一 6am
-      expect(ctx).toContain('清晨');
-      expect(ctx).toContain('周一');
-    });
-
-    it('上午 (9-11点)', () => {
-      const ctx = (core as any).getTimeContext(10, 3); // 周三 10am
-      expect(ctx).toContain('上午');
-      expect(ctx).toContain('周三');
-    });
-
-    it('中午 (12-13点)', () => {
-      const ctx = (core as any).getTimeContext(12, 5);
-      expect(ctx).toContain('中午');
-    });
-
-    it('下午 (14-17点)', () => {
-      const ctx = (core as any).getTimeContext(15, 2);
-      expect(ctx).toContain('下午');
-    });
-
-    it('晚上 (18-21点)', () => {
-      const ctx = (core as any).getTimeContext(20, 4);
-      expect(ctx).toContain('晚上');
-    });
-
-    it('深夜 (22点以后)', () => {
-      const ctx = (core as any).getTimeContext(23, 6);
-      expect(ctx).toContain('深夜');
-    });
-  });
-
-  // ═══════════════════════════════════════════════════
-  // processInput — v3.3: LLM-first架构，processInput内部逻辑已变更
-  // ═══════════════════════════════════════════════════
-  describe.skip('processInput — fast path', () => {
-    beforeEach(async () => {
-      // 注入最小值让初始化通过
-      (core as any).memoryEngine = { stub: true };
-      await core.initialize();
-      jest.clearAllMocks();
-    });
-
-    it('短问候走快速 LLM 路径', async () => {
-      mockLLMChat.mockResolvedValue('你好。有什么需要？');
-      mockPersonaApply.mockImplementation((s: string) => s);
+      (core as any).pythonBridgeResolver = () => null;
+      (core as any).initialized = true;
 
       const result = await core.processInput('你好');
 
-      expect(mockLLMChat).toHaveBeenCalled();
-      // 验证调用包含 system prompt override
-      const chatArgs = mockLLMChat.mock.calls[0];
-      expect(chatArgs[0]).toBe('你好');
-      expect(chatArgs[2]).toBeDefined(); // systemPrompt override
-    });
-
-    it('快速路径失败时降级到本地回复', async () => {
-      mockLLMChat.mockRejectedValue(new Error('LLM down'));
-
-      const result = await core.processInput('你好');
-
-      expect(result.response).toContain('你好');
-      expect(result.intent).toBe('conversation');
-    });
-
-    it('返回结果包含 traceId', async () => {
-      mockLLMChat.mockResolvedValue('test response');
-      const result = await core.processInput('你好');
+      expect(result).toBeDefined();
       expect(result.traceId).toBeDefined();
-      expect(result.intent).toBe('conversation');
+
+      process.env.AGENT_BACKEND = originalEnv;
     });
   });
 
-  // ═══════════════════════════════════════════════════
-  // processInput — 完整路径
-  // ═══════════════════════════════════════════════════
-  describe.skip('processInput — full path', () => {
-    it('长文本触发完整推理路径', async () => {
-      (core as any).memoryEngine = { stub: true };
-      const mockExecute = jest.fn().mockResolvedValue({ response: '分析结果' });
-      await core.initialize();
-      jest.clearAllMocks();
-
-      const longInput = '请帮我重构 src/core/JiabaixingCore.ts 文件中的 processInput 方法，让它支持更灵活的意图分类和流式输出';
+  describe('processInput — 降级处理', () => {
+    it('无 Harness 时走降级路径返回结果', async () => {
+      (core as any).initialized = true;
+      (core as any).harness = null;
+      (core as any).pythonBridgeResolver = null;
+      (core as any).memoryEngine = { markUserActive: jest.fn() };
+      (core as any).scenarioScheduler = { updateUserActivity: jest.fn() };
+      (core as any).securityAuditor = { logAuditEntry: jest.fn() };
+      (core as any).conversationHistoryManager = {
+        getPreviousAssistantMessage: jest.fn().mockReturnValue(''),
+        addUserMessage: jest.fn(),
+        addAssistantMessage: jest.fn(),
+        getLength: jest.fn().mockReturnValue(1),
+      };
+      (core as any).loadAndInjectProjectContext = jest
+        .fn()
+        .mockResolvedValue(undefined);
       mockPersonaApply.mockImplementation((s: string) => s);
 
-      const result = await core.processInput(longInput);
+      mockLLMChat.mockResolvedValue('降级回复');
 
-      // 长输入应该走完整路径
-      expect(mockExecute).toHaveBeenCalled();
-      expect(result.intent).toBe('reasoning');
+      const result = await core.processInput('帮我看看代码');
+
+      expect(result).toBeDefined();
+      expect(result.response).toBeDefined();
     });
   });
 
-  // ═══════════════════════════════════════════════════
-  // generateProactiveMessage
-  // ═══════════════════════════════════════════════════
-  describe.skip('generateProactiveMessage', () => {
-    beforeEach(async () => {
-      (core as any).memoryEngine = { stub: true };
-      await core.initialize();
-      jest.clearAllMocks();
+  describe('generateProactiveMessage', () => {
+    beforeEach(() => {
+      (core as any).personaCore = {
+        buildPersonaSummary: jest.fn().mockReturnValue('家百星秘书'),
+      };
     });
 
     it('生成早晨问候消息', async () => {
-      mockLLMChat.mockResolvedValue('早上好。今天有什么计划？');
-      mockPersonaApply.mockImplementation((s: string) => s);
+      mockLLMChat.mockResolvedValue('早上好！今天有什么计划？');
 
       const msg = await core.generateProactiveMessage({
         reason: 'morning_greeting',
-        context: '周一 08:30。用户画像：偏好语言：TypeScript',
+        context: '周一 08:30',
         scene: '休闲',
         isEmotionBased: false,
       });
 
       expect(mockLLMChat).toHaveBeenCalled();
       expect(typeof msg).toBe('string');
-    });
-
-    it('生成晚间 checkin 消息', async () => {
-      mockLLMChat.mockResolvedValue('今天进展如何？');
-      mockPersonaApply.mockImplementation((s: string) => s);
-
-      const msg = await core.generateProactiveMessage({
-        reason: 'evening_checkin',
-        context: '周三 19:00。用户最近关注：代码重构。近期反馈：3 次正面互动',
-        scene: '休闲',
-        isEmotionBased: false,
-      });
-
-      expect(mockLLMChat).toHaveBeenCalled();
-      // 验证 prompt 包含记忆上下文
-      const chatArgs = mockLLMChat.mock.calls[0];
-      expect(chatArgs[0]).toContain('用户最近关注');
-      expect(chatArgs[0]).toContain('近期反馈');
+      expect(msg.length).toBeGreaterThan(0);
     });
 
     it('LLM 失败时返回降级消息', async () => {
@@ -330,71 +190,128 @@ describe('JiabaixingCore', () => {
     });
 
     it('负面情绪触发温和关切', async () => {
-      mockLLMChat.mockResolvedValue('在呢。');
-      mockPersonaApply.mockImplementation((s: string) => s);
+      mockLLMChat.mockResolvedValue('今天还好吗？');
 
       const msg = await core.generateProactiveMessage({
         reason: 'negative_emotion_trend',
-        context: '用户最近关注：加班调试。相关历史：连续3天处理编译错误',
+        context: '用户最近关注：加班调试',
         scene: '休闲',
         isEmotionBased: false,
       });
 
       expect(mockLLMChat).toHaveBeenCalled();
-      const prompt = mockLLMChat.mock.calls[0][0];
-      expect(prompt).toContain('负面情绪');
+      expect(typeof msg).toBe('string');
     });
 
-    it('富上下文时引导 LLM 引用具体细节', async () => {
-      mockLLMChat.mockResolvedValue('早。今天有个ScenarioAwareScheduler的改动需要收尾。');
-      mockPersonaApply.mockImplementation((s: string) => s);
+    it('晚间 checkin 消息', async () => {
+      mockLLMChat.mockResolvedValue('晚上好，今天辛苦了~');
 
-      const richContext = '周一 08:30。用户最近关注：ScenarioAwareScheduler的detectProactiveInsight优化；修改JiabaixingCore.ts。待处理：重构PersonaRules语气映射';
-      await core.generateProactiveMessage({
-        reason: 'morning_greeting',
-        context: richContext,
+      const msg = await core.generateProactiveMessage({
+        reason: 'evening_checkin',
+        context: '周三 19:00',
         scene: '休闲',
         isEmotionBased: false,
       });
 
-      const prompt = mockLLMChat.mock.calls[0][0];
-      // 富上下文时 prompt 应引导引用具体细节
-      expect(prompt).toContain('记忆上下文');
-      expect(prompt).toContain('具体细节');
+      expect(mockLLMChat).toHaveBeenCalled();
+      expect(typeof msg).toBe('string');
     });
 
-    it('PersonaRules 润色被调用', async () => {
-      mockLLMChat.mockResolvedValue('raw LLM response');
-      mockPersonaApply.mockImplementation((s: string) => `[polished] ${s}`);
+    it('未知 reason 使用默认引导', async () => {
+      mockLLMChat.mockResolvedValue('在呢~');
 
       const msg = await core.generateProactiveMessage({
-        reason: 'scheduled',
+        reason: 'unknown_reason',
         context: '',
         scene: '休闲',
         isEmotionBased: false,
       });
 
-      expect(mockPersonaApply).toHaveBeenCalled();
-      expect(msg).toContain('[polished]');
+      expect(mockLLMChat).toHaveBeenCalled();
+      expect(typeof msg).toBe('string');
     });
   });
 
-  // ═══════════════════════════════════════════════════
-  // processInput — 安全红线
-  // ═══════════════════════════════════════════════════
-  describe('processInput — 降级处理', () => {
-    it('无推理引擎时走降级路径', async () => {
-      (core as any).memoryEngine = { stub: true };
-      await core.initialize();
-      jest.clearAllMocks();
+  describe('treeOfThoughtReasoning', () => {
+    beforeEach(() => {
+      (core as any).llm = { chat: mockLLMChat };
+    });
 
-      mockLLMChat.mockResolvedValue('降级回复');
+    it('应返回推理结果结构', async () => {
+      mockLLMChat
+        .mockResolvedValueOnce(
+          'THOUGHT_1: 分析问题\nTHOUGHT_2: 提出假设\nTHOUGHT_3: 验证假设'
+        )
+        .mockResolvedValueOnce('8')
+        .mockResolvedValueOnce('7')
+        .mockResolvedValueOnce('6');
+
+      const result = await core.treeOfThoughtReasoning('如何优化代码性能？', {
+        maxDepth: 1,
+        branchCount: 3,
+        evaluationTopK: 2,
+      });
+
+      expect(result).toHaveProperty('answer');
+      expect(result).toHaveProperty('reasoningPaths');
+      expect(result).toHaveProperty('bestPath');
+      expect(result).toHaveProperty('evaluations');
+      expect(Array.isArray(result.reasoningPaths)).toBe(true);
+    });
+
+    it('LLM 返回非标准格式时应降级处理', async () => {
+      mockLLMChat
+        .mockResolvedValueOnce('这是一段非标准格式的回复，没有THOUGHT标记')
+        .mockResolvedValueOnce('5');
+
+      const result = await core.treeOfThoughtReasoning('简单问题', {
+        maxDepth: 1,
+        branchCount: 1,
+        evaluationTopK: 1,
+      });
+
+      expect(result).toHaveProperty('answer');
+      expect(result.reasoningPaths.length).toBeGreaterThan(0);
+    });
+
+    it('LLM 失败时应返回降级结果', async () => {
+      mockLLMChat.mockRejectedValue(new Error('LLM error'));
+
+      const result = await core.treeOfThoughtReasoning('测试问题', {
+        maxDepth: 1,
+        branchCount: 1,
+        evaluationTopK: 1,
+      });
+
+      expect(result).toHaveProperty('answer');
+      expect(result.answer).toBeDefined();
+    });
+  });
+
+  describe('processInputWithTracking', () => {
+    it('应调用 processInput 并返回带追踪信息的结果', async () => {
+      (core as any).initialized = true;
+      (core as any).harness = null;
+      (core as any).pythonBridgeResolver = null;
+      (core as any).memoryEngine = { markUserActive: jest.fn() };
+      (core as any).scenarioScheduler = { updateUserActivity: jest.fn() };
+      (core as any).securityAuditor = { logAuditEntry: jest.fn() };
+      (core as any).conversationHistoryManager = {
+        getPreviousAssistantMessage: jest.fn().mockReturnValue(''),
+        addUserMessage: jest.fn(),
+        addAssistantMessage: jest.fn(),
+        getLength: jest.fn().mockReturnValue(1),
+      };
+      (core as any).loadAndInjectProjectContext = jest
+        .fn()
+        .mockResolvedValue(undefined);
       mockPersonaApply.mockImplementation((s: string) => s);
+      mockLLMChat.mockResolvedValue('追踪测试回复');
 
-      const result = await core.processInput('帮我看看代码');
+      const result = await core.processInputWithTracking('你好', 'user1');
 
-      expect(result.response).toBeDefined();
-      expect(result.intent).toBeDefined();
+      expect(result).toBeDefined();
+      expect(result.traceId).toBeDefined();
     });
   });
 });

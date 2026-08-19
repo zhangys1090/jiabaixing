@@ -32,12 +32,14 @@ class ScrubResult:
         removed_tags: 被移除的标签名称列表。
         removed_char_count: 被移除的字符数。
         original_length: 原始文本长度。
+        thinking: 被移除的思考过程内容（用于流式事件输出）。
     """
 
     cleaned: str
     removed_tags: list[str] = field(default_factory=list)
     removed_char_count: int = 0
     original_length: int = 0
+    thinking: str = ""
 
 
 class ThinkScrubber:
@@ -123,22 +125,27 @@ class ThinkScrubber:
         original_length = len(text)
         cleaned = text
         removed_tags: list[str] = []
+        thinking_parts: list[str] = []
 
         if self._strip_think:
-            cleaned, tags = self._strip_tag_pair(cleaned, "think", _THINK_BLOCK, _THINK_OPEN_ONLY)
+            cleaned, tags, extracted = self._strip_tag_pair(cleaned, "think", _THINK_BLOCK, _THINK_OPEN_ONLY)
             removed_tags.extend(tags)
+            thinking_parts.extend(extracted)
 
         if self._strip_reasoning:
-            cleaned, tags = self._strip_tag_pair(cleaned, "reasoning", _REASONING_BLOCK, None)
+            cleaned, tags, extracted = self._strip_tag_pair(cleaned, "reasoning", _REASONING_BLOCK, None)
             removed_tags.extend(tags)
+            thinking_parts.extend(extracted)
 
         if self._strip_reflection:
-            cleaned, tags = self._strip_tag_pair(cleaned, "reflection", _REFLECTION_BLOCK, None)
+            cleaned, tags, extracted = self._strip_tag_pair(cleaned, "reflection", _REFLECTION_BLOCK, None)
             removed_tags.extend(tags)
+            thinking_parts.extend(extracted)
 
         if self._strip_scratchpad:
-            cleaned, tags = self._strip_tag_pair(cleaned, "scratchpad", _SCRATCHPAD_BLOCK, None)
+            cleaned, tags, extracted = self._strip_tag_pair(cleaned, "scratchpad", _SCRATCHPAD_BLOCK, None)
             removed_tags.extend(tags)
+            thinking_parts.extend(extracted)
 
         cleaned = self._clean_whitespace(cleaned)
 
@@ -147,6 +154,7 @@ class ThinkScrubber:
             removed_tags=removed_tags,
             removed_char_count=original_length - len(cleaned),
             original_length=original_length,
+            thinking="\n".join(thinking_parts) if thinking_parts else "",
         )
 
     def scrub_message(self, message: dict[str, Any]) -> dict[str, Any]:
@@ -181,7 +189,7 @@ class ThinkScrubber:
         tag_name: str,
         block_pattern: re.Pattern[str],
         open_only_pattern: re.Pattern[str] | None,
-    ) -> tuple[str, list[str]]:
+    ) -> tuple[str, list[str], list[str]]:
         """移除成对标签及其内容。
 
         Args:
@@ -191,22 +199,37 @@ class ThinkScrubber:
             open_only_pattern: 仅开标签的正则模式（处理未闭合标签）。
 
         Returns:
-            tuple[str, list[str]]: (处理后的文本, 移除的标签名列表)。
+            tuple[str, list[str], list[str]]: (处理后的文本, 移除的标签名列表, 提取的内容列表)。
         """
         removed: list[str] = []
-        new_text, count = block_pattern.subn("", text)
+        extracted: list[str] = []
+
+        def _extract_match(m: re.Match[str]) -> str:
+            extracted.append(m.group(0))
+            return ""
+
+        new_text = block_pattern.sub(_extract_match, text)
+        count = len(extracted)
         if count > 0:
             removed.extend([tag_name] * count)
 
         if open_only_pattern and new_text != text:
             pass
         elif open_only_pattern:
-            new_text2, count2 = open_only_pattern.subn("", new_text)
+            open_extracted: list[str] = []
+
+            def _extract_open(m: re.Match[str]) -> str:
+                open_extracted.append(m.group(0))
+                return ""
+
+            new_text2 = open_only_pattern.sub(_extract_open, new_text)
+            count2 = len(open_extracted)
             if count2 > 0:
                 removed.extend([f"{tag_name}_open"] * count2)
+                extracted.extend(open_extracted)
                 new_text = new_text2
 
-        return new_text, removed
+        return new_text, removed, extracted
 
     @staticmethod
     def _clean_whitespace(text: str) -> str:

@@ -19,6 +19,10 @@ export class TimerManager {
   private timers: Map<string, TimerEntry> = new Map();
   private namespaceCounters: Map<string, number> = new Map();
 
+  static create(): TimerManager {
+    return new TimerManager();
+  }
+
   static getInstance(): TimerManager {
     if (!TimerManager.instance) {
       TimerManager.instance = new TimerManager();

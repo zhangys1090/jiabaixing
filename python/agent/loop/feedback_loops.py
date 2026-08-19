@@ -50,10 +50,12 @@ class FeedbackLoops:
         evolution_engine: Any = None,
         memory_engine: Any = None,
         preference_manager: Any = None,
+        episodic_store: Any = None,
     ) -> None:
         self._evolution_engine = evolution_engine
         self._memory_engine = memory_engine
         self._preference_manager = preference_manager
+        self._episodic_store = episodic_store
         self._custom_loops: list[Callable[..., Awaitable[FeedbackLoopResult]]] = []
 
     def add_loop(self, loop_fn: Callable[..., Awaitable[FeedbackLoopResult]]) -> None:
@@ -99,6 +101,9 @@ class FeedbackLoops:
             results.append(await self._preference_loop(user_corrections, **kwargs))
 
         results.append(await self._knowledge_extraction_loop(user_input, response, session_id, **kwargs))
+
+        if self._episodic_store:
+            results.append(await self._episodic_loop(user_input, response, quality_score, session_id, **kwargs))
 
         for loop_fn in self._custom_loops:
             try:
@@ -217,3 +222,32 @@ class FeedbackLoops:
         except Exception as e:
             log.warning(f"知识提取闭环失败: {e}")
             return FeedbackLoopResult(loop_name="knowledge_extraction", success=False, message=str(e))
+
+    async def _episodic_loop(
+        self, user_input: str, response: str, quality_score: float, session_id: str, **kwargs: Any
+    ) -> FeedbackLoopResult:
+        try:
+            if self._episodic_store and hasattr(self._episodic_store, "store"):
+                emotion = "happy" if quality_score >= 0.7 else ("sad" if quality_score < 0.4 else "neutral")
+                importance = max(1.0, min(10.0, quality_score * 10))
+                self._episodic_store.store(
+                    content=f"用户: {user_input[:200]}\n助手: {response[:200]}",
+                    scene="work",
+                    emotion=emotion,
+                    importance=importance,
+                    tags=["loop_interaction", f"quality_{quality_score:.1f}"],
+                    metadata={"session_id": session_id, "quality_score": quality_score},
+                )
+                return FeedbackLoopResult(
+                    loop_name="episodic",
+                    success=True,
+                    message=f"情景记忆已存储（评分: {quality_score}）",
+                )
+            return FeedbackLoopResult(
+                loop_name="episodic",
+                success=False,
+                message="情景记忆存储未配置",
+            )
+        except Exception as e:
+            log.warning(f"情景记忆闭环失败: {e}")
+            return FeedbackLoopResult(loop_name="episodic", success=False, message=str(e))

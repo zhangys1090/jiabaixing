@@ -7,9 +7,9 @@
  * - 支持循环：每小时/每天/每周/每月
  */
 
+import { Logger } from '../../../utils/Logger';
 import type { ToolContext, ToolDefinition, ToolResult } from '../../types';
 import { ToolCategory } from '../../types';
-import { Logger } from '../../../utils/Logger';
 
 export const NATURAL_SCHEDULE_DEF: ToolDefinition = {
   name: 'natural_schedule',
@@ -52,7 +52,7 @@ interface ScheduledTask {
 
 // 任务存储（内存 + 文件持久化）
 const tasks: Map<string, ScheduledTask> = new Map();
-const TASKS_FILE = require('path').join(
+const TASKS_FILE = path.join(
   process.cwd(),
   'data',
   'scheduled-tasks.json'
@@ -60,30 +60,28 @@ const TASKS_FILE = require('path').join(
 
 function loadTasks(): void {
   try {
-    const fs = require('fs');
     if (fs.existsSync(TASKS_FILE)) {
       const data = JSON.parse(fs.readFileSync(TASKS_FILE, 'utf-8'));
       for (const task of data) {
         tasks.set(task.id, task);
       }
     }
-  } catch {
-    /* 静默失败 */
+  } catch (e) {
+    Logger.warn(`定时任务加载失败，已忽略损坏的 scheduled-tasks.json: ${String(e)}`, 'NaturalSchedule');
   }
 }
 
 function saveTasks(): void {
   try {
-    const fs = require('fs');
-    const dir = require('path').dirname(TASKS_FILE);
+    const dir = path.dirname(TASKS_FILE);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
       TASKS_FILE,
       JSON.stringify(Array.from(tasks.values()), null, 2),
       'utf-8'
     );
-  } catch {
-    /* 静默失败 */
+  } catch (e) {
+    Logger.warn(`定时任务加载失败，已忽略损坏的 scheduled-tasks.json: ${String(e)}`, 'NaturalSchedule');
   }
 }
 

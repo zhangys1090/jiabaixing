@@ -1,13 +1,14 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
     <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#0f0e0d" />
+    <meta name="description" content="Jiabaixing Desktop — 本地优先的 AI Agent 执行引擎，Harness 驱动的多模型智能助手" />
     <meta
-      name="description"
-      content="jiabaixing — 你的私人御姐秘书，成熟、专业、有记忆、会主动行动"
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://trae-api-cn.mchost.guru; connect-src 'self' http://localhost:3111 ws://localhost:3111 ws://localhost:3112;"
     />
     <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -17,10 +18,23 @@
       rel="stylesheet"
     />
     <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
-    <title>jiabaixing · 御姐秘书</title>
+    <title>家百星 Desktop</title>
+    <style>
+      /* 防止启动时白屏闪烁 */
+      html,
+      body,
+      #root {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        background-color: #0f0e0d;
+        overflow: hidden;
+      }
+    </style>
   </head>
   <body>
-    <noscript>请启用 JavaScript 以使用 jiabaixing。</noscript>
+    <noscript>请启用 JavaScript 以使用家百星。</noscript>
     <div id="root"></div>
   </body>
 </html>

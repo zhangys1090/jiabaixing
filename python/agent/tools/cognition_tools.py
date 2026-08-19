@@ -9,6 +9,7 @@ from agent.tools.registry import (
     ToolParameterDef,
     ToolResult,
 )
+from agent.core.logger import log_ignored
 
 
 EMOTION_DETECT_DEF = ToolDefinition(
@@ -118,8 +119,8 @@ async def scene_analyze_executor(params: dict[str, Any]) -> ToolResult:
             json_match = re.search(r'\{[^{}]*\}', content, re.DOTALL)
             if json_match:
                 parsed = json.loads(json_match.group())
-        except (json.JSONDecodeError, AttributeError):
-            pass
+        except (json.JSONDecodeError, AttributeError) as _exc:
+            log_ignored(None, "cognition_tools.scene_analyze_executor", _exc)
 
         if parsed:
             metadata = {

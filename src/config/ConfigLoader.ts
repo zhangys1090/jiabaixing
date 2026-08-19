@@ -72,6 +72,10 @@ export class ConfigLoader {
     this.configPath = path.join(process.cwd(), '.trae', 'config.json');
   }
 
+  public static create(): ConfigLoader {
+    return new ConfigLoader();
+  }
+
   public static getInstance(): ConfigLoader {
     if (!ConfigLoader.instance) {
       ConfigLoader.instance = new ConfigLoader();

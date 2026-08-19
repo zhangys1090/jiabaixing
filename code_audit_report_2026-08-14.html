@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>家百星代码审计报告 · 2026-08-14</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1d212b; --line:#2a2f3a;
+    --fg:#e6e9ef; --muted:#9aa3b2; --accent:#5b9dff;
+    --red:#ff5d5d; --amber:#ffb454; --green:#4cd07d; --purple:#b48cff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.6 -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
+  .wrap{max-width:1180px;margin:0 auto;padding:28px 22px 80px}
+  h1{font-size:24px;margin:0 0 4px}
+  h2{font-size:19px;margin:34px 0 10px;border-left:4px solid var(--accent);padding-left:10px}
+  h3{font-size:15px;margin:20px 0 8px;color:#cdd6e6}
+  .sub{color:var(--muted);font-size:13px;margin-bottom:18px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:10px 0}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:14px 0}
+  .stat{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:14px}
+  .stat .n{font-size:26px;font-weight:700}
+  .stat .l{color:var(--muted);font-size:12px;margin-top:2px}
+  table{width:100%;border-collapse:collapse;margin:10px 0;font-size:13px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:var(--panel2);color:#cdd6e6}
+  tr:nth-child(even) td{background:#14171e}
+  code{background:#0c0e13;border:1px solid var(--line);border-radius:5px;padding:1px 5px;color:#ffd9a0;font-family:"SF Mono",Consolas,monospace;font-size:12px}
+  pre{background:#0c0e13;border:1px solid var(--line);border-radius:8px;padding:10px 12px;overflow:auto;font-family:"SF Mono",Consolas,monospace;font-size:12px;color:#d7e0f0}
+  .tag{display:inline-block;padding:1px 8px;border-radius:20px;font-size:11px;font-weight:700;margin-right:6px}
+  .H{background:rgba(255,93,93,.16);color:var(--red);border:1px solid rgba(255,93,93,.4)}
+  .M{background:rgba(255,180,84,.16);color:var(--amber);border:1px solid rgba(255,180,84,.4)}
+  .L{background:rgba(76,208,125,.14);color:var(--green);border:1px solid rgba(76,208,125,.4)}
+  .I{background:rgba(180,140,255,.14);color:var(--purple);border:1px solid rgba(180,140,255,.4)}
+  .path{color:var(--accent)}
+  .note{color:var(--muted);font-size:12px}
+  ul{margin:6px 0 6px 18px;padding:0}
+  .legend{color:var(--muted);font-size:12px;margin:6px 0 0}
+  .foot{margin-top:40px;color:var(--muted);font-size:12px;border-top:1px solid var(--line);padding-top:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>家百星（Jiabaixing）代码审计报告</h1>
+  <div class="sub">审计日期 2026-08-14 · 范围：Python 后端核心（<code>python/agent/</code> 666 文件）+ TS 网关/前端（<code>src/</code>）· 三大主题：逻辑错误 / 错误被吞 / 信号阻塞与拦截</div>
+
+  <div class="grid">
+    <div class="stat"><div class="n">420</div><div class="l">Python 静默 except 候选（核心 386）</div></div>
+    <div class="stat"><div class="n">104</div><div class="l">API 端点吞错且无服务端日志</div></div>
+    <div class="stat"><div class="n">10</div><div class="l">信号处理点（Python 2 / TS 8）</div></div>
+    <div class="stat"><div class="n">8</div><div class="l">TS 空 <code>.catch(()=&gt;{})</code></div></div>
+    <div class="stat"><div class="n">0</div><div class="l">裸 <code>except:</code>（P0-3 已清零）</div></div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:4px">方法论与覆盖范围</h3>
+    <ul>
+      <li>使用自研静态扫描器（AST 精确解析 Python <code>except</code>，正则+上下文扫描 TS <code>catch</code>/signal），见仓库根 <code>audit_scanner.py</code>，结果落 <code>/tmp/audit_findings.json</code>。</li>
+      <li><b>逐项人工核验</b>：所有信号处理器（10 处）、代表性核心模块（<code>loop/executor.py</code>、<code>scheduler/cron.py</code>、<code>api/*.py</code>、<code>main.ts</code>、<code>shutdown.ts</code>、<code>forensics.py</code>）均阅读真实代码确认，非文档宣称。</li>
+      <li>覆盖度：核心 agent 模块与全部信号路径已完整核实；TS 前端 9000 文件中仅对信号/空 catch 做全量，业务 <code>catch</code> 因 612 文件量过大采用抽样（代表性高危点已列出）。</li>
+      <li>未发现裸 <code>except:</code>（P0-3 治理有效）；但 <code>except Exception: return {error}</code> 形式未被 ruff 门禁（E722/S112）覆盖，是系统性盲区。</li>
+    </ul>
+  </div>
+
+  <!-- ============ 信号 ============ -->
+  <h2>一、信号阻塞与拦截（Signal）</h2>
+  <p class="note">风险最高的一类：信号处理器一旦写错，进程会在崩溃/关闭时行为异常，且问题极难在测试中暴露。</p>
+
+  <table>
+    <tr><th style="width:34px">#</th><th style="width:70px">等级</th><th style="width:230px">位置</th><th>问题</th><th>修复建议</th></tr>
+
+    <tr>
+      <td>2.1</td><td><span class="tag H">高</span></td>
+      <td><span class="path">src/main.ts:439</span><br/><span class="path">src/main.ts:444</span></td>
+      <td><code>uncaughtException</code> / <code>unhandledRejection</code> 处理器<b>仅 <code>Logger.error</code> 而不退出进程</b>。Node 中一旦挂上 <code>uncaughtException</code> handler，默认的崩溃退出被覆盖，进程在可能已损坏的状态（内存/句柄/内部状态不一致）下继续运行；<code>WS_ERR_INVALID_CLOSE_CODE</code> 还被显式忽略。这是 Node 经典反模式，会导致"僵尸进程"。</td>
+      <td>记录后用 <code>process.exit(1)</code> 退出（或把危险工作放进子进程/worker 隔离）；<code>unhandledRejection</code> 建议计数到阈值再退出，避免无限累加。</td>
+    </tr>
+
+    <tr>
+      <td>2.2</td><td><span class="tag H">高</span></td>
+      <td><span class="path">src/integration/gatewayWorker.ts:145</span><br/><span class="path">:154</span></td>
+      <td>Worker 线程的 <code>uncaughtException</code>/<code>unhandledRejection</code> 同样<b>只记录 + 发 IPC 不退出</b>。Worker 在损坏态继续存活，父进程无法感知，可能造成任务静默丢失。</td>
+      <td>发送错误后调用 <code>process.exit(1)</code>；或 <code>worker.terminate()</code> 由父进程兜底重启。</td>
+    </tr>
+
+    <tr>
+      <td>2.3</td><td><span class="tag H">高</span></td>
+      <td><span class="path">python/agent/gateway/forensics.py:227-228</span></td>
+      <td>SIGTERM/SIGINT 处理器内调用 <code>self.record()</code>（构造 dict、<code>time.time()</code>、构建 <code>ShutdownRecord</code>、可能写盘）——<b>非 async-signal-safe</b>：在持有 GIL 或非重入区收到信号可死锁/状态损坏。<code>signal.signal</code> 仅在主线程有效，子线程调用抛 <code>ValueError</code> 被静默 <code>log.warning</code>。更严重：handler <b>只记录、不发起关闭</b>，SIGTERM 被拦截后进程不终止（除非主循环轮询某标志）。</td>
+      <td>handler 只置标志位 <code>self._shutdown_requested=True</code>（或 <code>signal.set_wakeup_fd</code> / 用 <code>asyncio.loop.add_signal_handler</code>）；记录动作移回主线程执行；主循环周期性检查并优雅退出。</td>
+    </tr>
+
+    <tr>
+      <td>2.4</td><td><span class="tag M">中</span></td>
+      <td><span class="path">src/server/shutdown.ts</span>（全文）</td>
+      <td><code>gracefulShutdown</code> <b>无重入守卫</b>。SIGTERM 与 SIGINT 并发触发、或重复触发时，会并发执行 <code>scheduler.stop()</code>/<code>stopIpcServer()</code>/<code>wss.close()</code>，可能重复 <code>process.exit</code> 或抛异常。另含两处 <code>catch {}</code> 静默吞掉 MCP/IPC 关闭失败（见 1.4）。</td>
+      <td>加模块级 <code>let shuttingDown = false</code> 守卫，已在进行则直接返回。</td>
+    </tr>
+
+    <tr>
+      <td>2.5</td><td><span class="tag M">中</span></td>
+      <td><span class="path">src/cli/repl.ts:582</span></td>
+      <td>SIGINT handler 提示"再按 Ctrl+C 退出"，但<b>仅设 <code>aborted=true</code> 并重复打印提示，从未实现真正退出</b>。若 <code>replLoop</code> 阻塞在 <code>readline</code> 输入，abort 标志不被观察，"二次退出"成空头支票。</td>
+      <td>对 SIGINT 计数，第二次直接 <code>process.exit(0)</code>；或在检测到 <code>aborted</code> 时主动中断当前 read。</td>
+    </tr>
+
+    <tr>
+      <td>2.6</td><td><span class="tag L">低</span></td>
+      <td><span class="path">src/harness/lsp/LspTransport.ts:91</span></td>
+      <td>此处是子进程 <code>'exit'</code>/<code>'error'</code> 事件（非 OS 信号）。但 <code>resolve()</code> 已调用后，<code>'error'</code> 再触发 <code>reject(err)</code> 形成<b>双重 settle</b>（被忽略，仅代码异味）。</td>
+      <td>用 <code>rejectOnce</code> 或先判 <code>settled</code> 标志，避免重复 settle。</td>
+    </tr>
+  </table>
+
+  <!-- ============ 错误被吞 ============ -->
+  <h2>二、错误被吞（Swallowed Errors）</h2>
+
+  <h3>2.1 API 层系统性静默 —— <span class="tag H">高</span></h3>
+  <div class="card">
+    <p><b>现象：</b><code>python/agent/api/</code> 下有 <b>104</b> 处 <code>except Exception</code>，捕获后返回 <code>{"success": False, "error": str(e)}</code> 给客户端，但<b>服务端不记录任何日志、堆栈或指标</b>。运维侧对失败完全不可见，只能靠用户反馈发现。</p>
+    <p><b>代表位置：</b></p>
+    <pre>api/memory.py      :125,139,153,182,209,237,253,273,296,315,363,375,387,398,410,427,445,457
+api/llm.py         :384,409,428,517,537,555,573,594,616  (+ SSE 生成器 :484)
+api/canary.py      :51,63,75,87
+api/compat.py      :113,155,650,843,898
+api/feedback.py    :45,110
+api/cognition.py   :42
+api/health.py      :99,117,199,213,227,244,259,320,363,391</pre>
+    <p><b>根因：</b>ruff 门禁 <code>E722</code>(裸 <code>except:</code>)、<code>S112</code>(<code>except:pass</code>) 拦不住 <code>except Exception: return {...}</code> 形式，形成审计盲区。P0-3 引入的 <code>log_ignored</code> 也未在此类端点使用。</p>
+    <p><b>修复：</b>① 每个 <code>except Exception</code> 在返回前补 <code>log_ignored(log, "&lt;模块&gt;.&lt;函数&gt;", e)</code> 或 <code>logger.error(..., exc_info=True)</code>；② 注册统一 FastAPI 异常处理器，集中记录 500 级错误；③ 新增 CI 规则（自定义 AST 检查，或 <code>flake8-try-except-raise</code>）抓"except 块既无 raise 也无 log"的模式。</p>
+  </div>
+
+  <h3>2.2 错误类型误标 —— <span class="tag M">中</span></h3>
+  <div class="card">
+    <p><span class="path">api/cognition.py:42</span> · <span class="path">api/feedback.py:45</span> · <span class="path">api/feedback.py:110</span></p>
+    <pre>try:
+    body = json.loads(await request.body())
+except Exception:
+    return {"success": False, "error": "invalid JSON body"}</pre>
+    <p>try 块本意只捕获 JSON 解析错误，却用裸 <code>except Exception</code>，使<b>任何下游异常（DB 错误、KeyError、网络超时）都被误报为 "invalid JSON body"</b>，真实原因被掩盖，排障被误导。</p>
+    <p><b>修复：</b>改为 <code>except json.JSONDecodeError</code> 才返回该消息；其余异常按 2.1 记录并透传真实错误。</p>
+  </div>
+
+  <h3>2.3 清理/遥测路径空 catch —— <span class="tag M">中</span></h3>
+  <div class="card">
+    <p><b>TS 空 <code>.catch(()=&gt;{})</code>（共 8 处，fire-and-forget 吞掉失败）：</b></p>
+    <pre>src/desktop/DesktopVisionEngine.ts:80   实例 shutdown 失败被吞（实例仍被置 null）
+src/harness/loops/FeedbackLoops.ts:105    反馈记录失败被吞
+src/harness/loops/FeedbackLoops.ts:153    scene 记录失败被吞
+src/harness/orchestration/OrchestratorAgent.ts:783  编排结果落库失败被吞
+src/harness/sandbox/backends/DockerBackend.ts:133   rm 临时文件失败被吞（可能残留）
+src/harness/tools/memory/memory_recall.ts:73        访问统计更新失败被吞
+src/security/AuditService.ts:94          审计服务 shutdown 失败被吞（安全日志风险）
+src/server/websocket/WsProcessor.ts:187  WS 事件记录失败被吞</pre>
+    <p><b>修复：</b>改为 <code>.catch((e) =&gt; logger.warn("&lt;上下文&gt; 失败", e))</code>；对 <code>AuditService</code>/<code>OrchestratorAgent</code> 等落库类至少记 warning，避免静默数据丢失。</p>
+    <p><b>TS shutdown 路径：</b><span class="path">src/server/shutdown.ts</span> 两处 <code>catch {}</code> 静默吞掉 MCP 服务器 / IPC 关闭异常（注释"不影响关闭流程"），建议至少 <code>log.warning</code>，否则残留 MCP 子进程不可知。</p>
+  </div>
+
+  <h3>2.4 其他核心静默（低，列出备查）</h3>
+  <div class="card">
+    <ul>
+      <li><span class="path">python/agent/a2a/protocol.py:364</span> <code>except Exception: healthy = False</code> —— 健康检查失败只置 False，<b>不记录失败原因</b>，排障时无据。</li>
+      <li><span class="path">python/agent/main.py:333/684/688</span> <code>except Exception: _event_clients.discard(ws)</code> —— 断开期异常被吞，低危。</li>
+      <li><span class="path">python/agent/api/health.py:199/213/227/244/259</span> <code>_get_*_stats</code> 捕获后返回 <code>[]</code>/<code>{}</code>，统计缺失无提示 —— 健康面板显示空数据却不告警。</li>
+      <li><span class="path">python/agent/api/health.py:363</span> <code>ignored_exceptions_health</code> 取数异常时返回 <code>{"status":"healthy", ...}</code>，把"统计不可用"伪装成 healthy（设计取舍：永不报 unhealthy；建议至少标 <code>unknown</code> 并记日志）。</li>
+    </ul>
+  </div>
+
+  <!-- ============ 逻辑错误 ============ -->
+  <h2>三、逻辑错误（条件 / 循环 / 边界 / 状态）</h2>
+  <p class="note">Python 静态启发式（可变默认参数、<code>== None</code>、<code>== True/False</code>）扫描结果为 0 处，说明基础反模式已清理。下列为在核心调度/循环模块中人工核实出的<b>真实逻辑缺陷</b>。</p>
+
+  <table>
+    <tr><th style="width:34px">#</th><th style="width:70px">等级</th><th style="width:230px">位置</th><th>问题</th><th>修复建议</th></tr>
+
+    <tr>
+      <td>3.1</td><td><span class="tag H">高</span></td>
+      <td><span class="path">python/agent/scheduler/cron.py:335-342</span> + <span class="path">405/439</span></td>
+      <td><b>慢任务被每个 tick 重复派发。</b><code>_tick</code> 按 <code>job.next_run &lt;= now</code> 派发，但 <code>next_run</code> 与 <code>status="running"</code> 都在 <code>_run_job</code> <b>异步执行完成后</b>才更新（439/405 行）。派发经 MQ 后立即返回，调度锁 <code>cron:sched:{id}</code> 在 <code>dispatch()</code> 后即释放。于是：下一 tick 时 <code>next_run</code> 未推进且 <code>status</code> 仍非 <code>"running"</code>（<code>_run_job</code> 尚未开始），任务被<b>再次派发</b>。原用于防重的 <code>status=="running"</code> 守卫因异步时序完全失效。</td>
+      <td>派发时（<code>_safe_dispatch</code> 内）<b>同步</b>置 <code>job.status="running"</code> 并 <code>self._save()</code>；或将 <code>next_run</code> 推进提前到派发时刻；或将调度锁持有范围扩展到执行完成。</td>
+    </tr>
+
+    <tr>
+      <td>3.2</td><td><span class="tag M">中</span></td>
+      <td><span class="path">python/agent/scheduler/cron.py:438</span></td>
+      <td><b>cron 表达式周期被退化为 +3600s。</b><code>interval = _parse_interval(job.schedule) or 3600</code>：对 cron 表达式（如 <code>*/5 * * * *</code>）<code>_parse_interval</code> 返回 <code>None</code>，<code>next_run</code> 被设为 <code>end + 3600</code>，<b>完全忽略真实 cron 周期</b>。项目已实现 <code>_next_cron_run()</code>（159 行）却从未在此使用 → cron 语法任务会变成每小时跑一次。</td>
+      <td>若 <code>_parse_interval</code> 为 <code>None</code> 且 <code>job.schedule</code> 为 cron 表达式，改用 <code>_next_cron_run(job.schedule)</code> 计算下次运行时间。</td>
+    </tr>
+
+    <tr>
+      <td>3.3</td><td><span class="tag M">中</span></td>
+      <td><span class="path">python/agent/scheduler/cron.py:307-318</span></td>
+      <td><b>stop() 无事件循环时泄漏锁与 MQ。</b><code>stop()</code> 在 <code>except RuntimeError</code>（无 running loop，如同步 teardown / atexit）分支直接 <code>self._leader=None; self._mq=None; return</code>，<b>未调用 <code>leader.stop()</code> / <code>mq.stop()</code></b>。底层 Redis 领导者锁、调度锁与 MQ 连接未释放（只能等 TTL 过期），MQ 未停止。状态清理遗漏。</td>
+      <td>无循环时也同步释放底层资源（<code>create_lock</code> 的 Redis 连接、MQ 连接），或补 <code>atexit</code>/<code>__del__</code> 兜底；至少记 warning 提示未释放。</td>
+    </tr>
+
+    <tr>
+      <td>3.4</td><td><span class="tag L">低</span></td>
+      <td><span class="path">python/agent/loop/executor.py:915,938-945,1057</span></td>
+      <td><code>_retry_with_reflection</code> 中 <code>step.retry_count</code> 在函数入口(+1) 与循环体内(1057 行, 每次 attempt +1) <b>双重自增</b>，配合 <code>max_reflection_retries = min(dynamic, step.max_retries)</code> 与循环内 <code>step.retry_count &gt;= step.max_retries</code> 守卫，计数逻辑可读性与边界易误判（当前实测不越界，但耦合脆弱，重构易引入 off-by-one）。</td>
+      <td>统一重试计数入口，避免两处自增；将"已尝试次数"与"最大次数"用独立变量表达并以断言保护边界。</td>
+    </tr>
+  </table>
+
+  <div class="card">
+    <h3 style="margin-top:4px">已核实无问题的关键点（避免过度告警）</h3>
+    <ul>
+      <li><code>loop/executor.py</code> 的反思重试循环：错误类型路由、替代工具迁移、经验回写逻辑完整，<code>log_ignored</code> 已用于内部异常 —— 功能正确。</li>
+      <li><code>api/health.py</code> 的 <code>subsystems_health</code> / <code>ignored_exceptions_health</code> 设计上"永不报 unhealthy"，属有意取舍。</li>
+      <li>Python 端无裸 <code>except:</code>，P0-3 静默异常治理有效。</li>
+    </ul>
+  </div>
+
+  <h2>四、优先级行动清单</h2>
+  <table>
+    <tr><th>优先级</th><th>行动</th><th>涉及问题</th></tr>
+    <tr><td><span class="tag H">P0</span></td><td>修复信号处理器：TS <code>uncaughtException</code>/<code>unhandledRejection</code> 记录后退出；Python <code>forensics.py</code> handler 改为置标志位 + 主线程关闭</td><td>2.1, 2.2, 2.3</td></tr>
+    <tr><td><span class="tag H">P0</span></td><td>修复 cron 重复派发（派发时同步置 running + save）</td><td>3.1</td></tr>
+    <tr><td><span class="tag M">P1</span></td><td>API 端点统一加 <code>log_ignored</code>/异常处理器 + CI 抓"except 无 log"；修正 cognition/feedback 错误误标</td><td>2.1, 2.2</td></tr>
+    <tr><td><span class="tag M">P1</span></td><td>cron 表达式 next_run 用 <code>_next_cron_run</code>；stop() 无循环时也释放锁/MQ；shutdown 加重入守卫；repl 二次退出</td><td>3.2, 3.3, 2.4, 2.5</td></tr>
+    <tr><td><span class="tag L">P2</span></td><td>8 处空 <code>.catch</code> 与清理路径 catch 补 warning 日志；executor 重试计数去耦合</td><td>2.3, 2.4, 3.4</td></tr>
+  </table>
+
+  <div class="foot">
+    生成方式：静态扫描（<code>audit_scanner.py</code>，AST + 正则）→ 人工逐项核验真实代码 → 分级。
+    信号类 10 处、核心调度/循环模块、API 层 104 端点均已逐行确认；TS 业务 catch 因体量采用高危抽样。
+    所有结论基于 <code>git</code> 工作区实时代码，未采信文档宣称。
+  </div>
+</div>
+</body>
+</html>

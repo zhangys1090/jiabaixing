@@ -16,11 +16,10 @@ import { DynamicTaskAdjuster } from '../core/DynamicTaskAdjuster';
 import EventBus from '../shared/EventBus';
 import { ProfileEvolutionManager } from '../user/ProfileEvolutionManager';
 import { Logger } from '../utils/Logger';
-import { EvolutionEngine, EvolutionMetrics } from './EvolutionEngine';
 import {
-  EvolutionEngineV2,
-  EvolutionCause,
-  EvolutionMetrics as CodeEvolutionMetrics,
+    EvolutionMetrics as CodeEvolutionMetrics,
+    EvolutionCause,
+    EvolutionEngineV2,
 } from './';
 
 /** 自我增强结果（原 SelfEnhancementEngine 已删除，本地定义） */
@@ -93,7 +92,7 @@ export interface UnifiedEvolutionMetrics {
     successRate: number;
     recentCycles: OptimizationCycle[];
   };
-  evolution: EvolutionMetrics | null;
+  evolution: CodeEvolutionMetrics | null;
   /** 代码进化指标（V2） */
   codeEvolution: CodeEvolutionMetrics | null;
   engines: {
@@ -115,10 +114,15 @@ export interface UnifiedEvolutionMetrics {
   };
 }
 
+/**
+ * @deprecated TS 侧进化编排器已收口（P2-3，2026-08-03）。
+ * 生产路径（AGENT_BACKEND=python，默认）下，`initEvolution.ts` 不再启动本引擎，
+ * 进化执行/数据由 Python `agent.evolution` 经 `PythonAgentBridge` 接管。
+ * 本类仅作为 AGENT_BACKEND=local 的废弃回退存根保留，请勿在新代码中依赖其运行时行为。
+ */
 export class EvolutionOrchestrator {
   private static instance: EvolutionOrchestrator;
 
-  private evolutionEngine: EvolutionEngine | null = null;
   private evolutionEngineV2: EvolutionEngineV2 | null = null;
   private profileEvolution: ProfileEvolutionManager | null = null;
   private taskAdjuster: DynamicTaskAdjuster | null = null;
@@ -146,6 +150,10 @@ export class EvolutionOrchestrator {
   private unifiedTimer: NodeJS.Timeout | null = null;
   private isRunning = false;
 
+  static create(): EvolutionOrchestrator {
+    return new EvolutionOrchestrator();
+  }
+
   static getInstance(): EvolutionOrchestrator {
     if (!EvolutionOrchestrator.instance) {
       EvolutionOrchestrator.instance = new EvolutionOrchestrator();
@@ -157,19 +165,16 @@ export class EvolutionOrchestrator {
    * 注册所有子引擎
    */
   registerEngines(engines: {
-    evolutionEngine?: EvolutionEngine;
     evolutionEngineV2?: EvolutionEngineV2;
     profileEvolution?: ProfileEvolutionManager;
     taskAdjuster?: DynamicTaskAdjuster;
     llmProvider?: import('../models/LLMProvider').LLMProvider;
   }): void {
-    this.evolutionEngine = engines.evolutionEngine || null;
     this.evolutionEngineV2 = engines.evolutionEngineV2 || null;
     this.profileEvolution = engines.profileEvolution || null;
     this.taskAdjuster = engines.taskAdjuster || null;
 
     const activeEngines: string[] = [];
-    if (this.evolutionEngine) activeEngines.push('EvolutionEngine');
     if (this.evolutionEngineV2)
       activeEngines.push('EvolutionEngineV2 (真正自我进化)');
     if (this.profileEvolution) activeEngines.push('ProfileEvolution');
@@ -229,7 +234,6 @@ export class EvolutionOrchestrator {
     }
 
     // 并行驱动所有子引擎
-    this.driveEvolutionEngine(record);
     this.driveProfileEvolution(record);
 
     // 正向进化闭环：追踪连续模式
@@ -301,35 +305,6 @@ export class EvolutionOrchestrator {
         error as Error,
         'EvolutionOrchestrator'
       );
-    }
-  }
-
-  private driveEvolutionEngine(record: InteractionRecord): void {
-    if (!this.evolutionEngine) return;
-
-    try {
-      this.evolutionEngine.assessQuality(
-        record.traceId,
-        record.success,
-        record.qualityScore,
-        record.executionDuration,
-        record.scene
-      );
-
-      // 关键修复：同时喂 FeedbackCollector，让 StrategyOptimizer
-      // 的 feedbackBuffer 累积真实交互数据
-      this.evolutionEngine.collectFeedback(
-        record.input,
-        record.response,
-        {
-          success: record.success,
-          intent: record.scene || 'general',
-          toolsUsed: record.toolCalls.map((t) => t.toolName),
-        },
-        record.scene
-      );
-    } catch {
-      Logger.debug('EvolutionEngine 记录失败', 'EvolutionOrchestrator');
     }
   }
 
@@ -407,32 +382,6 @@ export class EvolutionOrchestrator {
       };
 
       // 按顺序触发各引擎的优化（不并行以避免冲突）
-      if (this.evolutionEngine && canTriggerEngine('EvolutionEngine')) {
-        try {
-          const optLog = this.evolutionEngine.triggerManualOptimization(
-            `${reason} (编排器触发)`
-          );
-          this.engineLastTriggered.set('EvolutionEngine', Date.now());
-          results.push({
-            engineName: 'EvolutionEngine',
-            triggered: true,
-            detail: `优化ID: ${optLog?.id ?? 'none'}`,
-          });
-        } catch (error) {
-          results.push({
-            engineName: 'EvolutionEngine',
-            triggered: false,
-            detail: (error as Error).message,
-          });
-        }
-      } else if (this.evolutionEngine) {
-        results.push({
-          engineName: 'EvolutionEngine',
-          triggered: false,
-          detail: '冷却期中，跳过',
-        });
-      }
-
       this.optimizationCycles.push({
         cycleId,
         timestamp,
@@ -714,10 +663,6 @@ export class EvolutionOrchestrator {
 
     const toolWeights: Record<string, number> = {};
 
-    const evolutionMetrics = this.evolutionEngine
-      ? this.getEvolutionMetricsSafe()
-      : null;
-
     const codeEvolutionMetrics = this.evolutionEngineV2
       ? this.getCodeEvolutionMetricsSafe()
       : null;
@@ -727,10 +672,8 @@ export class EvolutionOrchestrator {
         totalInteractions: this.interactionCount,
         totalOptimizations: this.optimizationCycles.length,
         averageQualityScore: avgQuality,
-        weeklyImprovement:
-          evolutionMetrics?.weeklyOptimizationStats?.successRate || 0,
+        weeklyImprovement: codeEvolutionMetrics?.qualityImprovement ?? 0,
         enginesActive: [
-          ...(this.evolutionEngine ? ['EvolutionEngine'] : []),
           ...(this.evolutionEngineV2
             ? ['EvolutionEngineV2 (真正自我进化)']
             : []),
@@ -763,7 +706,7 @@ export class EvolutionOrchestrator {
         successRate: cycleSuccessRate,
         recentCycles: this.optimizationCycles.slice(-10),
       },
-      evolution: evolutionMetrics,
+      evolution: codeEvolutionMetrics,
       codeEvolution: codeEvolutionMetrics,
       engines: {
         toolWeights,
@@ -856,6 +799,60 @@ export class EvolutionOrchestrator {
     this.autoDetectionTimer = setInterval(() => {
       void this.runAutoDetection();
     }, this.AUTO_DETECTION_INTERVAL_MS);
+
+    // P1-2: 进化周期自动化 — 定时触发优化周期
+    // 原实现仅靠 recordInteraction 间接触发优化，
+    // 现在增加独立的定时优化调度器，确保即使低频交互也能持续进化。
+    this.startOptimizationScheduler();
+  }
+
+  /** P1-2: 优化周期定时调度器 */
+  private optimizationSchedulerTimer: NodeJS.Timeout | null = null;
+  private static readonly OPTIMIZATION_SCHEDULER_INTERVAL_MS = 10 * 60 * 1000;
+
+  private startOptimizationScheduler(): void {
+    if (this.optimizationSchedulerTimer) return;
+
+    const interval =
+      parseInt(process.env['EVOLUTION_OPT_INTERVAL_MS'] || '0', 10) ||
+      EvolutionOrchestrator.OPTIMIZATION_SCHEDULER_INTERVAL_MS;
+
+    Logger.info(
+      `⏰ P1-2: 进化优化定时调度器已启动 (间隔=${interval}ms)`,
+      'EvolutionOrchestrator'
+    );
+
+    this.optimizationSchedulerTimer = setInterval(() => {
+      if (!this.isRunning) return;
+      const avgQuality =
+        this.qualityHistory.length > 0
+          ? this.qualityHistory.reduce((a, b) => a + b, 0) /
+            this.qualityHistory.length
+          : 1;
+      const threshold = parseFloat(
+        process.env['EVOLUTION_OPT_QUALITY_THRESHOLD'] || '0.6'
+      );
+      if (avgQuality < threshold) {
+        Logger.info(
+          `⏰ P1-2: 定时调度器检测到平均质量 ${avgQuality.toFixed(2)} < 阈值 ${threshold}，触发优化周期`,
+          'EvolutionOrchestrator'
+        );
+        void this.triggerOptimizationCycle(
+          `scheduled:avg_quality=${avgQuality.toFixed(2)}`
+        );
+      }
+    }, interval);
+  }
+
+  private stopOptimizationScheduler(): void {
+    if (this.optimizationSchedulerTimer) {
+      clearInterval(this.optimizationSchedulerTimer);
+      this.optimizationSchedulerTimer = null;
+      Logger.info(
+        '⏰ P1-2: 进化优化定时调度器已停止',
+        'EvolutionOrchestrator'
+      );
+    }
   }
 
   stopAutoDetection(): void {
@@ -863,6 +860,7 @@ export class EvolutionOrchestrator {
       clearInterval(this.autoDetectionTimer);
       this.autoDetectionTimer = null;
     }
+    this.stopOptimizationScheduler();
   }
 
   /**
@@ -1057,30 +1055,11 @@ export class EvolutionOrchestrator {
 
     const avg = recentScores.reduce((s, v) => s + v, 0) / recentScores.length;
 
-    const activeEngineCount = [
-      this.evolutionEngine,
-      this.profileEvolution,
-      this.taskAdjuster,
-    ].filter(Boolean).length;
+    const activeEngineCount = [this.profileEvolution, this.taskAdjuster].filter(
+      Boolean
+    ).length;
 
-    return avg * (0.5 + 0.5 * (activeEngineCount / 3));
-  }
-
-  private getEvolutionMetricsSafe(): EvolutionMetrics | null {
-    try {
-      if (
-        this.evolutionEngine &&
-        typeof (this.evolutionEngine as unknown as Record<string, unknown>)
-          .getMetrics === 'function'
-      ) {
-        return (
-          this.evolutionEngine as unknown as { getMetrics(): EvolutionMetrics }
-        ).getMetrics();
-      }
-    } catch {
-      // 静默
-    }
-    return null;
+    return avg * (0.5 + 0.5 * (activeEngineCount / 2));
   }
 
   /**

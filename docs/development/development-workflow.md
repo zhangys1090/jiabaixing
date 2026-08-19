@@ -272,6 +272,309 @@ fix/* (Bug修复)
 4. 作者根据意见修改代码
 5. 审查者批准后合并到目标分支
 
+## 依赖注入规范 (V5.6)
+
+### 1. 获取依赖
+
+**新代码必须通过 DI 容器获取依赖，禁止直接调用 `getInstance()`：**
+
+```typescript
+// ✅ 正确：通过 DI 容器
+import { DIContainer, DI_TOKENS } from '../shared/DIContainer';
+const eventBus = await DIContainer.getInstance().resolve<JiabaixingEventBus>(DI_TOKENS.EVENT_BUS);
+
+// ❌ 错误：直接调用单例
+import { EventBus } from '../shared/EventBus';
+const eventBus = EventBus.getInstance();
+```
+
+### 2. 注册新依赖
+
+新增 Service/Manager/Engine 类时，必须：
+
+1. 在 `DIContainer.ts` 的 `DI_TOKENS` 中添加对应 Symbol
+2. 在 `DependencyRegistry.ts` 的 `SINGLETON_MIGRATION_MAP` 中登记迁移条目
+3. 在 `registerCoreDependencies()` 或初始化流程中注册到容器
+
+```typescript
+// DIContainer.ts
+export const DI_TOKENS = {
+  // ... 已有 Token
+  MY_NEW_SERVICE: Symbol('MyNewService'),
+} as const;
+
+// DependencyRegistry.ts
+const SINGLETON_MIGRATION_MAP: SingletonMigrationEntry[] = [
+  // ... 已有条目
+  { className: 'MyNewService', token: DI_TOKENS.MY_NEW_SERVICE, module: '../services/MyNewService', tags: [DI_TAGS.CORE], priority: 2, migrated: true },
+];
+```
+
+### 3. 测试中使用 DI
+
+```typescript
+import { DIContainer, DI_TOKENS } from '../../shared/DIContainer';
+
+describe('MyService', () => {
+  let container: DIContainer;
+
+  beforeEach(() => {
+    container = DIContainer.create(); // 独立容器，不影响全局
+    container.registerValue(DI_TOKENS.EVENT_BUS, mockEventBus);
+    container.registerValue(DI_TOKENS.LLM_PROVIDER, mockLLM);
+  });
+
+  afterEach(async () => {
+    await container.dispose(); // 清理
+  });
+
+  it('should work', async () => {
+    const service = await container.resolve<MyService>(DI_TOKENS.MY_NEW_SERVICE);
+    // ...
+  });
+});
+```
+
+### 4. 生命周期选择
+
+| 生命周期 | 适用场景 | 示例 |
+|---------|---------|------|
+| `singleton` | 全局唯一的服务 | EventBus, ConfigLoader, SecurityGuard |
+| `transient` | 每次使用都新建 | 请求处理器, 临时计算器 |
+| `scoped` | 请求/会话内唯一 | 会话上下文, 请求级缓存 |
+
+## Agent 编排规范 (V5.6)
+
+### 1. BaseAgent 竞标调度
+
+新增的 `bid()` / `canHandle()` / `healthCheck()` 接口用于多 Agent 编排：
+
+```typescript
+// OrchestratorAgent 选择最佳执行者
+const bids = await Promise.all(
+  agents.map(agent => agent.bid(taskGoal, requiredTools))
+);
+const validBids = bids.filter((b): b is AgentBid => b !== null);
+const winner = validBids.sort((a, b) => b.confidence - a.confidence)[0];
+```
+
+### 2. TaskDispatcher assignedTo 闭环
+
+OrchestratorAgent 的 `assignDynamicRoles()` 结果现在会实际影响 TaskDispatcher 的 Agent 分配：
+
+```
+OrchestratorAgent.assignDynamicRoles() → task.assignedTo = agentId
+  → TaskDispatcher.assignAgent() 优先使用 task.assignedTo
+  → 回退: agentId → findBestAgent → getIdleAgents
+```
+
+### 3. Bridge 轨迹数据
+
+`PythonAgentBridge.processInput()` 现在返回 `BridgeProcessResult`，包含完整轨迹：
+
+```typescript
+interface BridgeProcessResult {
+  response: string;
+  traceId?: string;
+  intent?: string;
+  qualityScore?: number;   // Python 端评估的质量分
+  toolCallsMade?: number;  // 本次执行的工具调用次数
+  roundsUsed?: number;     // ReAct 循环轮数
+  duration?: number;       // 总执行时长 (ms)
+  finishReason?: string;   // 结束原因 (stop/tool_call/max_rounds)
+}
+```
+
+### 4. HarnessDeps 校验
+
+注入依赖时会自动校验必需字段：
+
+```typescript
+const harness = new AgentHarness();
+harness.setDeps(deps); // 缺少 llm/constitutionalBuilder/memoryInjector/dynamicContext/historyProvider 时告警
+```
+
+### 5. ESLint 规则
+
+- `no-restricted-imports`: 禁止 import 6 个废弃模块（ContextManager/LLMProvider/EvolutionOrchestrator/MemoryEngine/TokenBudgetAllocator/loop/*）
+- `no-restricted-syntax`: 警告 `getInstance()` 调用，提示使用 DI 容器
+
+## 架构拆分规范 (V5.6)
+
+### 1. EventBus 职责拆分
+
+EventBus 已拆分为三个职责清晰的服务：
+
+```
+EventBus (事件广播 + 持久化)
+  ├── TraceCollector (全链路追踪: trace/token/toolCall)
+  └── AgentDiscovery (Agent 通信: 注册/订阅/邮箱)
+```
+
+直接使用子服务获取更细粒度的控制：
+
+```typescript
+const bus = EventBus.getInstance();
+// 追踪
+bus.traceCollector.startTrace(id, 'tool_execution');
+bus.traceCollector.recordTokenUsage(id, 'gpt-4', 100, 50);
+// Agent 通信
+bus.agentDiscovery.registerAgent(profile);
+bus.agentDiscovery.getAgentsByCapability('code_generation');
+```
+
+### 2. ToolRegistry 状态外置
+
+ToolRegistry 的运行时状态（熔断器/信号量/配额/去重缓存）已抽象为 `ToolRuntimeState` 接口：
+
+```typescript
+// 默认使用内存存储
+const registry = new ToolRegistry();
+
+// 生产环境可替换为 Redis 存储
+registry.setRuntimeState(new RedisToolRuntimeState(redisClient));
+```
+
+接口方法：`getCircuitBreaker` / `setCircuitBreaker` / `getSemaphore` / `setSemaphore` / `getQuota` / `setQuota` / `getDedupResult` / `setDedupResult`
+
+### 3. ContextManager 委托迁移
+
+ContextManager 已支持委托模式，优先使用 UnifiedContextPipeline：
+
+```typescript
+const cm = new ContextManager(deps);
+// 设置委托（Python 后端）
+cm.setDelegatePipeline(unifiedContextPipeline);
+// buildContext() 将优先调用 pipeline，失败时回退 TS 本地实现
+const messages = await cm.buildContext(input);
+```
+
+## 类型与错误规范 (V5.6)
+
+### 1. Result<T> 统一返回类型
+
+新代码应使用 `Result<T>` 替代 `{ success, output?, error? }` 模式：
+
+```typescript
+import { Result, ok, err, isOk, isErr } from '../types';
+
+async function divide(a: number, b: number): Promise<Result<number>> {
+  if (b === 0) return err('除数不能为零', 'DIVISION_BY_ZERO');
+  return ok(a / b);
+}
+
+const result = await divide(10, 0);
+if (isOk(result)) {
+  console.log(result.value); // 类型安全，无需 !
+} else {
+  console.log(result.error); // string
+  console.log(result.code);  // 'DIVISION_BY_ZERO'
+}
+```
+
+### 2. SandboxExecutor 双模式
+
+```typescript
+// 默认：Worker 线程真隔离（推荐）
+const sandbox = new SandboxExecutor({ mode: 'isolated', securityLevel: 'high' });
+
+// 仅 low 安全级别允许 inline 模式
+const devSandbox = new SandboxExecutor({ mode: 'inline', securityLevel: 'low' });
+```
+
+### 3. safeExecute 安全执行
+
+```typescript
+import { safeExecute, safeExecuteSync } from '../../shared/errors';
+
+const result = await safeExecute(() => riskyOperation());
+if (result.ok) {
+  // result.value
+} else {
+  // result.error: JiabaixingError
+}
+```
+
+### 4. 新增错误类型
+
+| 错误类 | code | statusCode | 用途 |
+|--------|------|------------|------|
+| `CircuitBreakerOpenError` | CIRCUIT_BREAKER_OPEN | 503 | 工具熔断器打开 |
+| `SandboxExecutionError` | SANDBOX_EXECUTION_ERROR | 500 | 沙箱执行失败 |
+| `DependencyResolutionError` | DEPENDENCY_RESOLUTION_ERROR | 500 | DI 容器依赖解析失败 |
+
+## V6.0 迁移规范 (2026-08-17)
+
+### 1. 单例 → DI 迁移规则
+
+所有单例类必须添加 `create()` 工厂方法，保留 `getInstance()` 向后兼容：
+
+```typescript
+export class MyService {
+  private static instance: MyService | null = null;
+
+  // ✅ V6.0 新增：DI 容器工厂方法
+  static create(): MyService {
+    return new MyService();
+  }
+
+  // ⚠️ 保留向后兼容，新代码不应直接调用
+  static getInstance(): MyService {
+    if (!MyService.instance) {
+      MyService.instance = new MyService();
+    }
+    return MyService.instance;
+  }
+}
+```
+
+### 2. DI 注册模式
+
+在 `DependencyRegistry.ts` 中使用 `create()` 注册：
+
+```typescript
+container.register(
+  DI_TOKENS.MY_SERVICE,
+  () => MyService.create(),          // ✅ 使用 create()
+  { lifecycle: 'singleton', tags: [DI_TAGS.CORE] }
+);
+```
+
+### 3. 废弃模块代理
+
+TS 端废弃模块应通过 `DeprecatedModuleProxy` 转发到 Python：
+
+```typescript
+import { DEPRECATED_PROXY } from '../../shared/DeprecatedModuleProxy';
+
+const result = await DEPRECATED_PROXY.proxy({
+  method: 'POST',
+  path: '/api/memory/store',
+  body: { content, type: 'long-term' }
+});
+```
+
+### 4. API 契约检查
+
+新增端点必须在 `api-contract.ts` 中登记：
+
+```typescript
+import { getContractGaps, getContractStats } from '../../shared/api-contract';
+
+const stats = getContractStats();
+// { total: 44, tsOnly: 8, pyOnly: 14, aligned: 22, alignmentRate: '50.0%' }
+```
+
+### 5. 迁移进度
+
+| 优先级 | 已迁移 | 总计 | 进度 |
+|--------|--------|------|------|
+| P0 | 6 | 6 | 100% |
+| P1 | 12 | 12 | 100% |
+| P2 | 7 | 7 | 100% |
+| P3 | 0 | 12 | 0% |
+| **合计** | **25** | **37** | **67.6%** |
+
 ## 总结
 
 遵循以上开发流程，可以确保代码质量和团队协作效率。建议团队成员在实际开发中不断优化和完善流程，以适应项目需求的变化。

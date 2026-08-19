@@ -33,6 +33,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from agent.config import DATA_ROOT
 from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("memory.providers")
@@ -113,7 +114,7 @@ class BuiltinMemoryProvider(MemoryProvider):
     """内置记忆存储（默认）。"""
 
     def __init__(self, data_dir: Path | None = None) -> None:
-        self._dir = data_dir or Path("data/memory")
+        self._dir = data_dir or DATA_ROOT / "memory"
         self._store: dict[str, list[MemoryItem]] = defaultdict(list)
         self._by_id: dict[str, MemoryItem] = {}
         self._load()

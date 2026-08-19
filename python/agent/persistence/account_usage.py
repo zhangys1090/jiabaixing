@@ -31,6 +31,8 @@ from typing import Any
 
 from agent.config import DATA_DIR
 from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
+from agent.infrastructure.safe_json import safe_json_loads
 
 log = StructuredLogger("account_usage")
 
@@ -102,27 +104,47 @@ class AccountUsageTracker:
         self._load()
 
     def _load(self) -> None:
-        if self._path.exists():
+        if not self._path.exists():
+            return
+        try:
+            raw = self._path.read_text(encoding="utf-8")
+        except OSError as _exc:
+            log_ignored(log, "account_usage.AccountUsageTracker._load", _exc)
+            return
+        data = safe_json_loads(raw, {}, context="account_usage.load")
+        if not isinstance(data, dict):
+            # 顶层损坏：保留空用量状态，不再静默清空历史
+            return
+        # 逐条容错：单条损坏记录仅跳过，不再把整份用量历史静默丢弃
+        for uid, records in data.get("records", {}).items():
+            if not isinstance(records, list):
+                continue
+            loaded: list[UsageRecord] = []
+            for r in records:
+                if not isinstance(r, dict):
+                    continue
+                try:
+                    loaded.append(UsageRecord(
+                        user_id=r["user_id"],
+                        model=r["model"],
+                        input_tokens=r["input_tokens"],
+                        output_tokens=r["output_tokens"],
+                        cost_usd=r["cost_usd"],
+                        timestamp=r["timestamp"],
+                        session_id=r.get("session_id", ""),
+                        task_type=r.get("task_type", ""),
+                    ))
+                except (KeyError, TypeError) as _exc:
+                    log_ignored(log, "account_usage.AccountUsageTracker._load.record", _exc, uid=uid)
+            if loaded:
+                self._records[uid] = loaded
+        for uid, b in data.get("budgets", {}).items():
+            if not isinstance(b, dict):
+                continue
             try:
-                data = json.loads(self._path.read_text(encoding="utf-8"))
-                for uid, records in data.get("records", {}).items():
-                    self._records[uid] = [
-                        UsageRecord(
-                            user_id=r["user_id"],
-                            model=r["model"],
-                            input_tokens=r["input_tokens"],
-                            output_tokens=r["output_tokens"],
-                            cost_usd=r["cost_usd"],
-                            timestamp=r["timestamp"],
-                            session_id=r.get("session_id", ""),
-                            task_type=r.get("task_type", ""),
-                        )
-                        for r in records
-                    ]
-                for uid, b in data.get("budgets", {}).items():
-                    self._budgets[uid] = UserBudget(**b)
-            except Exception as e:
-                log.warning("用量数据加载失败", error=str(e))
+                self._budgets[uid] = UserBudget(**b)
+            except (TypeError, ValueError) as _exc:
+                log_ignored(log, "account_usage.AccountUsageTracker._load.budget", _exc, uid=uid)
 
     def _save(self) -> None:
         try:
@@ -217,8 +239,8 @@ class AccountUsageTracker:
                 for cb in self._alert_callbacks:
                     try:
                         cb(alert)
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        log_ignored(log, "account_usage.AccountUsageTracker._check_budget", _exc)
 
     def _get_period_cost(self, user_id: str, period_seconds: int) -> float:
         cutoff = time.time() - period_seconds

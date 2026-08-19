@@ -402,6 +402,9 @@ export class AgentRegistry {
     };
     this.knowledgeEntries.set(id, entry);
 
+    // P1-7: 知识共享持久化 — 发布时同步写入文件系统
+    this.persistKnowledgeEntry(entry);
+
     for (const [, sub] of this.knowledgeSubscriptions) {
       if (sub.type === input.type) {
         try {
@@ -508,6 +511,83 @@ export class AgentRegistry {
       topContributors,
       avgQualityScore: entries.length > 0 ? totalQuality / entries.length : 0,
     };
+  }
+
+  // ============ P1-7: 知识共享持久化 ============
+
+  private knowledgePersistDir: string | null = null;
+
+  /**
+   * P1-7: 设置知识持久化目录
+   * 调用后，publishKnowledge 会同步写入文件，启动时 loadPersistedKnowledge 可恢复
+   */
+  setKnowledgePersistDir(dir: string): void {
+    this.knowledgePersistDir = dir;
+    try {
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+    } catch {
+      // 忽略
+    }
+  }
+
+  private persistKnowledgeEntry(entry: SharedKnowledgeEntry): void {
+    if (!this.knowledgePersistDir) return;
+    try {
+      const filePath = path.join(
+        this.knowledgePersistDir,
+        `${entry.id}.json`
+      );
+      fs.writeFileSync(filePath, JSON.stringify(entry, null, 2), 'utf-8');
+      Logger.debug(
+        `💾 P1-7: 知识条目已持久化: ${entry.id}`,
+        'AgentRegistry'
+      );
+    } catch (err) {
+      Logger.warn(
+        `💾 P1-7: 知识条目持久化失败: ${(err as Error).message}`,
+        'AgentRegistry'
+      );
+    }
+  }
+
+  /**
+   * P1-7: 从持久化目录加载知识条目
+   * 在 AgentRegistry 初始化后调用，恢复跨重启的知识共享状态
+   */
+  loadPersistedKnowledge(): number {
+    if (!this.knowledgePersistDir) return 0;
+    try {
+      const files = fs
+        .readdirSync(this.knowledgePersistDir)
+        .filter((f: string) => f.endsWith('.json'));
+      let loaded = 0;
+      for (const file of files) {
+        try {
+          const raw = fs.readFileSync(
+            path.join(this.knowledgePersistDir, file),
+            'utf-8'
+          );
+          const entry: SharedKnowledgeEntry = JSON.parse(raw);
+          if (!this.knowledgeEntries.has(entry.id)) {
+            this.knowledgeEntries.set(entry.id, entry);
+            loaded++;
+          }
+        } catch {
+          // 跳过损坏的文件
+        }
+      }
+      if (loaded > 0) {
+        Logger.info(
+          `💾 P1-7: 从持久化目录加载 ${loaded} 条知识条目`,
+          'AgentRegistry'
+        );
+      }
+      return loaded;
+    } catch {
+      return 0;
+    }
   }
 
   // ============ 结构化通信系统 ============
@@ -837,5 +917,460 @@ export class AgentRegistry {
       }
     }
     return false;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// A2A Protocol — Agent Card & Task Lifecycle
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * A2A Agent Card — 标准化的 Agent 自描述元数据
+ * 遵循 Google A2A Protocol 规范
+ */
+export interface A2AAgentCard {
+  /** Agent 唯一标识 URI */
+  id: string;
+  /** 显示名称 */
+  name: string;
+  /** 详细描述 */
+  description: string;
+  /** Agent 服务端点 URL */
+  url: string;
+  /** 支持的传输协议 */
+  transport: 'json-rpc' | 'grpc' | 'http';
+  /** 能力声明列表 */
+  capabilities: A2ACapability[];
+  /** 认证方案 */
+  authentication?: {
+    type: 'none' | 'api-key' | 'oauth2' | 'jwt';
+    scheme?: string;
+  };
+  /** 版本号 */
+  version: string;
+  /** 提供者信息 */
+  provider?: {
+    name: string;
+    url?: string;
+  };
+}
+
+/**
+ * A2A 能力声明
+ */
+export interface A2ACapability {
+  /** 能力类型 */
+  type:
+    | 'task-execution'
+    | 'information-retrieval'
+    | 'data-processing'
+    | 'orchestration'
+    | 'monitoring';
+  /** 能力名称 */
+  name: string;
+  /** 详细描述 */
+  description: string;
+  /** 输入 schema */
+  inputSchema?: Record<string, unknown>;
+  /** 输出 schema */
+  outputSchema?: Record<string, unknown>;
+  /** 支持的模态 */
+  modalities?: ('text' | 'image' | 'audio' | 'video')[];
+}
+
+/**
+ * A2A Task — 跨 Agent 任务生命周期
+ */
+export interface A2ATask {
+  /** 任务唯一标识 */
+  id: string;
+  /** 会话 ID */
+  sessionId: string;
+  /** 任务描述 */
+  description: string;
+  /** 发起方 Agent ID */
+  fromAgentId: string;
+  /** 执行方 Agent ID */
+  toAgentId: string;
+  /** 任务状态 */
+  status: A2ATaskStatus;
+  /** 任务输入 */
+  input: Record<string, unknown>;
+  /** 任务输出 */
+  output?: Record<string, unknown>;
+  /** 创建时间 */
+  createdAt: number;
+  /** 更新时间 */
+  updatedAt: number;
+  /** 完成时间 */
+  completedAt?: number;
+  /** 错误信息 */
+  error?: string;
+  /** 状态历史 */
+  statusHistory: Array<{
+    status: A2ATaskStatus;
+    timestamp: number;
+    message?: string;
+  }>;
+}
+
+/**
+ * A2A Task 状态流转
+ */
+export type A2ATaskStatus =
+  | 'submitted'
+  | 'working'
+  | 'input-required'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
+/**
+ * A2A Task 事件
+ */
+export interface A2ATaskEvent {
+  taskId: string;
+  type: 'status-change' | 'artifact-update' | 'progress';
+  status?: A2ATaskStatus;
+  message?: string;
+  artifact?: Record<string, unknown>;
+  progress?: number;
+  timestamp: number;
+}
+
+/**
+ * A2A 协议管理器 — 扩展 AgentRegistry，提供标准化的 A2A 通信
+ *
+ * @deprecated 架构违规：A2A 协议主实现应在 Python 端（`agent/a2a/`）。
+ * 本内存实现仅用于单进程本地回放/测试，无网络传输层，无法跨进程通信，
+ * **不可作为生产跨 Agent 通信路径**。
+ * 生产跨进程 A2A 的规范入口是 TS 薄壳 `src/a2a/`：
+ *   - `registerA2ARoutes(app)` 把 `/a2a/*` HTTP 入口透明转发到 Python 后端；
+ *   - `A2AClient` 提供 TS 侧出站调用远端 A2A Agent 的薄封装。
+ * 调用方应优先使用 `src/a2a` 薄壳（逻辑全在 Python），本类仅作本地兜底。
+ * @see AGENTS.md §0.1 模块归属强制表
+ * @see src/a2a
+ */
+export class A2AProtocolManager {
+  private agentCards: Map<string, A2AAgentCard> = new Map();
+  private tasks: Map<string, A2ATask> = new Map();
+  private taskEventHandlers: Map<string, Array<(event: A2ATaskEvent) => void>> =
+    new Map();
+  private registry: AgentRegistry;
+  /** P1-4: Python 后端桥接客户端（可选，由 engine 初始化时注入） */
+  private pythonBridge: import('../../a2a/A2AClient').A2AClient | null = null;
+  /** P1-4: 是否优先使用 Python 后端 */
+  private preferPython: boolean = false;
+
+  constructor(registry: AgentRegistry) {
+    this.registry = registry;
+  }
+
+  /**
+   * P1-4: 注入 Python A2A 桥接客户端，使 TS 侧操作透明转发到 Python 后端。
+   * 启用后，createTask/completeTask/cancelTask 等写操作会同步调用 Python 端，
+   * 实现双端 A2A 能力统一。
+   */
+  setPythonBridge(
+    client: import('../../a2a/A2AClient').A2AClient,
+    preferPython = true,
+  ): void {
+    this.pythonBridge = client;
+    this.preferPython = preferPython;
+    Logger.info(
+      `🔗 A2AProtocolManager: Python 桥接已注入 (preferPython=${preferPython})`,
+      'A2AProtocol',
+    );
+  }
+
+  /**
+   * 发布 Agent Card
+   */
+  async publishAgentCard(card: A2AAgentCard): Promise<void> {
+    this.agentCards.set(card.id, card);
+    Logger.info(
+      `📇 A2A Agent Card 发布: ${card.name} (${card.id})`,
+      'A2AProtocol',
+    );
+
+    // P1-4: 同步到 Python 后端
+    if (this.pythonBridge && this.preferPython) {
+      try {
+        await fetch(`${this.pythonBridge['baseUrl']}/a2a/agents`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(card),
+        });
+      } catch (e) {
+        Logger.warn(
+          `⚠️ A2A Agent Card 同步到 Python 失败: ${(e as Error).message}`,
+          'A2AProtocol',
+        );
+      }
+    }
+  }
+
+  /**
+   * 获取 Agent Card
+   */
+  getAgentCard(agentId: string): A2AAgentCard | undefined {
+    return this.agentCards.get(agentId);
+  }
+
+  /**
+   * 发现具备指定能力的 Agent
+   */
+  discoverAgents(capabilityType?: A2ACapability['type']): A2AAgentCard[] {
+    const cards = Array.from(this.agentCards.values());
+    if (!capabilityType) return cards;
+    return cards.filter((card) =>
+      card.capabilities.some((cap) => cap.type === capabilityType)
+    );
+  }
+
+  /**
+   * 创建 A2A Task
+   * P1-4: Python 优先模式下，通过 Python 后端创建 Task，本地仅做缓存。
+   */
+  async createTask(input: {
+    fromAgentId: string;
+    toAgentId: string;
+    description: string;
+    input: Record<string, unknown>;
+  }): Promise<A2ATask> {
+    // P1-4: Python 优先 → 通过 A2AClient 创建
+    if (this.pythonBridge && this.preferPython) {
+      try {
+        const remoteTask = await this.pythonBridge.createTask({
+          fromAgentId: input.fromAgentId,
+          toAgentId: input.toAgentId,
+          description: input.description,
+          input: input.input,
+        });
+        this.tasks.set(remoteTask.id, remoteTask);
+        this.emitTaskEvent(remoteTask.id, {
+          taskId: remoteTask.id,
+          type: 'status-change',
+          status: 'submitted',
+          timestamp: Date.now(),
+        });
+        Logger.info(
+          `📋 A2A Task 创建(Python): ${remoteTask.id} (${input.fromAgentId} → ${input.toAgentId})`,
+          'A2AProtocol',
+        );
+        return remoteTask;
+      } catch (e) {
+        Logger.warn(
+          `⚠️ Python A2A Task 创建失败，降级到本地: ${(e as Error).message}`,
+          'A2AProtocol',
+        );
+      }
+    }
+
+    // 本地兜底
+    const id = `a2a_task_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const now = Date.now();
+    const task: A2ATask = {
+      id,
+      sessionId: `session_${Date.now()}`,
+      description: input.description,
+      fromAgentId: input.fromAgentId,
+      toAgentId: input.toAgentId,
+      status: 'submitted',
+      input: input.input,
+      createdAt: now,
+      updatedAt: now,
+      statusHistory: [{ status: 'submitted', timestamp: now }],
+    };
+
+    this.tasks.set(id, task);
+
+    Logger.info(
+      `📋 A2A Task 创建(本地): ${task.id} (${input.fromAgentId} → ${input.toAgentId})`,
+      'A2AProtocol',
+    );
+
+    this.emitTaskEvent(task.id, {
+      taskId: task.id,
+      type: 'status-change',
+      status: 'submitted',
+      timestamp: now,
+    });
+
+    return task;
+  }
+
+  /**
+   * 更新 Task 状态
+   */
+  updateTaskStatus(
+    taskId: string,
+    newStatus: A2ATaskStatus,
+    message?: string
+  ): A2ATask | null {
+    const task = this.tasks.get(taskId);
+    if (!task) {
+      Logger.warn(`A2A Task 不存在: ${taskId}`, 'A2AProtocol');
+      return null;
+    }
+
+    const now = Date.now();
+    task.status = newStatus;
+    task.updatedAt = now;
+    task.statusHistory.push({ status: newStatus, timestamp: now, message });
+
+    if (
+      newStatus === 'completed' ||
+      newStatus === 'failed' ||
+      newStatus === 'cancelled'
+    ) {
+      task.completedAt = now;
+    }
+
+    if (newStatus === 'completed') {
+      this.registry.recordExecution(task.toAgentId, true, now - task.createdAt);
+    } else if (newStatus === 'failed') {
+      this.registry.recordExecution(
+        task.toAgentId,
+        false,
+        now - task.createdAt
+      );
+      task.error = message;
+    }
+
+    Logger.info(
+      `📋 A2A Task 状态更新: ${taskId} → ${newStatus}`,
+      'A2AProtocol'
+    );
+
+    this.emitTaskEvent(taskId, {
+      taskId,
+      type: 'status-change',
+      status: newStatus,
+      message,
+      timestamp: now,
+    });
+
+    return task;
+  }
+
+  /**
+   * 完成 Task 并设置输出
+   */
+  completeTask(
+    taskId: string,
+    output: Record<string, unknown>
+  ): A2ATask | null {
+    const task = this.tasks.get(taskId);
+    if (!task) return null;
+
+    task.output = output;
+    return this.updateTaskStatus(taskId, 'completed');
+  }
+
+  /**
+   * 获取 Task
+   */
+  getTask(taskId: string): A2ATask | undefined {
+    return this.tasks.get(taskId);
+  }
+
+  /**
+   * 获取 Agent 的所有 Task
+   */
+  getAgentTasks(agentId: string, role?: 'from' | 'to'): A2ATask[] {
+    const tasks = Array.from(this.tasks.values());
+    if (!role) {
+      return tasks.filter(
+        (t) => t.fromAgentId === agentId || t.toAgentId === agentId
+      );
+    }
+    if (role === 'from') return tasks.filter((t) => t.fromAgentId === agentId);
+    return tasks.filter((t) => t.toAgentId === agentId);
+  }
+
+  /**
+   * 取消 Task
+   */
+  cancelTask(taskId: string, reason?: string): A2ATask | null {
+    return this.updateTaskStatus(taskId, 'cancelled', reason);
+  }
+
+  /**
+   * 请求额外输入
+   */
+  requestInput(taskId: string, message: string): A2ATask | null {
+    return this.updateTaskStatus(taskId, 'input-required', message);
+  }
+
+  /**
+   * 订阅 Task 事件
+   */
+  onTaskEvent(taskId: string, handler: (event: A2ATaskEvent) => void): void {
+    if (!this.taskEventHandlers.has(taskId)) {
+      this.taskEventHandlers.set(taskId, []);
+    }
+    this.taskEventHandlers.get(taskId)!.push(handler);
+  }
+
+  /**
+   * 取消订阅 Task 事件
+   */
+  offTaskEvent(taskId: string, handler: (event: A2ATaskEvent) => void): void {
+    const handlers = this.taskEventHandlers.get(taskId);
+    if (handlers) {
+      const idx = handlers.indexOf(handler);
+      if (idx >= 0) handlers.splice(idx, 1);
+    }
+  }
+
+  /**
+   * 获取活跃 Task 统计
+   */
+  getTaskStats(): {
+    total: number;
+    byStatus: Record<A2ATaskStatus, number>;
+    avgCompletionTimeMs: number;
+  } {
+    const tasks = Array.from(this.tasks.values());
+    const byStatus: Record<A2ATaskStatus, number> = {
+      submitted: 0,
+      working: 0,
+      'input-required': 0,
+      completed: 0,
+      failed: 0,
+      cancelled: 0,
+    };
+
+    let totalCompletionTime = 0;
+    let completedCount = 0;
+
+    for (const task of tasks) {
+      byStatus[task.status]++;
+      if (task.completedAt && task.status === 'completed') {
+        totalCompletionTime += task.completedAt - task.createdAt;
+        completedCount++;
+      }
+    }
+
+    return {
+      total: tasks.length,
+      byStatus,
+      avgCompletionTimeMs:
+        completedCount > 0 ? totalCompletionTime / completedCount : 0,
+    };
+  }
+
+  private emitTaskEvent(taskId: string, event: A2ATaskEvent): void {
+    const handlers = this.taskEventHandlers.get(taskId);
+    if (handlers) {
+      for (const handler of handlers) {
+        try {
+          handler(event);
+        } catch {
+          // 忽略回调错误
+        }
+      }
+    }
   }
 }

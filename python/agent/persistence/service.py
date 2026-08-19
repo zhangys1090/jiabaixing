@@ -10,6 +10,7 @@ from typing import Any
 from agent.config import DATA_DIR
 from agent.memory.engine import MemoryEngine
 from agent.persistence.trajectory import TrajectoryDatabase
+from agent.core.logger import log_ignored
 
 
 @dataclass
@@ -235,8 +236,8 @@ class PersistenceService:
                         self._promoted_ids.add(mid)
                         self._promoted_ids.add(f"promoted:{mid}")
                     promoted += 1
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    log_ignored(None, "service.PersistenceService.promote_memories", _exc)
 
             return promoted
         except Exception:
@@ -324,8 +325,8 @@ class PersistenceService:
                 tmp_path = path.with_suffix(".json.tmp")
                 tmp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
                 tmp_path.replace(path)
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(None, "service.PersistenceService._flush_task_states", _exc)
 
     async def _load_task_states(self) -> None:
         path = self._data_dir / "task-states.json"
@@ -347,8 +348,8 @@ class PersistenceService:
                     resume_context=item.get("resume_context"),
                 )
                 self._task_states[task.task_id] = task
-        except Exception:
-            pass
+        except Exception as _exc:
+            log_ignored(None, "service.PersistenceService._load_task_states", _exc)
 
     def _flush_evolution_metrics(self) -> None:
         path = self._data_dir / "evolution-metrics.json"
@@ -363,8 +364,8 @@ class PersistenceService:
                 for m in self._evolution_metrics
             ]
             path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        except Exception:
-            pass
+        except Exception as _exc:
+            log_ignored(None, "service.PersistenceService._flush_evolution_metrics", _exc)
 
     async def _load_evolution_metrics(self) -> None:
         path = self._data_dir / "evolution-metrics.json"
@@ -381,5 +382,5 @@ class PersistenceService:
                 )
                 for m in data[-1000:]
             ]
-        except Exception:
-            pass
+        except Exception as _exc:
+            log_ignored(None, "service.PersistenceService._load_evolution_metrics", _exc)

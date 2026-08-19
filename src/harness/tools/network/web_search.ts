@@ -1,11 +1,12 @@
+import { Logger } from '../../../utils/Logger';
 import type { ToolContext, ToolDefinition, ToolResult } from '../../types';
 import { Permission, ToolCategory } from '../../types';
-import { Logger } from '../../../utils/Logger';
+import { getActivePythonBridge } from '../../../ide/bridgeRegistry';
 
 export const WEB_SEARCH_DEF: ToolDefinition = {
   name: 'web_search',
   description:
-    '实时网络搜索，返回标题+链接+摘要。USE WHEN: 用户要查最新信息、新闻、技术文档、市场数据。DO NOT USE WHEN: 用户问本地文件（用file_search）、问代码问题（用code_analyze）、要打开网页内容（先搜再用web_fetch）。每次搜索用不同关键词，不要重复搜同一个词。',
+    '实时网络搜索，返回标题+链接+摘要。USE WHEN: 用户要查最新信息、新闻、技术文档、市场数据。DO NOT USE WHEN: 用户问本地文件（用file_search）、问代码问题（用code_analyze）、要打开网页内容（先搜再用web_fetch）。每次搜索用不同关键词，不要重复搜同一个词。中文搜索提示：DuckDuckGo 对中文查询支持有限，建议中文搜索使用 tavily/brave 提供商或 auto 模式（会自动降级到 Bing 中文搜索）。',
   category: ToolCategory.NETWORK,
   parameters: {
     query: {
@@ -411,11 +412,50 @@ export function createWebSearchExecutor(deps: WebSearchDeps) {
     }
 
     const searchType = String(params.search_type || 'general');
-    const maxResults = Number(params.max_results || 5);
+    const rawMaxResults = Number(params.max_results);
+    // 非数字入参会产生 NaN，`slice(0, NaN)` 返回空数组（静默丢结果）。
+    const maxResults = Number.isFinite(rawMaxResults) ? rawMaxResults : 5;
     const searchProvider = String(params.search_provider || 'auto');
     const startTime = Date.now();
 
     try {
+      // B1: web_search 归 Python canonical（F1 同法）。
+      // 优先级: 显式注入的 searchEngine(如测试) → Python 桥(生产 canonical) → TS 本地多引擎(降级)。
+      const bridge = getActivePythonBridge();
+      if (bridge) {
+        try {
+          const pyRes = await bridge.toolsetExecuteRaw('web_search', {
+            query,
+            search_type: searchType,
+            max_results: maxResults,
+            language: String(params.language || 'zh-CN'),
+            search_provider: searchProvider,
+          });
+          if (pyRes?.success) {
+            Logger.info(
+              `🔍 web_search(Python): "${query}" (${Date.now() - startTime}ms)`,
+              'WebSearch'
+            );
+            return {
+              success: true,
+              output: String(pyRes.output ?? ''),
+              duration: Date.now() - startTime,
+              validated: false,
+              metadata: { backend: 'python', ...(pyRes.metadata || {}) },
+            };
+          }
+          Logger.warn(
+            `⚠️ Python web_search 逻辑失败, 降级 TS 本地: ${pyRes?.error || 'unknown'}`,
+            'WebSearch'
+          );
+        } catch (pyErr) {
+          Logger.warn(
+            `⚠️ Python web_search 代理失败, 降级 TS 本地: ${(pyErr as Error).message}`,
+            'WebSearch'
+          );
+        }
+      }
+
       let results: SearchResult[];
 
       if (deps.searchEngine) {
@@ -425,13 +465,23 @@ export function createWebSearchExecutor(deps: WebSearchDeps) {
           language: String(params.language || 'zh-CN'),
         });
       } else if (searchProvider === 'auto') {
-        // auto 模式：按优先级 tavily → duckduckgo → searxng → brave → bing
-        results = await searchWithFallback(query, maxResults, searchType, [
-          'tavily',
-          'duckduckgo',
-          'searxng',
-          'brave',
-        ]);
+        // auto 模式：中文查询优先 tavily → brave → bing，非中文 tavily → duckduckgo → searxng → brave → bing
+        const hasChinese = /[\u4e00-\u9fff]/.test(query);
+        if (hasChinese) {
+          results = await searchWithFallback(query, maxResults, searchType, [
+            'tavily',
+            'brave',
+            'duckduckgo',
+            'searxng',
+          ]);
+        } else {
+          results = await searchWithFallback(query, maxResults, searchType, [
+            'tavily',
+            'duckduckgo',
+            'searxng',
+            'brave',
+          ]);
+        }
       } else {
         // 指定提供商，失败则降级到后续提供商
         const providerOrder: SearchProvider[] = [

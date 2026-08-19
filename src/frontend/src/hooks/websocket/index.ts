@@ -29,6 +29,7 @@ import {
   StreamStartData,
   StreamChunkData,
   StreamDoneData,
+  AgentProgressData,
 } from './types';
 
 const DEFAULT_WS_URL = `ws://localhost:3111`;
@@ -210,6 +211,10 @@ export function useWebSocket(options: UseWebSocketOptions = {}): WebSocketState 
       optionsRef.current.onStreamDone?.(data);
     };
 
+    const handleAgentProgress = (data: AgentProgressData) => {
+      optionsRef.current.onAgentProgress?.(data);
+    };
+
     connectionManager.onStateChange(handleStateChange);
     connectionManager.onConnectionStatus(handleConnectionStatus);
     connectionManager.onDialogState(handleDialogState);
@@ -239,6 +244,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}): WebSocketState 
     connectionManager.onStreamStart(handleStreamStart);
     connectionManager.onStreamChunk(handleStreamChunk);
     connectionManager.onStreamDone(handleStreamDone);
+    connectionManager.onAgentProgress(handleAgentProgress);
 
     cleanupRef.current = [
       () => connectionManager.offStateChange(handleStateChange),
@@ -270,6 +276,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}): WebSocketState 
       () => connectionManager.offStreamStart(handleStreamStart),
       () => connectionManager.offStreamChunk(handleStreamChunk),
       () => connectionManager.offStreamDone(handleStreamDone),
+      () => connectionManager.offAgentProgress(handleAgentProgress),
     ];
 
     return () => {

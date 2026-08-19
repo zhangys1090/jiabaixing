@@ -1,10 +1,10 @@
 import { Logger } from '../../utils/Logger';
 import {
-  UIElement,
-  UIElementNode,
-  ElementQueryResult,
-  UIAControlType,
-  CONTROL_TYPE_NAMES,
+    CONTROL_TYPE_NAMES,
+    ElementQueryResult,
+    UIAControlType,
+    UIElement,
+    UIElementNode,
 } from './types';
 
 export class UIElementParser {
@@ -12,9 +12,13 @@ export class UIElementParser {
 
   private constructor() {}
 
+  public static create(): UIElementParser {
+    return new UIElementParser();
+  }
+
   public static getInstance(): UIElementParser {
     if (!UIElementParser.instance) {
-      UIElementParser.instance = new UIElementParser();
+      UIElementParser.instance = UIElementParser.create();
     }
     return UIElementParser.instance;
   }

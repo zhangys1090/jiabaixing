@@ -12,6 +12,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 from agent.core.logger import StructuredLogger, log_ignored
+from agent.core.logger import log_ignored
 from agent.sandbox.windows_hard import (
     WindowsHardSandbox,
     hard_windows_enabled,
@@ -311,8 +312,8 @@ class SandboxExecutor:
         # 兜底：直接杀死直接子进程（已退出时会抛 ProcessLookupError，忽略）。
         try:
             proc.kill()
-        except (ProcessLookupError, OSError):
-            pass
+        except (ProcessLookupError, OSError) as _exc:
+            log_ignored(log, "executor.SandboxExecutor._kill_process_tree", _exc)
 
     def _harden_windows(self, proc: asyncio.subprocess.Process) -> None:
         """E2: 可选 Windows 硬隔离（Job Object）。
@@ -384,8 +385,8 @@ class SandboxExecutor:
                 watcher.cancel()
             try:
                 await watcher
-            except asyncio.CancelledError:
-                pass
+            except asyncio.CancelledError as _exc:
+                log_ignored(log, "executor.SandboxExecutor._monitor_resources", _exc)
 
         if memory_exceeded:
             return None

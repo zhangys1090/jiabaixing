@@ -144,11 +144,18 @@ process.on('message', (msg: IpcMessage) => {
 
 process.on('uncaughtException', (error: Error) => {
   Logger.error('Gateway Worker 未捕获异常', error, 'GatewayWorker');
-  send({
-    id: `err_${Date.now()}`,
-    success: false,
-    error: `Worker uncaught exception: ${error.message}`,
-  });
+  try {
+    send({
+      id: `err_${Date.now()}`,
+      success: false,
+      error: `Worker uncaught exception: ${error.message}`,
+    });
+  } catch {
+    // 发送失败也继续退出
+  }
+  // 未捕获异常代表 Worker 已处于损坏状态，必须退出由父进程重启，
+  // 否则僵尸 Worker 持续运行（审计 S-02：原仅上报不退出）。
+  process.exit(1);
 });
 
 process.on('unhandledRejection', (reason: unknown) => {
@@ -157,11 +164,16 @@ process.on('unhandledRejection', (reason: unknown) => {
     reason as Error,
     'GatewayWorker'
   );
-  send({
-    id: `err_${Date.now()}`,
-    success: false,
-    error: `Worker unhandled rejection: ${String(reason)}`,
-  });
+  try {
+    send({
+      id: `err_${Date.now()}`,
+      success: false,
+      error: `Worker unhandled rejection: ${String(reason)}`,
+    });
+  } catch {
+    // 发送失败也继续退出
+  }
+  process.exit(1);
 });
 
 Logger.info('🟢 Gateway Worker 已启动', 'GatewayWorker');

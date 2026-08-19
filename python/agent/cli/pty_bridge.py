@@ -36,6 +36,7 @@ from enum import Enum
 from typing import Any
 
 from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
 
 log = StructuredLogger("pty_bridge")
 
@@ -120,15 +121,15 @@ class PtyBridge:
                 import winpty
 
                 return PtyBackend.WIN_CONPTY
-            except ImportError:
-                pass
+            except ImportError as _exc:
+                log_ignored(log, "pty_bridge.PtyBridge._detect_backend", _exc)
         else:
             try:
                 import pty
 
                 return PtyBackend.UNIX_PTY
-            except ImportError:
-                pass
+            except ImportError as _exc:
+                log_ignored(log, "pty_bridge.PtyBridge._detect_backend", _exc)
         return PtyBackend.SUBPROCESS
 
     async def spawn(
@@ -231,8 +232,8 @@ class PtyBridge:
             if subproc and subproc.pid:
                 try:
                     os.kill(subproc.pid, signal.SIGWINCH)
-                except ProcessLookupError:
-                    pass
+                except ProcessLookupError as _exc:
+                    log_ignored(log, "pty_bridge.PtyBridge.resize", _exc)
 
     async def terminate(self, proc: PtyProcess, timeout: float = 5.0) -> int | None:
         """终止 PTY 进程。
@@ -293,5 +294,5 @@ class PtyBridge:
                     break
                 text = data.decode(errors="replace")
                 buf.append(text)
-        except Exception:
-            pass
+        except Exception as _exc:
+            log_ignored(log, "pty_bridge.PtyBridge._capture_output", _exc)

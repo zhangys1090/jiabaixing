@@ -769,14 +769,80 @@ class TestRelayAdapter:
     async def test_start_without_url_enters_simulate_mode(self) -> None:
         a = RelayAdapter()  # 无 relay_url
         await a.start()
-        assert await a.is_connected() is True  # 模拟模式
+        # 诚实化：模拟模式不再谎报 connected，而是声明 simulated
+        assert await a.is_connected() is False
+        assert a.simulated is True
+        assert a.mode == "simulated"
 
-    async def test_send_message_in_simulate_mode_returns_true(self) -> None:
+    async def test_send_message_in_simulate_mode_returns_false(self) -> None:
         a = RelayAdapter()
         await a.start()
+        # 诚实化：模拟态未真实发送，应返回 False 且不计入 sent
         ok = await a.send_message("chat1", "payload")
-        assert ok is True
-        assert a.get_stats()["sent"] == 1
+        assert ok is False
+        assert a.get_stats()["sent"] == 0
+
+
+class TestGatewayHonesty:
+    """网关诚实性测试：模拟态必须如实反映，不得伪装成已连接/已发送。
+
+    验证「宣称=实况」：无凭证/缺依赖的适配器进入模拟模式后，
+    is_connected() 必须为 False、simulated 必须为 True，
+    经 PlatformManager 聚合后的状态与统计也不得把模拟态计入「已连接」。
+    """
+
+    async def test_all_adapters_simulated_without_credentials(self) -> None:
+        from agent.gateway.platforms.matrix_adapter import MatrixAdapter
+        from agent.gateway.platforms.signal_adapter import SignalAdapter
+        from agent.gateway.platforms.slack_adapter import SlackAdapter
+        from agent.gateway.platforms.whatsapp_adapter import WhatsAppAdapter
+
+        adapters = [
+            RelayAdapter(),
+            SlackAdapter(),
+            SignalAdapter(),
+            MatrixAdapter(),
+            WhatsAppAdapter(),
+        ]
+        for a in adapters:
+            await a.start()
+            assert await a.is_connected() is False, f"{a.name} 不应谎报已连接"
+            assert a.simulated is True, f"{a.name} 应声明 simulated"
+
+    async def test_manager_does_not_count_simulated_as_connected(self) -> None:
+        mgr = PlatformManager()
+        mgr.register("relay", RelayAdapter())
+        mgr.register("real", MockAdapter("real"))
+        results = await mgr.start_all()
+        assert results == {"relay": True, "real": True}
+
+        relay_status = await mgr.get_status("relay")
+        assert relay_status.connected is False
+        assert relay_status.simulated is True
+
+        real_status = await mgr.get_status("real")
+        assert real_status.connected is True
+        assert real_status.simulated is False
+
+        stats = mgr.get_stats()
+        assert stats["connected"] == 1  # 仅 real
+        assert stats["simulated"] == 1  # relay 计入模拟
+
+    async def test_manager_send_on_simulated_returns_false(self) -> None:
+        mgr = PlatformManager()
+        mgr.register("relay", RelayAdapter())
+        await mgr.start("relay")
+        ok = await mgr.send_message("relay", "u1", "hello")
+        assert ok is False
+        assert (await mgr.get_status("relay")).message_count == 0
+
+    async def test_get_all_statuses_reflects_simulated(self) -> None:
+        mgr = PlatformManager()
+        mgr.register("relay", RelayAdapter())
+        await mgr.start("relay")
+        all_status = await mgr.get_all_statuses()
+        assert all_status["relay"].connected is False
+        assert all_status["relay"].simulated is True
 
     async def test_stop_is_safe_when_not_started(self) -> None:
         a = RelayAdapter()

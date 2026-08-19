@@ -10,6 +10,7 @@ from agent.security.sensitive_detector import (
     RiskLevel,
     check_sensitive_info,
 )
+from agent.core.logger import log_ignored
 
 
 @dataclass
@@ -395,8 +396,8 @@ class VerificationService:
         if self.deps.llm:
             try:
                 return await self._llm_evaluate_goal(original_input, current_output)
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(None, "service.VerificationService.evaluate_goal_progress", _exc)
 
         # 无 LLM 时无法真正评估目标达成，不得误判为成功（审计 V-01）
         return GoalProgress(

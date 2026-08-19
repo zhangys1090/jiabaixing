@@ -4,6 +4,7 @@
 
 import type { ToolContext, ToolDefinition, ToolResult } from '../../types';
 import { Permission, ToolCategory } from '../../types';
+import { withStoreLock } from './storeLock';
 
 interface NoteEntry {
   id: string;
@@ -87,6 +88,17 @@ export function createNoteTakeExecutor(deps: NoteTakeDeps) {
   ): Promise<ToolResult> => {
     const action = String(params.action || '');
 
+    if (!deps.noteStore) {
+      return {
+        success: false,
+        output: null,
+        error:
+          'note_take 不可用: noteStore 未注入，请在 initHarness 中配置笔记存储依赖',
+        duration: 0,
+        validated: false,
+      };
+    }
+
     try {
       switch (action) {
         case 'write': {
@@ -103,20 +115,31 @@ export function createNoteTakeExecutor(deps: NoteTakeDeps) {
           }
           const now = Date.now();
           const noteId = params.note_id ? String(params.note_id) : undefined;
-          let note: NoteEntry;
-          if (noteId) {
-            const notes = await deps.noteStore.getNotes();
-            const existing = notes.find((n) => n.id === noteId);
-            if (existing) {
-              existing.title = title || existing.title;
-              existing.content = content || existing.content;
-              if (Array.isArray(params.tags))
-                existing.tags = params.tags.map(String);
-              existing.updatedAt = now;
-              note = existing;
+          return withStoreLock(deps.noteStore, async () => {
+            let note: NoteEntry;
+            if (noteId) {
+              const notes = await deps.noteStore.getNotes();
+              const existing = notes.find((n) => n.id === noteId);
+              if (existing) {
+                existing.title = title || existing.title;
+                existing.content = content || existing.content;
+                if (Array.isArray(params.tags))
+                  existing.tags = params.tags.map(String);
+                existing.updatedAt = now;
+                note = existing;
+              } else {
+                note = {
+                  id: noteId,
+                  title: title || '无标题',
+                  content,
+                  tags: Array.isArray(params.tags) ? params.tags.map(String) : [],
+                  createdAt: now,
+                  updatedAt: now,
+                };
+              }
             } else {
               note = {
-                id: noteId,
+                id: generateId(),
                 title: title || '无标题',
                 content,
                 tags: Array.isArray(params.tags) ? params.tags.map(String) : [],
@@ -124,23 +147,14 @@ export function createNoteTakeExecutor(deps: NoteTakeDeps) {
                 updatedAt: now,
               };
             }
-          } else {
-            note = {
-              id: generateId(),
-              title: title || '无标题',
-              content,
-              tags: Array.isArray(params.tags) ? params.tags.map(String) : [],
-              createdAt: now,
-              updatedAt: now,
+            await deps.noteStore.saveNote(note);
+            return {
+              success: true,
+              output: `笔记已保存: [${note.id}] ${note.title}`,
+              duration: 0,
+              validated: false,
             };
-          }
-          await deps.noteStore.saveNote(note);
-          return {
-            success: true,
-            output: `笔记已保存: [${note.id}] ${note.title}`,
-            duration: 0,
-            validated: false,
-          };
+          });
         }
 
         case 'read': {
@@ -217,12 +231,25 @@ export function createNoteTakeExecutor(deps: NoteTakeDeps) {
             };
           }
           const notes = await deps.noteStore.getNotes();
-          const matched = notes.filter(
-            (n) =>
-              n.title.toLowerCase().includes(query) ||
-              n.content.toLowerCase().includes(query) ||
-              n.tags.some((t) => t.toLowerCase().includes(query))
-          );
+          const matched = notes
+            .map((n) => {
+              let score = 0;
+              if (n.title.toLowerCase().includes(query)) score += 10;
+              if (n.content.toLowerCase().includes(query)) score += 5;
+              for (const t of n.tags) {
+                if (t.toLowerCase().includes(query)) score += 3;
+              }
+              const queryChars = [...new Set(query.split(''))];
+              for (const c of queryChars) {
+                if (c.trim() && n.title.toLowerCase().includes(c)) score += 1;
+                if (c.trim() && n.content.toLowerCase().includes(c))
+                  score += 0.5;
+              }
+              return { note: n, score };
+            })
+            .filter((s) => s.score > 0)
+            .sort((a, b) => b.score - a.score)
+            .map((s) => s.note);
           if (matched.length === 0) {
             return {
               success: true,

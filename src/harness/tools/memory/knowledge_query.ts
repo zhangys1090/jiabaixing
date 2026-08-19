@@ -8,6 +8,7 @@
 
 import type { ToolContext, ToolDefinition, ToolResult } from '../../types';
 import { Permission, ToolCategory } from '../../types';
+import { Logger } from '../../../utils/Logger';
 
 export const KNOWLEDGE_QUERY_DEF: ToolDefinition = {
   name: 'knowledge_query',
@@ -60,6 +61,14 @@ export interface KnowledgeQueryDeps {
     content: string;
     timestamp?: Date;
   }>;
+  /** D1: 记忆召回不足时的网络检索降级（RAG 闭环）。由 registerHarnessTools 注入 searchEngine 适配。 */
+  webSearch?: (
+    query: string,
+    limit: number,
+    context?: ToolContext
+  ) => Promise<Array<{ content: string; source?: string }>>;
+  /** D1: 记忆回填（RAG 闭环）—— 网络检索补强结果写回记忆，供后续直接命中 */
+  memoryStore?: (query: string, content: string) => Promise<void> | void;
 }
 
 export function createKnowledgeQueryExecutor(deps: KnowledgeQueryDeps) {
@@ -134,6 +143,39 @@ export function createKnowledgeQueryExecutor(deps: KnowledgeQueryDeps) {
             );
           }
           results.push('');
+        }
+      }
+
+      // D1: RAG 闭环 — 记忆召回不足时自动降级 web_search 并回填记忆
+      if (results.length === 0 && deps.webSearch) {
+        try {
+          const web = await deps.webSearch(query, maxResults, _context);
+          if (web.length > 0) {
+            results.push('🌐 网络检索补强 (记忆不足，已自动降级搜索):');
+            for (const item of web.slice(0, maxResults)) {
+              results.push(
+                `  • ${item.content.substring(0, 200)}${item.source ? ` (${item.source})` : ''}`
+              );
+            }
+            results.push('');
+            // 回填记忆（RAG 闭环）：把检索到的知识写回，供后续直接命中
+            if (deps.memoryStore) {
+              const combined = web.map((w) => w.content).join('\n');
+              try {
+                await deps.memoryStore(query, combined);
+              } catch (be) {
+                Logger.debug(
+                  `⚠️ D1: 记忆回填失败: ${(be as Error).message}`,
+                  'KnowledgeQuery'
+                );
+              }
+            }
+          }
+        } catch (we) {
+          Logger.warn(
+            `⚠️ D1: web_search 降级失败: ${(we as Error).message}`,
+            'KnowledgeQuery'
+          );
         }
       }
 

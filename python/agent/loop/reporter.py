@@ -4,6 +4,8 @@ import time
 from typing import Any
 
 from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
+from agent.loop.quality_scorer import BuiltInQualityScorer
 from agent.loop.types import (
     AgentResult,
     LoopContext,
@@ -21,17 +23,22 @@ class Reporter:
       - step_success_rate (25%): 步骤成功率
       - error_recovery (20%): 错误恢复率（失败后通过反思重试成功）
       - time_efficiency (20%): 时间效率（实际耗时 vs 预算）
+
+    额外维度（BuiltInQualityScorer）：
+      - reflection_value: 反思引擎是否产出了有效经验
+      - context_relevance: 注意力聚焦后的上下文集中度
     """
 
-    # 质量评分权重
     WEIGHT_RESPONSE = 0.35
     WEIGHT_STEPS = 0.25
     WEIGHT_RECOVERY = 0.20
     WEIGHT_EFFICIENCY = 0.20
 
-    # 响应长度阈值（字符数）
     MIN_RESPONSE_LENGTH = 10
     GOOD_RESPONSE_LENGTH = 100
+
+    def __init__(self) -> None:
+        self._quality_scorer = BuiltInQualityScorer()
 
     def report(self, context: LoopContext) -> ReporterOutput:
         last_assistant = self._extract_response(context)
@@ -136,6 +143,25 @@ class Reporter:
             "error_recovery": round(recovery_score, 4),
             "time_efficiency": round(efficiency_score, 4),
         }
+
+        # F1: 接入 BuiltInQualityScorer 额外维度（反思价值 + 上下文相关性）
+        try:
+            reflection_experiences = 0
+            if hasattr(context, '_reflection_experiences_count'):
+                reflection_experiences = context._reflection_experiences_count
+            extra_report = self._quality_scorer.score(
+                step_results=context.step_results,
+                planned_steps=len(context.plan.steps) if context.plan and context.plan.steps else 0,
+                rounds_used=context.budget.rounds_used,
+                reflection_experiences=reflection_experiences,
+                context_message_count=len(context.messages),
+            )
+            if extra_report and hasattr(extra_report, 'dimensions'):
+                breakdown["reflection_value"] = round(extra_report.dimensions.reflection_value, 4)
+                breakdown["context_relevance"] = round(extra_report.dimensions.context_relevance, 4)
+                quality = quality * 0.85 + extra_report.overall_score * 0.15
+        except Exception as _exc:
+            log_ignored(log, "reporter.Reporter._compute_quality_score", _exc)
 
         log.debug(
             "Quality score computed",

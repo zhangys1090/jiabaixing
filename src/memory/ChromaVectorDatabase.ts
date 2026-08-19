@@ -57,9 +57,9 @@ export class ChromaVectorDatabase
 
   public async initialize(): Promise<void> {
     await this.executeTransaction('initialize', async () => {
-      const { ChromaClient } =
-        (await import('@chroma-core/chromadb')) as typeof import('@chroma-core/chromadb');
-      this.client = new ChromaClient({
+      const ImportedChromaClient = (await import('@chroma-core/chromadb'))
+        .ChromaClient;
+      this.client = new ImportedChromaClient({
         path: 'http://localhost:8000',
       }) as unknown as ChromaClient;
 

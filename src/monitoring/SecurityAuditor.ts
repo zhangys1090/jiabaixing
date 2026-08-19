@@ -7,6 +7,13 @@
  * @deprecated 请使用 src/security/AuditService 代替
  */
 
+import { emitDeprecationWarning } from '../shared/deprecationWarning';
+emitDeprecationWarning(
+  'SecurityAuditor',
+  'AuditService (src/security/AuditService)',
+  'V6.0'
+);
+
 import * as fs from 'fs';
 import * as path from 'path';
 import { AuditService } from '../security/AuditService';

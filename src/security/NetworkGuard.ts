@@ -254,7 +254,7 @@ class NetworkGuardInner {
                         return mockRes;
                       },
                       destroy: () => {},
-                    } as unknown as IncomingMessage;
+                    } as Partial<IncomingMessage> as IncomingMessage;
                     callback(mockRes);
                   }
                   cb?.();

@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import os
-from typing import Any
+import threading
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:  # 仅供类型注解使用（PEP 563 下不会在运行时求值）
+    pass
 
 from agent.core.dependencies import SUBSYSTEM_DEPS, SubsystemSpec
+from agent.core.domain_containers import SUBSYSTEM_TO_DOMAIN
 from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
 from agent.core.registry import SubsystemRegistry
 from agent.core.think_scrubber import ThinkScrubber
 from agent.infrastructure.otel_setup import setup_otel, get_tracer, get_meter, is_otel_enabled, traced
@@ -22,6 +29,11 @@ from agent.memory.episodic_memory import EpisodicMemoryStore
 from agent.evolution.engine import EvolutionEngine
 from agent.evolution.orchestrator import EvolutionOrchestrator
 from agent.core.conversation_loop import ConversationLoop
+from agent.core.backpressure import BackpressureController, BackpressureConfig
+from agent.core.config_watcher import ConfigReloader
+from agent.memory.consolidation import MemoryConsolidator, ConsolidationConfig
+from agent.core.verification_loop import VerificationLoop, VerificationReport, StepVerification
+from agent.core.clarification import ClarificationEngine, ClarificationConfig, AmbiguityResult
 from agent.core.context_pipeline import (
     ContextManager,
     ContextFileRegistry,
@@ -30,28 +42,9 @@ from agent.core.context_pipeline import (
 from agent.core.context_compressor import ContextCompressor, ContextWindowManager
 
 
-def build_extension_catalog(env_value: str | None = None) -> Any:
-    """构建引擎使用的窄腰能力目录（skill:*/mcp:*），默认全部启用（向后兼容）。
-
-    - 注册各内置技能为 skill:<name>（OPTIONAL）。
-    - 注册各默认 MCP 服务器为 mcp:<name>（OPTIONAL）。
-    - env 表达式缺省按 "*" 处理 → 全部启用；设具体列表则仅启用所列（白名单）。
-
-    Returns:
-        ExtensionCatalog 实例。
-    """
-    from agent.catalog import EXTENSIONS_ENV, ExtensionCatalog, ExtensionState
-    from agent.skills.registry import builtin_skill_names
-
-    cat = ExtensionCatalog()
-    for name in builtin_skill_names():
-        cat.register(f"skill:{name}", ExtensionState.OPTIONAL)
-    # 默认 MCP 服务器（与 MCPServerManager._initialize_default_servers 对齐）。
-    for srv in ("filesystem", "sqlite", "browser", "cron"):
-        cat.register(f"mcp:{srv}", ExtensionState.OPTIONAL)
-    # 向后兼容：env 缺省 → 全部启用。
-    cat.apply_env(env_value if env_value else "*")
-    return cat
+# #6d 超大文件拆分首批：build_extension_catalog 已外提至独立模块并 re-export，
+# 保持 engine.py 对外签名不变（含测试 `from agent.core.engine import build_extension_catalog`）。
+from agent.core.extension_catalog import build_extension_catalog
 from agent.core.persona import PersonaCore
 from agent.context import UnifiedContextOrchestrator, ContextBuildRequest
 from agent.context.models import ContextBuildResult
@@ -133,178 +126,85 @@ log = StructuredLogger("engine")
 class AgentEngine:
     def __init__(self) -> None:
         self.llm = LLMProvider()
-        self.provider_catalog: Any = None  # T3：Provider 目录（运行时常量 + 已配置集合）
         self.provider_oauth_status: dict[str, dict] = {}  # T3：各 OAuth provider 凭据解析结果
-        self.memory: MemoryEngine | None = None
-        self.loop: LoopController | None = None
-        self.evolution: EvolutionEngine | None = None
-        self.conversation: ConversationLoop | None = None
-        self.context_manager: ContextManager | None = None
-        self.context_compressor: ContextCompressor | None = None
-        self.context_window_manager: ContextWindowManager | None = None
-        self.context_file_registry: ContextFileRegistry | None = None
-        self.context_reference_resolver: ContextReferenceResolver | None = None
-        self.persona: PersonaCore | None = None
-        self.unified_context_orchestrator: UnifiedContextOrchestrator | None = None
-        self.security: SecurityGuard | None = None
-        self.tool_registry: ToolRegistry | None = None
-        self.toolset_registry: ToolsetRegistry | None = None
-        self._toolset_mapper: Any = None  # 延迟构建的 SceneToToolsetMapper（AGENT_TOOLSET_SAMPLING）
-        self.mcp_tool_bridge: MCPToolBridge | None = None
-        self.permission_guard: PermissionGuard | None = None
-        self.schema_validator: SchemaValidator | None = None
-        self.tool_call_guard: ToolCallGuard | None = None
-        self.approval_manager: ApprovalManager | None = None
-        self.skill_registry: SkillRegistry | None = None
-        self.extension_catalog: Any = None  # T4：窄腰能力目录（skill:*/mcp:*）
-        self.session_store: SessionStore | None = None
-        self.trajectory_db: TrajectoryDatabase | None = None
-        self.flywheel: TrajectoryFlywheel | None = None
-        self.persistence: PersistenceService | None = None
-        self.curator: Curator | None = None
-        self.verification: VerificationService | None = None
-        self.constraints: ConstraintsService | None = None
-        self.hook_manager: HookManager | None = None
-        self.feedback_loops: FeedbackLoops | None = None
-        self.agent_registry: AgentRegistry | None = None
-        self.orchestrator: OrchestratorAgent | None = None
-        self.cron_scheduler: CronJobScheduler | None = None
-        self.output_guardrail: OutputGuardrailEngine | None = None
-        self.sandbox: SandboxExecutor | None = None
-        self.batch_processor: BatchProcessor | None = None
-        self.attention_focus: AttentionFocusEngine | None = None
-        self.think_scrubber: ThinkScrubber | None = None
-        # OTel tracer/meter 不再缓存到实例属性，统一通过 otel_metrics/otel_tracer 工厂获取
-        self._redis_cache: Any = None
-        # P3-#3: 生产埋点采集器 + 持续反馈闭环
-        self.production_metrics: Any = None
-        self.feedback_loop: ContinuousFeedbackLoop | None = None
         self._start_time: float = 0.0
         self._session_count: int = 0
         self._active_sessions: int = 0  # 当前活跃会话数，用于 OTel gauge
-        self.performance_monitor: PerformanceMonitor | None = None
-        self.evolution_trigger: EvolutionTrigger | None = None
-        self.fewshot_generalizer: FewShotGeneralizer | None = None
-        self.strategy_adapter: StrategyAdapter | None = None
-        self.learning_signals: LearningSignalCollector | None = None
-        self.incremental_planner: IncrementalPlanner | None = None
-        self.plan_quality_checker: PlanQualityChecker | None = None
-        self.reflection_applier: ReflectionApplicationManager | None = None
-        self.canary_manager: CanaryReleaseManager | None = None
-        self.priority_scorer: DynamicPriorityScorer | None = None
-        # A2A 协议组件 — 跨 Agent 通信能力
-        self.a2a_manager: A2AProtocolManager | None = None
-        self.a2a_self_card: A2AAgentCard | None = None
-        # A2A 运行时鉴权拦截器 — 入站校验 + 出站凭据注入
-        self.a2a_auth_interceptor: A2AAuthInterceptor | None = None
-        # 远程 A2A Agent 端点列表（逗号分隔 URL，从环境变量 A2A_REMOTE_AGENTS 加载）
+        self._counter_lock = threading.Lock()
         self.a2a_remote_endpoints: list[str] = []
-        # 新增功能模块属性
-        self.web_search_registry: Any = None
-        self.tool_search_index: Any = None
-        self.path_security_guard: Any = None
-        self.url_safety_guard: Any = None
-        self.ssl_guard: Any = None
-        self.redaction_engine: Any = None
-        self.error_classifier: Any = None
-        self.local_title_generator: Any = None
-        self.session_recap_engine: Any = None
-        self.session_search_index: Any = None
-        self.session_lineage_tracker: Any = None
-        self.credential_store: Any = None
-        self.credential_discovery: Any = None
-        self.eval_runner: Any = None
-        self.gateway_dispatcher: Any = None
-        self.a2a_task_manager: Any = None
-        self.a2a_discovery: Any = None
-        self.a2a_trust_manager: Any = None
-        # T0 用户体验
-        self.clarify_manager: Any = None
-        self.todo_manager: Any = None
-        self.code_executor: Any = None
-        self.delegate_delegator: Any = None
-        self.write_approval_manager: Any = None
-        # T1 效率
-        self.lazy_deps: Any = None
-        self.coding_context_detector: Any = None
-        self.subdirectory_hints: Any = None
-        self.tool_result_cache: Any = None
-        self.conversation_compressor_v2: Any = None
-        # T2 安全可控
-        self.budget_guard: Any = None
-        self.osv_checker: Any = None
-        self.disk_cleaner: Any = None
-        self.security_guidance: Any = None
-        # T3+T4 差异化
-        self.voice_mode_manager: Any = None
-        self.workspace_manager: Any = None
-        self.i18n_instance: Any = None
-        self.plugin_manager: Any = None
-        # P3-P5 扩展节点
-        self.skill_hub: Any = None
-        self.skill_audit: Any = None
-        self.profile_manager: Any = None
-        self.async_delegator: Any = None
-        self.memory_providers: Any = None
-        self.proxy_server: Any = None
-        self.dashboard_auth: Any = None
-        self.hot_reloader: Any = None
-        self.shutdown_forensics: Any = None
-        self.relay_adapter: Any = None
-        # P6 扩展节点
-        self.batch_trajectory: Any = None
-        self.stream_diag: Any = None
-        self.nous_rate_guard: Any = None
-        self.portal_tags: Any = None
-        # P7 扩展节点
-        self.message_content: Any = None
-        self.retry_utils: Any = None
-        self.skill_provenance: Any = None
-        self.cli_output: Any = None
-        self.markdown_tables: Any = None
-        # P8 扩展节点
-        self.display_formatter: Any = None
-        self.curses_tui: Any = None
-        self.pty_bridge: Any = None
-        self.shell_completion: Any = None
-        self.clipboard: Any = None
-        # P9 扩展节点
-        self.prompt_caching: Any = None
-        self.turn_finalizer: Any = None
-        self.turn_retry_state: Any = None
-        self.batch_runner: Any = None
-        # P10 安全+记忆+Prompt增强节点
-        self.write_approval: Any = None
-        self.threat_patterns: Any = None
-        self.memory_manager: Any = None
-        self.insights: Any = None
-        self.background_review: Any = None
-        self.conversation_compression: Any = None
-        self.context_references: Any = None
-        # P11 平台扩展+LSP+ACP+Skill节点
-        self.platform_manager: Any = None
-        self.lsp_servers: Any = None
-        self.lsp_workspace: Any = None
-        self.acp_entry: Any = None
-        self.acp_server: Any = None
-        self.acp_auth: Any = None
-        self.skill_sync: Any = None
-        self.skill_bundles: Any = None
-        # P12 游离节点注册
-        self.model_cost_guard: Any = None
-        self.auxiliary_client: Any = None
-        self.moa_aggregator: Any = None
-        self.streaming_scrubber: Any = None
-        self.account_usage: Any = None
-        self.learning_graph: Any = None
-        self.rate_limit_tracker: Any = None
-        self.blueprint_catalog: Any = None
-        self.onboarding: Any = None
-        self.multi_agent: Any = None
-        self.gateway_hooks: Any = None
-        self.slash_commands: Any = None
-        # 子系统注册中心（用于拓扑排序初始化）
         self._registry: SubsystemRegistry | None = None
+        self._degraded_subsystems: set[str] = set()
+        self._degraded_reasons: dict[str, str] = {}
+        self._critical_degraded: set[str] = set()
+        self._shutdown_event: asyncio.Event | None = None
+        # ── 域容器（V6.0 域独占门面） ──
+        from agent.core.domain_containers import (
+            CoreDomain, ToolDomain, ContextDomain, SecurityDomain,
+            PersistenceDomain, OrchestrationDomain, EvolutionDomain,
+            IntegrationDomain, PresentationDomain, UtilityDomain,
+            ObservabilityDomain, SessionDomain, CacheDomain,
+        )
+        self.domains = {
+            "core": CoreDomain(),
+            "tool": ToolDomain(),
+            "context": ContextDomain(),
+            "security": SecurityDomain(),
+            "persistence": PersistenceDomain(),
+            "orchestration": OrchestrationDomain(),
+            "evolution": EvolutionDomain(),
+            "integration": IntegrationDomain(),
+            "presentation": PresentationDomain(),
+            "observability": ObservabilityDomain(),
+            "session": SessionDomain(),
+            "cache": CacheDomain(),
+            "utility": UtilityDomain(),
+        }
+        self._domain_proxy_enabled: bool = True
+        from agent.core.domain_containers import DomainEventBus
+        self.domain_events = DomainEventBus()
+        self._loop_strategies: dict[str, Any] = {}
+        # 多智能体编排器：必须在此显式初始化。
+        # __getattr__ 对下划线开头属性一律抛 AttributeError，若不预置为 None，
+        # 当 _init_multi_agent_orchestrator 因 self.loop 未就绪而跳过赋值时，
+        # 主对话路径读取 self._multi_agent_orchestrator 会崩溃。
+        self._multi_agent_orchestrator: Any = None
+
+    _ENGINE_OWN_ATTRS: frozenset[str] = frozenset({
+        "a2a_remote_endpoints",
+        "_start_time", "_session_count", "_active_sessions",
+        "_registry", "_degraded_subsystems", "_degraded_reasons",
+        "_domain_proxy_enabled", "_loop_strategies", "_counter_lock",
+        "_multi_agent_orchestrator",
+    })
+
+    def __getattr__(self, name: str) -> Any:
+        if name.startswith("_") and name != "_redis_cache":
+            raise AttributeError(f"AgentEngine has no attribute '{name}'")
+        if not self.__dict__.get("_domain_proxy_enabled", False):
+            raise AttributeError(f"AgentEngine has no attribute '{name}'")
+        domain_name = SUBSYSTEM_TO_DOMAIN.get(name)
+        if domain_name is not None:
+            domains = self.__dict__.get("domains")
+            if domains is not None:
+                domain = domains.get(domain_name)
+                if domain is not None and hasattr(domain, name):
+                    return getattr(domain, name)
+        raise AttributeError(f"AgentEngine has no attribute '{name}'")
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if (name.startswith("_") and name != "_redis_cache") or name in ("domains", "domain_events"):
+            object.__setattr__(self, name, value)
+            return
+        domains = self.__dict__.get("domains")
+        if domains is not None and self.__dict__.get("_domain_proxy_enabled", False):
+            from agent.core.domain_containers import SUBSYSTEM_TO_DOMAIN
+            domain_name = SUBSYSTEM_TO_DOMAIN.get(name)
+            if domain_name is not None:
+                domain = domains.get(domain_name)
+                if domain is not None:
+                    setattr(domain, name, value)
+                    return
+        object.__setattr__(self, name, value)
 
     async def initialize_v2(self) -> None:
         """基于依赖图的拓扑排序初始化（新版）。
@@ -346,6 +246,7 @@ class AgentEngine:
             return
 
         await self._finalize_boot()
+        self._mark_domains_initialized()
 
     def _validate_required_config(self) -> list[str]:
         """检查必要配置是否完整。
@@ -384,8 +285,8 @@ class AgentEngine:
 
         try:
             set_active_sessions(0)
-        except Exception:
-            pass
+        except Exception as _exc:
+            log_ignored(log, "engine.AgentEngine._init_observability", _exc)
 
         try:
             from agent.memory.redis_cache import get_redis_cache, is_redis_enabled
@@ -399,12 +300,214 @@ class AgentEngine:
 
     async def _finalize_boot(self) -> None:
         """初始化完成后的收尾工作。"""
+        self._register_default_loop_strategies()
         if self.hook_manager:
             await self.hook_manager.trigger(ON_SESSION_START, session_id="engine", modules_loaded=True)
+
+    def _register_default_loop_strategies(self) -> None:
+        if self.loop is not None:
+            self.register_loop_strategy("plan_exec_eval", self.loop)
+            if hasattr(self.loop, "run_react_loop"):
+                self.register_loop_strategy("react", self.loop)
+        if self.conversation is not None:
+            self.register_loop_strategy("simple", self.conversation)
+        if self._multi_agent_orchestrator is not None:
+            self.register_loop_strategy("multi_agent", self._multi_agent_orchestrator)
+
+    def is_subsystem_available(self, name: str) -> bool:
+        """检查子系统是否可用（已初始化且未降级）。
+
+        Args:
+            name: 子系统属性名（如 'memory', 'loop', 'evolution'）
+
+        Returns:
+            True 表示可用，False 表示未初始化或已降级
+        """
+        if name in self._degraded_subsystems:
+            return False
+        return getattr(self, name, None) is not None
+
+    def get_degraded_report(self) -> dict[str, Any]:
+        """获取降级子系统健康报告。
+
+        Returns:
+            包含 degraded_count、degraded_subsystems、critical_degraded、
+            all_healthy 的字典
+        """
+        return {
+            "degraded_count": len(self._degraded_subsystems),
+            "degraded_subsystems": dict(self._degraded_reasons),
+            "critical_degraded": sorted(self._critical_degraded),
+            "critical_degraded_count": len(self._critical_degraded),
+            "all_healthy": len(self._degraded_subsystems) == 0,
+        }
+
+    def _mark_subsystem_degraded(self, name: str, reason: str = "", critical: bool = False) -> None:
+        """标记子系统已降级。
+
+        Args:
+            name: 子系统名称
+            reason: 降级原因
+            critical: 是否为关键子系统（如 loop / tool_registry / schema_validator /
+                constraints）。关键子系统降级会影响核心服务能力，会被标记进
+                `_critical_degraded` 并反映在健康检查中（status=unhealthy），
+                而非静默放行。
+        """
+        self._degraded_subsystems.add(name)
+        self._degraded_reasons[name] = reason
+        if critical:
+            self._critical_degraded.add(name)
+            log.error("Critical subsystem degraded", subsystem=name, reason=reason)
+        else:
+            log.warning("Subsystem degraded", subsystem=name, reason=reason)
+
+        try:
+            from agent.core.subsystem_guard import get_degraded_tracker
+            get_degraded_tracker().mark_degraded(name, reason)
+        except Exception as _exc:
+            log_ignored(log, "engine.AgentEngine._mark_subsystem_degraded", _exc)
+
+    def _mark_domains_initialized(self) -> None:
+        """V6.0: 扁平属性已归零，仅提取 LLM 子域并标记域初始化完成。"""
+        core = self.domains.get("core")
+        if core and core.llm is not None:
+            from agent.core.domain_containers import LLMSubDomain
+            if core.llm_sub is None:
+                core.llm_sub = LLMSubDomain()
+            core.llm_sub.from_provider(core.llm)
+
+        for domain in self.domains.values():
+            domain.mark_initialized()
+
+    def get_domain(self, name: str) -> Any | None:
+        """按名称获取域容器。
+
+        Args:
+            name: 域名称（如 'core', 'tool', 'security'）
+
+        Returns:
+            域容器实例，不存在则返回 None
+        """
+        return self.domains.get(name)
+
+    def get_domain_report(self) -> dict[str, Any]:
+        """获取所有域的健康报告。
+
+        Returns:
+            每个域的初始化状态和子系统列表
+        """
+        report: dict[str, Any] = {}
+        for name, domain in self.domains.items():
+            report[name] = {
+                "initialized": domain.is_initialized,
+                "subsystems": domain.list_subsystems(),
+            }
+        report["degraded"] = self.get_degraded_report()
+        return report
+
+    def _topological_sort_domains(self) -> list[str]:
+        """基于 depends_on 声明对域进行拓扑排序。
+
+        Returns:
+            按依赖顺序排列的域名称列表（被依赖的域排在前面）。
+
+        Raises:
+            ValueError: 如果存在循环依赖。
+        """
+        in_degree: dict[str, int] = {name: 0 for name in self.domains}
+        adj: dict[str, list[str]] = {name: [] for name in self.domains}
+        for name, domain in self.domains.items():
+            deps = getattr(domain, "depends_on", ())
+            for dep in deps:
+                if dep in self.domains:
+                    adj[dep].append(name)
+                    in_degree[name] += 1
+        queue = [n for n, d in in_degree.items() if d == 0]
+        result: list[str] = []
+        while queue:
+            node = queue.pop(0)
+            result.append(node)
+            for neighbor in adj[node]:
+                in_degree[neighbor] -= 1
+                if in_degree[neighbor] == 0:
+                    queue.append(neighbor)
+        if len(result) != len(self.domains):
+            remaining = set(self.domains) - set(result)
+            raise ValueError(f"Circular dependency detected among domains: {remaining}")
+        return result
+
+    async def startup_domains(self) -> None:
+        """按拓扑顺序启动所有域。"""
+        order = self._topological_sort_domains()
+        for name in order:
+            domain = self.domains.get(name)
+            if domain is not None:
+                try:
+                    await domain.startup()
+                except Exception as e:
+                    log.warning("Domain startup failed", domain=name, error=str(e))
+                    self._mark_subsystem_degraded(f"domain:{name}", str(e))
+
+    async def shutdown_domains(self) -> None:
+        """按逆拓扑顺序关闭所有域。"""
+        if self._shutdown_event is not None:
+            self._shutdown_event.set()
+        order = self._topological_sort_domains()
+        for name in reversed(order):
+            domain = self.domains.get(name)
+            if domain is not None:
+                try:
+                    await domain.shutdown()
+                except Exception as e:
+                    log.warning("Domain shutdown failed", domain=name, error=str(e))
+
+    async def health_check_domains(self) -> dict[str, dict[str, Any]]:
+        """对所有域执行健康检查。"""
+        results: dict[str, dict[str, Any]] = {}
+        for name, domain in self.domains.items():
+            try:
+                results[name] = await domain.health_check()
+            except Exception as e:
+                results[name] = {"healthy": False, "domain": name, "error": str(e)}
+        return results
+
+    def register_loop_strategy(self, name: str, strategy: Any) -> None:
+        self._loop_strategies[name] = strategy
+
+    def get_loop_strategy(self, name: str) -> Any | None:
+        return self._loop_strategies.get(name)
+
+    def select_loop_strategy(self, input_text: str) -> str:
+        if not self._loop_strategies:
+            return "simple"
+        if "react" in self._loop_strategies:
+            core = self.domains.get("core")
+            if core and core.loop and hasattr(core.loop, "_should_use_react"):
+                if core.loop._should_use_react(input_text):
+                    return "react"
+        if "plan_exec_eval" in self._loop_strategies:
+            return "plan_exec_eval"
+        return next(iter(self._loop_strategies), "simple")
+
+    def _resolve_execution_strategy(self, input_text: str, should_use_loop: bool) -> str:
+        if should_use_loop and self._multi_agent_orchestrator and self.loop:
+            try:
+                complexity = self._multi_agent_orchestrator._complexity_analyzer.analyze(input_text)
+                if complexity.complexity == "very_complex" and complexity.recommended_agents > 1:
+                    return "multi_agent"
+            except Exception as _exc:
+                log_ignored(log, "engine.AgentEngine._resolve_execution_strategy", _exc)
+        if should_use_loop and self.loop:
+            return self.select_loop_strategy(input_text)
+        if self.conversation:
+            return "simple"
+        return "fallback"
 
     async def initialize(self) -> None:
         import time
         self._start_time = time.time()
+
+        self._shutdown_event = asyncio.Event()
 
         # P0: OTel 可观测性初始化
         # 注意：OTel tracer/meter 通过 otel_metrics/otel_tracer 模块的工厂函数按需获取，
@@ -421,8 +524,8 @@ class AgentEngine:
         # 初始化活跃会话 gauge 为 0（OTel 启用时由 MetricReader 周期性拉取）
         try:
             set_active_sessions(0)
-        except Exception:
-            pass
+        except Exception as _exc:
+            log_ignored(log, "engine.AgentEngine.initialize", _exc)
 
         # P0: Redis 缓存层初始化（显式注入，供 LLM 缓存等使用）
         try:
@@ -451,6 +554,7 @@ class AgentEngine:
         except Exception as e:
             log.warning("Memory Engine init failed", error=str(e))
             self.memory = None
+            self._mark_subsystem_degraded("memory", str(e))
 
         try:
             self.trajectory_db = TrajectoryDatabase()
@@ -458,14 +562,22 @@ class AgentEngine:
         except Exception as e:
             log.warning("Trajectory Database init failed", error=str(e))
             self.trajectory_db = None
+            self._mark_subsystem_degraded("trajectory_db", str(e))
 
         try:
             self.tool_registry = ToolRegistry()
             count = register_default_tools(self.tool_registry)
+            try:
+                from agent.perception.tools import register_perception_tools
+                register_perception_tools(self.tool_registry)
+                log.info("Perception tools registered")
+            except Exception as _e:
+                log.warning("Perception tools registration failed", error=str(_e))
             log.info("Tool Registry ready", count=count)
         except Exception as e:
             log.warning("Tool Registry init failed", error=str(e))
             self.tool_registry = None
+            self._mark_subsystem_degraded("tool_registry", str(e), critical=True)
 
         try:
             self.toolset_registry = ToolsetRegistry(self.tool_registry)
@@ -473,6 +585,7 @@ class AgentEngine:
         except Exception as e:
             log.warning("Toolset Registry init failed", error=str(e))
             self.toolset_registry = None
+            self._mark_subsystem_degraded("toolset_registry", str(e))
 
         try:
             # P0 修复：MCPToolBridge 应持有 MCPServerManager（MCPProvider 实现），
@@ -490,6 +603,7 @@ class AgentEngine:
         except Exception as e:
             log.warning("MCP Tool Bridge init failed", error=str(e))
             self.mcp_tool_bridge = None
+            self._mark_subsystem_degraded("mcp_tool_bridge", str(e), critical=True)
 
         try:
             self.permission_guard = PermissionGuard()
@@ -497,6 +611,7 @@ class AgentEngine:
         except Exception as e:
             log.warning("Permission Guard init failed", error=str(e))
             self.permission_guard = None
+            self._mark_subsystem_degraded("permission_guard", str(e), critical=True)
 
         try:
             self.schema_validator = SchemaValidator()
@@ -504,6 +619,7 @@ class AgentEngine:
         except Exception as e:
             log.warning("Schema Validator init failed", error=str(e))
             self.schema_validator = None
+            self._mark_subsystem_degraded("schema_validator", str(e), critical=True)
 
         try:
             self.tool_call_guard = ToolCallGuard()
@@ -511,24 +627,37 @@ class AgentEngine:
         except Exception as e:
             log.warning("Tool Call Guard init failed", error=str(e))
             self.tool_call_guard = None
+            self._mark_subsystem_degraded("tool_call_guard", str(e))
 
         try:
-            # 非交互模式下自动批准所有工具调用（CLI/API/WS 场景无人审批）；
-            # 若显式设置 AGENT_RUNTIME_POSTURE 非 confirm，则由安全姿态接管裁决。
             _posture = RuntimePosture.from_env()
-            self.approval_manager = ApprovalManager(auto_approve_all=True, posture=_posture)
-            log.info("Approval Manager ready", posture=_posture.value)
+            import os as _os
+            _env_mode = _os.environ.get("ENV", "development").lower()
+            _auto_approve = _env_mode not in ("production", "prod", "staging", "stage")
+            self.approval_manager = ApprovalManager(auto_approve_all=_auto_approve, posture=_posture)
+            log.info("Approval Manager ready", posture=_posture.value, auto_approve_all=_auto_approve)
         except Exception as e:
             log.warning("Approval Manager init failed", error=str(e))
             self.approval_manager = None
+            self._mark_subsystem_degraded("approval_manager", str(e))
 
-        # 金丝雀发布管理 — 必须在 LoopController 之前初始化，供其注入到 LLMProvider
         try:
             self.canary_manager = CanaryReleaseManager()
             log.info("Canary Release Manager ready")
         except Exception as e:
             log.warning("Canary Release Manager init failed", error=str(e))
             self.canary_manager = None
+            self._mark_subsystem_degraded("canary_manager", str(e))
+
+        # P0-P1: 新架构组件初始化
+        # 注：并行工具执行器不再挂到 engine 上（此前为双重孤儿，执行路径用
+        # conversation_loop._parallel_executor 自有实例）。见审计报告 §1.6 W1。
+        self.backpressure = BackpressureController()
+        self.config_reloader = ConfigReloader(self)
+        self.memory_consolidator = MemoryConsolidator(llm=self.llm)
+        self.verification_loop = VerificationLoop(verification=self.verification)
+        self.clarification_engine = ClarificationEngine()
+        log.info("Engine extensions initialized (backpressure, config_reloader, memory_consolidator, verification_loop, clarification_engine)")
 
         # 约束服务 — 必须在 LoopController 之前初始化，供其调用 resolve_adaptive_budget
         try:
@@ -537,31 +666,179 @@ class AgentEngine:
         except Exception as e:
             log.warning("Constraints Service init failed", error=str(e))
             self.constraints = None
+            self._mark_subsystem_degraded("constraints", str(e), critical=True)
 
         try:
+            perception_bus = None
+            try:
+                from agent.perception.bus import PerceptionBus, PerceptionLevel
+                perception_bus = PerceptionBus(
+                    tool_registry=self.tool_registry,
+                    llm=self.llm,
+                    level=PerceptionLevel(
+                        os.environ.get("PERCEPTION_LEVEL", "standard")
+                    ),
+                )
+                log.info("PerceptionBus ready")
+            except Exception as _e:
+                log.warning("PerceptionBus init failed", error=str(_e))
+
             self.loop = LoopController(
                 self.llm,
                 trajectory_db=self.trajectory_db,
                 tool_registry=self.tool_registry,
                 evolution=None,
-                memory_engine=self.memory,  # 修复断层 2.1: 传入记忆引擎，启用 Loop 模式下记忆检索
-                canary_manager=self.canary_manager,  # 修复断层 1.1: 传入灰度发布管理器
-                constraints_service=self.constraints,  # 修复断层 3.3: 传入约束服务，启用自适应预算
+                memory_engine=self.memory,
+                canary_manager=self.canary_manager,
+                constraints_service=self.constraints,
+                perception_bus=perception_bus,
+                schema_validator=getattr(self, "schema_validator", None),
+                tool_call_guard=getattr(self, "tool_call_guard", None),
+                proactive_engine=getattr(self, "proactive_engine", None),
             )
+
+            # Phase 3+4: 将进化闭环和辩论器注入 DebateHarness
+            if hasattr(self.loop, "_debate_harness") and self.loop._debate_harness:
+                if hasattr(self, "evolution_closed_loop") and self.evolution_closed_loop:
+                    self.loop._debate_harness._evolution_closed_loop = self.evolution_closed_loop
+                debater_instance = self.loop._get_debater() if hasattr(self.loop, "_get_debater") else None
+                if debater_instance:
+                    self.loop._debate_harness._debater = debater_instance
+                if hasattr(self.loop, "_causal") and self.loop._causal:
+                    self.loop._debate_harness._causal_modeler = self.loop._causal
+
             log.info("Loop Controller ready")
         except Exception as e:
             log.warning("Loop Controller init failed", error=str(e))
             self.loop = None
+            self._mark_subsystem_degraded("loop", str(e), critical=True)
 
         try:
             self.evolution = EvolutionEngine()
+
+            # Phase 4: 进化闭环打通 — 连通 EvolutionEngine + EvolutionOrchestrator
+            try:
+                from agent.evolution.closed_loop import EvolutionClosedLoop
+                self.evolution_closed_loop = EvolutionClosedLoop(
+                    evolution_engine=self.evolution,
+                )
+                log.info("Evolution Closed Loop ready")
+            except Exception as _e:
+                log.warning("Evolution Closed Loop init failed", error=str(_e))
+                self.evolution_closed_loop = None
+
+            # Phase 4: 跨会话记忆 + 主动行为引擎
+            try:
+                from agent.memory.cross_session import CrossSessionMemory, ProactiveEngine
+                self.cross_session_memory = CrossSessionMemory()
+                self.proactive_engine = ProactiveEngine(
+                    memory=self.cross_session_memory,
+                    perception_bus=perception_bus,
+                )
+                log.info("Cross-session Memory + Proactive Engine ready")
+            except Exception as _e:
+                log.warning("Cross-session Memory init failed", error=str(_e))
+                self.cross_session_memory = None
+                self.proactive_engine = None
+
+            # Phase 3: 任务感知模型路由
+            try:
+                from agent.llm.task_aware_model_router import TaskAwareModelRouter
+                cap_router = getattr(self.llm, "_capability_router", None)
+                self.task_aware_router = TaskAwareModelRouter(capability_router=cap_router)
+                log.info("Task-aware Model Router ready")
+            except Exception as _e:
+                log.warning("Task-aware Model Router init failed", error=str(_e))
+                self.task_aware_router = None
+
+            # Phase 3+4: 行动安全沙箱 — 高风险操作拦截 + 操作回滚
+            try:
+                from agent.desktop.action_sandbox import ActionSandbox
+                self.action_sandbox = ActionSandbox()
+                log.info("Action Sandbox ready")
+            except Exception as _e:
+                log.warning("Action Sandbox init failed", error=str(_e))
+                self.action_sandbox = None
+
+            # Phase 3+4: 智能工具缓存 — 细粒度缓存 + 幂等性标记
+            try:
+                from agent.tools.smart_tool_cache import SmartToolCache
+                self.smart_tool_cache = SmartToolCache()
+                log.info("Smart Tool Cache ready")
+            except Exception as _e:
+                log.warning("Smart Tool Cache init failed", error=str(_e))
+                self.smart_tool_cache = None
+
+            # Phase 3+4: 工具自愈 — 工具调用失败时自动修复与降级
+            try:
+                from agent.tools.tool_self_healing import ToolSelfHealing
+                self.tool_self_healing = ToolSelfHealing(
+                    tool_registry=self.tool_registry,
+                    trajectory_db=self.trajectory_db,
+                    llm=self.llm,
+                )
+                log.info("Tool Self-Healing ready")
+            except Exception as _e:
+                log.warning("Tool Self-Healing init failed", error=str(_e))
+                self.tool_self_healing = None
+
             log.info("Evolution Engine ready")
         except Exception as e:
             log.warning("Evolution Engine init failed", error=str(e))
             self.evolution = None
+            self._mark_subsystem_degraded("evolution", str(e))
 
         if self.loop and self.evolution:
             self.loop.evolution = self.evolution
+
+        # P0-修复2: 进化闭环注入 — EvolutionClosedLoop 在上方才创建（晚于 DebateHarness
+        # 初始化），故 L5 进化层与 controller 报告反馈需在此补注入，修复时序 Bug。
+        if self.loop and getattr(self, "evolution_closed_loop", None):
+            self.loop.evolution_closed_loop = self.evolution_closed_loop
+            if hasattr(self.loop, "_debate_harness") and self.loop._debate_harness:
+                self.loop._debate_harness._evolution_closed_loop = self.evolution_closed_loop
+                log.info("EvolutionClosedLoop injected into DebateHarness (L5)")
+
+        # F8: 注入 EpisodicMemoryStore 到 ReflectionEngine，启用反思经验的情景记忆存储
+        if self.loop and self.memory and hasattr(self.memory, '_episodic_store') and self.memory._episodic_store:
+            try:
+                self.loop.reflection._episodic_store = self.memory._episodic_store
+                log.info("EpisodicMemoryStore injected into ReflectionEngine")
+            except Exception as e:
+                log.warning("EpisodicMemoryStore injection into ReflectionEngine failed", error=str(e))
+
+        # F6: 注入 OrchestrationExecutor 到 LoopController，启用 DAG 调度
+        if self.loop:
+            try:
+                from agent.orchestration.executor import OrchestrationExecutor, OrchestrationConfig
+                self.loop._orchestration_executor = OrchestrationExecutor(
+                    config=OrchestrationConfig(),
+                )
+                log.info("OrchestrationExecutor injected into LoopController")
+            except Exception as e:
+                log.warning("OrchestrationExecutor injection failed", error=str(e))
+
+            # Phase 3+4: 注入 ActionSandbox / SmartToolCache / ToolSelfHealing 到 Executor
+            try:
+                executor = self.loop.executor
+                if executor is not None:
+                    if self.action_sandbox is not None:
+                        executor._action_sandbox = self.action_sandbox
+                    if self.smart_tool_cache is not None:
+                        executor._smart_tool_cache = self.smart_tool_cache
+                    if self.tool_self_healing is not None:
+                        executor._tool_self_healing = self.tool_self_healing
+                    log.info("ActionSandbox/SmartToolCache/ToolSelfHealing injected into Executor")
+            except Exception as e:
+                log.warning("Executor injection failed", error=str(e))
+
+        # F4: 注入 FeedbackLoops 到 LoopController
+        if self.loop and self.feedback_loops:
+            self.loop._feedback_loops = self.feedback_loops
+            log.info("FeedbackLoops injected into LoopController")
+
+        # F7: 注入 ContextWindowManager 到 LoopController（在 context pipeline 初始化之后）
+        # 此处先标记需要注入，实际注入在 context_window_manager 初始化后执行
 
         # GAP-02: 性能监控 + 自动进化触发
         try:
@@ -570,6 +847,7 @@ class AgentEngine:
         except Exception as e:
             log.warning("Performance Monitor init failed", error=str(e))
             self.performance_monitor = None
+            self._mark_subsystem_degraded("performance_monitor", str(e))
 
         if self.performance_monitor and self.evolution:
             try:
@@ -661,6 +939,12 @@ class AgentEngine:
             log.warning("Evolution Orchestrator init failed", error=str(e))
             self._evolution_orchestrator = None
 
+        # W1-2/W1-3: EventBus 订阅者接线 — 打通学习信号闭环
+        # DomainEventBus 已在 emit 端发布 domain.evolution.feedback / domain.tool.executed，
+        # 但此前无任何订阅者消费。现将 EvolutionOrchestrator 和 StrategyAdapter 注册为订阅者，
+        # 使学习信号通过事件驱动闭环运行。
+        self._wire_domain_event_subscribers()
+
         if self.loop:
             try:
                 self._multi_agent_orchestrator = MultiAgentOrchestrator(llm=self.llm)
@@ -679,8 +963,10 @@ class AgentEngine:
                 approval_manager=self.approval_manager,
                 hook_manager=self.hook_manager,
                 tool_selector=self.select_openai_tools_for_input,
+                # D8（审计 §1.7）：接入验证闭环，工具结果验证失败时回灌纠错提示。
+                verification_loop=getattr(self, "verification_loop", None),
             )
-            log.info("Conversation Loop ready (with safety modules + hooks)")
+            log.info("Conversation Loop ready (with safety modules + hooks + verification)")
         except Exception as e:
             log.warning("Conversation Loop init failed", error=str(e))
             self.conversation = None
@@ -699,6 +985,10 @@ class AgentEngine:
                 reserve_ratio=0.3,
                 auto_compress=True,
             )
+            # F7: 注入 ContextWindowManager 到 LoopController，启用循环级 Token 预算管理
+            if self.loop and self.context_window_manager:
+                self.loop._context_window_manager = self.context_window_manager
+                log.info("ContextWindowManager injected into LoopController")
             log.info("Context Pipeline ready (with file registry, reference resolver, window manager)")
         except Exception as e:
             log.warning("Context Pipeline init failed", error=str(e))
@@ -780,6 +1070,23 @@ class AgentEngine:
         except Exception as e:
             log.warning("Skill Registry init failed", error=str(e))
 
+        # 技能生命周期闭环：SkillHub（发现/安装/更新）+ SkillAudit（安全审计）→ SkillRegistry（执行）
+        try:
+            from agent.evolution.skill_audit import SkillAuditor
+            self.skill_audit = SkillAuditor()
+            log.info("Skill Auditor ready")
+        except Exception as e:
+            log.warning("Skill Auditor init failed", error=str(e))
+            self.skill_audit = None
+
+        try:
+            from agent.evolution.skill_hub import SkillHub
+            self.skill_hub = SkillHub(auditor=self.skill_audit)
+            log.info("Skill Hub ready (with Auditor)")
+        except Exception as e:
+            log.warning("Skill Hub init failed", error=str(e))
+            self.skill_hub = None
+
         try:
             self.session_store = SessionStore()
             log.info("Session Store ready")
@@ -828,11 +1135,15 @@ class AgentEngine:
             self.hook_manager = None
 
         try:
+            episodic_store = None
+            if self.memory and hasattr(self.memory, '_episodic_store'):
+                episodic_store = self.memory._episodic_store
             self.feedback_loops = FeedbackLoops(
                 evolution_engine=self.evolution,
                 memory_engine=self.memory,
+                episodic_store=episodic_store,
             )
-            log.info("Feedback Loops ready")
+            log.info("Feedback Loops ready (with EpisodicMemoryStore)")
         except Exception as e:
             log.warning("Feedback Loops init failed", error=str(e))
             self.feedback_loops = None
@@ -968,6 +1279,8 @@ class AgentEngine:
             log.warning("Continuous Feedback Loop init failed", error=str(e))
             self.feedback_loop = None
 
+        self._mark_domains_initialized()
+        await self.startup_domains()
         await self.hook_manager.trigger(ON_SESSION_START, session_id="engine", modules_loaded=True)
         log.info("Agent Engine fully initialized", module_count=20)
 
@@ -1057,17 +1370,19 @@ class AgentEngine:
         user_id: str | None = None,
         strategy_name: str | None = None,
         trace_id: str | None = None,
+        history: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
         import time
         # P3-#3: 请求埋点 — 记录起始时间用于耗时计算
         _req_start = time.time()
-        self._session_count += 1
-        # 更新活跃会话数 gauge（OTel 启用时由 MetricReader 周期性拉取）
-        self._active_sessions += 1
+        with self._counter_lock:
+            self._session_count += 1
+            self._active_sessions += 1
+            _current_active = self._active_sessions
         try:
-            set_active_sessions(self._active_sessions)
-        except Exception:
-            pass
+            set_active_sessions(_current_active)
+        except Exception as _exc:
+            log_ignored(log, "engine.AgentEngine.process_input", _exc)
 
         try:
             if self.hook_manager:
@@ -1076,11 +1391,24 @@ class AgentEngine:
             if self.security:
                 sec_result = self.security.check_command(message)
                 if not sec_result.allowed:
+                    try:
+                        await self.domain_events.emit("domain.security.violation", {
+                            "session_id": session_id,
+                            "reasons": sec_result.blocked_reasons,
+                            "input_preview": message[:100],
+                        })
+                    except Exception as _exc:
+                        log_ignored(log, "engine.AgentEngine.process_input", _exc)
                     return {
                         "content": f"请求被安全策略拦截: {'; '.join(sec_result.blocked_reasons)}",
                         "session_id": session_id,
                         "trace_id": f"blocked_{self._session_count}",
                         "intent": "blocked",
+                        "quality_score": 0.0,
+                        "tool_calls_made": 0,
+                        "rounds_used": 0,
+                        "duration": 0.0,
+                        "finish_reason": "blocked",
                     }
 
             context_text = ""
@@ -1093,8 +1421,8 @@ class AgentEngine:
                         ):
                             context_text += f"\n\n--- {entry.file_name} ---\n{entry.content[:2000]}"
                 # 上下文文件加载失败不影响主流程，静默跳过
-                except (OSError, IOError, ValueError, KeyError):
-                    pass
+                except (OSError, IOError, ValueError, KeyError) as _exc:
+                    log_ignored(log, "engine.AgentEngine.process_input", _exc)
 
             if self.context_reference_resolver:
                 try:
@@ -1102,8 +1430,8 @@ class AgentEngine:
                     if resolved.has_references and resolved.resolved_content:
                         context_text += "\n\n" + resolved.resolved_content
                         message = resolved.cleaned_input
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    log_ignored(log, "engine.AgentEngine.process_input", _exc)
 
             if context_text:
                 message = context_text + "\n\n--- 用户输入 ---\n" + message
@@ -1112,30 +1440,88 @@ class AgentEngine:
             if should_use_loop is None:
                 should_use_loop = self._should_use_loop(message)
 
-            # P1-5: 超复杂任务走 MultiAgentOrchestrator 分解
-            if should_use_loop and self._multi_agent_orchestrator and self.loop:
-                complexity = self._multi_agent_orchestrator._complexity_analyzer.analyze(message)
-                if complexity.complexity == "very_complex" and complexity.recommended_agents > 1:
-                    orch_result = await self._multi_agent_orchestrator.process_goal_with_loop(
-                        goal=message,
-                        context={},
-                        loop_controller=self.loop,
-                    )
-                    result = {
-                        "content": orch_result.summary,
-                        "session_id": session_id,
-                        "trace_id": f"orch_{self._session_count}",
-                        "intent": "multi_agent_orchestration",
-                        "quality_score": orch_result.quality_score,
-                        "tool_activities": [
-                            {"name": sr.agent_name, "success": sr.success, "error": sr.error}
-                            for sr in orch_result.sub_results
-                        ],
-                    }
-                else:
-                    result = await self._process_with_loop(message, session_id, user_id=user_id, strategy_name=strategy_name)
+            strategy = self._resolve_execution_strategy(message, should_use_loop)
+            strategy_impl = self.get_loop_strategy(strategy)
+            if strategy == "multi_agent" and strategy_impl is not None:
+                orch_result = await self._multi_agent_orchestrator.process_goal_with_loop(
+                    goal=message,
+                    context={},
+                    loop_controller=self.loop,
+                )
+                orch_output = orch_result.summary
+                if self.verification and orch_output:
+                    try:
+                        safety = self.verification.check_output_safety(orch_output)
+                        if not safety.safe:
+                            orch_output = safety.sanitized_output or orch_output
+                    except Exception as _sec_exc:
+                        # D2（审计 §1.7）：安全检查异常此前静默吞掉 —— 输出未经校验即放行且零日志。
+                        # 保持放行语义（避免误伤正常输出），但必须留痕并接入 /health 降级视图。
+                        log.error(
+                            "安全检查异常，该项校验已跳过",
+                            check="output_safety",
+                            error=str(_sec_exc),
+                        )
+                        self._mark_subsystem_degraded("verification", f"output_safety 检查异常: {_sec_exc}")
+                    try:
+                        guardrail_result = self.verification.check_guardrails(orch_output)
+                        if not guardrail_result.passed:
+                            orch_output = "抱歉，无法提供该内容（安全检查未通过）"
+                    except Exception as _sec_exc:
+                        # D2（审计 §1.7）：安全检查异常此前静默吞掉 —— 输出未经校验即放行且零日志。
+                        # 保持放行语义（避免误伤正常输出），但必须留痕并接入 /health 降级视图。
+                        log.error(
+                            "安全检查异常，该项校验已跳过",
+                            check="guardrails",
+                            error=str(_sec_exc),
+                        )
+                        self._mark_subsystem_degraded("verification", f"guardrails 检查异常: {_sec_exc}")
+                if self.output_guardrail and orch_output:
+                    try:
+                        guard_result = self.output_guardrail.check(orch_output)
+                        if not guard_result.passed:
+                            log.warning(
+                                "Multi-agent output blocked by guardrail",
+                                reason=guard_result.reason,
+                                risk_level=guard_result.risk_level,
+                            )
+                            orch_output = "抱歉，输出内容被安全策略拦截"
+                    except Exception as _sec_exc:
+                        # D2（审计 §1.7）：安全检查异常此前静默吞掉 —— 输出未经校验即放行且零日志。
+                        # 保持放行语义（避免误伤正常输出），但必须留痕并接入 /health 降级视图。
+                        log.error(
+                            "安全检查异常，该项校验已跳过",
+                            check="output_guardrail",
+                            error=str(_sec_exc),
+                        )
+                        self._mark_subsystem_degraded("verification", f"output_guardrail 检查异常: {_sec_exc}")
+                if self.session_store:
+                    try:
+                        self.session_store.add_message(session_id, "user", message)
+                        self.session_store.add_message(session_id, "assistant", orch_output)
+                    except Exception as _exc:
+                        log_ignored(log, "engine.AgentEngine.process_input", _exc)
+                result = {
+                    "content": orch_output,
+                    "session_id": session_id,
+                    "trace_id": f"orch_{self._session_count}",
+                    "intent": "multi_agent_orchestration",
+                    "quality_score": orch_result.quality_score,
+                    "tool_calls_made": len(orch_result.sub_results),
+                    "rounds_used": getattr(orch_result, "rounds_used", 1),
+                    "duration": getattr(orch_result, "duration", orch_result.duration_ms / 1000.0 if orch_result.duration_ms else 0.0),
+                    "finish_reason": "stop" if orch_result.success else "error",
+                    "tool_activities": [
+                        {"name": sr.agent_name, "success": sr.success, "error": sr.error}
+                        for sr in orch_result.sub_results
+                    ],
+                }
+            elif strategy in ("plan_exec_eval", "react") and strategy_impl is not None:
+                result = await self._process_with_loop(message, session_id, user_id=user_id, strategy_name=strategy, external_history=history)
+            elif strategy == "simple" and strategy_impl is not None:
+                result = await self._process_with_conversation(message, session_id, use_tools, trace_id=trace_id)
             elif should_use_loop and self.loop:
-                result = await self._process_with_loop(message, session_id, user_id=user_id, strategy_name=strategy_name)
+                result = await self._process_with_loop(message, session_id, user_id=user_id, strategy_name=strategy_name, external_history=history)
             elif self.conversation:
                 result = await self._process_with_conversation(message, session_id, use_tools, trace_id=trace_id)
             else:
@@ -1155,8 +1541,20 @@ class AgentEngine:
                         user_corrections=[],
                         session_id=session_id,
                     )
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    log_ignored(log, "engine.AgentEngine.process_input", _exc)
+
+            try:
+                tool_acts = result.get("tool_activities", [])
+                if tool_acts:
+                    await self.domain_events.emit("domain.tool.executed", {
+                        "session_id": session_id,
+                        "tool_count": len(tool_acts),
+                        "tool_names": [tc.get("name", "") for tc in tool_acts[:10]],
+                        "failures": len([tc for tc in tool_acts if tc.get("error")]),
+                    })
+            except Exception as _exc:
+                log_ignored(log, "engine.AgentEngine.process_input", _exc)
 
             if self.hook_manager:
                 await self.hook_manager.trigger(
@@ -1182,15 +1580,18 @@ class AgentEngine:
                             success=not bool(tc.get("error")),
                             duration_ms=float(tc.get("duration_ms", 0.0) or 0.0),
                         )
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    log_ignored(log, "engine.AgentEngine.process_input", _exc)
 
             return result
         except Exception as exc:
             # P3-#3: 错误埋点 — 记录异常类型与请求耗时
             if self.production_metrics:
                 try:
-                    _duration_ms = (time.time() - _req_start) * 1000
+                    try:
+                        _duration_ms = (time.time() - _req_start) * 1000
+                    except NameError:
+                        _duration_ms = 0.0
                     self.production_metrics.record_request(
                         user_id=session_id,
                         intent="error",
@@ -1201,25 +1602,37 @@ class AgentEngine:
                         error_type=type(exc).__name__,
                         error_message=str(exc),
                     )
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    log_ignored(log, "engine.AgentEngine.process_input", _exc)
             raise
         finally:
             # 会话结束：递减活跃会话数并更新 gauge
-            self._active_sessions = max(0, self._active_sessions - 1)
+            with self._counter_lock:
+                self._active_sessions = max(0, self._active_sessions - 1)
+                _current_active = self._active_sessions
             try:
-                set_active_sessions(self._active_sessions)
-            except Exception:
-                pass
+                set_active_sessions(_current_active)
+            except Exception as _exc:
+                log_ignored(log, "engine.AgentEngine.process_input", _exc)
 
     def _should_use_loop(self, message: str) -> bool:
         complex_indicators = [
             "分析", "对比", "设计", "实现", "优化", "重构",
             "迁移", "集成", "部署", "步骤", "流程", "方案",
-            "搜索", "查找", "读取", "修改", "执行", "运行",
         ]
-        score = sum(1 for kw in complex_indicators if kw in message)
-        return score >= 2
+        tool_indicators = ["搜索", "查找", "读取", "修改", "执行", "运行"]
+        complex_score = sum(1 for kw in complex_indicators if kw in message)
+        tool_score = sum(1 for kw in tool_indicators if kw in message)
+        if complex_score >= 2:
+            return True
+        if complex_score >= 1 and tool_score >= 1:
+            return True
+        # 两个及以上工具动词即视为多步任务（如"搜索并读取文件内容"）。
+        # 此前门槛为 >=3，导致串联双工具任务被判为"简单"而绕过 ReAct 循环，
+        # 走单轮 _process_simple 路径 —— 属静默路由降级。见审计报告 §1.7。
+        if tool_score >= 2:
+            return True
+        return False
 
     async def _process_simple(
         self,
@@ -1240,8 +1653,8 @@ class AgentEngine:
                     context_parts.append("相关记忆:")
                     for m in mem_results[:3]:
                         context_parts.append(f"  - {m['content']}")
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "engine.AgentEngine._process_simple", _exc)
 
         system_content = (
             "你是家百星（Jiabaixing），一个智能AI助手。"
@@ -1256,16 +1669,78 @@ class AgentEngine:
             {"role": "system", "content": system_content},
             {"role": "user", "content": message},
         ]
-        result = await self.llm.chat(messages=messages)
+        core = self.domains.get("core")
+        if core is not None and core.is_initialized:
+            result = await core.invoke(messages=messages)
+        else:
+            result = await self.llm.chat(messages=messages)
         response_content = result.get("content", "")
+
+        if self.verification and response_content:
+            try:
+                safety = self.verification.check_output_safety(response_content)
+                if not safety.safe:
+                    response_content = safety.sanitized_output or response_content
+            except Exception as _sec_exc:
+                # D2（审计 §1.7）：安全检查异常此前静默吞掉 —— 输出未经校验即放行且零日志。
+                # 保持放行语义（避免误伤正常输出），但必须留痕并接入 /health 降级视图。
+                log.error(
+                    "安全检查异常，该项校验已跳过",
+                    check="output_safety",
+                    error=str(_sec_exc),
+                )
+                self._mark_subsystem_degraded("verification", f"output_safety 检查异常: {_sec_exc}")
+            try:
+                guardrail_result = self.verification.check_guardrails(response_content)
+                if not guardrail_result.passed:
+                    response_content = "抱歉，无法提供该内容（安全检查未通过）"
+            except Exception as _sec_exc:
+                # D2（审计 §1.7）：安全检查异常此前静默吞掉 —— 输出未经校验即放行且零日志。
+                # 保持放行语义（避免误伤正常输出），但必须留痕并接入 /health 降级视图。
+                log.error(
+                    "安全检查异常，该项校验已跳过",
+                    check="guardrails",
+                    error=str(_sec_exc),
+                )
+                self._mark_subsystem_degraded("verification", f"guardrails 检查异常: {_sec_exc}")
+        if self.output_guardrail and response_content:
+            try:
+                guard_result = self.output_guardrail.check(response_content)
+                if not guard_result.passed:
+                    log.warning(
+                        "Simple output blocked by guardrail",
+                        reason=guard_result.reason,
+                        risk_level=guard_result.risk_level,
+                    )
+                    response_content = "抱歉，输出内容被安全策略拦截"
+            except Exception as _sec_exc:
+                # D2（审计 §1.7）：安全检查异常此前静默吞掉 —— 输出未经校验即放行且零日志。
+                # 保持放行语义（避免误伤正常输出），但必须留痕并接入 /health 降级视图。
+                log.error(
+                    "安全检查异常，该项校验已跳过",
+                    check="output_guardrail",
+                    error=str(_sec_exc),
+                )
+                self._mark_subsystem_degraded("verification", f"output_guardrail 检查异常: {_sec_exc}")
+
+        _simple_quality = min(1.0, max(0.3, len(response_content) / 200.0)) if response_content else 0.1
+
+        try:
+            await self.domain_events.emit("domain.core.llm_invoked", {
+                "session_id": session_id, "strategy": "simple",
+                "response_len": len(response_content),
+                "quality": _simple_quality, "duration_ms": 0.0,
+            })
+        except Exception as _exc:
+            log_ignored(log, "engine.AgentEngine._process_simple", _exc)
 
         if self.memory:
             try:
                 await self.memory.store_instant(message, scene="chat")
                 await self.memory.store_short_term(response_content, scene="chat_response")
                 await self._auto_reflect(message, response_content, session_id)
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "engine.AgentEngine._process_simple", _exc)
 
         if self.evolution:
             try:
@@ -1273,40 +1748,55 @@ class AgentEngine:
                 import time
                 await self.evolution.collect_feedback(FeedbackSignal(
                     interaction_id=f"py_{self._session_count}",
-                    quality_score=0.8,
+                    quality_score=_simple_quality,
                     cause="chat",
                     timestamp=time.time(),
                     scene="chat",
                     response_length=len(response_content),
                 ))
-            except Exception:
-                pass
+                try:
+                    await self.domain_events.emit("domain.evolution.feedback", {
+                        "session_id": session_id, "cause": "chat",
+                        "quality_score": _simple_quality, "scene": "chat",
+                        "response_time_ms": 0.0, "tool_successes": True,
+                    })
+                except Exception as _exc:
+                    log_ignored(log, "engine.AgentEngine._process_simple", _exc)
+            except Exception as _exc:
+                log_ignored(log, "engine.AgentEngine._process_simple", _exc)
 
         # GAP-09: 学习信号（simple 路径）
         if self.learning_signals:
             try:
                 self.learning_signals.record_signal(
-                    signal_type="task_success",
-                    value=0.8,
+                    signal_type="task_success" if _simple_quality >= 0.6 else "task_partial",
+                    value=_simple_quality,
                     source="simple",
                     context={"session_id": session_id},
                 )
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "engine.AgentEngine._process_simple", _exc)
 
         # GAP-06: 策略自适应（simple 路径）
         if self.strategy_adapter:
             try:
-                self.strategy_adapter.record_outcome("chat", "simple", success=True)
-            except Exception:
-                pass
+                self.strategy_adapter.record_outcome("chat", "simple", success=_simple_quality >= 0.6)
+            except Exception as _exc:
+                log_ignored(log, "engine.AgentEngine._process_simple", _exc)
 
         # GAP-02: 性能监控（simple 路径）
         if self.performance_monitor:
             try:
-                self.performance_monitor.record_metric("task_completion", success=True, duration=0.0)
-            except Exception:
-                pass
+                self.performance_monitor.record_metric("task_completion", success=_simple_quality >= 0.6, duration=0.0)
+            except Exception as _exc:
+                log_ignored(log, "engine.AgentEngine._process_simple", _exc)
+
+        if self.session_store:
+            try:
+                self.session_store.add_message(session_id, "user", message)
+                self.session_store.add_message(session_id, "assistant", response_content)
+            except Exception as _exc:
+                log_ignored(log, "engine.AgentEngine._process_simple", _exc)
 
         return {
             "content": response_content,
@@ -1315,6 +1805,11 @@ class AgentEngine:
             "intent": "",
             "related_files": [],
             "tool_activities": [],
+            "tool_calls_made": 0,
+            "rounds_used": 1,
+            "duration": 0.0,
+            "finish_reason": "stop",
+            "quality_score": _simple_quality,
         }
 
     async def _process_with_conversation(
@@ -1353,8 +1848,8 @@ class AgentEngine:
                 evo_section = self.evolution.build_evolution_prompt_section()
                 if evo_section:
                     system_prompt += "\n\n" + evo_section
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "engine.AgentEngine._process_with_conversation", _exc)
 
         memories: list[str] = []
         history: list[dict[str, str]] = []
@@ -1367,15 +1862,15 @@ class AgentEngine:
                 )
                 memory_results = mem_results
                 memories = [m["content"] for m in mem_results[:3]]
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "engine.AgentEngine._process_with_conversation", _exc)
 
         if self.session_store:
             try:
                 msgs = self.session_store.get_messages(session_id, limit=10)
                 history = [{"role": m.role, "content": m.content} for m in msgs]
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "engine.AgentEngine._process_with_conversation", _exc)
 
         if self.context_manager:
             scene = ContextManager.infer_scene(message)
@@ -1461,15 +1956,29 @@ class AgentEngine:
                 safety = self.verification.check_output_safety(output_content)
                 if not safety.safe:
                     output_content = safety.sanitized_output or output_content
-            except Exception:
-                pass
+            except Exception as _sec_exc:
+                # D2（审计 §1.7）：安全检查异常此前静默吞掉 —— 输出未经校验即放行且零日志。
+                # 保持放行语义（避免误伤正常输出），但必须留痕并接入 /health 降级视图。
+                log.error(
+                    "安全检查异常，该项校验已跳过",
+                    check="output_safety",
+                    error=str(_sec_exc),
+                )
+                self._mark_subsystem_degraded("verification", f"output_safety 检查异常: {_sec_exc}")
 
             try:
                 guardrail_result = self.verification.check_guardrails(output_content)
                 if not guardrail_result.passed:
                     output_content = "抱歉，无法提供该内容（安全检查未通过）"
-            except Exception:
-                pass
+            except Exception as _sec_exc:
+                # D2（审计 §1.7）：安全检查异常此前静默吞掉 —— 输出未经校验即放行且零日志。
+                # 保持放行语义（避免误伤正常输出），但必须留痕并接入 /health 降级视图。
+                log.error(
+                    "安全检查异常，该项校验已跳过",
+                    check="guardrails",
+                    error=str(_sec_exc),
+                )
+                self._mark_subsystem_degraded("verification", f"guardrails 检查异常: {_sec_exc}")
 
         if self.output_guardrail and output_content:
             try:
@@ -1481,10 +1990,17 @@ class AgentEngine:
                         risk_level=guard_result.risk_level,
                     )
                     output_content = "抱歉，输出内容被安全策略拦截"
-            except Exception:
-                pass
+            except Exception as _sec_exc:
+                # D2（审计 §1.7）：安全检查异常此前静默吞掉 —— 输出未经校验即放行且零日志。
+                # 保持放行语义（避免误伤正常输出），但必须留痕并接入 /health 降级视图。
+                log.error(
+                    "安全检查异常，该项校验已跳过",
+                    check="output_guardrail",
+                    error=str(_sec_exc),
+                )
+                self._mark_subsystem_degraded("verification", f"output_guardrail 检查异常: {_sec_exc}")
 
-        quality_score = 0.7 if conv_result.finish_reason == "stop" else 0.4
+        quality_score = conv_result.quality_score if conv_result.quality_score > 0 else (0.7 if conv_result.finish_reason == "stop" else 0.4)
         if self.verification:
             try:
                 quality = self.verification.score_quality({
@@ -1495,8 +2011,8 @@ class AgentEngine:
                     "completed_successfully": conv_result.finish_reason == "stop",
                 })
                 quality_score = quality.overall
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "engine.AgentEngine._process_with_conversation", _exc)
 
         # GAP-09: 多维度学习信号采集
         if self.learning_signals:
@@ -1513,8 +2029,8 @@ class AgentEngine:
                         value=float(conv_result.tool_calls_made),
                         source="conversation",
                     )
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "engine.AgentEngine._process_with_conversation", _exc)
 
         # GAP-06: 策略自适应 — 根据结果调整策略
         if self.strategy_adapter:
@@ -1522,8 +2038,8 @@ class AgentEngine:
                 scene = ContextManager.infer_scene(message) if self.context_manager else "daily"
                 success = quality_score >= 0.6
                 self.strategy_adapter.record_outcome(scene, "conversation", success=success)
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "engine.AgentEngine._process_with_conversation", _exc)
 
         # GAP-02: 性能监控指标记录
         if self.performance_monitor:
@@ -1538,10 +2054,10 @@ class AgentEngine:
                 if alerts and self.evolution_trigger:
                     try:
                         await self.evolution_trigger._check_and_trigger()
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                    except Exception as _exc:
+                        log_ignored(log, "engine.AgentEngine._process_with_conversation", _exc)
+            except Exception as _exc:
+                log_ignored(log, "engine.AgentEngine._process_with_conversation", _exc)
 
         # GAP-06 闭环：策略自适应 — 读取最优策略
         if self.strategy_adapter:
@@ -1555,8 +2071,8 @@ class AgentEngine:
                         strategy=best.strategy_name,
                         confidence=round(best.confidence, 2),
                     )
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "engine.AgentEngine._process_with_conversation", _exc)
 
         # GAP-09 闭环：学习信号分析
         if self.learning_signals:
@@ -1568,10 +2084,10 @@ class AgentEngine:
                         weak_areas=insights.weak_areas,
                         trend=insights.signal_trend,
                     )
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "engine.AgentEngine._process_with_conversation", _exc)
 
-        if self.verification:
+        if self.verification and quality_score == 0.0:
             try:
                 quality = self.verification.score_quality({
                     "loop_count": conv_result.rounds_used,
@@ -1581,13 +2097,13 @@ class AgentEngine:
                     "completed_successfully": conv_result.finish_reason == "stop",
                 })
                 quality_score = quality.overall
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "engine.AgentEngine._process_with_conversation", _exc)
 
         if self.memory:
             try:
                 await self.memory.store_instant(message, scene="conversation")
-                await self.memory.store_short_term(conv_result.content, scene="conversation_response")
+                await self.memory.store_short_term(output_content, scene="conversation_response")
                 tool_names = [tc.get("name", "") for tc in conv_result.metadata.get("tool_calls", [])]
                 if tool_names:
                     await self.memory.store_episodic(
@@ -1596,16 +2112,16 @@ class AgentEngine:
                         outcome="成功" if conv_result.finish_reason == "stop" else "部分完成",
                         emotion="positive" if quality_score >= 0.6 else "neutral",
                     )
-                await self._auto_reflect(message, conv_result.content, session_id, quality_score, tool_names)
-            except Exception:
-                pass
+                await self._auto_reflect(message, output_content, session_id, quality_score, tool_names)
+            except Exception as _exc:
+                log_ignored(log, "engine.AgentEngine._process_with_conversation", _exc)
 
         if self.session_store:
             try:
                 self.session_store.add_message(session_id, "user", message)
-                self.session_store.add_message(session_id, "assistant", conv_result.content)
-            except Exception:
-                pass
+                self.session_store.add_message(session_id, "assistant", output_content)
+            except Exception as _exc:
+                log_ignored(log, "engine.AgentEngine._process_with_conversation", _exc)
 
         if self.evolution:
             try:
@@ -1630,7 +2146,7 @@ class AgentEngine:
                     tool_successes=tool_successes,
                     session_id=session_id,
                     scene=scene,
-                    response_length=len(conv_result.content),
+                    response_length=len(output_content),
                     rounds_used=conv_result.rounds_used,
                 ))
                 plan = await self.evolution.should_evolve()
@@ -1648,24 +2164,24 @@ class AgentEngine:
                                     f"用户偏好提醒: {nudge}",
                                     scene="knowledge_nudge",
                                 )
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            log_ignored(log, "engine.AgentEngine._process_with_conversation", _exc)
 
                 if quality_score >= 0.7 and tool_names:
                     try:
                         skill_name = self.evolution.generate_skill({
                             "input": message,
-                            "response": conv_result.content,
+                            "response": output_content,
                             "tools_used": tool_names,
                             "quality_score": quality_score,
                             "scene": scene,
                         })
                         if skill_name:
                             log.info("Skill auto-generated", skill_name=skill_name)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                    except Exception as _exc:
+                        log_ignored(log, "engine.AgentEngine._process_with_conversation", _exc)
+            except Exception as _exc:
+                log_ignored(log, "engine.AgentEngine._process_with_conversation", _exc)
 
         if self.trajectory_db:
             try:
@@ -1673,7 +2189,7 @@ class AgentEngine:
                 self.trajectory_db.record_execution(ExecutionRecord(
                     id=conv_result.trace_id,
                     input=message[:500],
-                    response=conv_result.content[:500],
+                    response=output_content[:500],
                     status="success" if conv_result.finish_reason == "stop" else "failed",
                     quality_overall=quality_score,
                     loop_rounds=conv_result.rounds_used,
@@ -1690,8 +2206,8 @@ class AgentEngine:
                         args_json=str(tc.get("arguments", {})),
                         result_success=1,
                     ))
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "engine.AgentEngine._process_with_conversation", _exc)
 
         return {
             "content": output_content,
@@ -1714,6 +2230,7 @@ class AgentEngine:
         cancel_token: "asyncio.Event | None" = None,
         user_id: str | None = None,
         strategy_name: str | None = None,
+        external_history: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
         # P0-4: 构建统一上下文（系统提示、人格、记忆、文件上下文、注意力聚焦）
         system_messages: list[dict[str, str]] = []
@@ -1733,41 +2250,166 @@ class AgentEngine:
 
         # 加载会话历史，避免 loop 模式失忆
         history: list[dict[str, str]] = []
-        if self.session_store:
+        if external_history:
+            history = external_history
+        elif self.session_store:
             try:
                 msgs = self.session_store.get_messages(session_id, limit=10)
                 history = [{"role": m.role, "content": m.content} for m in msgs]
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "engine.AgentEngine._process_with_loop", _exc)
 
         # 合并历史到 messages（系统消息 + 历史 + 用户消息由 loop 内部追加）
         all_messages = system_messages + history if history else system_messages
 
-        result = await self.loop.run(
-            input_text=message,
-            messages=all_messages or None,
-            session_id=session_id,
-            cancel_event=cancel_token,
-            user_id=user_id,
-            strategy_name=strategy_name,
-        )
+        # P1: 澄清交互集成 — 模糊度检测 + 系统提示增强
+        ambiguity_result = None
+        if self.clarification_engine:
+            ambiguity_result = self.clarification_engine.detect_ambiguity(message)
+            if ambiguity_result.is_ambiguous:
+                log.info(
+                    "Ambiguity detected",
+                    level=ambiguity_result.level.value,
+                    dimensions=[d.value for d in ambiguity_result.dimensions],
+                    confidence=ambiguity_result.confidence,
+                )
+                if system_messages:
+                    for msg in system_messages:
+                        if msg.get("role") == "system":
+                            msg["content"] = self.clarification_engine.enhance_system_prompt(
+                                msg["content"]
+                            )
+                elif all_messages:
+                    for msg in all_messages:
+                        if msg.get("role") == "system":
+                            msg["content"] = self.clarification_engine.enhance_system_prompt(
+                                msg["content"]
+                            )
+
+        effective_strategy = strategy_name or self.select_loop_strategy(message)
+        loop_strategy = self.get_loop_strategy(effective_strategy)
+        if loop_strategy is not None and hasattr(loop_strategy, "run"):
+            result = await loop_strategy.run(
+                input_text=message,
+                messages=all_messages or None,
+                session_id=session_id,
+                cancel_event=cancel_token,
+                user_id=user_id,
+                strategy_name=effective_strategy,
+            )
+        else:
+            result = await self.loop.run(
+                input_text=message,
+                messages=all_messages or None,
+                session_id=session_id,
+                cancel_event=cancel_token,
+                user_id=user_id,
+                strategy_name=strategy_name,
+            )
 
         output_content = result.response
+
+        try:
+            try:
+                _elapsed_ms = (time.time() - _req_start) * 1000
+            except NameError:
+                _elapsed_ms = 0.0
+            await self.domain_events.emit("domain.core.llm_invoked", {
+                "session_id": session_id, "strategy": effective_strategy,
+                "steps_completed": getattr(result, "steps_completed", 0),
+                "success": getattr(result, "success", True),
+                "quality": getattr(result, "quality_score", 0.5),
+                "duration_ms": _elapsed_ms,
+            })
+        except Exception as _exc:
+            log_ignored(log, "engine.AgentEngine._process_with_loop", _exc)
+
+        # P1: 验证闭环集成 — 使用 VerificationLoop 统一验证响应
+        verification_result = None
+        if self.verification_loop:
+            try:
+                vcontext = {
+                    "loop_count": result.steps_completed,
+                    "total_tool_calls": result.metadata.get("total_tool_calls", 0),
+                    "total_tool_duration": result.metadata.get("total_tool_duration", 0.0),
+                    "total_duration": result.metadata.get("duration", 0.0),
+                    "completed_successfully": result.success,
+                }
+                verification_result = self.verification_loop.verify_response(
+                    output_content, context=vcontext,
+                )
+                self.verification_loop.record_step(verification_result)
+
+                if verification_result.action == "block":
+                    log.warning(
+                        "Response blocked by verification",
+                        action=verification_result.action,
+                        message=verification_result.message,
+                    )
+                    output_content = "抱歉，无法提供该内容（安全检查未通过）"
+                elif verification_result.action == "retry":
+                    # D8（审计 §1.7）+ P1-5 增强：RETRY 动作现在真正触发重执行。
+                    # 原实现仅将 correction 挂到 metadata（零调用点死方法），
+                    # 现在改为：将纠错提示注入 messages，使下一轮 LLM 调用
+                    # 能看到验证失败的原因并自动修正，形成真正的闭环。
+                    correction = self.verification_loop.build_correction_prompt(
+                        verification_result, output_content,
+                    )
+                    log.warning(
+                        "Response verification requested retry",
+                        action=verification_result.action,
+                        message=verification_result.message,
+                        has_correction=bool(correction),
+                    )
+                    if correction:
+                        result.metadata["verification_correction"] = correction
+                        # P1-5: 将纠错提示注入消息列表，使下一轮 LLM 调用
+                        # 能看到验证失败的原因并自动修正输出
+                        if hasattr(result, 'messages') and result.messages is not None:
+                            result.messages.append({
+                                "role": "system",
+                                "content": f"【验证纠错】{correction}",
+                            })
+                        # 同时在 output_content 末尾追加纠错标记，
+                        # 确保即使不走 messages 路径也能被上层消费
+                        output_content += f"\n\n[系统提示：上一次输出未通过验证，已生成纠错提示，将在下一轮自动修正]"
+                elif verification_result.action == "warn":
+                    log.warning(
+                        "Response verification warning",
+                        action=verification_result.action,
+                        message=verification_result.message,
+                    )
+            except Exception as e:
+                log.warning("Verification loop failed", error=str(e))
 
         if self.verification:
             try:
                 safety = self.verification.check_output_safety(output_content)
                 if not safety.safe:
                     output_content = safety.sanitized_output or output_content
-            except Exception:
-                pass
+            except Exception as _sec_exc:
+                # D2（审计 §1.7）：安全检查异常此前静默吞掉 —— 输出未经校验即放行且零日志。
+                # 保持放行语义（避免误伤正常输出），但必须留痕并接入 /health 降级视图。
+                log.error(
+                    "安全检查异常，该项校验已跳过",
+                    check="output_safety",
+                    error=str(_sec_exc),
+                )
+                self._mark_subsystem_degraded("verification", f"output_safety 检查异常: {_sec_exc}")
 
             try:
                 guardrail_result = self.verification.check_guardrails(output_content)
                 if not guardrail_result.passed:
                     output_content = "抱歉，无法提供该内容（安全检查未通过）"
-            except Exception:
-                pass
+            except Exception as _sec_exc:
+                # D2（审计 §1.7）：安全检查异常此前静默吞掉 —— 输出未经校验即放行且零日志。
+                # 保持放行语义（避免误伤正常输出），但必须留痕并接入 /health 降级视图。
+                log.error(
+                    "安全检查异常，该项校验已跳过",
+                    check="guardrails",
+                    error=str(_sec_exc),
+                )
+                self._mark_subsystem_degraded("verification", f"guardrails 检查异常: {_sec_exc}")
 
         if self.output_guardrail and output_content:
             try:
@@ -1779,10 +2421,35 @@ class AgentEngine:
                         risk_level=guard_result.risk_level,
                     )
                     output_content = "抱歉，输出内容被安全策略拦截"
-            except Exception:
-                pass
+            except Exception as _sec_exc:
+                # D2（审计 §1.7）：安全检查异常此前静默吞掉 —— 输出未经校验即放行且零日志。
+                # 保持放行语义（避免误伤正常输出），但必须留痕并接入 /health 降级视图。
+                log.error(
+                    "安全检查异常，该项校验已跳过",
+                    check="output_guardrail",
+                    error=str(_sec_exc),
+                )
+                self._mark_subsystem_degraded("verification", f"output_guardrail 检查异常: {_sec_exc}")
 
         quality_score = result.quality_score
+
+        # P1: 验证闭环质量评分覆盖 — 如果 VerificationLoop 提供了质量评分，优先使用
+        if verification_result and verification_result.quality:
+            quality_score = verification_result.quality.overall
+
+        # 后备质量评分：当 loop 返回 quality_score==0.0 时用 verification 重新计算
+        if quality_score == 0.0 and self.verification:
+            try:
+                quality = self.verification.score_quality({
+                    "loop_count": result.steps_completed,
+                    "total_tool_calls": result.metadata.get("total_tool_calls", 0),
+                    "total_tool_duration": result.metadata.get("total_tool_duration", 0.0),
+                    "total_duration": result.metadata.get("duration", 0.0),
+                    "completed_successfully": result.success,
+                })
+                quality_score = quality.overall
+            except Exception as _exc:
+                log_ignored(log, "engine.AgentEngine._process_with_loop", _exc)
 
         # GAP-08: 规划质量预检
         if self.plan_quality_checker and result.metadata.get("plan_steps"):
@@ -1796,8 +2463,8 @@ class AgentEngine:
                             score=quality_result.quality_score,
                             issues=[i.description for i in quality_result.issues[:3]],
                         )
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "engine.AgentEngine._process_with_loop", _exc)
 
         # GAP-05: 增量重规划 — 如果 loop 结果标记需要重规划
         if self.incremental_planner and result.metadata.get("needs_replan"):
@@ -1815,8 +2482,8 @@ class AgentEngine:
                             "Incremental replan succeeded",
                             changes=len(replan_result.changes),
                         )
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "engine.AgentEngine._process_with_loop", _exc)
 
         # GAP-09: 多维度学习信号采集（loop 路径）
         if self.learning_signals:
@@ -1827,8 +2494,8 @@ class AgentEngine:
                     source="loop",
                     context={"session_id": session_id},
                 )
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "engine.AgentEngine._process_with_loop", _exc)
 
         # GAP-06: 策略自适应（loop 路径）
         if self.strategy_adapter:
@@ -1836,8 +2503,8 @@ class AgentEngine:
                 scene = ContextManager.infer_scene(message) if self.context_manager else "daily"
                 success = quality_score >= 0.6
                 self.strategy_adapter.record_outcome(scene, "loop", success=success)
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "engine.AgentEngine._process_with_loop", _exc)
 
         # GAP-02: 性能监控指标记录（loop 路径）
         if self.performance_monitor:
@@ -1852,10 +2519,10 @@ class AgentEngine:
                 if alerts and self.evolution_trigger:
                     try:
                         await self.evolution_trigger._check_and_trigger()
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                    except Exception as _exc:
+                        log_ignored(log, "engine.AgentEngine._process_with_loop", _exc)
+            except Exception as _exc:
+                log_ignored(log, "engine.AgentEngine._process_with_loop", _exc)
 
         # GAP-06 闭环：策略自适应 — 读取最优策略用于日志和后续优化
         if self.strategy_adapter:
@@ -1870,8 +2537,8 @@ class AgentEngine:
                         confidence=round(best.confidence, 2),
                         expected_success_rate=round(best.expected_success_rate, 2),
                     )
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "engine.AgentEngine._process_with_loop", _exc)
 
         # GAP-09 闭环：学习信号分析 — 检测弱项和趋势
         if self.learning_signals:
@@ -1888,8 +2555,8 @@ class AgentEngine:
                         "Learning signal recommendations",
                         recommendations=insights.recommendations[:3],
                     )
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "engine.AgentEngine._process_with_loop", _exc)
 
         # GAP-07 闭环：记忆策展 — 定期执行记忆整理
         if self.curator and self.memory:
@@ -1901,13 +2568,13 @@ class AgentEngine:
                     curate_result = self.curator.curate(recent_memories, force=False)
                     if curate_result.get("curated"):
                         log.info("Memory curated", result=curate_result)
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "engine.AgentEngine._process_with_loop", _exc)
 
         if self.memory:
             try:
                 await self.memory.store_instant(message, scene="loop_chat")
-                await self.memory.store_short_term(result.response, scene="loop_response")
+                await self.memory.store_short_term(output_content, scene="loop_response")
                 tool_names = [
                     tc.get("name", "")
                     for tc in result.metadata.get("tool_calls", [])
@@ -1920,16 +2587,16 @@ class AgentEngine:
                         outcome="成功" if quality_score >= 0.6 else "部分完成",
                         emotion="positive" if quality_score >= 0.6 else "neutral",
                     )
-                await self._auto_reflect(message, result.response, session_id, quality_score, tool_names)
-            except Exception:
-                pass
+                await self._auto_reflect(message, output_content, session_id, quality_score, tool_names)
+            except Exception as _exc:
+                log_ignored(log, "engine.AgentEngine._process_with_loop", _exc)
 
         if self.session_store:
             try:
                 self.session_store.add_message(session_id, "user", message)
-                self.session_store.add_message(session_id, "assistant", result.response)
-            except Exception:
-                pass
+                self.session_store.add_message(session_id, "assistant", output_content)
+            except Exception as _exc:
+                log_ignored(log, "engine.AgentEngine._process_with_loop", _exc)
 
         if self.evolution:
             try:
@@ -1953,15 +2620,15 @@ class AgentEngine:
                     tool_successes=tool_successes,
                     session_id=session_id,
                     scene=scene,
-                    response_length=len(result.response),
+                    response_length=len(output_content),
                     rounds_used=result.metadata.get("rounds_used", 1),
                 ))
                 plan = await self.evolution.should_evolve()
                 if plan:
                     log.info("Evolution triggered (loop)", plan_type=plan.evolution_type, priority=plan.priority)
                     await self.evolution.execute_evolution(plan)
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "engine.AgentEngine._process_with_loop", _exc)
 
         if self.trajectory_db:
             try:
@@ -1969,7 +2636,7 @@ class AgentEngine:
                 self.trajectory_db.record_execution(ExecutionRecord(
                     id=result.trace_id,
                     input=message[:500],
-                    response=result.response[:500],
+                    response=output_content[:500],
                     status="success" if quality_score >= 0.6 else "failed",
                     quality_overall=quality_score,
                     loop_rounds=result.metadata.get("rounds_used", 0),
@@ -1986,8 +2653,40 @@ class AgentEngine:
                         args_json="{}",
                         result_success=0 if tc.get("error") else 1,
                     ))
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "engine.AgentEngine._process_with_loop", _exc)
+
+        _loop_extra = {
+            "steps_completed": result.steps_completed,
+            "steps_total": result.steps_total,
+            "loop_metadata": result.metadata,
+            "clarification": ambiguity_result.is_ambiguous if ambiguity_result else False,
+            "clarification_details": (
+                {
+                    "level": ambiguity_result.level.value,
+                    "dimensions": [d.value for d in ambiguity_result.dimensions],
+                    "suggestions": ambiguity_result.suggestions,
+                }
+                if ambiguity_result and ambiguity_result.is_ambiguous
+                else None
+            ),
+            "verification": (
+                {
+                    "action": verification_result.action.value,
+                    "message": verification_result.message,
+                    "quality": (
+                        {
+                            "overall": verification_result.quality.overall,
+                            "accuracy": verification_result.quality.accuracy,
+                        }
+                        if verification_result.quality
+                        else None
+                    ),
+                }
+                if verification_result
+                else None
+            ),
+        }
 
         return {
             "content": output_content,
@@ -1996,10 +2695,12 @@ class AgentEngine:
             "intent": "",
             "related_files": [],
             "tool_activities": result.metadata.get("tool_calls", []),
+            "tool_calls_made": result.metadata.get("total_tool_calls", 0),
+            "rounds_used": result.metadata.get("rounds_used", result.steps_completed),
+            "duration": result.metadata.get("total_duration_ms", 0) / 1000.0,
+            "finish_reason": "stop" if result.success else "error",
             "quality_score": quality_score,
-            "steps_completed": result.steps_completed,
-            "steps_total": result.steps_total,
-            "loop_metadata": result.metadata,
+            "loop_extra": _loop_extra,
         }
 
     async def _auto_reflect(
@@ -2029,8 +2730,8 @@ class AgentEngine:
                             f"反思记录: {reflection.task_diagnosis} | 策略调整: {reflection.strategy_adjustment}",
                             scene="auto_reflection",
                         )
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        log_ignored(log, "engine.AgentEngine._auto_reflect", _exc)
                 # GAP-10: 反思结果应用闭环
                 if self.reflection_applier:
                     try:
@@ -2055,8 +2756,8 @@ class AgentEngine:
                             source="auto_reflect",
                             context={"diagnosis": reflection.task_diagnosis},
                         )
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        log_ignored(log, "engine.AgentEngine._auto_reflect", _exc)
             elif tool_names and self.evolution:
                 for tn in tool_names:
                     try:
@@ -2069,10 +2770,10 @@ class AgentEngine:
                             tool_name=tn,
                             timestamp=_t.time(),
                         ))
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+                    except Exception as _exc:
+                        log_ignored(log, "engine.AgentEngine._auto_reflect", _exc)
+        except Exception as _exc:
+            log_ignored(log, "engine.AgentEngine._auto_reflect", _exc)
 
     async def process_input_stream(
         self,
@@ -2097,7 +2798,12 @@ class AgentEngine:
 
         # 1. 检查取消
         if cancel_token and cancel_token.is_set():
-            yield {"type": "done", "trace_id": "", "content": "任务已取消"}
+            if self.session_store:
+                try:
+                    self.session_store.add_message(session_id, "user", message)
+                except Exception as _exc:
+                    log_ignored(log, "engine.AgentEngine.process_input_stream", _exc)
+            yield {"type": "done", "trace_id": "", "content": "任务已取消", "quality_score": 0.0, "finish_reason": "cancelled"}
             return
 
         # 立即发送 thinking 事件 — 首字反馈，让用户知道系统已开始处理
@@ -2109,8 +2815,8 @@ class AgentEngine:
             try:
                 msgs = self.session_store.get_messages(session_id, limit=10)
                 history = [{"role": m.role, "content": m.content} for m in msgs]
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "engine.AgentEngine.process_input_stream", _exc)
 
         # 3. 构建统一上下文（系统提示、人格、记忆）
         yield {"type": "thinking", "content": "正在检索记忆和构建上下文..."}
@@ -2154,9 +2860,17 @@ class AgentEngine:
                     history=history,
                     use_tools=True,
                 ):
-                    # 检查取消
+                    # 检查取消 — 持久化已接收的部分响应后再退出
                     if cancel_token and cancel_token.is_set():
-                        yield {"type": "done", "trace_id": "", "content": "任务已取消"}
+                        if self.session_store:
+                            try:
+                                partial = "".join(response_buffer).strip()
+                                self.session_store.add_message(session_id, "user", message)
+                                if partial:
+                                    self.session_store.add_message(session_id, "assistant", partial + "\n[已取消]")
+                            except Exception as _exc:
+                                log_ignored(log, "engine.AgentEngine.process_input_stream", _exc)
+                        yield {"type": "done", "trace_id": "", "content": "任务已取消", "quality_score": 0.0, "finish_reason": "cancelled"}
                         return
 
                     # 累积 token 内容用于持久化
@@ -2169,10 +2883,56 @@ class AgentEngine:
                     # 透传事件
                     yield event
 
-                # 5. 持久化会话历史 — 保存用户消息和助手回复
+                # 5. 安全检查 + 持久化会话历史
+                assistant_response = "".join(response_buffer).strip()
+                if self.verification and assistant_response:
+                    try:
+                        safety = self.verification.check_output_safety(assistant_response)
+                        if not safety.safe:
+                            assistant_response = safety.sanitized_output or assistant_response
+                    except Exception as _sec_exc:
+                        # D2（审计 §1.7）：安全检查异常此前静默吞掉 —— 输出未经校验即放行且零日志。
+                        # 保持放行语义（避免误伤正常输出），但必须留痕并接入 /health 降级视图。
+                        log.error(
+                            "安全检查异常，该项校验已跳过",
+                            check="output_safety",
+                            error=str(_sec_exc),
+                        )
+                        self._mark_subsystem_degraded("verification", f"output_safety 检查异常: {_sec_exc}")
+                    try:
+                        guardrail_result = self.verification.check_guardrails(assistant_response)
+                        if not guardrail_result.passed:
+                            assistant_response = "抱歉，无法提供该内容（安全检查未通过）"
+                    except Exception as _sec_exc:
+                        # D2（审计 §1.7）：安全检查异常此前静默吞掉 —— 输出未经校验即放行且零日志。
+                        # 保持放行语义（避免误伤正常输出），但必须留痕并接入 /health 降级视图。
+                        log.error(
+                            "安全检查异常，该项校验已跳过",
+                            check="guardrails",
+                            error=str(_sec_exc),
+                        )
+                        self._mark_subsystem_degraded("verification", f"guardrails 检查异常: {_sec_exc}")
+                if self.output_guardrail and assistant_response:
+                    try:
+                        guard_result = self.output_guardrail.check(assistant_response)
+                        if not guard_result.passed:
+                            log.warning(
+                                "Stream output blocked by guardrail",
+                                reason=guard_result.reason,
+                                risk_level=guard_result.risk_level,
+                            )
+                            assistant_response = "抱歉，输出内容被安全策略拦截"
+                    except Exception as _sec_exc:
+                        # D2（审计 §1.7）：安全检查异常此前静默吞掉 —— 输出未经校验即放行且零日志。
+                        # 保持放行语义（避免误伤正常输出），但必须留痕并接入 /health 降级视图。
+                        log.error(
+                            "安全检查异常，该项校验已跳过",
+                            check="output_guardrail",
+                            error=str(_sec_exc),
+                        )
+                        self._mark_subsystem_degraded("verification", f"output_guardrail 检查异常: {_sec_exc}")
                 if self.session_store:
                     try:
-                        assistant_response = "".join(response_buffer).strip()
                         self.session_store.add_message(session_id, "user", message)
                         if assistant_response:
                             self.session_store.add_message(session_id, "assistant", assistant_response)
@@ -2180,7 +2940,15 @@ class AgentEngine:
                         log.warning("Failed to persist stream session history", error=str(e))
                 return
             except _asyncio.CancelledError:
-                yield {"type": "done", "trace_id": "", "content": "任务已取消"}
+                if self.session_store:
+                    try:
+                        partial = "".join(response_buffer).strip()
+                        self.session_store.add_message(session_id, "user", message)
+                        if partial:
+                            self.session_store.add_message(session_id, "assistant", partial + "\n[已取消]")
+                    except Exception as _exc:
+                        log_ignored(log, "engine.AgentEngine.process_input_stream", _exc)
+                yield {"type": "done", "trace_id": "", "content": "任务已取消", "quality_score": 0.0, "finish_reason": "cancelled"}
                 return
             except Exception as e:
                 log.error("Stream loop failed, fallback to raw LLM", error=str(e))
@@ -2193,27 +2961,111 @@ class AgentEngine:
             {"role": "user", "content": message},
         ]
         try:
-            async for chunk in self.llm.chat_stream(messages=messages):
-                if cancel_token and cancel_token.is_set():
-                    yield {"type": "done", "trace_id": "", "content": "任务已取消"}
-                    return
-                chunk_str = chunk if isinstance(chunk, str) else (chunk.get("content", "") if isinstance(chunk, dict) else str(chunk))
-                response_buffer.append(chunk_str)
-                yield {"type": "token", "content": chunk_str}
+            core = self.domains.get("core")
+            if core is not None and core.is_initialized:
+                async for chunk in core.invoke_stream(messages=messages):
+                    if cancel_token and cancel_token.is_set():
+                        if self.session_store:
+                            try:
+                                partial = "".join(response_buffer).strip()
+                                self.session_store.add_message(session_id, "user", message)
+                                if partial:
+                                    self.session_store.add_message(session_id, "assistant", partial + "\n[已取消]")
+                            except Exception as _exc:
+                                log_ignored(log, "engine.AgentEngine.process_input_stream", _exc)
+                        yield {"type": "done", "trace_id": "", "content": "任务已取消", "quality_score": 0.0, "finish_reason": "cancelled"}
+                        return
+                    chunk_str = chunk if isinstance(chunk, str) else (chunk.get("content", "") if isinstance(chunk, dict) else str(chunk))
+                    response_buffer.append(chunk_str)
+                    yield {"type": "token", "content": chunk_str}
+            else:
+                async for chunk in self.llm.chat_stream(messages=messages):
+                    if cancel_token and cancel_token.is_set():
+                        if self.session_store:
+                            try:
+                                partial = "".join(response_buffer).strip()
+                                self.session_store.add_message(session_id, "user", message)
+                                if partial:
+                                    self.session_store.add_message(session_id, "assistant", partial + "\n[已取消]")
+                            except Exception as _exc:
+                                log_ignored(log, "engine.AgentEngine.process_input_stream", _exc)
+                        yield {"type": "done", "trace_id": "", "content": "任务已取消", "quality_score": 0.0, "finish_reason": "cancelled"}
+                        return
+                    chunk_str = chunk if isinstance(chunk, str) else (chunk.get("content", "") if isinstance(chunk, dict) else str(chunk))
+                    response_buffer.append(chunk_str)
+                    yield {"type": "token", "content": chunk_str}
+        except _asyncio.CancelledError:
+            if self.session_store:
+                try:
+                    partial = "".join(response_buffer).strip()
+                    self.session_store.add_message(session_id, "user", message)
+                    if partial:
+                        self.session_store.add_message(session_id, "assistant", partial + "\n[已取消]")
+                except Exception as _exc:
+                    log_ignored(log, "engine.AgentEngine.process_input_stream", _exc)
+            yield {"type": "done", "trace_id": "", "content": "任务已取消", "quality_score": 0.0, "finish_reason": "cancelled"}
+            return
         except Exception as e:
             yield {"type": "error", "content": str(e)}
 
-        # 降级路径也持久化会话历史
+        # 降级路径也做安全检查 + 持久化会话历史
+        assistant_response = "".join(response_buffer).strip()
+        if self.verification and assistant_response:
+            try:
+                safety = self.verification.check_output_safety(assistant_response)
+                if not safety.safe:
+                    assistant_response = safety.sanitized_output or assistant_response
+            except Exception as _sec_exc:
+                # D2（审计 §1.7）：安全检查异常此前静默吞掉 —— 输出未经校验即放行且零日志。
+                # 保持放行语义（避免误伤正常输出），但必须留痕并接入 /health 降级视图。
+                log.error(
+                    "安全检查异常，该项校验已跳过",
+                    check="output_safety",
+                    error=str(_sec_exc),
+                )
+                self._mark_subsystem_degraded("verification", f"output_safety 检查异常: {_sec_exc}")
+            try:
+                guardrail_result = self.verification.check_guardrails(assistant_response)
+                if not guardrail_result.passed:
+                    assistant_response = "抱歉，无法提供该内容（安全检查未通过）"
+            except Exception as _sec_exc:
+                # D2（审计 §1.7）：安全检查异常此前静默吞掉 —— 输出未经校验即放行且零日志。
+                # 保持放行语义（避免误伤正常输出），但必须留痕并接入 /health 降级视图。
+                log.error(
+                    "安全检查异常，该项校验已跳过",
+                    check="guardrails",
+                    error=str(_sec_exc),
+                )
+                self._mark_subsystem_degraded("verification", f"guardrails 检查异常: {_sec_exc}")
+        if self.output_guardrail and assistant_response:
+            try:
+                guard_result = self.output_guardrail.check(assistant_response)
+                if not guard_result.passed:
+                    log.warning(
+                        "Fallback stream output blocked by guardrail",
+                        reason=guard_result.reason,
+                        risk_level=guard_result.risk_level,
+                    )
+                    assistant_response = "抱歉，输出内容被安全策略拦截"
+            except Exception as _sec_exc:
+                # D2（审计 §1.7）：安全检查异常此前静默吞掉 —— 输出未经校验即放行且零日志。
+                # 保持放行语义（避免误伤正常输出），但必须留痕并接入 /health 降级视图。
+                log.error(
+                    "安全检查异常，该项校验已跳过",
+                    check="output_guardrail",
+                    error=str(_sec_exc),
+                )
+                self._mark_subsystem_degraded("verification", f"output_guardrail 检查异常: {_sec_exc}")
         if self.session_store:
             try:
-                assistant_response = "".join(response_buffer).strip()
                 self.session_store.add_message(session_id, "user", message)
                 if assistant_response:
                     self.session_store.add_message(session_id, "assistant", assistant_response)
             except Exception as e:
                 log.warning("Failed to persist fallback stream history", error=str(e))
 
-        yield {"type": "done", "trace_id": ""}
+        _fallback_quality = min(1.0, max(0.1, len(assistant_response) / 200.0)) if assistant_response else 0.0
+        yield {"type": "done", "trace_id": "", "quality_score": _fallback_quality, "finish_reason": "stop" if assistant_response else "error"}
 
     # ─────────────────────────────────────────────────────────────
     # 子系统初始化方法（对应 SUBSYSTEM_DEPS 的 factory 字段）
@@ -2287,6 +3139,12 @@ class AgentEngine:
         try:
             self.tool_registry = ToolRegistry()
             count = register_default_tools(self.tool_registry)
+            try:
+                from agent.perception.tools import register_perception_tools
+                register_perception_tools(self.tool_registry)
+                log.info("Perception tools registered")
+            except Exception as _e:
+                log.warning("Perception tools registration failed", error=str(_e))
             log.info("Tool Registry ready", count=count)
             return self.tool_registry
         except Exception as e:
@@ -2351,12 +3209,14 @@ class AgentEngine:
 
         数据流:
             用户输入 + 环境
+              → [agent_native 模型] → 直接返回全量工具
               → SceneToToolsetMapper.detect_scene()
               → sample_toolset()（AGENT_TOOLSET_SAMPLING=on 时概率分发，否则确定性）
               → toolset_registry.resolve(toolset_id) 展开工具名
               → tool_registry.filter_tools(工具名集合)
 
         退化保护（零回归）:
+            - agent_native 模型 → 返回全量工具（模型自主选择）。
             - AGENT_TOOLSET_SAMPLING 未启用 → 返回全量工具（行为同旧版）。
             - toolset_registry / tool_registry 为 None → 全量或空。
             - 工具集解析为空 → 退化为全量工具。
@@ -2371,6 +3231,9 @@ class AgentEngine:
         """
         if self.tool_registry is None:
             return []
+        # agent_native 模型：直接返回全量工具，让模型自主选择
+        if self._is_agent_native_model():
+            return self.tool_registry.filter_tools(None)
         if self.toolset_registry is None:
             return self.tool_registry.filter_tools(None)
         try:
@@ -2404,11 +3267,22 @@ class AgentEngine:
         供 ConversationLoop 直接作为 tool_selector 注入 LLM 调用。
         开关未启用或任一子系统缺失时返回全量工具 schema（零回归）。
 
+        工具选择策略（按优先级）：
+        0. agent_native 模型 → 直接返回全量工具（模型自主选择）
+        1. 场景 → 工具集采样（SceneToToolsetMapper）
+        2. 语义 embedding 检索（AGENT_SEMANTIC_TOOL_SELECT=on）
+        3. 全量工具回退
+
         Returns:
             list[dict]: OpenAI 格式的工具 schema 列表。
         """
         if self.tool_registry is None:
             return []
+        # agent_native 模型：直接返回全量工具，让模型自主选择
+        # 原生 Agent 模型（如 DeepSeek V4 Flash）工具调用准确率高，
+        # 无需通过场景关键词检测裁剪工具集，反而会限制模型能力
+        if self._is_agent_native_model():
+            return self.tool_registry.to_openai_tools()
         if self.toolset_registry is None:
             return self.tool_registry.to_openai_tools()
         try:
@@ -2417,10 +3291,12 @@ class AgentEngine:
             log.warning("SceneToToolsetMapper 构建失败, 退化为全量工具", error=str(e))
             return self.tool_registry.to_openai_tools()
         if not mapper.enable_sampling:
-            return self.tool_registry.to_openai_tools()
+            return self._select_tools_semantic(input_text) or self.tool_registry.to_openai_tools()
         scene = mapper.detect_scene(input_text, env)
         config = mapper.sample_toolset(scene, rng=rng)
         openai_tools = self.toolset_registry.resolve_to_openai(config.toolset_id, self.tool_registry)
+        if not openai_tools:
+            openai_tools = self._select_tools_semantic(input_text)
         if not openai_tools:
             log.warning(
                 "工具集 OpenAI schema 为空, 退化为全量工具",
@@ -2428,14 +3304,66 @@ class AgentEngine:
                 toolset_id=config.toolset_id,
             )
             return self.tool_registry.to_openai_tools()
-        # R2 → EvolutionEngine：把采样选中的工具集作为学习信号喂送（每次 LLM
-        # 工具选择事件喂一次，供进化引擎积累"场景→工具集"分布）。
         tool_names = [
             (t.get("function") or {}).get("name") or t.get("name")
             for t in openai_tools
         ]
         self._feed_evolution_toolset(scene, config.toolset_id, tool_names, method="sampled")
         return openai_tools
+
+    def _select_tools_semantic(self, input_text: str) -> list[dict[str, Any]] | None:
+        """基于语义 embedding 的工具选择。
+
+        使用 sentence-transformers 对工具描述和用户输入做语义匹配，
+        返回最相关的 Top-K 工具 schema。
+
+        Args:
+            input_text: 用户输入文本。
+
+        Returns:
+            list[dict] | None: OpenAI 工具 schema 列表，None 表示不可用。
+        """
+        try:
+            from agent.tools.semantic_selector import SemanticToolSelector
+            selector = self._ensure_semantic_selector()
+            return selector.select(input_text, top_k=15)
+        except Exception as e:
+            log.debug("Semantic tool selection unavailable", error=str(e))
+            return None
+
+    def _ensure_semantic_selector(self) -> Any:
+        if not hasattr(self, "_semantic_selector"):
+            from agent.tools.semantic_selector import SemanticToolSelector
+            self._semantic_selector = SemanticToolSelector(
+                tool_registry=self.tool_registry,
+            )
+        return self._semantic_selector
+
+    def _is_agent_native_model(self) -> bool:
+        """检测当前 LLM 是否具备原生 Agent 能力。
+
+        通过 LLMCapabilityDetector 探测当前模型的 agent_native 标志。
+        agent_native 模型（如 DeepSeek V4 Flash）工具调用准确率高，
+        可直接接收全量工具注册表，无需场景关键词检测裁剪。
+
+        可通过环境变量 AGENT_NATIVE_FORCE_DISABLE=true 强制关闭。
+
+        Returns:
+            bool: True 表示模型具备原生 Agent 能力。
+        """
+        if os.environ.get("AGENT_NATIVE_FORCE_DISABLE", "").lower() == "true":
+            return False
+        try:
+            from agent.evolution.llm_capability_detector import LLMCapabilityDetector
+            model_name = getattr(self.llm, "model_name", "") or ""
+            provider = getattr(self.llm, "provider", "") or ""
+            if not model_name:
+                return False
+            detector = LLMCapabilityDetector()
+            caps = detector.detect(model_name, provider=provider)
+            return getattr(caps, "agent_native", False)
+        except Exception:
+            return False
 
     async def _init_mcp_tool_bridge(self) -> MCPToolBridge | None:
         try:
@@ -2491,11 +3419,14 @@ class AgentEngine:
     async def _init_approval_manager(self) -> ApprovalManager | None:
         try:
             _posture = RuntimePosture.from_env()
-            self.approval_manager = ApprovalManager(auto_approve_all=True, posture=_posture)
+            import os as _os2
+            _env_mode2 = _os2.environ.get("ENV", "development").lower()
+            _auto_approve2 = _env_mode2 not in ("production", "prod", "staging", "stage")
+            self.approval_manager = ApprovalManager(auto_approve_all=_auto_approve2, posture=_posture)
             # 接线 R1 管理面控制器（姿态覆盖 / 锁定 推送到真实执行器）
             from agent.security.runtime_control import get_controller
             get_controller().attach_approval_manager(self.approval_manager)
-            log.info("Approval Manager ready", posture=_posture.value)
+            log.info("Approval Manager ready", posture=_posture.value, auto_approve_all=_auto_approve2)
             return self.approval_manager
         except Exception as e:
             log.warning("Approval Manager init failed", error=str(e))
@@ -2531,6 +3462,20 @@ class AgentEngine:
 
     async def _init_loop(self) -> LoopController | None:
         try:
+            perception_bus = None
+            try:
+                from agent.perception.bus import PerceptionBus, PerceptionLevel
+                perception_bus = PerceptionBus(
+                    tool_registry=self.tool_registry,
+                    llm=self.llm,
+                    level=PerceptionLevel(
+                        os.environ.get("PERCEPTION_LEVEL", "standard")
+                    ),
+                )
+                log.info("PerceptionBus ready")
+            except Exception as _e:
+                log.warning("PerceptionBus init failed", error=str(_e))
+
             self.loop = LoopController(
                 self.llm,
                 trajectory_db=self.trajectory_db,
@@ -2539,6 +3484,10 @@ class AgentEngine:
                 memory_engine=self.memory,
                 canary_manager=self.canary_manager,
                 constraints_service=self.constraints,
+                perception_bus=perception_bus,
+                schema_validator=getattr(self, "schema_validator", None),
+                tool_call_guard=getattr(self, "tool_call_guard", None),
+                proactive_engine=getattr(self, "proactive_engine", None),
             )
             log.info("Loop Controller ready")
             return self.loop
@@ -2567,8 +3516,10 @@ class AgentEngine:
                 approval_manager=self.approval_manager,
                 hook_manager=self.hook_manager,
                 tool_selector=self.select_openai_tools_for_input,
+                # D8（审计 §1.7）：接入验证闭环，工具结果验证失败时回灌纠错提示。
+                verification_loop=getattr(self, "verification_loop", None),
             )
-            log.info("Conversation Loop ready (with safety modules + hooks)")
+            log.info("Conversation Loop ready (with safety modules + hooks + verification)")
             return self.conversation
         except Exception as e:
             log.warning("Conversation Loop init failed", error=str(e))
@@ -2874,6 +3825,81 @@ class AgentEngine:
             log.warning("Dynamic Priority Scorer init failed", error=str(e))
             return None
 
+    def _wire_domain_event_subscribers(self) -> None:
+        """W1-2/W1-3: 将 DomainEventBus 事件连接到 EvolutionOrchestrator 和 StrategyAdapter。
+
+        打通学习信号闭环：
+        - domain.evolution.feedback → EvolutionOrchestrator.record_interaction()
+        - domain.tool.executed → StrategyAdapter.record_signal() (工具级学习)
+        - domain.core.llm_invoked → EvolutionOrchestrator (LLM 调用质量追踪)
+
+        设计原则：
+        - 订阅者异常不阻塞 EventBus 发射端（DomainEventBus 已有 try/except）
+        - 保留直连调用作为降级路径（EventBus 不可用时）
+        - 订阅者处理为异步，不阻塞主流程
+        """
+        orchestrator = getattr(self, "_evolution_orchestrator", None)
+
+        async def _on_evolution_feedback(payload: Any) -> None:
+            if orchestrator is None:
+                return
+            try:
+                if isinstance(payload, dict):
+                    quality = float(payload.get("quality_score", 0.5))
+                    response_time_ms = float(payload.get("response_time_ms", 0.0))
+                    tool_successes = payload.get("tool_successes", True)
+                    await orchestrator.record_interaction(
+                        quality=quality,
+                        response_time_ms=response_time_ms,
+                        tool_successes=tool_successes,
+                    )
+            except Exception as e:
+                log_ignored(log, "engine._on_evolution_feedback", e)
+
+        async def _on_tool_executed(payload: Any) -> None:
+            if orchestrator is None:
+                return
+            try:
+                if isinstance(payload, dict):
+                    adapter = getattr(orchestrator, "_strategy_adapter", None)
+                    if adapter is None:
+                        return
+                    tool_names = payload.get("tool_names", [])
+                    failures = payload.get("failures", 0)
+                    for tname in tool_names:
+                        if failures > 0:
+                            adapter.record_signal(f"tool_failure:{tname}", value=-1.0)
+                        else:
+                            adapter.record_signal(f"tool_success:{tname}", value=1.0)
+            except Exception as e:
+                log_ignored(log, "engine._on_tool_executed", e)
+
+        async def _on_llm_invoked(payload: Any) -> None:
+            if orchestrator is None:
+                return
+            try:
+                if isinstance(payload, dict):
+                    quality = float(payload.get("quality", 0.5))
+                    response_time_ms = float(payload.get("duration_ms", 0.0))
+                    await orchestrator.record_interaction(
+                        quality=quality,
+                        response_time_ms=response_time_ms,
+                        tool_successes=True,
+                    )
+            except Exception as e:
+                log_ignored(log, "engine._on_llm_invoked", e)
+
+        self.domain_events.on("domain.evolution.feedback", _on_evolution_feedback)
+        self.domain_events.on("domain.tool.executed", _on_tool_executed)
+        self.domain_events.on("domain.core.llm_invoked", _on_llm_invoked)
+
+        log.info(
+            "DomainEventBus subscribers wired",
+            evolution_feedback=self.domain_events.listener_count("domain.evolution.feedback"),
+            tool_executed=self.domain_events.listener_count("domain.tool.executed"),
+            llm_invoked=self.domain_events.listener_count("domain.core.llm_invoked"),
+        )
+
     async def _init_evolution_orchestrator(self) -> Any:
         try:
             orchestrator = EvolutionOrchestrator.get_instance()
@@ -2977,6 +4003,18 @@ class AgentEngine:
             return self.orchestrator
         except Exception as e:
             log.warning("Orchestrator init failed", error=str(e))
+            return None
+
+    async def _init_orchestration_executor(self) -> Any:
+        try:
+            from agent.orchestration.executor import OrchestrationExecutor, OrchestrationConfig
+            self.orchestration_executor = OrchestrationExecutor(
+                config=OrchestrationConfig(),
+            )
+            log.info("OrchestrationExecutor ready")
+            return self.orchestration_executor
+        except Exception as e:
+            log.warning("OrchestrationExecutor init failed", error=str(e))
             return None
 
     async def _init_cron_scheduler(self) -> CronJobScheduler | None:
@@ -3352,16 +4390,14 @@ class AgentEngine:
             log.warning("Subdirectory Hints init failed", error=str(e))
             return None
 
-    async def _init_tool_result_cache(self) -> Any:
-        """初始化工具结果缓存。"""
-        try:
-            from agent.tools.tool_result_cache import ToolResultCache
-            self.tool_result_cache = ToolResultCache()
-            log.info("Tool Result Cache ready")
-            return self.tool_result_cache
-        except Exception as e:
-            log.warning("Tool Result Cache init failed", error=str(e))
-            return None
+    # W3（审计 §1.6）：已移除 _init_tool_result_cache。
+    # ToolResultCache 此前在此实例化并注册为子系统，但全项目零调用点
+    # （无任何 .put()/.get()），属孤儿接线——只占内存、日志上报 "ready"，
+    # 却从未缓存过任何工具结果，制造"缓存已启用"的假象。
+    # 工具注册表缺少只读/幂等元数据，盲目接线会让 file_write / shell_exec
+    # 等副作用工具被错误复用，风险高于收益。
+    # 类实现保留在 agent/tools/tool_result_cache.py 备用；未来接线需先引入
+    # ToolDefinition.cacheable 白名单（需架构师批准）。
 
     async def _init_conversation_compressor(self) -> Any:
         """初始化对话压缩器 V2。"""
@@ -4088,17 +5124,6 @@ class AgentEngine:
             log.warning("Onboarding Wizard init failed", error=str(e))
             return None
 
-    async def _init_multi_agent(self) -> Any:
-        """初始化多智能体协调器。"""
-        try:
-            from agent.evolution.multi_agent import MultiAgentCoordinator
-            self.multi_agent = MultiAgentCoordinator()
-            log.info("Multi-Agent Coordinator ready")
-            return self.multi_agent
-        except Exception as e:
-            log.warning("Multi-Agent Coordinator init failed", error=str(e))
-            return None
-
     async def _init_gateway_hooks(self) -> Any:
         """初始化 Gateway 钩子管理器。"""
         try:
@@ -4119,6 +5144,186 @@ class AgentEngine:
             return self.slash_commands
         except Exception as e:
             log.warning("Slash Commands init failed", error=str(e))
+            return None
+
+    async def _init_safety_net(self) -> Any:
+        """初始化 SafetyNet 安全沙箱。
+
+        SafetyNet 集成 CheckpointManager、OperationScope、AutoRollback、
+        AuditTrail、DryRunExecutor 五大组件，为 agent_native 模型提供
+        高风险操作的自动审批和还原点保护。
+        """
+        try:
+            from agent.safety import SafetyNet
+            self.safety_net = SafetyNet()
+
+            if self.approval_manager is not None:
+                self.approval_manager._safety_net = self.safety_net
+
+            try:
+                from agent.tools.code_execution_tool import set_safety_net as _cesn
+                _cesn(self.safety_net)
+            except Exception as _exc:
+                log_ignored(log, "engine._setup_safety_net.code_execution", _exc)
+
+            try:
+                from agent.tools.write_approval_tool import set_safety_net as _wasn
+                _wasn(self.safety_net)
+            except Exception as _exc:
+                log_ignored(log, "engine._setup_safety_net.write_approval", _exc)
+
+            log.info("SafetyNet ready")
+            return self.safety_net
+        except Exception as e:
+            log.warning("SafetyNet init failed", error=str(e))
+            return None
+
+    async def _init_workflow_engine(self) -> Any:
+        """初始化 WorkflowEngine 持久化工作流引擎。
+
+        WorkflowEngine 支持 DAG 任务编排、状态持久化、事件触发、
+        崩溃恢复，让 agent_native 模型可以执行跨会话的持续任务。
+        依赖 SafetyNet 提供还原点保护。
+        """
+        try:
+            from agent.workflow import WorkflowEngine
+            safety_net = getattr(self, "safety_net", None)
+            self.workflow_engine = WorkflowEngine(safety_net=safety_net)
+
+            try:
+                from agent.workflow.tools import register_workflow_tools
+                tool_registry = getattr(self, "tool_registry", None)
+                if tool_registry is not None:
+                    register_workflow_tools(tool_registry, self.workflow_engine)
+            except Exception as _exc:
+                log_ignored(log, "engine._init_workflow_engine.register_tools", _exc)
+
+            # P0-2: 延迟注入到 LoopController，启用工作流状态上下文注入
+            if hasattr(self, "loop") and self.loop is not None:
+                self.loop._workflow_engine = self.workflow_engine
+                log.info("WorkflowEngine injected into LoopController")
+
+            log.info("WorkflowEngine ready")
+            return self.workflow_engine
+        except Exception as e:
+            log.warning("WorkflowEngine init failed", error=str(e))
+            return None
+
+    async def _init_perception_loop(self) -> Any:
+        """初始化 PerceptionActionLoop 多模态感知闭环。
+
+        整合 UIAElementCache、ActionVerifier、VisualGrounding、
+        ScreenWatcher、LocalOCR 五大组件，提供完整的
+        感知-行动闭环能力。
+        """
+        try:
+            from agent.perception import PerceptionActionLoop
+            self.perception_loop = PerceptionActionLoop(
+                enable_watcher=True,
+                enable_ocr=True,
+                shutdown_event=getattr(self, "_shutdown_event", None),
+            )
+
+            # P1-1: 延迟注入到 LoopController.Executor，启用桌面操作自动验证
+            if hasattr(self, "loop") and self.loop is not None:
+                executor = getattr(self.loop, "executor", None)
+                if executor is not None and hasattr(executor, "set_perception_loop"):
+                    executor.set_perception_loop(self.perception_loop)
+                    log.info("PerceptionActionLoop injected into Executor")
+
+                # P1-1: 延迟注入到 LoopController，启用感知上下文注入
+                self.loop._perception_loop = self.perception_loop
+                log.info("PerceptionActionLoop injected into LoopController")
+
+            log.info("PerceptionActionLoop ready")
+            return self.perception_loop
+        except Exception as e:
+            log.warning("PerceptionActionLoop init failed", error=str(e))
+            return None
+
+    async def _init_knowledge_lifecycle(self) -> Any:
+        """初始化 KnowledgeLifecycle 知识沉淀与主动学习。
+
+        整合 KnowledgeStore、KnowledgeExtractor、KnowledgeDecay，
+        提供完整的知识沉淀、检索、衰减、淘汰闭环。
+        """
+        try:
+            from agent.knowledge import KnowledgeLifecycle
+            self.knowledge_lifecycle = KnowledgeLifecycle()
+            await self.knowledge_lifecycle.initialize()
+
+            # P1-2: 延迟注入到 LoopController，启用知识上下文注入和对话后自动提取
+            if hasattr(self, "loop") and self.loop is not None:
+                self.loop._knowledge_lifecycle = self.knowledge_lifecycle
+                log.info("KnowledgeLifecycle injected into LoopController")
+
+            # P1-2: 启动知识衰减定时任务，自动维护知识库
+            await self.knowledge_lifecycle.start_decay_scheduler()
+            log.info("KnowledgeLifecycle decay scheduler started")
+
+            log.info("KnowledgeLifecycle ready")
+            return self.knowledge_lifecycle
+        except Exception as e:
+            log.warning("KnowledgeLifecycle init failed", error=str(e))
+            return None
+
+    async def _init_mcp_integration(self) -> Any:
+        """初始化 MCP 生态集成。
+
+        整合 MCPClient、MCPToolBridge、MCPLifecycle，
+        实现 MCP 服务端连接、工具桥接和生命周期管理。
+        同时桥接 ResourceSubscriptionManager 事件到 LoopController。
+        """
+        try:
+            from agent.mcp_integration import MCPClient, MCPToolBridge, MCPLifecycle
+            self.mcp_client = MCPClient()
+            self.mcp_tool_bridge = MCPToolBridge(
+                self.mcp_client,
+                getattr(self, "tool_registry", None),
+            )
+            self.mcp_lifecycle = MCPLifecycle(self.mcp_client)
+
+            mcp_config = os.environ.get("MCP_CONFIG_PATH", "")
+            if mcp_config:
+                await self.mcp_lifecycle.load_config(mcp_config)
+            else:
+                await self.mcp_lifecycle.auto_load()
+
+            # P1-3: 自动启动已配置的 MCP 服务端
+            if self.mcp_lifecycle and hasattr(self.mcp_lifecycle, "_servers") and self.mcp_lifecycle._servers:
+                try:
+                    start_results = await self.mcp_lifecycle.start_all()
+                    started = sum(1 for v in start_results.values() if v)
+                    log.info("MCP servers auto-started", total=len(start_results), success=started)
+                except Exception as start_err:
+                    log.warning("MCP auto-start failed", error=str(start_err))
+
+            # P1-3: 桥接资源变更事件到 LoopController
+            try:
+                resource_sub = getattr(self.mcp_client, "_resource_sub", None)
+                if resource_sub is None:
+                    from agent.mcp_integration.resource_subscription import ResourceSubscriptionManager
+                    resource_sub = ResourceSubscriptionManager(self.mcp_client)
+                    self.mcp_client._resource_sub = resource_sub
+
+                loop_ctrl = getattr(self, "loop", None)
+                if loop_ctrl is not None:
+                    async def _on_resource_change(event: Any) -> None:
+                        if hasattr(loop_ctrl, "_mcp_resource_events"):
+                            loop_ctrl._mcp_resource_events.append(event)
+                            if len(loop_ctrl._mcp_resource_events) > 50:
+                                loop_ctrl._mcp_resource_events = loop_ctrl._mcp_resource_events[-50:]
+
+                    resource_sub.on_change(_on_resource_change)
+                    await resource_sub.start_processor()
+                    log.info("MCP resource subscription bridge to LoopController active")
+            except Exception as bridge_err:
+                log.warning("MCP resource subscription bridge failed", error=str(bridge_err))
+
+            log.info("MCP Integration ready")
+            return self.mcp_client
+        except Exception as e:
+            log.warning("MCP Integration init failed", error=str(e))
             return None
 
     @property

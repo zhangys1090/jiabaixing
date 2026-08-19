@@ -6,11 +6,36 @@
 2. 集群已安装 ingress-nginx 控制器
 3. 集群已安装 metrics-server（HPA 依赖）
 4. 已构建并推送镜像（`jiabaixing/python-backend`、`jiabaixing/gateway`）
+   — CI 已自动化，见下文「CI/CD 镜像链路」
 5. 已替换 `secret.yaml` 中的 `placeholder` 为真实密钥值
+
+## CI/CD 镜像链路
+
+`.github/workflows/backend-ci-cd.yml` 的 `docker-build-push` job 会构建并推送两个镜像到 GHCR：
+
+| 清单占位镜像               | 实际推送镜像                                            |
+| -------------------------- | ------------------------------------------------------- |
+| `jiabaixing/gateway`       | `ghcr.io/<owner>/jiabaixing-gateway:sha-<12位>`          |
+| `jiabaixing/python-backend`| `ghcr.io/<owner>/jiabaixing-python-backend:sha-<12位>`   |
+
+部署时由 `kustomize edit set image` 把占位镜像替换为本次构建的**不可变 sha tag**，
+因此清单中的 `:latest` 仅作占位，不会被真正拉取。
+
+**镜像拉取凭据**：GHCR package 默认为 private。二选一：
+
+- 将 package 设为 public（最简单，无需额外配置）；或
+- 配置仓库 Secret `GHCR_PULL_TOKEN`（长期 PAT，需 `read:packages` 权限）。
+  CI 会据此创建 `ghcr-pull` docker-registry secret 并 patch 到 `default` ServiceAccount。
+
+> 不可使用 `GITHUB_TOKEN` 作为长期 pull secret——它仅在单次 workflow 运行期间有效，
+> Pod 后续重启会因凭据过期而 `ImagePullBackOff`。
+
+**部署所需 Secrets**：`KUBE_CONFIG_STAGING`（staging，缺失则跳过部署）、
+`KUBE_CONFIG_PROD`（production，缺失则直接失败）。
 
 ## 部署顺序
 
-按依赖关系依次执行（也可一次性 `kubectl apply -f deploy/kubernetes/`）：
+按依赖关系依次执行（推荐直接用下文「一键部署」的 kustomize 入口）：
 
 ```bash
 # 1. 命名空间（必须最先创建）
@@ -39,8 +64,12 @@ kubectl apply -f deploy/kubernetes/pdb.yaml
 
 ## 一键部署
 
+必须使用 kustomize 入口（`-k`）。**不要**用 `kubectl apply -f deploy/kubernetes/`：
+该目录含 `README.md`、`uninstall.sh`、`kustomization.yaml` 等非资源文件，`-f` 会尝试
+把它们解析为 K8s 资源而失败。
+
 ```bash
-kubectl apply -f deploy/kubernetes/
+kubectl apply -k deploy/kubernetes/
 ```
 
 ## 验证

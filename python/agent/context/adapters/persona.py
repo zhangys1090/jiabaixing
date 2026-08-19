@@ -7,6 +7,7 @@ from agent.context.models import (
     ComponentPriority,
     ContextBuildRequest,
 )
+from agent.core.logger import log_ignored
 
 
 class PersonaComponent(ContextComponent):
@@ -62,9 +63,9 @@ class PersonaComponent(ContextComponent):
                     tone_instruction = self._persona_core.build_scene_tone_instruction(
                         request.scene
                     )
-            except Exception:
+            except Exception as _exc:
                 # 如果 PersonaCore 调用失败，使用默认值
-                pass
+                log_ignored(None, "persona.PersonaComponent._execute", _exc)
 
         # 默认人格设定
         if not persona_summary:

@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from agent.core.logger import StructuredLogger
+from agent.core.token_counter import TokenCounter, get_token_counter
 
 log = StructuredLogger("context_compressor")
 
@@ -45,25 +46,48 @@ class ContextCompressor:
     支持注意力聚焦模式（compress_with_attention），结合记忆检索
     结果和关键词提取，优先保留与当前对话相关的上下文。
 
+    压缩质量回验：
+    - 关键实体保留检查：提取原文中的类名/函数名/变量名，验证压缩后是否仍包含
+    - 压缩率合理性检查：压缩后文本超过原文80%说明压缩效果差
+    - 关键信息标记：支持用 <!-- key:xxx --> 标记不可丢弃的信息
+    - 质量不通过时回退到原始文本截断版本
+
     Usage:
         compressor = ContextCompressor(max_context_tokens=8000)
         result = compressor.compress(messages, target_tokens=5000)
         print(f"压缩率: {result.ratio:.2f}, 策略: {result.strategy}")
     """
 
-    def __init__(self, max_context_tokens: int = 8000, reserve_ratio: float = 0.3) -> None:
+    def __init__(
+        self,
+        max_context_tokens: int = 8000,
+        reserve_ratio: float = 0.3,
+        model: str = "gpt-4o",
+        use_precise: bool = True,
+    ) -> None:
         """初始化上下文压缩器。
 
         Args:
             max_context_tokens: 最大上下文 Token 数。
             reserve_ratio: 保留比例（为 LLM 生成预留的空间）。
+            model: 模型名称（用于 tiktoken 编码器选择）。
+            use_precise: 是否使用精确 Token 计数（tiktoken），False 时回退到近似估算。
         """
         self._max_tokens = max_context_tokens
         self._reserve_ratio = reserve_ratio
+        self._model = model
+        self._use_precise = use_precise
+        self._token_counter: TokenCounter | None = None
+        if use_precise and TokenCounter.is_available():
+            self._token_counter = TokenCounter(model=model)
+            log.info("ContextCompressor using precise token counting", model=model)
+        else:
+            log.info("ContextCompressor using approximate token counting")
 
-    @staticmethod
-    def estimate_tokens(text: str) -> int:
-        """估算文本的 Token 数（按 4 字符 ≈ 1 Token 近似）。
+    def estimate_tokens(self, text: str) -> int:
+        """估算文本的 Token 数。
+
+        优先使用 tiktoken 精确计数，不可用时回退到中英文混合近似估算。
 
         Args:
             text: 输入文本。
@@ -71,10 +95,47 @@ class ContextCompressor:
         Returns:
             int: 估算的 Token 数（最小为 1）。
         """
-        return max(1, len(text) // 4)
+        if self._token_counter is not None:
+            return self._token_counter.count_tokens(text)
+        return self._approximate_tokens(text)
+
+    @staticmethod
+    def _approximate_tokens(text: str) -> int:
+        """中/日/韩混合近似 Token 估算。
+
+        中文约 1.5 token/字，日文假名约 1.2 token/字，
+        韩文约 1.3 token/字，英文约 4 字符/token。
+
+        Args:
+            text: 输入文本。
+
+        Returns:
+            int: 估算的 Token 数（最小为 1）。
+        """
+        cn_chars = 0
+        jp_chars = 0
+        kr_chars = 0
+        other_chars = 0
+        for ch in text:
+            cp = ord(ch)
+            if 0x4E00 <= cp <= 0x9FFF or 0x3400 <= cp <= 0x4DBF or 0x20000 <= cp <= 0x2A6DF:
+                cn_chars += 1
+            elif 0x3040 <= cp <= 0x309F or 0x30A0 <= cp <= 0x30FF:
+                jp_chars += 1
+            elif 0xAC00 <= cp <= 0xD7AF or 0x1100 <= cp <= 0x11FF:
+                kr_chars += 1
+            else:
+                other_chars += 1
+        cn_tokens = int(cn_chars * 1.5)
+        jp_tokens = int(jp_chars * 1.2)
+        kr_tokens = int(kr_chars * 1.3)
+        en_tokens = max(1, other_chars // 4) if other_chars > 0 else 0
+        return max(1, cn_tokens + jp_tokens + kr_tokens + en_tokens)
 
     def estimate_messages_tokens(self, messages: list[dict[str, Any]]) -> int:
         """估算消息列表的总 Token 数。
+
+        优先使用 tiktoken 精确计数，不可用时回退到近似估算。
 
         Args:
             messages: 消息列表。
@@ -82,15 +143,17 @@ class ContextCompressor:
         Returns:
             int: 总 Token 数估算值。
         """
+        if self._token_counter is not None:
+            return self._token_counter.count_messages_tokens(messages)
         total = 0
         for msg in messages:
-            total += self.estimate_tokens(msg.get("content", ""))
+            total += self._approximate_tokens(msg.get("content", ""))
             if msg.get("tool_calls"):
                 for tc in msg["tool_calls"]:
                     fn = tc.get("function", {})
-                    total += self.estimate_tokens(fn.get("name", ""))
-                    total += self.estimate_tokens(fn.get("arguments", ""))
-        return total
+                    total += self._approximate_tokens(fn.get("name", ""))
+                    total += self._approximate_tokens(fn.get("arguments", ""))
+        return max(1, total)
 
     def extract_attention_keywords(self, messages: list[dict[str, Any]]) -> list[str]:
         """从最近消息中提取注意力关键词。
@@ -209,6 +272,9 @@ class ContextCompressor:
     ) -> CompressionResult:
         """执行上下文压缩，按策略优先级依次尝试直到满足预算。
 
+        压缩后执行质量回验（_validate_compression_quality），若质量不通过
+        则回退到原始消息的截断版本，确保关键信息不丢失。
+
         Args:
             messages: 消息列表。
             target_tokens: 目标 Token 数，None 时使用默认预算。
@@ -245,6 +311,18 @@ class ContextCompressor:
                 if current_tokens <= target:
                     break
 
+        # 压缩质量回验：若不通过则回退到原始截断版本
+        quality_ok, quality_reason = self._validate_compression_quality(messages, current)
+        if not quality_ok:
+            log.warning(
+                "压缩质量回验未通过，回退到原始截断版本",
+                reason=quality_reason,
+                strategy=applied,
+            )
+            current = self._truncate_original(messages, target)
+            current_tokens = self.estimate_messages_tokens(current)
+            applied = "quality_fallback_truncate"
+
         return CompressionResult(
             original_tokens=original,
             compressed_tokens=current_tokens,
@@ -253,6 +331,150 @@ class ContextCompressor:
             removed_messages=len(messages) - len(current),
             compressed_messages=current,
         )
+
+    def _validate_compression_quality(
+        self,
+        original: list[dict[str, Any]],
+        compressed: list[dict[str, Any]],
+    ) -> tuple[bool, str]:
+        """验证压缩后文本的质量是否可接受。
+
+        检查三项指标：
+        1. 关键实体保留：提取原文中的类名/函数名/变量名，验证压缩后仍包含
+        2. 压缩率合理性：压缩后文本超过原文80%说明压缩效果差
+        3. 关键信息标记：带 <!-- key:xxx --> 标记的内容不可丢弃
+
+        Args:
+            original: 原始消息列表。
+            compressed: 压缩后消息列表。
+
+        Returns:
+            tuple[bool, str]: (是否通过, 未通过原因描述)。
+        """
+        original_text = " ".join(m.get("content", "") for m in original)
+        compressed_text = " ".join(m.get("content", "") for m in compressed)
+
+        if not original_text:
+            return True, ""
+
+        # 检查1：关键实体保留
+        original_entities = self._extract_code_entities(original_text)
+        if original_entities:
+            compressed_entities = self._extract_code_entities(compressed_text)
+            missing = [e for e in original_entities if e not in compressed_entities]
+            if len(missing) > len(original_entities) * 0.5:
+                return False, f"关键实体丢失过多: {missing[:5]}"
+
+        # 检查2：压缩率合理性
+        if len(compressed_text) > len(original_text) * 0.8:
+            return False, f"压缩率不合理: 压缩后{len(compressed_text)}字 > 原文80%({int(len(original_text) * 0.8)}字)"
+
+        # 检查3：关键信息标记保留
+        key_contents = self._extract_key_marked_content(original_text)
+        if key_contents:
+            for key, content in key_contents.items():
+                if content and content not in compressed_text:
+                    return False, f"关键标记信息丢失: <!-- key:{key} -->"
+
+        return True, ""
+
+    @staticmethod
+    def _extract_code_entities(text: str) -> list[str]:
+        """从文本中提取代码实体名称（类名/函数名/变量名）。
+
+        使用正则匹配常见的代码标识符模式：
+        - PascalCase 类名（至少2个大写字母开头，如 LLMProvider、ContextManager）
+        - snake_case 函数名/变量名（含下划线，如 compress_conversation、max_tokens）
+        - camelCase 方法名（小写字母开头含大写，如 processInput、getRequestId）
+
+        Args:
+            text: 输入文本。
+
+        Returns:
+            list[str]: 去重后的实体名称列表（最多20个）。
+        """
+        entities: list[str] = []
+        # PascalCase: 大写字母开头的2+字母组合
+        pascal = re.findall(r"\b([A-Z][a-zA-Z]{2,})\b", text)
+        entities.extend(pascal)
+        # snake_case: 含下划线的标识符
+        snake = re.findall(r"\b([a-z][a-z0-9]*_[a-z0-9_]+)\b", text)
+        entities.extend(snake)
+        # camelCase: 小写开头含大写字母
+        camel = re.findall(r"\b([a-z][a-z0-9]*[A-Z][a-zA-Z0-9]*)\b", text)
+        entities.extend(camel)
+        # 去重保序，最多20个
+        seen: set[str] = set()
+        unique: list[str] = []
+        for e in entities:
+            if e not in seen and len(e) >= 3:
+                seen.add(e)
+                unique.append(e)
+                if len(unique) >= 20:
+                    break
+        return unique
+
+    @staticmethod
+    def _extract_key_marked_content(text: str) -> dict[str, str]:
+        """提取带 <!-- key:xxx --> 标记的关键信息内容。
+
+        匹配模式：<!-- key:标记名 -->后紧跟的内容（到下一个标记或文本结束）。
+        这些内容在压缩时不应被丢弃。
+
+        Args:
+            text: 输入文本。
+
+        Returns:
+            dict[str, str]: 标记名 → 标记后紧跟的内容片段。
+        """
+        result: dict[str, str] = {}
+        # 匹配 <!-- key:xxx --> 标记及其后的内容（到下一个同类标记或200字符）
+        pattern = r"<!--\s*key:([\w]+)\s*-->\s*([^\n]{0,200})"
+        for match in re.finditer(pattern, text):
+            key_name = match.group(1)
+            content = match.group(2).strip()
+            result[key_name] = content
+        return result
+
+    def _truncate_original(
+        self,
+        messages: list[dict[str, Any]],
+        target_tokens: int,
+    ) -> list[dict[str, Any]]:
+        """将原始消息截断到目标Token数，作为质量回验失败的回退方案。
+
+        保留所有系统消息，对非系统消息从最早开始截断content，
+        直到总Token数不超过目标。
+
+        Args:
+            messages: 原始消息列表。
+            target_tokens: 目标Token数。
+
+        Returns:
+            list[dict[str, Any]]: 截断后的消息列表。
+        """
+        result: list[dict[str, Any]] = []
+        for msg in messages:
+            result.append(dict(msg))
+
+        total = self.estimate_messages_tokens(result)
+        if total <= target_tokens:
+            return result
+
+        # 从最早的非系统消息开始截断content
+        for i, msg in enumerate(result):
+            if msg.get("role") == "system":
+                continue
+            content = msg.get("content", "")
+            if not content:
+                continue
+            # 按目标比例截断content
+            msg["content"] = content[:int(len(content) * 0.5)] + "...[截断]"
+            total = self.estimate_messages_tokens(result)
+            if total <= target_tokens:
+                break
+
+        return result
 
     def _strategy_truncate_tool_output(
         self,
@@ -379,16 +601,19 @@ class ConversationCompressor:
     SHORT_REPLY_THRESHOLD: int = 50
     # 默认保留最近消息条数
     DEFAULT_RECENT_KEEP: int = 4
-    # 中文 1 字 ≈ 1.5 token 的系数
-    CN_TOKEN_FACTOR: float = 1.5
 
-    def __init__(self, recent_keep: int = 4) -> None:
+    def __init__(self, recent_keep: int = 4, model: str = "gpt-4o", use_precise: bool = True) -> None:
         """初始化对话压缩器。
 
         Args:
             recent_keep: 始终保留的最近消息条数，默认 4。
+            model: 模型名称（用于 tiktoken 编码器选择）。
+            use_precise: 是否使用精确 Token 计数。
         """
         self._recent_keep = recent_keep
+        self._token_counter: TokenCounter | None = None
+        if use_precise and TokenCounter.is_available():
+            self._token_counter = TokenCounter(model=model)
 
     async def compress_conversation(
         self, messages: list[dict], max_tokens: int = 4000
@@ -478,8 +703,7 @@ class ConversationCompressor:
     def _estimate_tokens(self, messages: list[dict]) -> int:
         """估算消息列表的 token 数。
 
-        中文 1 字 ≈ 1.5 token，英文 4 字符 ≈ 1 token。
-        对 content 和 tool_calls 中的 name/arguments 均做估算。
+        优先使用 tiktoken 精确计数，不可用时回退到中英文混合近似估算。
 
         Args:
             messages: 消息列表。
@@ -487,6 +711,8 @@ class ConversationCompressor:
         Returns:
             int: 估算的总 token 数。
         """
+        if self._token_counter is not None:
+            return self._token_counter.count_messages_tokens(messages)
         total = 0
         for msg in messages:
             content = msg.get("content", "")
@@ -498,10 +724,12 @@ class ConversationCompressor:
                     total += self._estimate_text_tokens(fn.get("arguments", ""))
         return max(1, total)
 
-    def _estimate_text_tokens(self, text: str) -> int:
-        """估算单段文本的 token 数。
+    @staticmethod
+    def _estimate_text_tokens(text: str) -> int:
+        """估算单段文本的 token 数（中/日/韩混合）。
 
-        区分中文字符（1.5 token/字）和非中文字符（4 字符/token）。
+        中文约 1.5 token/字，日文假名约 1.2 token/字，
+        韩文约 1.3 token/字，英文约 4 字符/token。
 
         Args:
             text: 输入文本。
@@ -512,15 +740,24 @@ class ConversationCompressor:
         if not text:
             return 0
         cn_chars = 0
+        jp_chars = 0
+        kr_chars = 0
         other_chars = 0
         for ch in text:
-            if "\u4e00" <= ch <= "\u9fff":
+            cp = ord(ch)
+            if 0x4E00 <= cp <= 0x9FFF or 0x3400 <= cp <= 0x4DBF or 0x20000 <= cp <= 0x2A6DF:
                 cn_chars += 1
+            elif 0x3040 <= cp <= 0x309F or 0x30A0 <= cp <= 0x30FF:
+                jp_chars += 1
+            elif 0xAC00 <= cp <= 0xD7AF or 0x1100 <= cp <= 0x11FF:
+                kr_chars += 1
             else:
                 other_chars += 1
-        cn_tokens = int(cn_chars * self.CN_TOKEN_FACTOR)
+        cn_tokens = int(cn_chars * 1.5)
+        jp_tokens = int(jp_chars * 1.2)
+        kr_tokens = int(kr_chars * 1.3)
         en_tokens = max(1, other_chars // 4) if other_chars > 0 else 0
-        return cn_tokens + en_tokens
+        return cn_tokens + jp_tokens + kr_tokens + en_tokens
 
     def _extract_key_info(self, messages: list[dict]) -> str:
         """从消息列表中提取关键信息（人名、数字、日期、决策）。

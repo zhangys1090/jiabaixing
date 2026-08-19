@@ -5,7 +5,7 @@
 
 import { EventEmitter } from 'events';
 import { ConfigLoader } from '../config/ConfigLoader';
-import { MCPServerManager } from '../mcp/MCPServerManager';
+import { getActivePythonBridge } from '../ide/bridgeRegistry';
 import { PerformanceMonitor } from '../monitoring/PerformanceMonitor';
 import { SkillRegistry } from '../skills/SkillRegistry';
 import { Logger } from '../utils/Logger';
@@ -35,7 +35,6 @@ export interface SystemHealthStatus {
 export class TRAEOptimizationIntegrator extends EventEmitter {
   private static instance: TRAEOptimizationIntegrator | null = null;
   private config: TRAEOptimizationConfig;
-  private mcpManager: MCPServerManager | null = null;
   private performanceMonitor: PerformanceMonitor | null = null;
   private configLoader: ConfigLoader | null = null;
   private skillRegistry: SkillRegistry | null = null;
@@ -136,26 +135,31 @@ export class TRAEOptimizationIntegrator extends EventEmitter {
 
     Logger.info('🌐 初始化MCP服务器管理器...', 'TRAEOptimizationIntegrator');
 
-    this.mcpManager = MCPServerManager.getInstance();
+    const bridge = getActivePythonBridge();
+    if (!bridge) {
+      Logger.warn(
+        '⚠️ Python 后端未连接，跳过 MCP 服务器初始化',
+        'TRAEOptimizationIntegrator'
+      );
+      return;
+    }
 
     if (this.configLoader) {
       const mcpServers = this.configLoader.getConfig()?.mcpServers || {};
-      Object.entries(mcpServers).forEach(
-        ([name, serverConfig]: [string, Record<string, unknown>]) => {
-          this.mcpManager?.registerServer({
-            name,
-            command: serverConfig.command as string,
-            args: serverConfig.args as string[],
-            description: serverConfig.description as string | undefined,
-            enabled: true,
-          });
-        }
-      );
+      for (const [name, serverConfig] of Object.entries(mcpServers)) {
+        await bridge.registerMcpServer({
+          name,
+          command: serverConfig.command as string,
+          args: serverConfig.args as string[],
+          description: serverConfig.description as string | undefined,
+          enabled: true,
+        });
+      }
     }
 
-    await this.mcpManager.startAllServers();
+    await bridge.startAllMcpServers();
 
-    const runningCount = this.mcpManager.getRunningServerCount();
+    const runningCount = await bridge.getRunningMcpServerCount();
     Logger.info(
       `✅ MCP服务器管理器初始化完成，${runningCount} 个服务器运行中`,
       'TRAEOptimizationIntegrator'
@@ -242,9 +246,10 @@ export class TRAEOptimizationIntegrator extends EventEmitter {
       timestamp: Date.now(),
     };
 
-    if (this.mcpManager) {
-      status.mcpServers.running = this.mcpManager.getRunningServerCount();
-      status.mcpServers.total = this.mcpManager.getServerCount();
+    const bridge = getActivePythonBridge();
+    if (bridge) {
+      status.mcpServers.running = await bridge.getRunningMcpServerCount();
+      status.mcpServers.total = await bridge.getMcpServerCount();
     }
 
     if (this.performanceMonitor) {
@@ -364,8 +369,9 @@ export class TRAEOptimizationIntegrator extends EventEmitter {
     return this.performanceMonitor?.getCurrentMetrics();
   }
 
-  public getMCPStatus() {
-    return this.mcpManager?.getAllServerStatus();
+  public async getMCPStatus() {
+    const bridge = getActivePythonBridge();
+    return bridge ? await bridge.getMcpServersStatus() : {};
   }
 
   public getSkillStatus() {
@@ -399,7 +405,7 @@ export class TRAEOptimizationIntegrator extends EventEmitter {
     Logger.info('配置已更新', 'TRAEOptimizationIntegrator');
   }
 
-  public shutdown(): void {
+  public async shutdown(): Promise<void> {
     Logger.info('🛑 关闭TRAE优化系统集成器...', 'TRAEOptimizationIntegrator');
 
     if (this.optimizationInterval) {
@@ -416,8 +422,9 @@ export class TRAEOptimizationIntegrator extends EventEmitter {
       this.performanceMonitor.stopMonitoring();
     }
 
-    if (this.mcpManager) {
-      this.mcpManager.stopAllServers();
+    const bridge = getActivePythonBridge();
+    if (bridge) {
+      await bridge.stopAllMcpServers();
     }
 
     this.initialized = false;

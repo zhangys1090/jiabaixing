@@ -5,11 +5,11 @@
  * ctx 提供注册工具/命令/钩子的方法，自动桥接到系统的各个注册表。
  */
 
-import { ToolRegistry } from '../harness/tools/registry/ToolRegistry';
 import { HookManager } from '../harness/hooks/HookManager';
+import { ToolRegistry } from '../harness/tools/registry/ToolRegistry';
 import {
-  SlashCommandRegistry,
   CommandHandler,
+  SlashCommandRegistry,
 } from '../integration/SlashCommandRegistry';
 
 /** 插件工具 schema（OpenAI Function Calling 格式） */
@@ -85,23 +85,36 @@ export class PluginContext {
       return true;
     }
 
-    // 构造 OpenAI Function Calling 格式
     const definition = {
-      type: 'function' as const,
-      function: {
-        name: tool.name,
-        description: tool.description,
-        parameters: tool.schema.parameters as Record<string, unknown>,
-      },
-    };
+      name: tool.name,
+      description: tool.description,
+      category: 'plugin' as string,
+      parameters: tool.schema.parameters as Record<string, unknown>,
+      requiredParams: (tool.schema as { required?: string[] }).required || [],
+      requiredPermissions: [] as string[],
+      riskLevel: 'low',
+      idempotent: false,
+      timeout: 30000,
+    } as import('../harness/types').ToolDefinition;
 
     try {
-      (this.toolRegistry as any).register(
-        tool.name,
+      (
+        this
+          .toolRegistry as import('../harness/tools/registry/ToolRegistry').ToolRegistry
+      ).register(
         definition,
-        async (args: Record<string, unknown>) => {
+        async (
+          args: Record<string, unknown>,
+          _context: import('../harness/types').ToolContext
+        ) => {
+          const startTime = Date.now();
           const result = await tool.handler(args);
-          return { success: true, output: result };
+          return {
+            success: true,
+            output: result,
+            duration: Date.now() - startTime,
+            validated: true,
+          };
         }
       );
       return true;
@@ -116,11 +129,15 @@ export class PluginContext {
 
     if (this.hookManager) {
       try {
-        (this.hookManager as any).register({
+        (
+          this.hookManager as import('../harness/hooks/HookManager').HookManager
+        ).register({
           id: `${this.pluginName}:${hook.event}`,
-          event: hook.event,
-          handler: hook.handler,
-          priority: 5,
+          event: hook.event as import('../harness/hooks/HookManager').HookEvent,
+          handler: hook.handler as unknown as (
+            ctx: import('../harness/hooks/HookManager').HookContext
+          ) => Promise<import('../harness/hooks/HookManager').HookResult>,
+          priority: 50 as import('../harness/hooks/HookManager').HookPriority,
         });
         return true;
       } catch {

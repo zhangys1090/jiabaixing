@@ -10,6 +10,7 @@ from typing import Any
 
 from agent.config import DATA_DIR
 from agent.persistence.database import get_sync_connection
+from agent.core.logger import log_ignored
 
 
 @dataclass
@@ -377,18 +378,42 @@ class TrajectoryDatabase:
 
         try:
             self._conn.execute("ALTER TABLE executions ADD COLUMN embedding TEXT")
-        except sqlite3.OperationalError:
-            pass
+        except sqlite3.OperationalError as _exc:
+            log_ignored(None, "trajectory.TrajectoryDatabase._init_tables", _exc)
 
         # P2 #15: 为时间预算预估新增 task_type 列（向后兼容，旧库自动补列）
         try:
             self._conn.execute("ALTER TABLE executions ADD COLUMN task_type TEXT")
-        except sqlite3.OperationalError:
-            pass
+        except sqlite3.OperationalError as _exc:
+            log_ignored(None, "trajectory.TrajectoryDatabase._init_tables", _exc)
 
         # 为 task_type 过滤创建索引，加速 estimate_execution_time 查询
         self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_exec_task_type ON executions(task_type)"
+        )
+
+        # W3-2: 环境状态持久化表 — 跨会话环境感知结果
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS environment_states (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                os_info TEXT DEFAULT '',
+                active_window TEXT DEFAULT '',
+                network_status TEXT DEFAULT 'unknown',
+                time_context TEXT DEFAULT '',
+                screen_resolution TEXT DEFAULT '',
+                emotion_type TEXT DEFAULT 'neutral',
+                emotion_intensity REAL DEFAULT 0.5,
+                scene_type TEXT DEFAULT 'general',
+                scene_confidence REAL DEFAULT 0.0,
+                created_at INTEGER NOT NULL
+            )
+        """)
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_env_states_session ON environment_states(session_id)"
+        )
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_env_states_created ON environment_states(created_at)"
         )
 
         self._conn.commit()
@@ -423,7 +448,6 @@ class TrajectoryDatabase:
     ) -> None:
         if not self._conn:
             return
-        # 仅当 response 非 None 时才覆盖已有响应，避免清空历史响应（审计 M-08）
         if response is None:
             self._conn.execute(
                 """UPDATE executions SET status=?, updated_at=? WHERE id=?""",
@@ -433,6 +457,24 @@ class TrajectoryDatabase:
             self._conn.execute(
                 """UPDATE executions SET status=?, response=?, updated_at=? WHERE id=?""",
                 (status, response, int(time.time() * 1000), exec_id),
+            )
+        self._conn.commit()
+
+    def update_execution_quality(
+        self, exec_id: str, quality_overall: float, status: str | None = None
+    ) -> None:
+        if not self._conn:
+            return
+        now = int(time.time() * 1000)
+        if status is not None:
+            self._conn.execute(
+                """UPDATE executions SET quality_overall=?, status=?, updated_at=? WHERE id=?""",
+                (quality_overall, status, now, exec_id),
+            )
+        else:
+            self._conn.execute(
+                """UPDATE executions SET quality_overall=?, updated_at=? WHERE id=?""",
+                (quality_overall, now, exec_id),
             )
         self._conn.commit()
 
@@ -655,6 +697,7 @@ class TrajectoryDatabase:
         include_failed: bool = False,
         max_results: int = 5,
         min_quality: float = 0.7,
+        quality_weight: float = 0.3,
     ) -> list[dict[str, Any]]:
         if not self._conn:
             return []
@@ -674,15 +717,98 @@ class TrajectoryDatabase:
             relevance = 0.5
             if execution.input:
                 relevance += self._cosine_similarity_text(query, execution.input) * 0.35
+            quality_score = execution.quality_overall if execution.quality_overall is not None else 0.5
+            combined_score = relevance * (1 - quality_weight) + quality_score * quality_weight
             tool_invocations = self.get_tool_invocations(execution.id)
             scored.append({
                 "execution": execution,
                 "tool_invocations": tool_invocations,
                 "relevance_score": relevance,
+                "quality_score": quality_score,
+                "combined_score": combined_score,
             })
 
-        scored.sort(key=lambda x: x["relevance_score"], reverse=True)
+        scored.sort(key=lambda x: x["combined_score"], reverse=True)
         return scored[:max_results]
+
+    def save_environment_state(
+        self,
+        session_id: str,
+        environment: dict[str, Any],
+        emotion: dict[str, Any] | None = None,
+        scene: dict[str, Any] | None = None,
+    ) -> None:
+        if not self._conn:
+            return
+        now = int(time.time() * 1000)
+        self._conn.execute(
+            """INSERT INTO environment_states
+               (session_id, os_info, active_window, network_status, time_context,
+                screen_resolution, emotion_type, emotion_intensity, scene_type,
+                scene_confidence, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                session_id,
+                environment.get("os_info", ""),
+                environment.get("active_window", ""),
+                environment.get("network_status", "unknown"),
+                environment.get("time_context", ""),
+                environment.get("screen_resolution", ""),
+                emotion.get("emotion_type", "neutral") if emotion else "neutral",
+                emotion.get("intensity", 0.5) if emotion else 0.5,
+                scene.get("scene_type", "general") if scene else "general",
+                scene.get("confidence", 0.0) if scene else 0.0,
+                now,
+            ),
+        )
+        self._conn.commit()
+
+    def load_latest_environment_state(
+        self,
+        session_id: str | None = None,
+        max_age_ms: int = 86400000,
+    ) -> dict[str, Any] | None:
+        if not self._conn:
+            return None
+        cutoff = int(time.time() * 1000) - max_age_ms
+        if session_id:
+            row = self._conn.execute(
+                """SELECT * FROM environment_states
+                   WHERE session_id = ? AND created_at > ?
+                   ORDER BY created_at DESC LIMIT 1""",
+                (session_id, cutoff),
+            ).fetchone()
+        else:
+            row = self._conn.execute(
+                """SELECT * FROM environment_states
+                   WHERE created_at > ?
+                   ORDER BY created_at DESC LIMIT 1""",
+                (cutoff,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "os_info": row["os_info"],
+            "active_window": row["active_window"],
+            "network_status": row["network_status"],
+            "time_context": row["time_context"],
+            "screen_resolution": row["screen_resolution"],
+            "emotion_type": row["emotion_type"],
+            "emotion_intensity": row["emotion_intensity"],
+            "scene_type": row["scene_type"],
+            "scene_confidence": row["scene_confidence"],
+            "created_at": row["created_at"],
+        }
+
+    def cleanup_old_environment_states(self, max_age_ms: int = 604800000) -> int:
+        if not self._conn:
+            return 0
+        cutoff = int(time.time() * 1000) - max_age_ms
+        cursor = self._conn.execute(
+            "DELETE FROM environment_states WHERE created_at < ?", (cutoff,)
+        )
+        self._conn.commit()
+        return cursor.rowcount
 
     def estimate_execution_time(
         self,
@@ -866,6 +992,15 @@ class TrajectoryDatabase:
         if self._conn:
             self._conn.close()
             self._conn = None
+
+    def __del__(self) -> None:
+        self.close()
+
+    def __enter__(self) -> "TrajectoryDatabase":
+        return self
+
+    def __exit__(self, *args: Any) -> None:
+        self.close()
 
     @staticmethod
     def _cosine_similarity_text(a: str, b: str) -> float:

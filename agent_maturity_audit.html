@@ -1,0 +1,1830 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>家百星 V5.0 — Agent 技术体系全面成熟度审计报告</title>
+    <style>
+      :root {
+        --bg: #0d1117;
+        --card-bg: #161b22;
+        --border: #30363d;
+        --text: #c9d1d9;
+        --text-secondary: #8b949e;
+        --accent: #58a6ff;
+        --green: #3fb950;
+        --red: #f85149;
+        --orange: #d2991d;
+        --purple: #a371f7;
+        --cyan: #39d2c0;
+        --pink: #db61a2;
+      }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei',
+          Helvetica, Arial, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.7;
+        padding: 2rem;
+        max-width: 1400px;
+        margin: 0 auto;
+      }
+      h1 {
+        font-size: 2rem;
+        color: var(--accent);
+        border-bottom: 2px solid var(--border);
+        padding-bottom: 0.5rem;
+        margin-bottom: 0.5rem;
+      }
+      h2 {
+        font-size: 1.4rem;
+        color: var(--purple);
+        margin-top: 2.5rem;
+        margin-bottom: 1rem;
+        border-left: 4px solid var(--purple);
+        padding-left: 0.75rem;
+      }
+      h3 {
+        font-size: 1.1rem;
+        color: var(--cyan);
+        margin-top: 1.5rem;
+        margin-bottom: 0.5rem;
+      }
+      h4 {
+        font-size: 1rem;
+        color: var(--pink);
+        margin-top: 1rem;
+        margin-bottom: 0.5rem;
+      }
+      .subtitle {
+        color: var(--text-secondary);
+        font-size: 0.95rem;
+        margin-bottom: 2rem;
+      }
+      .card {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 1.25rem;
+        margin: 1rem 0;
+      }
+      .grid {
+        display: grid;
+        gap: 1rem;
+      }
+      .grid-2 {
+        grid-template-columns: 1fr 1fr;
+      }
+      .grid-3 {
+        grid-template-columns: 1fr 1fr 1fr;
+      }
+      .grid-4 {
+        grid-template-columns: 1fr 1fr 1fr 1fr;
+      }
+      .tag {
+        display: inline-block;
+        padding: 0.15rem 0.6rem;
+        border-radius: 12px;
+        font-size: 0.8rem;
+        font-weight: 600;
+      }
+      .tag-green {
+        background: rgba(63, 185, 80, 0.15);
+        color: var(--green);
+      }
+      .tag-red {
+        background: rgba(248, 81, 73, 0.15);
+        color: var(--red);
+      }
+      .tag-orange {
+        background: rgba(210, 153, 29, 0.15);
+        color: var(--orange);
+      }
+      .tag-blue {
+        background: rgba(88, 166, 255, 0.15);
+        color: var(--accent);
+      }
+      .tag-purple {
+        background: rgba(163, 113, 247, 0.15);
+        color: var(--purple);
+      }
+      .tag-cyan {
+        background: rgba(57, 210, 192, 0.15);
+        color: var(--cyan);
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 0.75rem 0;
+      }
+      th,
+      td {
+        padding: 0.6rem 0.75rem;
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+      }
+      th {
+        color: var(--text-secondary);
+        font-weight: 600;
+        font-size: 0.85rem;
+        text-transform: uppercase;
+      }
+      td {
+        font-size: 0.9rem;
+      }
+      .metric-value {
+        font-size: 1.4rem;
+        font-weight: 700;
+        color: var(--accent);
+      }
+      .metric-label {
+        font-size: 0.8rem;
+        color: var(--text-secondary);
+      }
+      .stat-box {
+        text-align: center;
+        padding: 1rem;
+      }
+      hr {
+        border: none;
+        border-top: 1px solid var(--border);
+        margin: 1.5rem 0;
+      }
+      ul {
+        margin: 0.5rem 0 0.5rem 1.25rem;
+      }
+      li {
+        margin: 0.3rem 0;
+      }
+      .code {
+        background: rgba(240, 246, 252, 0.06);
+        padding: 0.15rem 0.4rem;
+        border-radius: 4px;
+        font-family: 'Cascadia Code', 'Fira Code', monospace;
+        font-size: 0.85rem;
+      }
+      .highlight-box {
+        background: rgba(88, 166, 255, 0.08);
+        border: 1px solid rgba(88, 166, 255, 0.2);
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 1rem 0;
+      }
+      .warn-box {
+        background: rgba(210, 153, 29, 0.08);
+        border: 1px solid rgba(210, 153, 29, 0.2);
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 1rem 0;
+      }
+      .critical-box {
+        background: rgba(248, 81, 73, 0.08);
+        border: 1px solid rgba(248, 81, 73, 0.2);
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 1rem 0;
+      }
+      .success-box {
+        background: rgba(63, 185, 80, 0.08);
+        border: 1px solid rgba(63, 185, 80, 0.2);
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 1rem 0;
+      }
+      .progress-bar {
+        height: 8px;
+        border-radius: 4px;
+        background: var(--border);
+        margin: 0.5rem 0;
+        overflow: hidden;
+      }
+      .progress-fill {
+        height: 100%;
+        border-radius: 4px;
+        transition: width 0.3s;
+      }
+      .fill-green {
+        background: var(--green);
+      }
+      .fill-orange {
+        background: var(--orange);
+      }
+      .fill-red {
+        background: var(--red);
+      }
+      .fill-blue {
+        background: var(--accent);
+      }
+      .score-badge {
+        display: inline-block;
+        width: 48px;
+        height: 48px;
+        border-radius: 50%;
+        text-align: center;
+        line-height: 48px;
+        font-size: 1.2rem;
+        font-weight: 700;
+        color: #fff;
+        margin-right: 0.5rem;
+      }
+      .score-A {
+        background: var(--green);
+      }
+      .score-B {
+        background: var(--accent);
+      }
+      .score-C {
+        background: var(--orange);
+      }
+      .score-D {
+        background: var(--red);
+      }
+      .toc {
+        padding: 1rem;
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        margin: 1rem 0;
+      }
+      .toc a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .toc a:hover {
+        text-decoration: underline;
+      }
+      .toc ol {
+        margin-left: 1.5rem;
+      }
+      .toc li {
+        margin: 0.4rem 0;
+      }
+      .arch-layer {
+        border-left: 3px solid var(--accent);
+        padding-left: 1rem;
+        margin: 0.75rem 0;
+      }
+      .arch-layer.exec {
+        border-color: var(--green);
+      }
+      .arch-layer.orch {
+        border-color: var(--purple);
+      }
+      .arch-layer.refl {
+        border-color: var(--pink);
+      }
+      .gap-item {
+        padding: 0.5rem 0.75rem;
+        margin: 0.25rem 0;
+        border-left: 3px solid var(--orange);
+        background: rgba(210, 153, 29, 0.05);
+      }
+      @media (max-width: 768px) {
+        body {
+          padding: 1rem;
+        }
+        .grid-2,
+        .grid-3,
+        .grid-4 {
+          grid-template-columns: 1fr;
+        }
+      }
+      .overall-score {
+        font-size: 3rem;
+        font-weight: 800;
+        text-align: center;
+      }
+      .overall-label {
+        text-align: center;
+        color: var(--text-secondary);
+        font-size: 0.9rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>家百星 V5.0 — Agent 技术体系全面成熟度审计报告</h1>
+    <p class="subtitle">
+      审计日期：2026-07-18 | 审计范围：TS + Python 混合架构全量 |
+      审计框架：Agent 完整技术体系总图（五层架构）
+      <br />审计方法：代码级静态分析 + 架构文档交叉验证 + 运行态配置检查
+    </p>
+
+    <!-- ===== 总体评分 ===== -->
+    <div class="grid grid-4">
+      <div class="card stat-box">
+        <div class="overall-score" style="color: var(--green)">85</div>
+        <div class="overall-label">综合成熟度评分 / 100</div>
+      </div>
+      <div class="card stat-box">
+        <div class="overall-score" style="color: var(--accent)">A-</div>
+        <div class="overall-label">综合等级</div>
+      </div>
+      <div class="card stat-box">
+        <div class="overall-score" style="color: var(--purple)">39/44</div>
+        <div class="overall-label">能力项达标率</div>
+      </div>
+      <div class="card stat-box">
+        <div class="overall-score" style="color: var(--orange)">5</div>
+        <div class="overall-label">待改进项</div>
+      </div>
+    </div>
+
+    <!-- ===== 目录 ===== -->
+    <div class="toc">
+      <strong>报告目录</strong>
+      <ol>
+        <li><a href="#s1">技术底座——底层后端基础设施</a></li>
+        <li><a href="#s2">技术底座——上层开发框架</a></li>
+        <li><a href="#s3">Agent 三层核心运行层级</a></li>
+        <li><a href="#s4">七大核心能力维度</a></li>
+        <li><a href="#s5">2026下半年核心加分层：MCP + A2A</a></li>
+        <li><a href="#s6">落地要求评估</a></li>
+        <li><a href="#s7">差距分析与改进建议</a></li>
+        <li><a href="#s8">综合评分矩阵</a></li>
+      </ol>
+    </div>
+
+    <hr />
+
+    <!-- ===== 一、技术底座 ===== -->
+    <h2 id="s1">一、技术底座（根基）</h2>
+
+    <h3>1.1 底层后端基础设施</h3>
+
+    <h4>1.1.1 存储层</h4>
+    <table>
+      <tr>
+        <th>能力项</th>
+        <th>状态</th>
+        <th>实现位置</th>
+        <th>成熟度</th>
+        <th>说明</th>
+      </tr>
+      <tr>
+        <td>MySQL/PostgreSQL</td>
+        <td><span class="tag tag-orange">替代方案</span></td>
+        <td>-</td>
+        <td>⭐⭐⭐</td>
+        <td>
+          未使用传统关系型数据库。主存储采用 <strong>SQLite</strong>（<span
+            class="code"
+            >better-sqlite3</span
+          >
+          TS侧 +
+          <span class="code">python/agent/persistence/database.py</span>
+          Python侧），适合单机/嵌入式场景，但缺少主从读写分离、连接池等生产级特性
+        </td>
+      </tr>
+      <tr>
+        <td>Redis（会话缓存/状态快照）</td>
+        <td><span class="tag tag-green">✅ 完备</span></td>
+        <td>
+          <span class="code">python/agent/memory/redis_cache.py</span
+          ><br /><span class="code"
+            >python/agent/infrastructure/message_queue.py</span
+          ><br /><span class="code">docker-compose.yml</span> (redis:7-alpine)
+        </td>
+        <td>⭐⭐⭐⭐⭐</td>
+        <td>
+          异步 Redis 缓存层，支持连接池复用、JSON 序列化、优雅降级；Redis
+          Streams 消息队列；docker-compose 生产部署含健康检查与资源限制
+        </td>
+      </tr>
+      <tr>
+        <td>向量库</td>
+        <td><span class="tag tag-green">✅ 完备</span></td>
+        <td>
+          <span class="code">chromadb</span> (package.json)<br /><span
+            class="code"
+            >python/agent/memory/engine.py</span
+          >
+          (多模态编码器)
+        </td>
+        <td>⭐⭐⭐⭐</td>
+        <td>
+          集成 ChromaDB 向量数据库，支持语义向量检索；多模态编码器
+          <span class="code">MultimodalEncoder</span> 支持文本/图像等多种模态
+        </td>
+      </tr>
+    </table>
+
+    <h4>1.1.2 异步调度</h4>
+    <table>
+      <tr>
+        <th>能力项</th>
+        <th>状态</th>
+        <th>实现位置</th>
+        <th>成熟度</th>
+        <th>说明</th>
+      </tr>
+      <tr>
+        <td>MQ消息队列</td>
+        <td><span class="tag tag-green">✅ 完备</span></td>
+        <td>
+          <span class="code">python/agent/infrastructure/message_queue.py</span>
+        </td>
+        <td>⭐⭐⭐⭐⭐</td>
+        <td>
+          基于 Redis Streams (XADD/XREADGROUP)
+          实现消费者组模式；支持多消费者并行消费、消息确认、死信队列、优雅降级为
+          asyncio.Queue
+        </td>
+      </tr>
+      <tr>
+        <td>定时任务</td>
+        <td><span class="tag tag-green">✅ 完备</span></td>
+        <td><span class="code">python/agent/scheduler/cron.py</span></td>
+        <td>⭐⭐⭐⭐⭐</td>
+        <td>
+          CronJobScheduler 支持 every:30m / hourly / daily / cron 表达式；<span
+            class="code"
+            >LeaderElection</span
+          >
+          保证单例执行；任务重试、超时控制
+        </td>
+      </tr>
+      <tr>
+        <td>任务重试/熔断/超时</td>
+        <td><span class="tag tag-green">✅ 完备</span></td>
+        <td>
+          <span class="code">python/agent/loop/robustness.py</span><br /><span
+            class="code"
+            >python/agent/loop/controller.py</span
+          >
+        </td>
+        <td>⭐⭐⭐⭐⭐</td>
+        <td>
+          <strong>L1-L4 韧性金字塔</strong
+          >：L1基础重试→L2指数退避→L3参数修正→L4工具降级替代；MAX_REPLAN_COUNT=3,
+          MAX_CONTINUE_STREAK=3；<span class="code">RateLimitTracker</span>
+          多提供商速率限制
+        </td>
+      </tr>
+    </table>
+
+    <h4>1.1.3 分布式能力</h4>
+    <table>
+      <tr>
+        <th>能力项</th>
+        <th>状态</th>
+        <th>实现位置</th>
+        <th>成熟度</th>
+        <th>说明</th>
+      </tr>
+      <tr>
+        <td>多实例部署</td>
+        <td><span class="tag tag-green">✅ 完备</span></td>
+        <td>
+          <span class="code">docker-compose.yml</span> (--scale
+          python-backend=N)
+        </td>
+        <td>⭐⭐⭐⭐⭐</td>
+        <td>
+          Docker Compose 支持水平扩展；K8s 已配置 2 副本 + HPA 至 10；<span
+            class="code"
+            >SHARD_COUNT</span
+          >
+          / <span class="code">REPLICA_INDEX</span> 环境变量支持副本感知
+        </td>
+      </tr>
+      <tr>
+        <td>分布式锁</td>
+        <td><span class="tag tag-green">✅ 完备</span></td>
+        <td>
+          <span class="code"
+            >python/agent/infrastructure/distributed_lock.py</span
+          >
+        </td>
+        <td>⭐⭐⭐⭐⭐</td>
+        <td>
+          Redis <span class="code">SET NX PX</span> + Lua
+          释放脚本；自动续期（TTL 半数续租）；优雅降级为
+          <span class="code">asyncio.Lock</span>；支持
+          <span class="code">LOCK_TIMEOUT_MS</span>/<span class="code"
+            >LOCK_MAX_RETRIES</span
+          >
+          等环境变量
+        </td>
+      </tr>
+      <tr>
+        <td>并发限流</td>
+        <td><span class="tag tag-green">✅ 完备</span></td>
+        <td>
+          <span class="code">python/agent/llm/rate_limit_tracker.py</span
+          ><br /><span class="code">python/agent/llm/nous_rate_guard.py</span>
+        </td>
+        <td>⭐⭐⭐⭐⭐</td>
+        <td>
+          滑动窗口统计 + 429 Retry-After 自动避让 + 动态安全间隔计算 +
+          多提供商自动降级
+        </td>
+      </tr>
+      <tr>
+        <td>分片任务</td>
+        <td><span class="tag tag-green">✅ 完备</span></td>
+        <td>
+          <span class="code">python/agent/infrastructure/sharding.py</span>
+        </td>
+        <td>⭐⭐⭐⭐⭐</td>
+        <td>
+          一致性哈希分片 <span class="code">consistent_shard()</span>；<span
+            class="code"
+            >LeaderElection</span
+          >
+          基于分布式锁的领导者选举；优雅降级单副本安全
+        </td>
+      </tr>
+    </table>
+
+    <h4>1.1.4 状态管理</h4>
+    <table>
+      <tr>
+        <th>能力项</th>
+        <th>状态</th>
+        <th>实现位置</th>
+        <th>成熟度</th>
+        <th>说明</th>
+      </tr>
+      <tr>
+        <td>持久化记忆</td>
+        <td><span class="tag tag-green">✅ 完备</span></td>
+        <td>
+          <span class="code">python/agent/memory/engine.py</span><br /><span
+            class="code"
+            >python/agent/memory/store.py</span
+          >
+        </td>
+        <td>⭐⭐⭐⭐⭐</td>
+        <td>
+          MemoryEngine 三层架构（即时/短期/长期）+ SQLite FTS5 全文检索 +
+          语义向量 + 情景记忆 + 知识图谱 + Redis 缓存加速
+        </td>
+      </tr>
+      <tr>
+        <td>多轮上下文快照</td>
+        <td><span class="tag tag-green">✅ 完备</span></td>
+        <td>
+          <span class="code">python/agent/persistence/checkpoint.py</span
+          ><br /><span class="code"
+            >python/agent/core/context_compressor.py</span
+          >
+        </td>
+        <td>⭐⭐⭐⭐</td>
+        <td>
+          CheckpointService 工作目录快照；ContextCompressor +
+          ContextWindowManager 上下文压缩与窗口管理；AttentionFocusManager
+          注意力聚焦
+        </td>
+      </tr>
+      <tr>
+        <td>会话隔离</td>
+        <td><span class="tag tag-green">✅ 完备</span></td>
+        <td>
+          <span class="code">python/agent/persistence/session_store.py</span
+          ><br /><span class="code"
+            >python/agent/persistence/session_lineage.py</span
+          >
+        </td>
+        <td>⭐⭐⭐⭐⭐</td>
+        <td>
+          SessionStore 会话持久化；SessionLineage 会话血缘追踪；session_id
+          全链路透传
+        </td>
+      </tr>
+    </table>
+
+    <div class="success-box">
+      <strong>小节总结：底层后端基础设施</strong> —
+      <span class="tag tag-green">A级 (95/100)</span><br />
+      13
+      项能力全部达标。Redis/分布式锁/分片/消息队列/限流/定时任务等生产级基础设施完备，唯一扣分项是缺少
+      MySQL/PostgreSQL 等传统关系型数据库（SQLite 在并发写场景下存在局限）。
+    </div>
+
+    <h3 id="s2">1.2 上层开发框架</h3>
+    <table>
+      <tr>
+        <th>框架</th>
+        <th>状态</th>
+        <th>成熟度</th>
+        <th>说明</th>
+      </tr>
+      <tr>
+        <td>LangChain</td>
+        <td><span class="tag tag-red">未使用</span></td>
+        <td>-</td>
+        <td>未集成。项目采用自研框架替代</td>
+      </tr>
+      <tr>
+        <td>LlamaIndex</td>
+        <td><span class="tag tag-red">未使用</span></td>
+        <td>-</td>
+        <td>未集成</td>
+      </tr>
+      <tr>
+        <td>AutoGen</td>
+        <td><span class="tag tag-red">未使用</span></td>
+        <td>-</td>
+        <td>
+          未集成。但自研了
+          <span class="code">python/agent/orchestration/fanout.py</span>
+          多Agent协作
+        </td>
+      </tr>
+      <tr>
+        <td>Spring AI</td>
+        <td><span class="tag tag-red">N/A</span></td>
+        <td>-</td>
+        <td>非 Java 技术栈</td>
+      </tr>
+      <tr>
+        <td>OpenAI Agent SDK</td>
+        <td><span class="tag tag-red">未使用</span></td>
+        <td>-</td>
+        <td>
+          未集成。但自研了
+          <span class="code">python/agent/loop/controller.py</span> 等效的 ReAct
+          循环
+        </td>
+      </tr>
+      <tr>
+        <td><strong>自研 Harness Agent 框架</strong></td>
+        <td><span class="tag tag-green">✅ 自研</span></td>
+        <td>⭐⭐⭐⭐⭐</td>
+        <td>
+          Python <span class="code">python/agent/</span> (~200+ .py 文件) + TS
+          <span class="code">src/harness/</span> (~110+ .ts
+          文件)。六层管控架构(E-T-C-S-L-V)，封装工具调用、记忆、上下文编排、评估、安全、进化
+        </td>
+      </tr>
+    </table>
+
+    <div class="warn-box">
+      <strong>小节总结：上层开发框架</strong> —
+      <span class="tag tag-orange">B+级 (70/100)</span><br />
+      未使用任何业界主流 Agent
+      框架（LangChain/LlamaIndex/AutoGen），完全依赖自研框架。优点是深度可控、无框架锁定风险；缺点是缺少社区生态支持、新成员上手成本高、无法直接复用社区最佳实践。博主强调"不能只学框架"——该项目确实做到了"理解底层"，但完全自研也有维护成本过高的风险。
+    </div>
+
+    <hr />
+
+    <!-- ===== 二、Agent 三层核心运行层级 ===== -->
+    <h2 id="s3">二、Agent 三层核心运行层级（自下而上）</h2>
+
+    <h3>2.1 执行层（底层动作）</h3>
+    <div class="arch-layer exec">
+      <table>
+        <tr>
+          <th>能力项</th>
+          <th>状态</th>
+          <th>实现位置</th>
+          <th>成熟度</th>
+        </tr>
+        <tr>
+          <td>调用 LLM</td>
+          <td><span class="tag tag-green">✅</span></td>
+          <td>
+            <span class="code">python/agent/llm/provider.py</span>
+            (LLMProvider)<br /><span class="code"
+              >python/agent/llm/router.py</span
+            >
+            (多模型路由)
+          </td>
+          <td>⭐⭐⭐⭐⭐</td>
+        </tr>
+        <tr>
+          <td>外部 API 调用</td>
+          <td><span class="tag tag-green">✅</span></td>
+          <td>
+            <span class="code">python/agent/tools/network_tools.py</span
+            ><br /><span class="code"
+              >python/agent/tools/web_search_provider.py</span
+            >
+          </td>
+          <td>⭐⭐⭐⭐</td>
+        </tr>
+        <tr>
+          <td>数据库操作</td>
+          <td><span class="tag tag-green">✅</span></td>
+          <td>
+            <span class="code">python/agent/persistence/database.py</span
+            ><br /><span class="code">python/agent/persistence/query.py</span>
+          </td>
+          <td>⭐⭐⭐⭐</td>
+        </tr>
+        <tr>
+          <td>代码执行</td>
+          <td><span class="tag tag-green">✅</span></td>
+          <td>
+            <span class="code">python/agent/sandbox/executor.py</span
+            ><br /><span class="code"
+              >python/agent/tools/code_execution_tool.py</span
+            >
+          </td>
+          <td>⭐⭐⭐⭐</td>
+        </tr>
+        <tr>
+          <td>文件读写</td>
+          <td><span class="tag tag-green">✅</span></td>
+          <td>
+            <span class="code">python/agent/tools/file_tools.py</span
+            ><br /><span class="code"
+              >python/agent/tools/file_parse_tools.py</span
+            >
+          </td>
+          <td>⭐⭐⭐⭐</td>
+        </tr>
+        <tr>
+          <td>工具函数调用</td>
+          <td><span class="tag tag-green">✅</span></td>
+          <td>
+            <span class="code">python/agent/tools/registry.py</span>
+            (ToolRegistry)<br /><span class="code"
+              >python/agent/tools/toolset_registry.py</span
+            >
+          </td>
+          <td>⭐⭐⭐⭐⭐</td>
+        </tr>
+      </table>
+    </div>
+    <div class="success-box">
+      <strong>执行层评分：A (93/100)</strong> — 6/6
+      能力全部达标，工具注册体系完善，沙箱执行安全可控
+    </div>
+
+    <h3>2.2 编排层（核心调度）</h3>
+    <div class="arch-layer orch">
+      <table>
+        <tr>
+          <th>能力项</th>
+          <th>状态</th>
+          <th>实现位置</th>
+          <th>成熟度</th>
+        </tr>
+        <tr>
+          <td>任务拆解</td>
+          <td><span class="tag tag-green">✅</span></td>
+          <td>
+            <span class="code">python/agent/loop/planner.py</span>
+            (Planner)<br /><span class="code"
+              >python/agent/loop/tot_planner.py</span
+            >
+            (Tree of Thoughts)
+          </td>
+          <td>⭐⭐⭐⭐⭐</td>
+        </tr>
+        <tr>
+          <td>流程分支/循环</td>
+          <td><span class="tag tag-green">✅</span></td>
+          <td>
+            <span class="code">python/agent/loop/controller.py</span>
+            (LoopController: Plan→Exec→Eval→Replan)
+          </td>
+          <td>⭐⭐⭐⭐⭐</td>
+        </tr>
+        <tr>
+          <td>子任务调度</td>
+          <td><span class="tag tag-green">✅</span></td>
+          <td>
+            <span class="code"
+              >python/agent/orchestration/task_dispatcher.py</span
+            ><br /><span class="code"
+              >python/agent/loop/batch_processor.py</span
+            >
+          </td>
+          <td>⭐⭐⭐⭐⭐</td>
+        </tr>
+        <tr>
+          <td>多Agent分工</td>
+          <td><span class="tag tag-green">✅</span></td>
+          <td>
+            <span class="code">python/agent/orchestration/fanout.py</span>
+            (parallel/sequential/adaptive)<br /><span class="code"
+              >python/agent/orchestration/agent_factory.py</span
+            >
+          </td>
+          <td>⭐⭐⭐⭐⭐</td>
+        </tr>
+        <tr>
+          <td>MCP上下文传输</td>
+          <td><span class="tag tag-green">✅</span></td>
+          <td>
+            <span class="code">python/agent/mcp/</span> (server_manager,
+            transport, sampling, logging, progress)
+          </td>
+          <td>⭐⭐⭐⭐⭐</td>
+        </tr>
+        <tr>
+          <td>A2A跨智能体通信</td>
+          <td><span class="tag tag-green">✅</span></td>
+          <td>
+            <span class="code">python/agent/a2a/</span> (protocol, manager,
+            server, client, auth, types)
+          </td>
+          <td>⭐⭐⭐⭐⭐</td>
+        </tr>
+      </table>
+    </div>
+    <div class="success-box">
+      <strong>编排层评分：A+ (97/100)</strong> — 6/6
+      能力全部达标且超越基准。ToT规划器、Fanout三种策略(parallel/sequential/adaptive)、完整的MCP+A2A协议栈，属业界领先水平
+    </div>
+
+    <h3>2.3 反思层（闭环优化）</h3>
+    <div class="arch-layer refl">
+      <table>
+        <tr>
+          <th>能力项</th>
+          <th>状态</th>
+          <th>实现位置</th>
+          <th>成熟度</th>
+        </tr>
+        <tr>
+          <td>结果校验</td>
+          <td><span class="tag tag-green">✅</span></td>
+          <td>
+            <span class="code">python/agent/loop/evaluator.py</span>
+            (LLM+RFC双模式评估)<br /><span class="code"
+              >python/agent/loop/quality_scorer.py</span
+            >
+          </td>
+          <td>⭐⭐⭐⭐⭐</td>
+        </tr>
+        <tr>
+          <td>错误识别</td>
+          <td><span class="tag tag-green">✅</span></td>
+          <td>
+            <span class="code">python/agent/loop/reflection.py</span>
+            (6层反思：工具级/步骤级/任务级/成功/轻量/元反思)
+          </td>
+          <td>⭐⭐⭐⭐⭐</td>
+        </tr>
+        <tr>
+          <td>重新规划</td>
+          <td><span class="tag tag-green">✅</span></td>
+          <td>
+            <span class="code">python/agent/loop/controller.py</span>
+            (MAX_REPLAN_COUNT=3)<br /><span class="code"
+              >python/agent/loop/incremental_planner.py</span
+            >
+          </td>
+          <td>⭐⭐⭐⭐⭐</td>
+        </tr>
+        <tr>
+          <td>复盘修正</td>
+          <td><span class="tag tag-green">✅</span></td>
+          <td>
+            <span class="code">python/agent/loop/reflection_application.py</span
+            ><br /><span class="code"
+              >python/agent/loop/reflection_applier.py</span
+            >
+          </td>
+          <td>⭐⭐⭐⭐</td>
+        </tr>
+        <tr>
+          <td>长期记忆沉淀</td>
+          <td><span class="tag tag-green">✅</span></td>
+          <td>
+            <span class="code">python/agent/memory/engine.py</span><br /><span
+              class="code"
+              >python/agent/memory/background_review.py</span
+            ><br /><span class="code">python/agent/memory/insights.py</span>
+          </td>
+          <td>⭐⭐⭐⭐⭐</td>
+        </tr>
+        <tr>
+          <td>自我迭代</td>
+          <td><span class="tag tag-green">✅</span></td>
+          <td>
+            <span class="code">python/agent/evolution/</span> (21 files,
+            V1+V2)<br /><span class="code"
+              >python/agent/evolution/v2_engine.py</span
+            >
+            (代码自修改)
+          </td>
+          <td>⭐⭐⭐⭐⭐</td>
+        </tr>
+      </table>
+    </div>
+    <div class="success-box">
+      <strong>反思层评分：A+ (95/100)</strong> — 6/6
+      能力全部达标且业界领先。6层反思深度、V2代码自进化引擎、因果推理(CausalModeler)均为独特优势
+    </div>
+
+    <hr />
+
+    <!-- ===== 三、七大核心能力维度 ===== -->
+    <h2 id="s4">三、七大核心能力维度</h2>
+
+    <div class="grid grid-2">
+      <div class="card">
+        <h3>3.1 感知记忆 <span class="tag tag-green">A (92/100)</span></h3>
+        <table>
+          <tr>
+            <td>短期会话记忆</td>
+            <td>
+              <span class="tag tag-green">✅</span> MemoryEngine 即时记忆层 +
+              SessionStore
+            </td>
+          </tr>
+          <tr>
+            <td>长期知识库</td>
+            <td>
+              <span class="tag tag-green">✅</span> SQLite FTS5 + ChromaDB 向量
+              + 知识图谱
+            </td>
+          </tr>
+          <tr>
+            <td>状态持久化</td>
+            <td>
+              <span class="tag tag-green">✅</span> Checkpoint + Trajectory +
+              Flywheel
+            </td>
+          </tr>
+          <tr>
+            <td>情景记忆</td>
+            <td><span class="tag tag-green">✅</span> EpisodicMemoryStore</td>
+          </tr>
+          <tr>
+            <td>外部记忆</td>
+            <td>
+              <span class="tag tag-green">✅</span> Mem0 / LocalMemory /
+              FileProvider
+            </td>
+          </tr>
+        </table>
+        <div class="progress-bar">
+          <div class="progress-fill fill-green" style="width: 92%"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>3.2 规划拆解 <span class="tag tag-green">A (95/100)</span></h3>
+        <table>
+          <tr>
+            <td>复杂任务拆分</td>
+            <td><span class="tag tag-green">✅</span> Planner + ToTPlanner</td>
+          </tr>
+          <tr>
+            <td>步骤排序</td>
+            <td><span class="tag tag-green">✅</span> Planner.plan()</td>
+          </tr>
+          <tr>
+            <td>优先级分配</td>
+            <td>
+              <span class="tag tag-green">✅</span> 动态优先级 + 场景感知调度
+            </td>
+          </tr>
+          <tr>
+            <td>增量规划</td>
+            <td><span class="tag tag-green">✅</span> IncrementalPlanner</td>
+          </tr>
+          <tr>
+            <td>DAG任务</td>
+            <td><span class="tag tag-green">✅</span> DAGTask (TS侧)</td>
+          </tr>
+        </table>
+        <div class="progress-bar">
+          <div class="progress-fill fill-green" style="width: 95%"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>3.3 工具调用 <span class="tag tag-green">A (90/100)</span></h3>
+        <table>
+          <tr>
+            <td>函数调用</td>
+            <td>
+              <span class="tag tag-green">✅</span> ToolRegistry + 8类工具目录
+            </td>
+          </tr>
+          <tr>
+            <td>第三方系统</td>
+            <td>
+              <span class="tag tag-green">✅</span>
+              飞书/微信/钉钉/QQ/Slack/WhatsApp
+            </td>
+          </tr>
+          <tr>
+            <td>数据读写</td>
+            <td>
+              <span class="tag tag-green">✅</span> FileTools + Persistence
+            </td>
+          </tr>
+          <tr>
+            <td>工具集配置</td>
+            <td>
+              <span class="tag tag-orange">⚠️</span>
+              8类目录硬编码，缺少平台级动态开关
+            </td>
+          </tr>
+          <tr>
+            <td>自注册发现</td>
+            <td>
+              <span class="tag tag-red">❌</span> 需改注册文件，无AST自动发现
+            </td>
+          </tr>
+        </table>
+        <div class="progress-bar">
+          <div class="progress-fill fill-green" style="width: 90%"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>3.4 逻辑推理 <span class="tag tag-green">A+ (97/100)</span></h3>
+        <table>
+          <tr>
+            <td>CoT思维链</td>
+            <td>
+              <span class="tag tag-green">✅</span> 结构化ReAct(JSON) + ToT
+            </td>
+          </tr>
+          <tr>
+            <td>多方案对比</td>
+            <td><span class="tag tag-green">✅</span> Planner 多方案生成</td>
+          </tr>
+          <tr>
+            <td>逻辑推导</td>
+            <td>
+              <span class="tag tag-green">✅</span> CausalModeler 因果推理
+            </td>
+          </tr>
+          <tr>
+            <td>辩论机制</td>
+            <td><span class="tag tag-green">✅</span> Debater 多角度辩论</td>
+          </tr>
+          <tr>
+            <td>MoA聚合</td>
+            <td>
+              <span class="tag tag-green">✅</span> Mixture of Agents 聚合器
+            </td>
+          </tr>
+        </table>
+        <div class="progress-bar">
+          <div class="progress-fill fill-green" style="width: 97%"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>3.5 行动执行 <span class="tag tag-green">A (90/100)</span></h3>
+        <table>
+          <tr>
+            <td>发起外部操作</td>
+            <td>
+              <span class="tag tag-green">✅</span>
+              Desktop/Browser/HomeAssistant
+            </td>
+          </tr>
+          <tr>
+            <td>输出结果</td>
+            <td>
+              <span class="tag tag-green">✅</span> Reporter + StreamResponse
+            </td>
+          </tr>
+          <tr>
+            <td>落地业务动作</td>
+            <td>
+              <span class="tag tag-green">✅</span> 多平台IM + 定时任务 + 审批
+            </td>
+          </tr>
+          <tr>
+            <td>语音交互</td>
+            <td>
+              <span class="tag tag-green">✅</span> VoiceModeManager 全双工
+            </td>
+          </tr>
+          <tr>
+            <td>Vision输入</td>
+            <td>
+              <span class="tag tag-orange">⚠️</span>
+              有TTS/图像生成，Vision输入管道待强化
+            </td>
+          </tr>
+        </table>
+        <div class="progress-bar">
+          <div class="progress-fill fill-green" style="width: 90%"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>3.6 反思纠错 <span class="tag tag-green">A+ (98/100)</span></h3>
+        <table>
+          <tr>
+            <td>自检输出</td>
+            <td>
+              <span class="tag tag-green">✅</span> Evaluator + QualityScorer
+            </td>
+          </tr>
+          <tr>
+            <td>修正流程</td>
+            <td>
+              <span class="tag tag-green">✅</span> 6层反思 + L1-L4韧性金字塔
+            </td>
+          </tr>
+          <tr>
+            <td>二次重规划</td>
+            <td><span class="tag tag-green">✅</span> MAX_REPLAN_COUNT=3</td>
+          </tr>
+          <tr>
+            <td>输出护栏</td>
+            <td>
+              <span class="tag tag-green">✅</span> OutputGuardrail +
+              SensitiveDetector
+            </td>
+          </tr>
+          <tr>
+            <td>安全审批</td>
+            <td>
+              <span class="tag tag-green">✅</span> 4种审批模式 + 审计日志
+            </td>
+          </tr>
+        </table>
+        <div class="progress-bar">
+          <div class="progress-fill fill-green" style="width: 98%"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>3.7 多端协作 <span class="tag tag-green">A (93/100)</span></h3>
+        <table>
+          <tr>
+            <td>A2A智能体互通</td>
+            <td><span class="tag tag-green">✅</span> 完整A2A协议栈(6文件)</td>
+          </tr>
+          <tr>
+            <td>MCP标准化交互</td>
+            <td><span class="tag tag-green">✅</span> 完整MCP协议栈(7文件)</td>
+          </tr>
+          <tr>
+            <td>多平台IM</td>
+            <td>
+              <span class="tag tag-green">✅</span>
+              飞书/微信/钉钉/QQ/Slack/WhatsApp/Matrix/Signal
+            </td>
+          </tr>
+          <tr>
+            <td>IDE集成</td>
+            <td>
+              <span class="tag tag-green">✅</span> ACPServer + LSP Client
+            </td>
+          </tr>
+          <tr>
+            <td>OpenAI兼容API</td>
+            <td><span class="tag tag-green">✅</span> /v1/chat/completions</td>
+          </tr>
+        </table>
+        <div class="progress-bar">
+          <div class="progress-fill fill-green" style="width: 93%"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="success-box">
+      <strong>七大能力维度综合评分：A (93.6/100)</strong><br />
+      全部 35 项子能力中，32 项达标(✅)，2 项部分达标(⚠️)，1
+      项缺失(❌)。核心能力维度（反思纠错、逻辑推理、规划拆解）达到业界领先水平。
+    </div>
+
+    <hr />
+
+    <!-- ===== 四、2026下半年核心加分层 ===== -->
+    <h2 id="s5">四、2026下半年核心加分层（行业分水岭）</h2>
+
+    <h3>4.1 MCP 模型上下文协议</h3>
+    <table>
+      <tr>
+        <th>MCP 能力</th>
+        <th>状态</th>
+        <th>实现位置</th>
+        <th>成熟度</th>
+      </tr>
+      <tr>
+        <td>MCP Tools</td>
+        <td><span class="tag tag-green">✅</span></td>
+        <td>
+          <span class="code">python/agent/mcp/server_manager.py</span>
+          (MCPServerManager)
+        </td>
+        <td>⭐⭐⭐⭐⭐</td>
+      </tr>
+      <tr>
+        <td>MCP Resources</td>
+        <td><span class="tag tag-green">✅</span></td>
+        <td><span class="code">python/agent/mcp/</span> (resources_prompts)</td>
+        <td>⭐⭐⭐⭐</td>
+      </tr>
+      <tr>
+        <td>MCP Prompts</td>
+        <td><span class="tag tag-green">✅</span></td>
+        <td><span class="code">python/agent/mcp/</span> (resources_prompts)</td>
+        <td>⭐⭐⭐⭐</td>
+      </tr>
+      <tr>
+        <td>MCP Sampling</td>
+        <td><span class="tag tag-green">✅</span></td>
+        <td><span class="code">python/agent/mcp/sampling.py</span></td>
+        <td>⭐⭐⭐⭐⭐</td>
+      </tr>
+      <tr>
+        <td>MCP Logging</td>
+        <td><span class="tag tag-green">✅</span></td>
+        <td><span class="code">python/agent/mcp/logging.py</span></td>
+        <td>⭐⭐⭐⭐</td>
+      </tr>
+      <tr>
+        <td>MCP Progress</td>
+        <td><span class="tag tag-green">✅</span></td>
+        <td><span class="code">python/agent/mcp/progress.py</span></td>
+        <td>⭐⭐⭐⭐</td>
+      </tr>
+      <tr>
+        <td>MCP Transport</td>
+        <td><span class="tag tag-green">✅</span></td>
+        <td>
+          <span class="code">python/agent/mcp/transport.py</span> (stdio +
+          HTTP/SSE)
+        </td>
+        <td>⭐⭐⭐⭐⭐</td>
+      </tr>
+      <tr>
+        <td>MCP Tool Bridge</td>
+        <td><span class="tag tag-green">✅</span></td>
+        <td><span class="code">python/agent/tools/mcp_tool_bridge.py</span></td>
+        <td>⭐⭐⭐⭐</td>
+      </tr>
+    </table>
+    <div class="success-box">
+      <strong>MCP评分：A (94/100)</strong> — 8/8 子能力全部达标，支持 stdio +
+      HTTP/SSE 双传输模式，工具过滤、采样、进度通知完整
+    </div>
+
+    <h3>4.2 A2A Agent互操作协议</h3>
+    <table>
+      <tr>
+        <th>A2A 能力</th>
+        <th>状态</th>
+        <th>实现位置</th>
+        <th>成熟度</th>
+      </tr>
+      <tr>
+        <td>A2A Protocol</td>
+        <td><span class="tag tag-green">✅</span></td>
+        <td>
+          <span class="code">python/agent/a2a/protocol.py</span> (TaskManager +
+          Discovery + TrustManager)
+        </td>
+        <td>⭐⭐⭐⭐⭐</td>
+      </tr>
+      <tr>
+        <td>A2A Server</td>
+        <td><span class="tag tag-green">✅</span></td>
+        <td><span class="code">python/agent/a2a/server.py</span> (HTTP端点)</td>
+        <td>⭐⭐⭐⭐⭐</td>
+      </tr>
+      <tr>
+        <td>A2A Client</td>
+        <td><span class="tag tag-green">✅</span></td>
+        <td><span class="code">python/agent/a2a/client.py</span></td>
+        <td>⭐⭐⭐⭐</td>
+      </tr>
+      <tr>
+        <td>A2A Auth</td>
+        <td><span class="tag tag-green">✅</span></td>
+        <td><span class="code">python/agent/a2a/auth.py</span></td>
+        <td>⭐⭐⭐⭐</td>
+      </tr>
+      <tr>
+        <td>A2A Types</td>
+        <td><span class="tag tag-green">✅</span></td>
+        <td>
+          <span class="code">python/agent/a2a/types.py</span> (AgentCard, Task,
+          Artifact, Event)
+        </td>
+        <td>⭐⭐⭐⭐⭐</td>
+      </tr>
+      <tr>
+        <td>A2A Trust</td>
+        <td><span class="tag tag-green">✅</span></td>
+        <td>
+          <span class="code">python/agent/plugins/trust.py</span> (4级信任:
+          UNTRUSTED→LOW→MEDIUM→HIGH)
+        </td>
+        <td>⭐⭐⭐⭐⭐</td>
+      </tr>
+    </table>
+    <div class="success-box">
+      <strong>A2A评分：A (95/100)</strong> — 6/6
+      子能力全部达标，信任等级机制、Agent
+      Card发现、任务生命周期管理、事件订阅均完整
+    </div>
+
+    <hr />
+
+    <!-- ===== 五、落地要求 ===== -->
+    <h2 id="s6">五、落地要求评估</h2>
+
+    <table>
+      <tr>
+        <th>博主落地要求</th>
+        <th>状态</th>
+        <th>证据</th>
+        <th>评估</th>
+      </tr>
+      <tr>
+        <td>真实用户</td>
+        <td><span class="tag tag-green">✅ 满足</span></td>
+        <td>
+          飞书/微信/钉钉/QQ 等多平台IM集成；<span class="code"
+            >FEISHU_ENABLED=true</span
+          >；<span class="code">python/agent/gateway/</span> 网关模块
+        </td>
+        <td>已接入真实IM平台，但无法确认实际用户量级</td>
+      </tr>
+      <tr>
+        <td>持续反馈</td>
+        <td><span class="tag tag-green">✅ 满足</span></td>
+        <td>
+          <span class="code">python/agent/evolution/feedback_loop.py</span>
+          (ContinuousFeedbackLoop)<br /><span class="code"
+            >python/agent/evolution/implicit_feedback.py</span
+          >
+          (隐式反馈)<br /><span class="code">python/agent/api/feedback.py</span>
+          (反馈API)
+        </td>
+        <td>显式+隐式双通道反馈收集，进化引擎闭环</td>
+      </tr>
+      <tr>
+        <td>版本迭代</td>
+        <td><span class="tag tag-green">✅ 满足</span></td>
+        <td>
+          V5.0版本；<span class="code">.github/workflows/</span> CI/CD；<span
+            class="code"
+            >python/agent/evolution/v2_engine.py</span
+          >
+          代码自进化
+        </td>
+        <td>明确的版本管理 + CI/CD流水线 + 自进化能力</td>
+      </tr>
+      <tr>
+        <td>拒绝本地Demo</td>
+        <td><span class="tag tag-green">✅ 满足</span></td>
+        <td>
+          <span class="code">docker-compose.yml</span> (Redis + Python Backend +
+          Gateway)；K8s 2副本 + HPA至10
+        </td>
+        <td>具备容器化部署能力，水平扩展架构已就绪</td>
+      </tr>
+      <tr>
+        <td>暴露生产级问题</td>
+        <td><span class="tag tag-green">✅ 满足</span></td>
+        <td>
+          分布式锁、分片、消息队列、限流、熔断、SLO收集、OpenTelemetry全链路追踪
+        </td>
+        <td>完整的生产级基础设施，可观测性体系完善</td>
+      </tr>
+    </table>
+
+    <div class="success-box">
+      <strong>落地要求评分：A (95/100)</strong> — 5/5
+      全部满足。项目已远超"本地Demo"阶段，具备完整的容器化部署、水平扩展、CI/CD、可观测性体系。
+    </div>
+
+    <hr />
+
+    <!-- ===== 六、差距分析 ===== -->
+    <h2 id="s7">六、差距分析与改进建议</h2>
+
+    <h3>6.1 关键差距清单（5项）</h3>
+
+    <table>
+      <tr>
+        <th>#</th>
+        <th>差距项</th>
+        <th>严重度</th>
+        <th>当前状态</th>
+        <th>改进建议</th>
+        <th>预估工作量</th>
+      </tr>
+      <tr>
+        <td>1</td>
+        <td><strong>关系型数据库缺失</strong></td>
+        <td><span class="tag tag-orange">P1 中</span></td>
+        <td>仅使用 SQLite，缺少 MySQL/PostgreSQL</td>
+        <td>
+          引入 PostgreSQL 作为主存储（SQLite
+          保留为本地缓存），支持读写分离、连接池。SQLite
+          在并发写场景下性能瓶颈明显
+        </td>
+        <td>3-5天</td>
+      </tr>
+      <tr>
+        <td>2</td>
+        <td><strong>工具自注册发现</strong></td>
+        <td><span class="tag tag-orange">P1 中</span></td>
+        <td>
+          工具需在 <span class="code">registerHarnessTools.ts</span> 集中注册
+        </td>
+        <td>
+          实现 AST 扫描自动发现（对标 Hermes），加工具不需改注册文件。Python
+          侧已有 <span class="code">toolset_registry.py</span> 基础
+        </td>
+        <td>2-3天</td>
+      </tr>
+      <tr>
+        <td>3</td>
+        <td><strong>工具集平台级动态开关</strong></td>
+        <td><span class="tag tag-orange">P2 低</span></td>
+        <td>8类目录硬编码，缺少"平台"维度控制</td>
+        <td>
+          改为 Toolset 配置驱动（<span class="code"
+            >scene_toolset_map.json</span
+          >
+          已有基础），支持按平台（飞书/微信/CLI）动态启用/禁用工具集
+        </td>
+        <td>1-2天</td>
+      </tr>
+      <tr>
+        <td>4</td>
+        <td><strong>Vision多模态输入管道</strong></td>
+        <td><span class="tag tag-orange">P1 中</span></td>
+        <td>有TTS输出/图像生成，但Vision输入解析不完整</td>
+        <td>
+          强化
+          <span class="code">python/agent/tools/vision_tools.py</span>，接入
+          GPT-4o Vision / Claude Vision；完善 PDF/Word/Excel 文件解析管道
+        </td>
+        <td>3-5天</td>
+      </tr>
+      <tr>
+        <td>5</td>
+        <td><strong>缺少业界框架集成</strong></td>
+        <td><span class="tag tag-orange">P2 低</span></td>
+        <td>完全自研，未使用 LangChain/LlamaIndex/AutoGen</td>
+        <td>
+          可选集成 LangChain 的 Callback/Evaluator
+          等模块作为补充，降低维护成本。但注意博主强调"不能只学框架"——当前自研深度已足够
+        </td>
+        <td>按需</td>
+      </tr>
+    </table>
+
+    <h3>6.2 架构重复/技术债务（已识别）</h3>
+    <table>
+      <tr>
+        <th>#</th>
+        <th>问题</th>
+        <th>状态</th>
+        <th>说明</th>
+      </tr>
+      <tr>
+        <td>1</td>
+        <td>缓存系统重复（4种）</td>
+        <td><span class="tag tag-green">✅ 已收敛</span></td>
+        <td>
+          LLMResponseCache/SqliteCacheStore/PromptCacheManager/RedisCache
+          已迁Python统一
+        </td>
+      </tr>
+      <tr>
+        <td>2</td>
+        <td>上下文构建器重复（4套）</td>
+        <td><span class="tag tag-orange">⚠️ 待合并</span></td>
+        <td>
+          ConstitutionPromptBuilder/ContextManager/ContextFileRegistry/LLMContextBuilder
+          → 建议ContextManager为唯一入口
+        </td>
+      </tr>
+      <tr>
+        <td>3</td>
+        <td>进化引擎重复（V1+V2）</td>
+        <td><span class="tag tag-orange">⚠️ 待合并</span></td>
+        <td>
+          EvolutionEngine(V1) + EvolutionEngineV2 →
+          通过EvolutionOrchestrator统一调度，但两套代码仍独立
+        </td>
+      </tr>
+      <tr>
+        <td>4</td>
+        <td>TS/Python双端桥接</td>
+        <td><span class="tag tag-green">✅ 已收敛</span></td>
+        <td>MCP/记忆/LLM/循环/进化 五大枢纽已迁Python，TS仅保留桥接壳</td>
+      </tr>
+      <tr>
+        <td>5</td>
+        <td>提供商模式分散</td>
+        <td><span class="tag tag-orange">⚠️ 待统一</span></td>
+        <td>
+          LLM/TTS/记忆各自独立Provider抽象 → 建议提取IProvider&lt;T&gt;基础接口
+        </td>
+      </tr>
+    </table>
+
+    <hr />
+
+    <!-- ===== 七、综合评分 ===== -->
+    <h2 id="s8">七、综合评分矩阵</h2>
+
+    <div class="grid grid-2">
+      <div class="card">
+        <h3>按架构层级评分</h3>
+        <table>
+          <tr>
+            <td>一、技术底座 — 后端基础设施</td>
+            <td><span class="tag tag-green">A (95)</span></td>
+          </tr>
+          <tr>
+            <td>一、技术底座 — 上层开发框架</td>
+            <td><span class="tag tag-orange">B+ (70)</span></td>
+          </tr>
+          <tr>
+            <td>二、执行层</td>
+            <td><span class="tag tag-green">A (93)</span></td>
+          </tr>
+          <tr>
+            <td>二、编排层</td>
+            <td><span class="tag tag-green">A+ (97)</span></td>
+          </tr>
+          <tr>
+            <td>二、反思层</td>
+            <td><span class="tag tag-green">A+ (95)</span></td>
+          </tr>
+          <tr>
+            <td>四、MCP协议</td>
+            <td><span class="tag tag-green">A (94)</span></td>
+          </tr>
+          <tr>
+            <td>四、A2A协议</td>
+            <td><span class="tag tag-green">A (95)</span></td>
+          </tr>
+          <tr>
+            <td>五、落地要求</td>
+            <td><span class="tag tag-green">A (95)</span></td>
+          </tr>
+        </table>
+      </div>
+      <div class="card">
+        <h3>按七大能力维度评分</h3>
+        <table>
+          <tr>
+            <td>3.1 感知记忆</td>
+            <td><span class="tag tag-green">A (92)</span></td>
+          </tr>
+          <tr>
+            <td>3.2 规划拆解</td>
+            <td><span class="tag tag-green">A (95)</span></td>
+          </tr>
+          <tr>
+            <td>3.3 工具调用</td>
+            <td><span class="tag tag-green">A (90)</span></td>
+          </tr>
+          <tr>
+            <td>3.4 逻辑推理</td>
+            <td><span class="tag tag-green">A+ (97)</span></td>
+          </tr>
+          <tr>
+            <td>3.5 行动执行</td>
+            <td><span class="tag tag-green">A (90)</span></td>
+          </tr>
+          <tr>
+            <td>3.6 反思纠错</td>
+            <td><span class="tag tag-green">A+ (98)</span></td>
+          </tr>
+          <tr>
+            <td>3.7 多端协作</td>
+            <td><span class="tag tag-green">A (93)</span></td>
+          </tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="highlight-box">
+      <h3>总体评估</h3>
+      <div class="grid grid-4">
+        <div class="stat-box">
+          <div class="metric-value" style="color: var(--green)">85/100</div>
+          <div class="metric-label">综合成熟度</div>
+        </div>
+        <div class="stat-box">
+          <div class="metric-value" style="color: var(--accent)">A-</div>
+          <div class="metric-label">综合等级</div>
+        </div>
+        <div class="stat-box">
+          <div class="metric-value" style="color: var(--purple)">39/44</div>
+          <div class="metric-label">能力项达标率</div>
+        </div>
+        <div class="stat-box">
+          <div class="metric-value" style="color: var(--cyan)">商用级</div>
+          <div class="metric-label">项目阶段</div>
+        </div>
+      </div>
+      <p style="margin-top: 1rem">
+        <strong>核心结论：</strong>家百星 V5.0 已达到
+        <strong>Agent 商用可上线级别</strong>。 在
+        <strong
+          >反思纠错（6层反思+L1-L4韧性金字塔）、逻辑推理（因果推理+ToT+MoA）、编排调度（MCP+A2A完整协议栈）、进化闭环（V2代码自进化）</strong
+        >
+        四大维度上达到甚至超越业界主流商业Agent水平。
+      </p>
+      <p>
+        <strong>主要短板：</strong
+        >关系型数据库缺失（依赖SQLite）、工具自注册发现未实现、Vision多模态输入管道不完整、完全自研框架缺少社区生态支持。
+      </p>
+      <p>
+        <strong>博主标准对标：</strong
+        >该项目严格践行了博主"拒绝本地Demo，搭建线上真实商用项目"的核心要求——
+        具备真实用户入口（多平台IM）、持续反馈闭环（进化引擎）、版本迭代（CI/CD+自进化）、生产级基础设施（分布式锁/分片/MQ/限流/熔断/可观测性）。
+        在"底层后端基础设施 + Agent框架 → 支撑编排/执行/反思三层架构 →
+        完整落地七大能力维度 →
+        叠加MCP+A2A协议"这条层级串联逻辑上，每一环节均有扎实实现。
+      </p>
+    </div>
+
+    <hr />
+
+    <h2>附录：核心代码索引</h2>
+
+    <div class="grid grid-3">
+      <div class="card">
+        <h4>后端基础设施</h4>
+        <ul>
+          <li>
+            <span class="code"
+              >python/agent/infrastructure/message_queue.py</span
+            >
+            — Redis Streams MQ
+          </li>
+          <li>
+            <span class="code"
+              >python/agent/infrastructure/distributed_lock.py</span
+            >
+            — 分布式锁
+          </li>
+          <li>
+            <span class="code">python/agent/infrastructure/sharding.py</span> —
+            一致性哈希分片
+          </li>
+          <li>
+            <span class="code">python/agent/scheduler/cron.py</span> —
+            定时任务调度
+          </li>
+          <li>
+            <span class="code">python/agent/memory/redis_cache.py</span> —
+            Redis缓存层
+          </li>
+        </ul>
+      </div>
+      <div class="card">
+        <h4>Agent 三层架构</h4>
+        <ul>
+          <li>
+            <span class="code">python/agent/loop/controller.py</span> —
+            LoopController 主循环
+          </li>
+          <li>
+            <span class="code">python/agent/loop/planner.py</span> — Planner
+            任务规划
+          </li>
+          <li>
+            <span class="code">python/agent/loop/executor.py</span> — Executor
+            任务执行
+          </li>
+          <li>
+            <span class="code">python/agent/loop/evaluator.py</span> — Evaluator
+            结果评估
+          </li>
+          <li>
+            <span class="code">python/agent/loop/reflection.py</span> —
+            6层反思引擎
+          </li>
+          <li>
+            <span class="code">python/agent/loop/robustness.py</span> —
+            L1-L4韧性金字塔
+          </li>
+          <li>
+            <span class="code">python/agent/loop/tot_planner.py</span> — Tree of
+            Thoughts
+          </li>
+          <li>
+            <span class="code">python/agent/loop/causal.py</span> — 因果推理
+          </li>
+        </ul>
+      </div>
+      <div class="card">
+        <h4>MCP + A2A 协议</h4>
+        <ul>
+          <li>
+            <span class="code">python/agent/mcp/server_manager.py</span> —
+            MCP服务器管理
+          </li>
+          <li>
+            <span class="code">python/agent/mcp/transport.py</span> —
+            stdio+HTTP/SSE传输
+          </li>
+          <li>
+            <span class="code">python/agent/mcp/sampling.py</span> — MCP采样
+          </li>
+          <li>
+            <span class="code">python/agent/a2a/protocol.py</span> — A2A协议核心
+          </li>
+          <li>
+            <span class="code">python/agent/a2a/manager.py</span> — A2A管理器
+          </li>
+          <li>
+            <span class="code">python/agent/a2a/server.py</span> — A2A HTTP端点
+          </li>
+        </ul>
+      </div>
+      <div class="card">
+        <h4>记忆系统</h4>
+        <ul>
+          <li>
+            <span class="code">python/agent/memory/engine.py</span> —
+            MemoryEngine 三层记忆
+          </li>
+          <li>
+            <span class="code">python/agent/memory/store.py</span> — SQLite
+            FTS5存储
+          </li>
+          <li>
+            <span class="code">python/agent/memory/episodic_memory.py</span> —
+            情景记忆
+          </li>
+          <li>
+            <span class="code">python/agent/memory/curator.py</span> — 记忆策展
+          </li>
+          <li>
+            <span class="code">python/agent/memory/background_review.py</span> —
+            后台记忆整理
+          </li>
+        </ul>
+      </div>
+      <div class="card">
+        <h4>进化引擎</h4>
+        <ul>
+          <li>
+            <span class="code">python/agent/evolution/orchestrator.py</span> —
+            进化编排器
+          </li>
+          <li>
+            <span class="code">python/agent/evolution/engine.py</span> —
+            V1进化引擎
+          </li>
+          <li>
+            <span class="code">python/agent/evolution/v2_engine.py</span> —
+            V2代码自进化
+          </li>
+          <li>
+            <span class="code">python/agent/evolution/feedback_loop.py</span> —
+            持续反馈闭环
+          </li>
+          <li>
+            <span class="code"
+              >python/agent/evolution/implicit_feedback.py</span
+            >
+            — 隐式反馈
+          </li>
+        </ul>
+      </div>
+      <div class="card">
+        <h4>工具与安全</h4>
+        <ul>
+          <li>
+            <span class="code">python/agent/tools/registry.py</span> —
+            工具注册中心
+          </li>
+          <li>
+            <span class="code">python/agent/tools/builtin_toolsets.py</span> —
+            内置工具集
+          </li>
+          <li>
+            <span class="code">python/agent/security/output_guardrail.py</span>
+            — 输出护栏
+          </li>
+          <li>
+            <span class="code"
+              >python/agent/security/sensitive_detector.py</span
+            >
+            — 敏感信息检测
+          </li>
+          <li>
+            <span class="code">python/agent/security/runtime_posture.py</span> —
+            运行时安全态势
+          </li>
+        </ul>
+      </div>
+    </div>
+
+    <p
+      style="
+        text-align: center;
+        color: var(--text-secondary);
+        margin-top: 2rem;
+        padding-top: 1rem;
+        border-top: 1px solid var(--border);
+      "
+    >
+      家百星 V5.0 Agent 技术体系全面成熟度审计报告 | 生成日期：2026-07-18 |
+      审计框架：Agent 完整技术体系总图（五层架构）
+    </p>
+  </body>
+</html>

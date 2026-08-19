@@ -5,6 +5,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 DATA_DIR.mkdir(exist_ok=True)
 
+# 审计 P0-5（数据双根）：统一数据根。所有落盘路径都应基于 DATA_ROOT 解析，
+# 禁止再用 cwd 相对的 Path("data/...")，否则在不同工作目录下会写出/读出不同根 → 幽灵数据。
+DATA_ROOT = DATA_DIR
+
 PROJECT_ROOT = BASE_DIR.parent
 ENV_FILE = PROJECT_ROOT / ".env"
 

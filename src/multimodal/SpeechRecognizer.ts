@@ -4,11 +4,28 @@
  * 保持向后兼容原有接口
  */
 
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import { EventBus } from '../shared/EventBus';
 import { Logger } from '../utils/Logger';
+
+// 固定 Python 代码片段（常量，绝不拼接任何外部输入）。
+// 通过 `python -c <CODE> model lang tmpfile` 调用，CODE 读取 sys.argv[1..3]，
+// 用户可控值始终作为独立 argv 元素传递，从根本上杜绝命令注入。
+const PY_TRANSCRIBE_FASTER = `import sys
+from faster_whisper import WhisperModel
+_model, _lang, _audio = sys.argv[1], sys.argv[2], sys.argv[3]
+_m = WhisperModel(_model)
+_segments, _ = _m.transcribe(_audio, language=_lang)
+print('\\n'.join([s.text for s in _segments]))`;
+
+const PY_TRANSCRIBE_OPENAI = `import sys
+import whisper
+_model, _lang, _audio = sys.argv[1], sys.argv[2], sys.argv[3]
+_m = whisper.load_model(_model)
+_r = _m.transcribe(_audio, language=_lang)
+print(_r['text'])`;
 
 export interface SpeechRecognitionResult {
   text: string;
@@ -61,9 +78,10 @@ export class SpeechRecognizer {
 
       // 尝试检测 Whisper Python 环境
       try {
-        // faster-whisper (Python) — 通过 CLI 检测
-        execSync(
-          'python -c "from faster_whisper import WhisperModel; print(\'ok\')"',
+        // faster-whisper (Python) — 通过 CLI 检测（无 shell 调用）
+        execFileSync(
+          'python',
+          ['-c', "from faster_whisper import WhisperModel; print('ok')"],
           {
             stdio: 'pipe',
             timeout: 5000,
@@ -77,8 +95,8 @@ export class SpeechRecognizer {
           'SpeechRecognizer'
         );
         try {
-          // openai-whisper (Python) — 通过 CLI 检测
-          execSync('python -c "import whisper; print(\'ok\')"', {
+          // openai-whisper (Python) — 通过 CLI 检测（无 shell 调用）
+          execFileSync('python', ['-c', "import whisper; print('ok')"], {
             stdio: 'pipe',
             timeout: 5000,
           });
@@ -218,16 +236,25 @@ export class SpeechRecognizer {
         (this.whisperModel as { type?: string })?.type || 'faster-whisper';
       const lang = this.config.language?.split('-')[0] || 'zh';
 
-      // 调用 Python Whisper CLI 进行转录
+      // 输入白名单校验：模型名 / 语言 / 临时路径，拒绝含元字符或路径穿越的值
+      this.validateWhisperInputs(this.config.model, lang, tmpFile);
+
+      // 安全调用约定：
+      // 1) execFileSync 默认关闭 shell —— 不经过任何 shell、无字符串拼接，
+      //    模型名/路径中的引号、分号、&& 等元字符绝不会被解释执行。
+      // 2) 用户可控值（model / lang / tmpFile）作为独立 argv 元素传入，
+      //    由 Python 的 sys.argv[1..3] 读取，而非嵌入 -c 源码字符串。
       let output: string;
       if (modelType === 'faster-whisper') {
-        output = execSync(
-          `python -c "from faster_whisper import WhisperModel; m = WhisperModel('${this.config.model}'); segments, _ = m.transcribe('${tmpFile}', language='${lang}'); print('\\n'.join([s.text for s in segments]))"`,
+        output = execFileSync(
+          'python',
+          ['-c', PY_TRANSCRIBE_FASTER, this.config.model, lang, tmpFile],
           { stdio: 'pipe', timeout: 60000, encoding: 'utf-8' }
         );
       } else {
-        output = execSync(
-          `python -c "import whisper; m = whisper.load_model('${this.config.model}'); r = m.transcribe('${tmpFile}', language='${lang}'); print(r['text'])"`,
+        output = execFileSync(
+          'python',
+          ['-c', PY_TRANSCRIBE_OPENAI, this.config.model, lang, tmpFile],
           { stdio: 'pipe', timeout: 60000, encoding: 'utf-8' }
         );
       }
@@ -254,6 +281,31 @@ export class SpeechRecognizer {
       } catch {
         /* ignore */
       }
+    }
+  }
+
+  /**
+   * 白名单校验 ASR 调用的外部可控输入（模型名 / 语言 / 临时文件），
+   * 防止命令注入与路径穿越。任意一项不合规即抛错，
+   * 由调用方 catch 后降级为空结果（fail-closed）。
+   */
+  private validateWhisperInputs(model: string, lang: string, tmpFile: string): void {
+    // 模型名：仅允许字母/数字/下划线/连字符（tiny/base/small/medium/large-v3 等）
+    if (!/^[A-Za-z0-9_-]+$/.test(model)) {
+      throw new Error(`非法的 Whisper 模型名（含非法字符）: ${JSON.stringify(model)}`);
+    }
+    // 语言代码：仅允许字母与连字符（如 zh / en）
+    if (!/^[A-Za-z-]+$/.test(lang)) {
+      throw new Error(`非法的 Whisper 语言代码（含非法字符）: ${JSON.stringify(lang)}`);
+    }
+    // 临时文件路径：必须归一化落在 <cwd>/tmp 内且以 .wav 结尾，杜绝路径穿越
+    const allowedDir = path.resolve(process.cwd(), 'tmp');
+    const resolved = path.resolve(tmpFile);
+    const inside = resolved === allowedDir || resolved.startsWith(allowedDir + path.sep);
+    if (path.extname(resolved) !== '.wav' || !inside) {
+      throw new Error(
+        `非法的 Whisper 临时文件路径（路径穿越或非法扩展名）: ${JSON.stringify(tmpFile)}`
+      );
     }
   }
 

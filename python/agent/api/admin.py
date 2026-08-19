@@ -31,9 +31,21 @@ def _require_admin(
     authorization: str | None = Header(default=None),
     x_admin_token: str | None = Header(default=None),
 ) -> None:
-    """敏感管理操作的前置校验。未配置令牌则放行（开发模式）。"""
+    """敏感管理操作的前置校验。未配置令牌时仅在非生产环境下放行。"""
     expected = os.environ.get(ADMIN_TOKEN_ENV)
     if not expected:
+        env_mode = os.environ.get("ENV", os.environ.get("APP_ENV", "development")).lower()
+        if env_mode in ("production", "prod", "staging", "stage"):
+            raise HTTPException(
+                status_code=401,
+                detail="生产环境必须配置 AGENT_ADMIN_TOKEN 环境变量",
+            )
+        from agent.core.logger import StructuredLogger
+        _admin_log = StructuredLogger("admin")
+        _admin_log.warning(
+            "Admin endpoint accessed without token - development mode bypass",
+            env=env_mode,
+        )
         return
     provided = authorization or ""
     if provided.lower().startswith("bearer "):

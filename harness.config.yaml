@@ -1,0 +1,46 @@
+# Harness Configuration
+# Updated: 2026-08-14T00:00:00.000Z
+#
+# 配置驱动组合 — 声明各层使用的实现
+# 运行时由 HarnessComposer 根据此配置组装层实例
+# 支持运行时层切换（热替换），无需重启 Agent
+
+version: 1
+
+layers:
+  tools:
+    implementation: builtin
+    enabled: true
+    config: {}
+
+  context:
+    implementation: unified-pipeline
+    enabled: true
+    config: {}
+
+  persistence:
+    implementation: event-sourcing
+    enabled: true
+    config:
+      snapshotInterval: 500
+      enableCompaction: true
+
+  verification:
+    implementation: builtin
+    enabled: true
+    config: {}
+
+  constraints:
+    implementation: builtin
+    enabled: true
+    config: {}
+
+  loop:
+    implementation: python-backend
+    enabled: true
+    config: {}
+
+plugins: []
+
+overrides:
+  AGENT_BACKEND: python

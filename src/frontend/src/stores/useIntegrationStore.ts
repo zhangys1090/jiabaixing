@@ -4,7 +4,6 @@ import {
   IntegrationStatus,
   IntegrationPlatformInfo,
   SendMessageRequest,
-  ApiResponse,
   PlatformConfig,
 } from '@shared/contracts';
 import { apiService } from '../api/apiService';

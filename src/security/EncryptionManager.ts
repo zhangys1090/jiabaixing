@@ -373,6 +373,13 @@ export class EncryptionManager {
   }
 
   /**
+   * 同步生成带盐的哈希值（用于密码哈希）
+   */
+  public hashWithSaltSync(data: string, salt: string): string {
+    return this.hash(data + salt);
+  }
+
+  /**
    * 验证带盐的哈希值
    */
   public verifyHashWithSalt(data: string, hash: string, salt: string): boolean {

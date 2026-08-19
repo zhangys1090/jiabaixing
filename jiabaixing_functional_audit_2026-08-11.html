@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>家百星 (Jiabaixing) 全面功能审计与增强优化方案 · 2026-08-11</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1d212b; --ink:#e6e9ef; --muted:#9aa3b2;
+    --line:#2a2f3a; --brand:#4f8cff; --green:#37d67a; --amber:#f5a623; --red:#ff5b5b;
+    --code:#c9d4e3; --shadow:0 6px 24px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;line-height:1.7;font-size:15px}
+  header.top{background:linear-gradient(135deg,#1b2330,#0f1115);padding:34px 40px 26px;border-bottom:1px solid var(--line)}
+  header.top h1{margin:0 0 6px;font-size:26px;letter-spacing:.5px}
+  header.top .sub{color:var(--muted);font-size:14px}
+  .wrap{display:flex;align-items:flex-start}
+  nav.toc{position:sticky;top:0;align-self:flex-start;width:260px;flex:0 0 260px;padding:22px 18px;border-right:1px solid var(--line);height:100vh;overflow:auto;background:var(--panel)}
+  nav.toc a{display:block;color:var(--muted);text-decoration:none;padding:6px 10px;border-radius:8px;font-size:13.5px;margin-bottom:2px}
+  nav.toc a:hover{background:var(--panel2);color:var(--ink)}
+  nav.toc .grp{color:var(--brand);font-size:12px;text-transform:uppercase;letter-spacing:1px;margin:14px 0 4px}
+  main{flex:1;padding:30px 40px 80px;max-width:1100px}
+  section{margin-bottom:46px;scroll-margin-top:20px}
+  h2{font-size:21px;border-left:4px solid var(--brand);padding-left:12px;margin:0 0 14px}
+  h3{font-size:17px;color:#cfe0ff;margin:26px 0 10px}
+  h4{font-size:14.5px;color:var(--muted);margin:18px 0 6px;text-transform:uppercase;letter-spacing:.5px}
+  p{margin:8px 0}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin:14px 0;box-shadow:var(--shadow)}
+  table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13.5px}
+  th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+  th{background:var(--panel2);color:#cdd6e4;font-weight:600}
+  tr:nth-child(even) td{background:rgba(255,255,255,.018)}
+  code{background:#0b0e13;color:var(--code);padding:1px 6px;border-radius:5px;font-family:"SFMono-Regular",Consolas,monospace;font-size:12.5px}
+  .badge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:12px;font-weight:700;color:#0c0f14}
+  .r{background:var(--red);color:#fff} .y{background:var(--amber);color:#1a1206} .g{background:var(--green);color:#06210f}
+  .pill{display:inline-block;padding:2px 8px;border-radius:6px;background:var(--panel2);border:1px solid var(--line);font-size:12px;color:var(--muted);margin:2px 4px 2px 0}
+  .kpis{display:flex;flex-wrap:wrap;gap:14px;margin:18px 0}
+  .kpi{flex:1;min-width:150px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+  .kpi .n{font-size:26px;font-weight:800;color:var(--brand)}
+  .kpi .l{font-size:13px;color:var(--muted);margin-top:2px}
+  .callout{border-left:4px solid var(--amber);background:rgba(245,166,35,.08);padding:12px 16px;border-radius:0 10px 10px 0;margin:14px 0}
+  .callout.red{border-color:var(--red);background:rgba(255,91,91,.09)}
+  .callout.green{border-color:var(--green);background:rgba(55,214,122,.08)}
+  .muted{color:var(--muted)}
+  ul.tight{margin:6px 0 6px 18px;padding:0} ul.tight li{margin:4px 0}
+  footer{color:var(--muted);font-size:12.5px;border-top:1px solid var(--line);padding:20px 40px}
+  .ok{color:var(--green);font-weight:600} .warn{color:var(--amber);font-weight:600} .bad{color:var(--red);font-weight:600}
+  pre{background:#0b0e13;border:1px solid var(--line);border-radius:8px;padding:12px;overflow:auto;font-size:12.5px;color:var(--code)}
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>家百星 (Jiabaixing) 全面功能审计与增强优化方案</h1>
+  <div class="sub">范围：LLM 底座 · 任务编排与调度 · 感知层（五感） · 执行层（手脚） · 独有核心能力　|　方法：实时代码探测（grep / read / 测试日志），不采信文档宣称　|　日期：2026-08-11</div>
+</header>
+<div class="wrap">
+<nav class="toc">
+  <div class="grp">导航</div>
+  <a href="#summary">摘要与关键指标</a>
+  <a href="#llm">一、LLM 底座核心能力</a>
+  <a href="#orchestration">二、任务编排与调度</a>
+  <a href="#perception">三、感知层（五感）</a>
+  <a href="#execution">四、执行层（手脚）</a>
+  <a href="#unique">五、独有核心能力</a>
+  <a href="#test">六、测试健康度</a>
+  <a href="#matrix">七、综合风险矩阵</a>
+  <a href="#plan">八、增强优化方案</a>
+  <a href="#appendix">附录：证据索引</a>
+</nav>
+<main>
+
+<section id="summary">
+  <h2>摘要与关键指标</h2>
+  <div class="kpis">
+    <div class="kpi"><div class="n">26</div><div class="l">LLM 包真实文件（9,030 行，非 bridge 壳）</div></div>
+    <div class="kpi"><div class="n">3597</div><div class="l">Python 测试收集数</div></div>
+    <div class="kpi"><div class="n">3193</div><div class="l">最新全量通过（1 失败 / 11 跳过）</div></div>
+    <div class="kpi"><div class="n">10</div><div class="l">感知模态适配器（sensory_fusion 注册）</div></div>
+    <div class="kpi"><div class="n">7</div><div class="l">🔴 高危项（需优先修复）</div></div>
+  </div>
+  <div class="callout red">
+    <strong>核心结论：</strong>家百星 Python 端核心能力（LLM hub、记忆、进化、轨迹、会话、上下文压缩、审批、A2A、调度、锁、MQ、ReAct 循环）主体为<strong>真实实现</strong>且测试面较健康（3193 绿）。真正的短板集中在三处：
+    <ul class="tight">
+      <li><span class="bad">安全性</span> —— 听觉 ASR 存在命令注入（<code>SpeechRecognizer.ts</code> 未转义拼接 <code>execSync</code>），属可直接被利用的高危漏洞；</li>
+      <li><span class="bad">可靠性</span> —— LLM 故障转移形同虚设（<code>exclude=None</code> 回退到同一失败 primary），跨厂商切换基本不发生；</li>
+      <li><span class="warn">工程一致性</span> —— TS 端 A2A / Evolution 实现缺位（仅 adapter/接口），与 Python 端不对齐；感知"五感"中听觉/触觉/嗅觉/味觉缺真实数据源；执行三通道分散、桌面闭环未接。</li>
+    </ul>
+  </div>
+  <p class="muted">审计原则沿用项目既定纪律：所有结论来自实时探测。本报告已对两处 🔴 高危项（ASR 命令注入、failover 选回失败 primary）做二次源码核验，路径/行号经逐一确认。</p>
+</section>
+
+<section id="llm">
+  <h2>一、LLM 底座核心能力审计</h2>
+  <p>目录 <code>python/agent/llm/</code> 共 26 个真实实现文件（9,030 行），为 hub 迁移后的真实现实层（非 bridge 壳）。Provider 目录声明 15 家，成本守卫、真流式 SSE、熔断、分层缓存均已落地。</p>
+  <h3>1.1 已实现的真实能力（证据）</h3>
+  <table>
+    <tr><th>能力</th><th>证据</th><th>状态</th></tr>
+    <tr><td>Provider 目录（15 家 + OAuth 字段）</td><td><code>provider_catalog.py</code>（含 <code>oauth_supported</code>）</td><td><span class="badge g">已落地</span></td></tr>
+    <tr><td>成本守卫（真接入）</td><td><code>provider.py:96</code> <code>CostGuard()</code>；<code>:214-233</code> 超预算拦截</td><td><span class="badge g">已落地</span></td></tr>
+    <tr><td>流式 SSE</td><td><code>stream.py</code> <code>stream_via_transport</code> / <code>chat_stream</code></td><td><span class="badge g">已落地</span></td></tr>
+    <tr><td>熔断</td><td><code>circuit_breaker.py</code> 三态，接入 <code>provider.py:464/472</code></td><td><span class="badge g">已落地</span></td></tr>
+    <tr><td>分层缓存</td><td><code>cache.py</code> <code>TieredCache</code>（内存+SQLite）；<code>prompt_cache.py</code> 前缀+语义</td><td><span class="badge g">已落地</span></td></tr>
+    <tr><td>能力感知路由</td><td><code>capability_aware_router.py</code> <code>score</code>/<code>select</code>，接入 <code>chat</code></td><td><span class="badge g">已落地</span></td></tr>
+  </table>
+  <h3>1.2 薄弱 / 缺失（含核验）</h3>
+  <table>
+    <tr><th>问题</th><th>证据</th><th>风险</th><th>说明</th></tr>
+    <tr><td>故障转移选回失败 primary</td><td><code>router.py:144-148</code>（<code>get_fallback</code> 按 priority 返回首个启用者；调用点 <code>provider.py:478</code> 传 <code>exclude=None</code>）</td><td><span class="badge r">🔴</span></td><td>默认跨厂商切换几乎不发生，仅当手动 <code>exclude</code> 才生效。已二次核验代码。</td></tr>
+    <tr><td>transport 路径无 failover</td><td><code>provider.py:_do_chat_via_transport</code> 异常直接 <code>raise</code></td><td><span class="badge y">🟡</span></td><td>litellm 路径有 1+1 尝试，transport 路径无，能力不一致。</td></tr>
+    <tr><td>无重试/退避、litellm 无 timeout</td><td><code>acompletion(**kwargs)</code> 未设 timeout</td><td><span class="badge y">🟡</span></td><td>瞬时故障即失败；超时可失控。</td></tr>
+    <tr><td>"语义缓存"实为词集重叠</td><td><code>prompt_cache.py:_try_semantic_match</code> 用 Jaccard 词集</td><td><span class="badge y">🟡</span></td><td>改写/同义场景命中率极低，名不副实。</td></tr>
+    <tr><td><code>ModelCostGuard</code> 死代码</td><td><code>model_cost_guard.py</code> 全量未被 import</td><td><span class="badge y">🟡</span></td><td>与 <code>credential_pool.CostGuard</code> 双实现，维护歧义。</td></tr>
+    <tr><td>缺窄腰 <code>catalog.py</code></td><td>目录无该文件，路由分散</td><td><span class="badge y">🟡</span></td><td>与文档预期不符，路由逻辑散落。</td></tr>
+    <tr><td>OAuth 仅元数据</td><td><code>provider_catalog.py</code> 自承本轮回不做握手</td><td><span class="badge g">🟢</span></td><td>影响范围有限，已自承。</td></tr>
+  </table>
+  <h3>1.3 测试覆盖盲区</h3>
+  <p><code>tests/test_llm.py</code> 仅覆盖 <code>LLMCache</code>/<code>RequestQueue</code>/<code>ProviderManager</code>；<strong>无</strong> cost_guard、circuit_breaker、stream、prompt_cache、capability_router、oauth 测试。且 <code>test_provider_manager_fallback</code> 显式传 <code>exclude="primary"</code>，<strong>未覆盖线上 <code>exclude=None</code> 的真实缺陷路径</strong>。</p>
+</section>
+
+<section id="orchestration">
+  <h2>二、任务编排与调度能力审计</h2>
+  <p>调度与协调主体真实可用：<code>scheduler/cron.py</code>（704 行，含 LeaderElection + 调度/执行双分布式锁 + MQ 解耦派发）、<code>infrastructure/</code>（sharding/distributed_lock/message_queue）、ReAct 循环（<code>loop/controller.py</code> 147KB、executor 74KB、reflection 43KB），以及多 agent 编排 <code>orchestration/{task_dispatcher,fanout,result_aggregator}</code>。DAG 拓扑在 <code>src/core/DAGTask.ts</code>。</p>
+  <table>
+    <tr><th>薄弱 / 缺失</th><th>证据</th><th>风险</th><th>说明</th></tr>
+    <tr><td>优先级调度默认部署失效</td><td><code>message_queue.py</code> <code>InMemoryMessageQueue</code> 用 <code>asyncio.Queue</code> FIFO，priority 仅元数据；<code>RedisStreamsQueue</code> 才按优先级分独立流</td><td><span class="badge r">🔴</span></td><td>非 Redis 部署下 HIGH 任务不会优先消费。</td></tr>
+    <tr><td>ReAct 循环零单元测试</td><td>controller/executor/reflection 合计 280KB+ 无 <code>test_*.py</code></td><td><span class="badge r">🔴</span></td><td>核心执行回路回归风险极高。</td></tr>
+    <tr><td>无读写锁（RWLock）</td><td><code>distributed_lock.py</code> 仅独占锁；cron L488 "写锁"实为互斥锁</td><td><span class="badge y">🟡</span></td><td>读写并发无法提升吞吐。</td></tr>
+    <tr><td>"一致性哈希"不严谨</td><td><code>sharding.py:consistent_shard</code> 用 <code>md5%n</code> 取模，无虚拟节点</td><td><span class="badge y">🟡</span></td><td>分片数变化导致大量 key 重归属。</td></tr>
+    <tr><td>编排路径与文档不符</td><td><code>evolution/multi_agent.py</code> 不存在；DAG 仅 TS 侧</td><td><span class="badge y">🟡</span></td><td>跨端对齐缺口；Python 侧无工作流测试。</td></tr>
+  </table>
+  <div class="callout">
+    <strong>亮点（应保留并强化）：</strong>ReAct 的参数修正后重试（<code>controller.py</code> 依据 <code>reflection.should_retry</code>/<code>corrected_args</code>）、<code>max_concurrent=5</code>/<code>default_timeout_ms=60000</code>、DAG 分层并发（<code>max_concurrent_per_layer=3</code>）、Leader 单例调度均真实落地，是差异化竞争力的基座。
+  </div>
+  <p class="muted">测试：调度/锁/队列/分片共 33 passed / 2 skipped（Redis 依赖跳过）；ReAct 与 DAG 编排无测试。</p>
+</section>
+
+<section id="perception">
+  <h2>三、感知层（五感）审计</h2>
+  <p>感知"大脑"抽象扎实：<code>python/agent/perception/sensory_fusion.py</code> 是真正的模态注册表（<code>VALID_MODALITIES</code> 含 10 个通道），<code>fuse()</code> 支持 weighted/concat，<code>to_prompt_context()</code> 闭环"感知→决策"。但"感官"缺真实数据源。</p>
+  <table>
+    <tr><th>模态</th><th>状态</th><th>证据</th><th>风险</th></tr>
+    <tr><td>视觉 Vision</td><td><span class="ok">已实现</span></td><td><code>visual_grounding.py</code>、<code>vlm_call.py</code>、<code>local_ocr.py</code>、<code>screen_watcher.py</code>；TS <code>SceneRecognizer.ts</code>、<code>EnvironmentPerceptionEngine.ts</code></td><td><span class="badge g">🟢</span></td></tr>
+    <tr><td>听觉 Audio</td><td><span class="warn">半残</span></td><td>TTS 默认 <code>simulated:true</code>；ASR <code>SpeechRecognizer.ts</code>（Whisper）独立实现，<strong>未接入</strong> <code>voice_interact.listen</code>（后者用 <code>Buffer.from('模拟音频输入数据')</code> 硬编码桩）</td><td><span class="badge y">🟡</span></td></tr>
+    <tr><td>触觉 Haptic</td><td><span class="warn">适配器有 / 无数据源</span></td><td><code>haptic_channel.py</code> 真实 <code>HapticEvent→SenseSample</code>，无传感器采集</td><td><span class="badge y">🟡</span></td></tr>
+    <tr><td>嗅觉 Olfactory</td><td><span class="warn">适配器有 / 无数据源</span></td><td><code>olfactory_channel.py</code>（气体阈值/危险等级），无 IoT 接入</td><td><span class="badge y">🟡</span></td></tr>
+    <tr><td>味觉 Gustatory</td><td><span class="muted">隐喻 / 未采集</span></td><td><code>gustatory_channel.py</code> 五原味枚举，纯软件 agent 属不适用</td><td><span class="badge g">🟢</span></td></tr>
+  </table>
+  <div class="callout red">
+    <strong>🔴 高危安全缺陷（已二次核验）：</strong> <code>src/multimodal/SpeechRecognizer.ts:224-225</code> 与 <code>:229-230</code> 将 <code>this.config.model</code> 与 <code>tmpFile</code> 通过模板字符串直接拼入 <code>execSync("python -c \"... WhisperModel('${model}'); ... transcribe('${tmpFile}'...)\"")</code>，<strong>无任何转义</strong>。模型名/路径含单引号或 shell 元字符即可造成任意命令执行。这是必须立即修复的命令注入。
+  </div>
+  <p class="muted">说明：对软件 agent 而言，嗅觉/味觉应理解为"外部传感器 / 环境化学态感知"的可插拔接入点，而非字面嗅觉。当前适配器结构正确，缺口是真实数据源（IoT / 硬件）与默认模拟回退。</p>
+</section>
+
+<section id="execution">
+  <h2>四、执行层（手脚）接口审计</h2>
+  <p>统一"手"的执行抽象已初具规模：<code>ToolRegistry.ts</code>（1356 行，含 Schema 校验、<code>PermissionGuard</code>、超时、结果标准化）与 <code>ToolCallGuard.ts</code>（281 行，去重/缓存/限速 + 宪法前置拦截）。但"手脚"通道分散。</p>
+  <table>
+    <tr><th>薄弱 / 缺失</th><th>证据</th><th>风险</th><th>说明</th></tr>
+    <tr><td>三套并行执行通道，无统一 Action 抽象</td><td>① harness 工具（<code>ToolRegistry</code>）② 桌面 GUI（<code>DesktopActionExecutor</code>/<code>SystemInput</code>/<code>ScreenCapture</code>）③ MCP（<code>mcp/</code>）</td><td><span class="badge y">🟡</span></td><td>跨通道结果/反馈难归一，编排层难以统一调度"手脚"。</td></tr>
+    <tr><td>桌面执行未闭环验证</td><td><code>DesktopActionExecutor.ts</code> 未接 <code>action_verifier</code>（Python 端 <code>action_verifier.py</code>/<code>closed_loop_metrics.py</code> 已有 + <code>test_closed_loop_e2e.py</code>）</td><td><span class="badge y">🟡</span></td><td>"动作→结果校验→再决策"闭环在桌面侧断链。</td></tr>
+  </table>
+  <div class="callout green">
+    <strong>已有闭环基础：</strong>Python 端 <code>action_verifier.py</code>(448 行)、<code>closed_loop_metrics.py</code>、<code>device_sense.py</code>（本体感）已构成"执行—校验—感知"闭环，并有 <code>test_closed_loop_e2e.py</code> 守护。增强方向是把桌面/工具通道统一接回该闭环。
+  </div>
+  <p class="muted">网关 <code>gateway/dispatcher.py</code> 真实实现 <code>MessageDispatcher</code>（适配器注册/路由/广播/镜像），<code>_mirror_send</code> 已修复（按 <code>platform#chat</code> 路由，缺失适配器降级不抛异常）。</p>
+</section>
+
+<section id="unique">
+  <h2>五、独有核心能力成熟度审计</h2>
+  <table>
+    <tr><th>能力</th><th>状态</th><th>证据</th><th>风险</th></tr>
+    <tr><td>记忆系统</td><td><span class="ok">已实现</span></td><td>Python <code>memory/engine,store,vector_store,cross_session,episodic</code>；TS 多层级齐备</td><td><span class="badge g">🟢</span></td></tr>
+    <tr><td>进化引擎</td><td><span class="ok">Python 已落地</span></td><td><code>evolution/engine,v2_engine,orchestrator,skill_engine</code>；TS <code>EvolutionEngine.ts</code> <strong>不存在</strong>（仅 adapter/接口）</td><td><span class="badge y">🟡</span></td></tr>
+    <tr><td>A2A 协议</td><td><span class="warn">仅 Python</span></td><td>Python <code>a2a/</code>（manager/server/client/protocol 2000+ 行，无 TODO）；<code>src/a2a/</code> <strong>不存在</strong></td><td><span class="badge r">🔴</span></td></tr>
+    <tr><td>轨迹持久化</td><td><span class="ok">已实现</span></td><td><code>persistence/trajectory.py</code> + <code>trajectory.db</code> 实际存在</td><td><span class="badge g">🟢</span></td></tr>
+    <tr><td>会话存储</td><td><span class="ok">已实现</span></td><td><code>session_store.py</code>（sqlite3 + FTS5 jieba 中文分词）</td><td><span class="badge g">🟢</span></td></tr>
+    <tr><td>上下文压缩</td><td><span class="ok">已实现</span></td><td><code>context_compressor.py</code> + <code>conversation_compression.py</code>（50+ 轮有损压缩）</td><td><span class="badge g">🟢</span></td></tr>
+    <tr><td>审批流</td><td><span class="ok">已实现</span></td><td>TS <code>ApprovalEngine.ts</code>(511)；Python <code>approval_manager.py</code></td><td><span class="badge g">🟢</span></td></tr>
+    <tr><td>Skill 中间件</td><td><span class="bad">缺失</span></td><td><code>agent/skill/</code> 仅 <code>skill_bundles/skill_sync</code>，无独立中间件层</td><td><span class="badge y">🟡</span></td></tr>
+  </table>
+  <div class="callout red">
+    <strong>🔴 质量红线被破：</strong> <code>tests/test_p2_1_silent_except.py::test_zero_silent_except_in_agent_package</code> 失败 —— agent 包内仍存在 <code>except: pass</code> 静默吞异常（已发现于 <code>perception/tools.py</code>、<code>screen_watcher.py</code>、<code>vlm_call.py</code>、<code>session_search_index.py</code>、<code>batch_trajectory.py</code> 等）。掩盖故障、损害可观测性，应统一改用 <code>log_ignored()</code>。
+  </div>
+  <p class="muted">另：<code>otel_tracer.py:187</code> 存在 "coroutine never awaited" 隐性异步 bug；<code>ARCHITECTURE.md</code> 应校正 "EvolutionEngine.ts / src/a2a" 的宣称与实情鸿沟。</p>
+</section>
+
+<section id="test">
+  <h2>六、测试健康度与质量红线</h2>
+  <div class="kpis">
+    <div class="kpi"><div class="n">3597</div><div class="l">Python 收集测试</div></div>
+    <div class="kpi"><div class="n">3193</div><div class="l">通过</div></div>
+    <div class="kpi"><div class="n">1</div><div class="l">失败（静默异常红线）</div></div>
+    <div class="kpi"><div class="n">11</div><div class="l">跳过（Redis 依赖）</div></div>
+  </div>
+  <ul class="tight">
+    <li>全量运行（<code>_audit_fullrun5_failures.log</code>，33min）：3193 passed / 1 failed / 11 skipped / 1 xfailed / 1 xpassed；并行版一致。历史波动已从 6/20 失败收敛至 1。</li>
+    <li>恒真测试守护 <code>scripts/check-no-tautology-tests.mjs</code> 运行通过，无 <code>expect(x).toBe(x)</code> 空壳。但仍有 <code>len(x) &gt;= 0</code> 类弱断言（如 <code>test_reflection_deep.py:308</code>），建议纳入守卫。</li>
+    <li>jest（TS）全量健康度未知（仅单套件日志 5/5、7/7）；覆盖率阈值配置但达标情况未复跑。</li>
+  </ul>
+</section>
+
+<section id="matrix">
+  <h2>七、综合风险矩阵</h2>
+  <table>
+    <tr><th>领域</th><th>🔴 高危（立即）</th><th>🟡 中危（本迭代）</th><th>🟢 健康</th></tr>
+    <tr>
+      <td>LLM 底座</td>
+      <td>failover 选回失败 primary（<code>router.py:144-148</code>）</td>
+      <td>transport 无 failover；无重试/timeout；语义缓存失真；ModelCostGuard 死代码；缺窄腰 catalog</td>
+      <td>Provider 目录、成本守卫、流式、熔断、分层缓存</td>
+    </tr>
+    <tr>
+      <td>编排调度</td>
+      <td>优先级调度默认失效；ReAct 零测试</td>
+      <td>无 RWLock；一致性哈希无虚拟节点；编排跨端不对齐</td>
+      <td>Leader 选举、双锁、MQ 派发、ReAct 重试/参数修正、DAG 分层并发</td>
+    </tr>
+    <tr>
+      <td>感知层</td>
+      <td>ASR 命令注入（<code>SpeechRecognizer.ts:224-230</code>）</td>
+      <td>听觉半残（TTS 模拟/ASR 未接通）；触觉/嗅觉无数据源；味觉不适用</td>
+      <td>视觉、sensory_fusion 统一入口</td>
+    </tr>
+    <tr>
+      <td>执行层</td>
+      <td>—</td>
+      <td>三通道分散无统一 Action；桌面闭环未接</td>
+      <td>ToolRegistry/PermissionGuard/ToolCallGuard、Python 闭环基础</td>
+    </tr>
+    <tr>
+      <td>独有能力</td>
+      <td>A2A 缺 TS 实现；静默异常红线被破</td>
+      <td>Evolution TS 仅 adapter；Skill 中间件缺失；otel 协程 bug</td>
+      <td>记忆、轨迹、会话、上下文压缩、审批</td>
+    </tr>
+  </table>
+</section>
+
+<section id="plan">
+  <h2>八、增强优化方案（优先级路线图）</h2>
+
+  <h3>P0 — 安全与可靠性（立即，1 周内）</h3>
+  <table>
+    <tr><th>编号</th><th>目标</th><th>具体措施</th><th>目标文件</th><th>验收标准</th></tr>
+    <tr>
+      <td>P0-1</td><td>消除 ASR 命令注入</td>
+      <td>改用参数数组调用（<code>execFile('python',[script,model,lang,tmpFile])</code>）或子进程 API 传参，杜绝字符串拼接；并加输入白名单校验模型名/路径</td>
+      <td><code>src/multimodal/SpeechRecognizer.ts</code></td>
+      <td>构造含引号/元字符的 model 与 tmpFile 不再触发命令执行；新增 <code>SpeechRecognizer</code> 注入安全单测</td>
+    </tr>
+    <tr>
+      <td>P0-2</td><td>修复 LLM 故障转移</td>
+      <td><code>get_fallback</code> 改为"排除已失败集合（含刚失败的 primary）后选次高优先级"，并将 failover 延伸至 transport 路径；补指数退避重试 + 显式 timeout</td>
+      <td><code>python/agent/llm/router.py</code>、<code>provider.py</code></td>
+      <td>单测覆盖 <code>exclude=None</code> 真实路径；主 primary 失败时真实切到次优 provider；transport 路径异常可降级</td>
+    </tr>
+    <tr>
+      <td>P0-3</td><td>恢复静默异常红线</td>
+      <td>全包扫描 <code>except: pass</code>/<code>except Exception: pass</code>，替换为 <code>log_ignored()</code>；CI 红线 <code>test_zero_silent_except</code> 转绿</td>
+      <td>agent 包（perception/tools、screen_watcher、vlm_call、session_search_index、batch_trajectory 等）</td>
+      <td><code>test_zero_silent_except</code> 通过；引入 ruff 规则防止回潮</td>
+    </tr>
+  </table>
+
+  <h3>P1 — 一致性与闭环（本迭代，2–4 周）</h3>
+  <table>
+    <tr><th>编号</th><th>目标</th><th>具体措施</th><th>目标文件</th><th>验收标准</th></tr>
+    <tr>
+      <td>P1-1</td><td>补齐 TS 端 A2A</td>
+      <td>以 Python <code>a2a/</code> 为基准实现 TS <code>src/a2a/</code> 薄壳（HTTP 入口路由 + 透传），对齐架构原则 0.1</td>
+      <td><code>src/a2a/</code>（新建）</td>
+      <td>跨端 A2A 连通冒烟测试通过；文档宣称与实情一致</td>
+    </tr>
+    <tr>
+      <td>P1-2</td><td>统一执行 Action 抽象</td>
+      <td>抽象 <code>ActionChannel</code> 接口，归并 harness 工具 / 桌面 / MCP 三通道；结果统一为 <code>ActionResult</code> 并回写闭环</td>
+      <td><code>src/harness/tools/registry/</code>、<code>src/desktop/</code>、<code>src/mcp/</code></td>
+      <td>编排层可经单一接口调度三类动作；桌面动作接回 <code>action_verifier</code></td>
+    </tr>
+    <tr>
+      <td>P1-3</td><td>听觉真正可用</td>
+      <td>将 <code>SpeechRecognizer</code> 接入 <code>voice_interact.listen</code>（替换硬编码 mock）；TTS 提供非模拟后端开关；ASR 结果进感知总线</td>
+      <td><code>src/harness/tools/system/voice_interact.ts</code>、<code>src/multimodal/SpeechRecognizer.ts</code></td>
+      <td>真实麦克风→ASR→文本→决策链路端到端测试通过</td>
+    </tr>
+    <tr>
+      <td>P1-4</td><td>优先级调度真实生效</td>
+      <td><code>InMemoryMessageQueue</code> 改用优先级堆（heapq/优先队列），与 Redis 路径语义一致；补 RWLock；一致性哈希加虚拟节点</td>
+      <td><code>python/agent/infrastructure/message_queue.py</code>、<code>distributed_lock.py</code>、<code>sharding.py</code></td>
+      <td>默认部署下 HIGH 任务优先消费；分片数变化时重归属率可控</td>
+    </tr>
+    <tr>
+      <td>P1-5</td><td>ReAct 核心回路加测</td>
+      <td>为 controller/executor/reflection 的关键路径（重试分类、参数修正、超时熔断）补单元测试与契约测试</td>
+      <td><code>python/tests/</code>（新增）</td>
+      <td>ReAct 关键路径覆盖率 ≥ 70%，回归护栏建立</td>
+    </tr>
+  </table>
+
+  <h3>P2 — 差异化增强（下迭代，1–2 月）</h3>
+  <table>
+    <tr><th>编号</th><th>目标</th><th>具体措施</th><th>目标文件</th><th>验收标准</th></tr>
+    <tr>
+      <td>P2-1</td><td>真语义缓存</td>
+      <td>将 <code>prompt_cache</code> 的 Jaccard 升级为 embedding 向量近邻（复用 vector_store），保留前缀缓存快路径</td>
+      <td><code>python/agent/llm/prompt_cache.py</code></td>
+      <td>同义改写命中率显著提升；缓存命中率指标可观测</td>
+    </tr>
+    <tr>
+      <td>P2-2</td><td>感知数据源插件化</td>
+      <td>为触觉/嗅觉/环境态提供可插拔 ingest 网关（模拟 + 真实 IoT/硬件后端），统一经 <code>sensory_fusion</code> 入决策；味觉映射为"化学/物料态"可选通道</td>
+      <td><code>python/agent/perception/*_channel.py</code></td>
+      <td>外部传感器数据可注入并被融合；默认安全模拟回退</td>
+    </tr>
+    <tr>
+      <td>P2-3</td><td>Skill 中间件层</td>
+      <td>新增独立 Skill 中间件（生命周期钩子：before/after tool-call、记忆注入、权限分级），对齐 AGENTS.md 角色职责</td>
+      <td><code>agent/skill/</code>（新建 middleware）</td>
+      <td>Skill 可在工具调用前后插桩；配置化启用</td>
+    </tr>
+    <tr>
+      <td>P2-4</td><td>窄腰路由 catalog + 死代码清理</td>
+      <td>引入 <code>catalog.py</code> 窄腰统一路由入口；删除或接线 <code>ModelCostGuard</code> 重复实现</td>
+      <td><code>python/agent/llm/</code></td>
+      <td>路由逻辑收敛；无重复成本守卫实现</td>
+    </tr>
+    <tr>
+      <td>P2-5</td><td>进化/记忆深度增强</td><td>把采样与反思信号真正喂入 <code>EvolutionEngine</code>；跨会话记忆检索接入 RAG 化；otel 协程 bug 修复</td>
+      <td><code>evolution/engine.py</code>、<code>memory/</code>、<code>core/otel_tracer.py</code></td>
+      <td>进化受真实反馈驱动；otel trace 不再丢；记忆检索可解释</td>
+    </tr>
+  </table>
+  <div class="callout">
+    <strong>执行纪律建议：</strong>所有 P0/P1 改动须先在隔离环境（Python venv / TS 隔离）跑通对应新增测试再合并；遵循 AGENTS.md "仅 Python 主实现 + TS 入口路由" 的归属强制，避免再次出现 TS 端缺失核心实现的对齐缺口。
+  </div>
+</section>
+
+<section id="appendix">
+  <h2>附录：证据索引</h2>
+  <ul class="tight">
+    <li>LLM：<code>python/agent/llm/</code>（26 文件，9,030 行）；failover 实锤 <code>router.py:144-148</code> + 调用点 <code>provider.py:478</code>。</li>
+    <li>编排：<code>scheduler/cron.py</code>、<code>infrastructure/{sharding,distributed_lock,message_queue}.py</code>、<code>loop/</code>、<code>orchestration/</code>、<code>src/core/DAGTask.ts</code>。</li>
+    <li>感知/执行：<code>perception/sensory_fusion.py</code>、<code>perception/{visual_grounding,vlm_call,local_ocr,screen_watcher,haptic_channel,olfactory_channel,gustatory_channel}.py</code>、<code>src/multimodal/SpeechRecognizer.ts</code>（注入 224-230）、<code>src/harness/tools/registry/{ToolRegistry,ToolCallGuard}.ts</code>、<code>src/desktop/</code>、<code>gateway/dispatcher.py</code>。</li>
+    <li>独有能力：<code>memory/</code>、<code>evolution/</code>（Python 真；TS <code>EvolutionEngine.ts</code> 缺失）、<code>a2a/</code>（Python 真；TS 缺）、<code>persistence/{trajectory,session_store}.py</code>、<code>context_compressor.py</code>、<code>src/security/ApprovalEngine.ts</code>、<code>agent/skill/</code>。</li>
+    <li>测试：<code>python/tests/</code>（3597 收集 / 3193 通过）、<code>scripts/check-no-tautology-tests.mjs</code>、日志 <code>_audit_fullrun5_failures.log</code>。</li>
+  </ul>
+  <p class="muted">本报告全部结论均来自实时代码探测；两处 🔴 高危项已逐行二次核验。</p>
+</section>
+
+</main>
+</div>
+<footer>
+  家百星全面功能审计 · 2026-08-11 · 方法：实时代码探测（grep/read/测试日志），不采信文档宣称 · 高风险项已二次源码核验。
+</footer>
+</body>
+</html>

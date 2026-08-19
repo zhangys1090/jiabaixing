@@ -143,8 +143,9 @@ async def lsp_completion_executor(params: dict[str, Any]) -> ToolResult:
             return ToolResult(success=False, error=f"补全失败: {e}", duration=time.time() - start)
 
     return ToolResult(
-        success=True,
-        output=f"LSP 补全请求已记录 ({Path(file_path).name}:{line}:{character})。当前支持 Python 补全，{language} 补全需通过 TS 后端调用。",
+        success=False,
+        output=f"LSP 补全不支持 {language}（仅 Python 由本后端实现）。",
+        error=f"unsupported_language: LSP completion 仅支持 Python，{language} 需经 TS 后端调用",
         duration=time.time() - start,
     )
 
@@ -171,8 +172,9 @@ async def lsp_diagnostics_executor(params: dict[str, Any]) -> ToolResult:
             return ToolResult(success=False, error=f"诊断失败: {e}", duration=time.time() - start)
 
     return ToolResult(
-        success=True,
-        output=f"LSP 诊断请求已记录 ({Path(file_path).name})。当前支持 Python 诊断，{language} 诊断需通过 TS 后端调用。",
+        success=False,
+        output=f"LSP 诊断不支持 {language}（仅 Python 由本后端实现）。",
+        error=f"unsupported_language: LSP diagnostics 仅支持 Python，{language} 需经 TS 后端调用",
         duration=time.time() - start,
     )
 
@@ -200,8 +202,9 @@ async def lsp_hover_executor(params: dict[str, Any]) -> ToolResult:
             return ToolResult(success=False, error=f"悬停查询失败: {e}", duration=time.time() - start)
 
     return ToolResult(
-        success=True,
-        output=f"LSP 悬停请求已记录 ({Path(file_path).name}:{line}:{character})。当前支持 Python 悬停，{language} 悬停需通过 TS 后端调用。",
+        success=False,
+        output=f"LSP 悬停不支持 {language}（仅 Python 由本后端实现）。",
+        error=f"unsupported_language: LSP hover 仅支持 Python，{language} 需经 TS 后端调用",
         duration=time.time() - start,
     )
 
@@ -229,8 +232,9 @@ async def lsp_definition_executor(params: dict[str, Any]) -> ToolResult:
             return ToolResult(success=False, error=f"定义跳转失败: {e}", duration=time.time() - start)
 
     return ToolResult(
-        success=True,
-        output=f"LSP 定义跳转请求已记录 ({Path(file_path).name}:{line}:{character})。当前支持 Python 定义跳转，{language} 需通过 TS 后端调用。",
+        success=False,
+        output=f"LSP 定义跳转不支持 {language}（仅 Python 由本后端实现）。",
+        error=f"unsupported_language: LSP definition 仅支持 Python，{language} 需经 TS 后端调用",
         duration=time.time() - start,
     )
 
@@ -258,8 +262,9 @@ async def lsp_references_executor(params: dict[str, Any]) -> ToolResult:
             return ToolResult(success=False, error=f"引用查找失败: {e}", duration=time.time() - start)
 
     return ToolResult(
-        success=True,
-        output=f"LSP 引用查找请求已记录 ({Path(file_path).name}:{line}:{character})。当前支持 Python 引用查找，{language} 需通过 TS 后端调用。",
+        success=False,
+        output=f"LSP 引用查找不支持 {language}（仅 Python 由本后端实现）。",
+        error=f"unsupported_language: LSP references 仅支持 Python，{language} 需经 TS 后端调用",
         duration=time.time() - start,
     )
 
@@ -285,8 +290,9 @@ async def lsp_symbols_executor(params: dict[str, Any]) -> ToolResult:
             return ToolResult(success=False, error=f"符号查找失败: {e}", duration=time.time() - start)
 
     return ToolResult(
-        success=True,
-        output=f"LSP 符号查找请求已记录 ({Path(file_path).name})。当前支持 Python 符号查找，{language} 需通过 TS 后端调用。",
+        success=False,
+        output=f"LSP 符号查找不支持 {language}（仅 Python 由本后端实现）。",
+        error=f"unsupported_language: LSP symbols 仅支持 Python，{language} 需经 TS 后端调用",
         duration=time.time() - start,
     )
 

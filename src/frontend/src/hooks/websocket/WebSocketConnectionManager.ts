@@ -1,62 +1,69 @@
+import { SYSTEM_CONSTANTS } from '@shared/contracts';
+import { createLogger } from '../../utils/logger';
 import {
-  ConnectionConfig,
-  StateChangeListener,
-  DialogStateListener,
-  MessageListener,
-  ConnectionStatusListener,
   AgentExecutionListener,
-  PerceptionUpdateListener,
-  BrainStageUpdateListener,
-  SkillExecutionUpdateListener,
-  EvolutionEventListener,
-  ClarificationRequestListener,
-  ExecutionPreviewListener,
-  FileModifiedListener,
-  ToolTraceListener,
-  DialogStateValue,
-  DialogState,
   AgentExecutionUpdate,
-  PerceptionUpdate,
+  AgentProgressData,
+  AgentProgressListener,
   BrainStageUpdate,
-  SkillExecutionUpdate,
-  EvolutionEvent,
+  BrainStageUpdateListener,
   ClarificationRequest,
-  ExecutionPreview,
-  FileModifiedEvent,
-  ToolTraceEvent,
+  ClarificationRequestListener,
+  ConnectionConfig,
   ConnectionStatus,
-  WebSocketMessage,
-  ServerLogEntry,
-  ErrorEventListener,
-  ProactiveMessageListener,
-  WeightUpdateListener,
-  FileRollbackListener,
-  MultiFileModifiedListener,
-  UserCorrectionListener,
-  ErrorEvent,
-  ProactiveMessage,
-  WeightUpdate,
-  FileRollback,
-  MultiFileModified,
-  UserCorrection,
-  TaskCancelled,
-  TaskCancelledListener,
+  ConnectionStatusListener,
+  DialogState,
+  DialogStateListener,
+  DialogStateValue,
   EnvironmentUpdate,
   EnvironmentUpdateListener,
-  ProjectChange,
-  ProjectChangeListener,
+  ErrorEvent,
+  ErrorEventListener,
+  EvolutionEvent,
+  EvolutionEventListener,
+  ExecutionPreview,
+  ExecutionPreviewListener,
+  FileModifiedEvent,
+  FileModifiedListener,
+  FileRollback,
+  FileRollbackListener,
   GitStatus,
   GitStatusListener,
-  StreamStartListener,
+  MessageListener,
+  MultiFileModified,
+  MultiFileModifiedListener,
+  PerceptionUpdate,
+  PerceptionUpdateListener,
+  ProactiveMessage,
+  ProactiveMessageListener,
+  ProjectChange,
+  ProjectChangeListener,
+  ServerLogEntry,
+  SkillExecutionUpdate,
+  SkillExecutionUpdateListener,
+  StateChangeListener,
+  StreamChunkData,
   StreamChunkListener,
+  StreamDoneData,
   StreamDoneListener,
+  StreamStartData,
+  StreamStartListener,
+  TaskCancelled,
+  TaskCancelledListener,
+  ToolTraceEvent,
+  ToolTraceListener,
+  UserCorrection,
+  UserCorrectionListener,
+  WebSocketMessage,
+  WeightUpdate,
+  WeightUpdateListener,
 } from './types';
-import { SYSTEM_CONSTANTS } from '@shared/contracts';
 
 type ServerLogListener = (entry: ServerLogEntry) => void;
 type ResponseReadyListener = (response: unknown, traceId?: string) => void;
 
 class WebSocketConnectionManager {
+  private static log = createLogger('WebSocket');
   private ws: WebSocket | null = null;
   private config: ConnectionConfig | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -93,6 +100,7 @@ class WebSocketConnectionManager {
   private streamStartListeners = new Set<StreamStartListener>();
   private streamChunkListeners = new Set<StreamChunkListener>();
   private streamDoneListeners = new Set<StreamDoneListener>();
+  private agentProgressListeners = new Set<AgentProgressListener>();
 
   private currentDialogState: DialogStateValue = 'idle';
   private currentConnected = false;
@@ -131,14 +139,14 @@ class WebSocketConnectionManager {
     }
 
     this.updateConnectionStatus('connecting');
-    console.log(`🔌 正在连接WebSocket: ${this.config.url} (第${this.reconnectAttempts + 1}次)`);
+    WebSocketConnectionManager.log.info(`正在连接WebSocket: ${this.config.url} (第${this.reconnectAttempts + 1}次)`);
 
     try {
       const ws = new WebSocket(this.config.url);
       this.ws = ws;
 
       ws.onopen = () => {
-        console.log('✅ WebSocket连接成功');
+        WebSocketConnectionManager.log.info('WebSocket连接成功');
         this.updateConnectionState(true);
         this.updateConnectionStatus('connected');
         this.reconnectAttempts = 0;
@@ -251,7 +259,7 @@ class WebSocketConnectionManager {
         this.updateDialogState('speaking');
         break;
       case 'dialog_state': {
-        const stateData = message.data as unknown as DialogState;
+        const stateData = message.data as DialogState;
         const stateMap: Record<string, DialogStateValue> = {
           LISTENING: 'listening',
           PROCESSING: 'processing',
@@ -261,7 +269,7 @@ class WebSocketConnectionManager {
         break;
       }
       case 'agent_execution_update': {
-        const updateData = message.data as unknown as AgentExecutionUpdate;
+        const updateData = message.data as AgentExecutionUpdate;
         this.agentExecutionListeners.forEach((listener) => {
           try {
             listener(updateData);
@@ -272,7 +280,7 @@ class WebSocketConnectionManager {
         break;
       }
       case 'perception_update': {
-        const updateData = message.data as unknown as PerceptionUpdate;
+        const updateData = message.data as PerceptionUpdate;
         this.perceptionUpdateListeners.forEach((listener) => {
           try {
             listener(updateData);
@@ -283,7 +291,7 @@ class WebSocketConnectionManager {
         break;
       }
       case 'brain_stage_update': {
-        const updateData = message.data as unknown as BrainStageUpdate;
+        const updateData = message.data as BrainStageUpdate;
         this.brainStageUpdateListeners.forEach((listener) => {
           try {
             listener(updateData);
@@ -294,7 +302,7 @@ class WebSocketConnectionManager {
         break;
       }
       case 'skill_execution_update': {
-        const updateData = message.data as unknown as SkillExecutionUpdate;
+        const updateData = message.data as SkillExecutionUpdate;
         this.skillExecutionUpdateListeners.forEach((listener) => {
           try {
             listener(updateData);
@@ -305,7 +313,7 @@ class WebSocketConnectionManager {
         break;
       }
       case 'evolution_event': {
-        const eventData = message.data as unknown as EvolutionEvent;
+        const eventData = message.data as EvolutionEvent;
         this.evolutionEventListeners.forEach((listener) => {
           try {
             listener(eventData);
@@ -316,7 +324,7 @@ class WebSocketConnectionManager {
         break;
       }
       case 'clarification_request': {
-        const requestData = message.data as unknown as ClarificationRequest;
+        const requestData = message.data as ClarificationRequest;
         console.log('🤔 收到澄清请求:', requestData.question);
         this.clarificationRequestListeners.forEach((listener) => {
           try {
@@ -328,7 +336,7 @@ class WebSocketConnectionManager {
         break;
       }
       case 'execution_preview': {
-        const previewData = message.data as unknown as ExecutionPreview;
+        const previewData = message.data as ExecutionPreview;
         console.log('📋 收到执行预览:', previewData.summary);
         this.executionPreviewListeners.forEach((listener) => {
           try {
@@ -340,7 +348,7 @@ class WebSocketConnectionManager {
         break;
       }
       case 'file_modified': {
-        const fileData = message.data as unknown as FileModifiedEvent;
+        const fileData = message.data as FileModifiedEvent;
         console.log('✏️ 文件已修改:', fileData.filePath);
         this.fileModifiedListeners.forEach((listener) => {
           try {
@@ -352,7 +360,7 @@ class WebSocketConnectionManager {
         break;
       }
       case 'tool_trace': {
-        const traceData = message.data as unknown as ToolTraceEvent;
+        const traceData = message.data as ToolTraceEvent;
         this.toolTraceListeners.forEach((listener) => {
           try {
             listener(traceData);
@@ -363,7 +371,7 @@ class WebSocketConnectionManager {
         break;
       }
       case 'server_log': {
-        const logData = message.data as unknown as ServerLogEntry;
+        const logData = message.data as ServerLogEntry;
         this.serverLogListeners.forEach((listener) => {
           try {
             listener(logData);
@@ -387,7 +395,7 @@ class WebSocketConnectionManager {
         this.updateDialogState('speaking');
         break;
       case 'processing_status': {
-        const statusData = message.data as unknown as { status: string; message: string; traceId?: string };
+        const statusData = message.data as { status: string; message: string; traceId?: string };
         console.log('⏳ 收到处理状态更新:', statusData.message);
         this.processingStatusListeners.forEach((listener) => {
           try {
@@ -402,7 +410,7 @@ class WebSocketConnectionManager {
         console.log('📨 WebSocket连接已确认');
         break;
       case 'error': {
-        const errorData = message.data as unknown as ErrorEvent;
+        const errorData = message.data as ErrorEvent;
         console.error('❌ 收到服务器错误:', errorData);
         this.errorListeners.forEach((listener) => {
           try {
@@ -414,7 +422,7 @@ class WebSocketConnectionManager {
         break;
       }
       case 'proactive_message': {
-        const messageData = message.data as unknown as ProactiveMessage;
+        const messageData = message.data as ProactiveMessage;
         console.log('💬 收到主动消息:', messageData.message);
         this.proactiveMessageListeners.forEach((listener) => {
           try {
@@ -426,7 +434,7 @@ class WebSocketConnectionManager {
         break;
       }
       case 'weight_update': {
-        const updateData = message.data as unknown as WeightUpdate;
+        const updateData = message.data as WeightUpdate;
         this.weightUpdateListeners.forEach((listener) => {
           try {
             listener(updateData);
@@ -437,7 +445,7 @@ class WebSocketConnectionManager {
         break;
       }
       case 'file_rollback': {
-        const rollbackData = message.data as unknown as FileRollback;
+        const rollbackData = message.data as FileRollback;
         console.log('↩️ 文件已回滚:', rollbackData.filePath);
         this.fileRollbackListeners.forEach((listener) => {
           try {
@@ -449,7 +457,7 @@ class WebSocketConnectionManager {
         break;
       }
       case 'multi_file_modified': {
-        const multiFileData = message.data as unknown as MultiFileModified;
+        const multiFileData = message.data as MultiFileModified;
         console.log('📝 多个文件已修改:', multiFileData.files?.length || 0, '个文件');
         this.multiFileModifiedListeners.forEach((listener) => {
           try {
@@ -461,7 +469,7 @@ class WebSocketConnectionManager {
         break;
       }
       case 'user_correction': {
-        const correctionData = message.data as unknown as UserCorrection;
+        const correctionData = message.data as UserCorrection;
         this.userCorrectionListeners.forEach((listener) => {
           try {
             listener(correctionData);
@@ -472,7 +480,7 @@ class WebSocketConnectionManager {
         break;
       }
       case 'task_cancelled': {
-        const cancelledData = message.data as unknown as TaskCancelled;
+        const cancelledData = message.data as TaskCancelled;
         console.log('🚫 任务已取消:', cancelledData.traceId ?? cancelledData.taskId ?? 'unknown');
         this.taskCancelledListeners.forEach((listener) => {
           try {
@@ -484,7 +492,7 @@ class WebSocketConnectionManager {
         break;
       }
       case 'environment_update': {
-        const envData = message.data as unknown as EnvironmentUpdate;
+        const envData = message.data as EnvironmentUpdate;
         this.environmentUpdateListeners.forEach((listener) => {
           try {
             listener(envData);
@@ -495,7 +503,7 @@ class WebSocketConnectionManager {
         break;
       }
       case 'project_change': {
-        const changeData = message.data as unknown as ProjectChange;
+        const changeData = message.data as ProjectChange;
         console.log('📂 项目变更:', changeData.repo, changeData.type);
         this.projectChangeListeners.forEach((listener) => {
           try {
@@ -507,7 +515,7 @@ class WebSocketConnectionManager {
         break;
       }
       case 'git_status': {
-        const gitData = message.data as unknown as GitStatus;
+        const gitData = message.data as GitStatus;
         this.gitStatusListeners.forEach((listener) => {
           try {
             listener(gitData);
@@ -518,11 +526,7 @@ class WebSocketConnectionManager {
         break;
       }
       case 'stream_start': {
-        const streamStartData = message.data as unknown as {
-          traceId?: string;
-          totalLength?: number;
-          timestamp?: number;
-        };
+        const streamStartData = message.data as StreamStartData;
         this.streamStartListeners.forEach((listener) => {
           try {
             listener(streamStartData);
@@ -533,12 +537,7 @@ class WebSocketConnectionManager {
         break;
       }
       case 'stream_chunk': {
-        const streamChunkData = message.data as unknown as {
-          traceId?: string;
-          chunk?: string;
-          offset?: number;
-          timestamp?: number;
-        };
+        const streamChunkData = message.data as StreamChunkData;
         this.streamChunkListeners.forEach((listener) => {
           try {
             listener(streamChunkData);
@@ -549,10 +548,38 @@ class WebSocketConnectionManager {
         break;
       }
       case 'stream_done': {
-        const streamDoneData = message.data as unknown as { traceId?: string; fullText?: string; timestamp?: number };
+        const streamDoneData = message.data as StreamDoneData;
         this.streamDoneListeners.forEach((listener) => {
           try {
             listener(streamDoneData);
+          } catch {
+            // 静默处理
+          }
+        });
+        break;
+      }
+      case 'thinking':
+      case 'tool_start':
+      case 'tool_end':
+      case 'progress': {
+        const progressData = message.data as AgentProgressData;
+        const progress: AgentProgressData = {
+          traceId: progressData.traceId,
+          type: message.type as 'thinking' | 'tool_start' | 'tool_end' | 'progress',
+          content: progressData.content,
+          toolName: progressData.toolName,
+          toolArgs: progressData.toolArgs,
+          success: progressData.success,
+          resultSummary: progressData.resultSummary,
+          durationMs: progressData.durationMs,
+          phase: progressData.phase,
+          stepsCompleted: progressData.stepsCompleted,
+          stepsTotal: progressData.stepsTotal,
+          message: progressData.message,
+        };
+        this.agentProgressListeners.forEach((listener) => {
+          try {
+            listener(progress);
           } catch {
             // 静默处理
           }
@@ -854,6 +881,14 @@ class WebSocketConnectionManager {
 
   offStreamDone(listener: StreamDoneListener): void {
     this.streamDoneListeners.delete(listener);
+  }
+
+  onAgentProgress(listener: AgentProgressListener): void {
+    this.agentProgressListeners.add(listener);
+  }
+
+  offAgentProgress(listener: AgentProgressListener): void {
+    this.agentProgressListeners.delete(listener);
   }
 
   on(event: string, listener: (data: unknown) => void): () => void {

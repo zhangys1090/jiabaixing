@@ -4,12 +4,16 @@ import os
 import time as _time
 from typing import Any
 
+from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
 from agent.tools.registry import (
     ToolCategory,
     ToolDefinition,
     ToolParameterDef,
     ToolResult,
 )
+
+log = StructuredLogger("system_tools")
 
 
 ASK_CLARIFICATION_DEF = ToolDefinition(
@@ -79,6 +83,7 @@ async def ask_clarification_executor(params: dict[str, Any]) -> ToolResult:
     options = params.get("options")
 
     if not question:
+        log.warning("ask_clarification: 问题为空")
         return ToolResult(success=False, error="问题不能为空")
 
     output = f"❓ {question}"
@@ -102,8 +107,8 @@ async def context_manage_executor(params: dict[str, Any]) -> ToolResult:
             from agent.main import engine
             if engine and hasattr(engine, "llm"):
                 llm = engine.llm
-        except Exception:
-            pass
+        except Exception as _exc:
+            log_ignored(log, "system_tools.context_manage_executor", _exc)
 
         if llm:
             try:
@@ -121,8 +126,8 @@ async def context_manage_executor(params: dict[str, Any]) -> ToolResult:
                     prompt = f"请总结以下对话的关键信息：\n{context_text}"
                     response = await llm.chat(messages=[{"role": "user", "content": prompt}], use_cache=False)
                     return ToolResult(success=True, output=response.get("content", "摘要完成"), duration=time.time() - start)
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "system_tools.context_manage_executor", _exc)
 
         return ToolResult(success=True, output="上下文摘要完成", duration=time.time() - start)
     elif action == "focus":
@@ -148,8 +153,8 @@ async def preview_execution_executor(params: dict[str, Any]) -> ToolResult:
         from agent.main import engine
         if engine and hasattr(engine, "llm"):
             llm = engine.llm
-    except Exception:
-        pass
+    except Exception as _exc:
+        log_ignored(log, "system_tools.preview_execution_executor", _exc)
 
     if llm:
         try:
@@ -161,8 +166,8 @@ async def preview_execution_executor(params: dict[str, Any]) -> ToolResult:
             response = await llm.chat(messages=[{"role": "user", "content": prompt}], use_cache=False)
             content = response.get("content", "")
             return ToolResult(success=True, output=content, duration=time.time() - start)
-        except Exception:
-            pass
+        except Exception as _exc:
+            log_ignored(log, "system_tools.preview_execution_executor", _exc)
 
     return ToolResult(success=True, output=f"执行计划预览:\n{plan}", duration=time.time() - start)
 
@@ -190,8 +195,8 @@ async def rollback_changes_executor(params: dict[str, Any]) -> ToolResult:
                         output=f"已回滚: {target}（{steps}步）",
                         duration=time.time() - start,
                     )
-    except Exception:
-        pass
+    except Exception as _exc:
+        log_ignored(log, "system_tools.rollback_changes_executor", _exc)
 
     return ToolResult(success=False, error="回滚失败：检查点服务不可用或无可用快照")
 
@@ -202,10 +207,8 @@ async def rollback_changes_executor(params: dict[str, Any]) -> ToolResult:
 # ═══════════════════════════════════════════════════════════════
 
 import hashlib
-import os
 import platform
 import re
-import time as _time
 from pathlib import Path
 
 
@@ -310,12 +313,12 @@ def _scan_files(dir_path: str, recursive: bool, min_size: int) -> list[dict[str,
                     stat = entry.stat()
                     if stat.st_size >= min_size:
                         results.append({"path": str(entry), "size": stat.st_size, "name": entry.name})
-                except OSError:
-                    pass
+                except OSError as _exc:
+                    log_ignored(log, "system_tools._scan_files", _exc)
             elif entry.is_dir() and recursive and not entry.name.startswith("."):
                 results.extend(_scan_files(str(entry), recursive, min_size))
-    except OSError:
-        pass
+    except OSError as _exc:
+        log_ignored(log, "system_tools._scan_files", _exc)
     return results
 
 
@@ -493,8 +496,8 @@ async def shell_generate_executor(params: dict[str, Any]) -> ToolResult:
         from agent.main import engine
         if engine and hasattr(engine, "llm"):
             llm = engine.llm
-    except Exception:
-        pass
+    except Exception as _exc:
+        log_ignored(log, "system_tools.shell_generate_executor", _exc)
 
     if not llm:
         return ToolResult(
@@ -622,10 +625,10 @@ async def _do_tts_speak(text: str, language: str, emotion: str, voice: str, star
             duration=_time.time() - start,
             metadata={"engine": "edge-tts", "voice": target_voice, "audio_path": str(audio_file), "text_length": len(text)},
         )
-    except ImportError:
-        pass
-    except Exception:
-        pass
+    except ImportError as _exc:
+        log_ignored(log, "system_tools._do_tts_speak", _exc)
+    except Exception as _exc:
+        log_ignored(log, "system_tools._do_tts_speak", _exc)
 
     try:
         import subprocess
@@ -640,8 +643,8 @@ async def _do_tts_speak(text: str, language: str, emotion: str, voice: str, star
                 duration=_time.time() - start,
                 metadata={"engine": "pyttsx3", "simulated": False},
             )
-    except (ImportError, Exception):
-        pass
+    except (ImportError, Exception) as _exc:
+        log_ignored(log, "system_tools._do_tts_speak", _exc)
 
     try:
         if os.name == "darwin":
@@ -652,8 +655,8 @@ async def _do_tts_speak(text: str, language: str, emotion: str, voice: str, star
                 duration=_time.time() - start,
                 metadata={"engine": "macos_say", "simulated": False},
             )
-    except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
-        pass
+    except (FileNotFoundError, subprocess.TimeoutExpired, Exception) as _exc:
+        log_ignored(log, "system_tools._do_tts_speak", _exc)
 
     return ToolResult(
         success=True,
@@ -732,10 +735,10 @@ async def _record_audio_realtime(language: str) -> str | None:
         sd.wait()
         wav.write(wav_file, fs, recording)
         return wav_file
-    except ImportError:
-        pass
-    except Exception:
-        pass
+    except ImportError as _exc:
+        log_ignored(log, "system_tools._record_audio_realtime", _exc)
+    except Exception as _exc:
+        log_ignored(log, "system_tools._record_audio_realtime", _exc)
 
     try:
         import pyaudio
@@ -767,10 +770,10 @@ async def _record_audio_realtime(language: str) -> str | None:
         wf.close()
 
         return wav_file
-    except ImportError:
-        pass
-    except Exception:
-        pass
+    except ImportError as _exc:
+        log_ignored(log, "system_tools._record_audio_realtime", _exc)
+    except Exception as _exc:
+        log_ignored(log, "system_tools._record_audio_realtime", _exc)
 
     return None
 
@@ -790,8 +793,8 @@ async def delegate_task_executor(params: dict[str, Any]) -> ToolResult:
         from agent.main import engine
         if engine and hasattr(engine, "llm"):
             llm = engine.llm
-    except Exception:
-        pass
+    except Exception as _exc:
+        log_ignored(log, "system_tools.delegate_task_executor", _exc)
 
     if not llm:
         return ToolResult(success=False, error="子Agent需要LLM支持，当前LLM不可用", duration=_time.time() - start)
@@ -879,10 +882,10 @@ async def get_active_file_executor(params: dict[str, Any]) -> ToolResult:
                     error=result.get("error"),
                     duration=_time.time() - start,
                 )
-        except Exception:
-            pass
-    except Exception:
-        pass
+        except Exception as _exc:
+            log_ignored(log, "system_tools.get_active_file_executor", _exc)
+    except Exception as _exc:
+        log_ignored(log, "system_tools.get_active_file_executor", _exc)
 
     return ToolResult(
         success=False,

@@ -4,14 +4,15 @@
  * 使用 screenshot-desktop 实现真实截图，保存到 /tmp/ 目录。
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
+import { Logger } from '../../../utils/Logger';
 import type { ToolContext, ToolDefinition, ToolResult } from '../../types';
 import { Permission, ToolCategory } from '../../types';
-import { Logger } from '../../../utils/Logger';
-import * as path from 'path';
-import * as fs from 'fs';
 
-// screenshot-desktop 是 CommonJS 模块
-const screenshotDesktop = require('screenshot-desktop');
+// screenshot-desktop 是 CommonJS 模块，使用动态导入兼容 ESM
+let screenshotDesktop: (options?: { format?: string; screen?: number }) => Promise<Buffer>;
+import('screenshot-desktop').then((mod) => { screenshotDesktop = mod.default || mod; }).catch(() => {});
 
 export const DESKTOP_SCREENSHOT_DEF: ToolDefinition = {
   name: 'desktop_screenshot',

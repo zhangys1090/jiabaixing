@@ -5,6 +5,7 @@
  */
 
 import { EventEmitter } from 'events';
+import type { IMemoryEngine } from '../core/IMemoryEngine';
 import { Logger } from '../utils/Logger';
 
 export interface DialogContext {
@@ -63,6 +64,7 @@ export class ContinuousDialogManager extends EventEmitter {
   private speechRecognizer: unknown = null;
   private speechSynthesizer: unknown = null;
   private audioStream: unknown = null;
+  private memoryEngine: IMemoryEngine | null = null;
 
   private config: ConversationEndConfig = {
     maxSilenceMs: 5000,
@@ -95,6 +97,18 @@ export class ContinuousDialogManager extends EventEmitter {
    */
   setSpeechSynthesizer(synthesizer: unknown): void {
     this.speechSynthesizer = synthesizer;
+  }
+
+  /**
+   * 注入记忆引擎（由 InteractionEngine.setMemoryEngine 传递）
+   * 使连续对话管理器能跨会话保持上下文
+   */
+  setMemoryEngine(memoryEngine: IMemoryEngine): void {
+    this.memoryEngine = memoryEngine;
+    Logger.info(
+      '💾 MemoryEngine 已注入 ContinuousDialogManager',
+      'ContinuousDialogManager'
+    );
   }
 
   public async initialize(): Promise<void> {
@@ -222,7 +236,7 @@ export class ContinuousDialogManager extends EventEmitter {
       this.emit('interruption', { userId, content });
     }
 
-    let context = this.getOrCreateDialogContext(userId);
+    let context = await this.getOrCreateDialogContext(userId);
 
     const userMessage: DialogMessage = {
       id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`,
@@ -365,7 +379,9 @@ export class ContinuousDialogManager extends EventEmitter {
     this.continuousRoundCount = 0;
   }
 
-  private getOrCreateDialogContext(userId: string): DialogContext {
+  private async getOrCreateDialogContext(
+    userId: string
+  ): Promise<DialogContext> {
     let context = this.dialogContexts.get(userId);
     if (!context) {
       context = {
@@ -378,6 +394,29 @@ export class ContinuousDialogManager extends EventEmitter {
         silenceDuration: 0,
         isWaitingForUser: false,
       };
+
+      if (this.memoryEngine?.retrieveRelevant) {
+        try {
+          const recentMemories = await this.memoryEngine.retrieveRelevant!({
+            query: userId,
+            limit: 5,
+            includeBehaviorPatterns: true,
+          });
+          if (Array.isArray(recentMemories) && recentMemories.length > 0) {
+            context.context.crossSessionMemories = recentMemories;
+            Logger.info(
+              `💾 跨会话记忆恢复: ${recentMemories.length}条`,
+              'ContinuousDialogManager'
+            );
+          }
+        } catch (error) {
+          Logger.warn(
+            `⚠️ 跨会话记忆恢复失败: ${(error as Error).message}`,
+            'ContinuousDialogManager'
+          );
+        }
+      }
+
       this.dialogContexts.set(userId, context);
     }
     return context;

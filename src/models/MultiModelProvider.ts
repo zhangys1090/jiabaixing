@@ -12,17 +12,19 @@
 
 import { Logger } from '../utils/Logger';
 import { OpenAICompatibleModel } from './OpenAICompatibleModel';
-import { ModelInput } from './ModelInterface';
+import { Model, ModelInput } from './ModelInterface';
+import { PythonBackedModel } from './PythonBackedModel';
+import { getActivePythonBridge } from '../ide/bridgeRegistry';
 import { getProviderManager, ProviderConfig } from './ProviderManager';
 import { LLMResponseCache } from './LLMResponseCache';
 import { RequestQueue } from './RequestQueue';
 import { PromptOptimizer } from './PromptOptimizer';
-import { getPromptTemplate } from '../llm/prompt-templates';
+import { getPromptTemplate } from './prompt-templates';
 import { injectPreferences } from '../memory/PreferenceInjector';
 import { perf } from '../monitoring/PerformanceMonitor';
 
 export class MultiModelProvider {
-  private instances: Map<string, OpenAICompatibleModel> = new Map();
+  private instances: Map<string, Model> = new Map();
   private responseCache: LLMResponseCache;
   private requestQueue: RequestQueue;
   private maxRetries: number = 2;
@@ -89,7 +91,12 @@ export class MultiModelProvider {
     }
   }
 
-  private createModel(config: ProviderConfig): OpenAICompatibleModel {
+  private createModel(config: ProviderConfig): Model {
+    // P2-3 C: AGENT_BACKEND=python 模式下桥壳化 — 经 PythonAgentBridge 委派，
+    // 不再实例化 TS 本地 LLM 客户端（OpenAICompatibleModel）。
+    if (getActivePythonBridge()) {
+      return new PythonBackedModel(config.model);
+    }
     return new OpenAICompatibleModel({
       baseUrl: config.baseUrl,
       apiKey: config.apiKey,
@@ -125,11 +132,11 @@ export class MultiModelProvider {
   /** 根据 ProviderManager 的路由规则获取模型列表（按优先级排序） */
   private getModelsForInput(
     input: string
-  ): { name: string; model: OpenAICompatibleModel }[] {
+  ): { name: string; model: Model }[] {
     const pm = getProviderManager();
     const providers = pm.getProvidersForInput(input);
 
-    const models: { name: string; model: OpenAICompatibleModel }[] = [];
+    const models: { name: string; model: Model }[] = [];
     for (const p of providers) {
       const m = this.instances.get(p.name);
       if (m) models.push({ name: p.name, model: m });
@@ -146,12 +153,12 @@ export class MultiModelProvider {
   }
 
   /** 获取单个指定名称的模型 */
-  private getModel(name: string): OpenAICompatibleModel | undefined {
+  private getModel(name: string): Model | undefined {
     return this.instances.get(name);
   }
 
   /** 获取主模型 */
-  private getPrimaryModel(): OpenAICompatibleModel | undefined {
+  private getPrimaryModel(): Model | undefined {
     const pm = getProviderManager();
     const primary = pm.getPrimary();
     if (primary) return this.instances.get(primary.name);
@@ -215,7 +222,7 @@ export class MultiModelProvider {
 
   /** 带降级的重试执行 */
   private async executeWithFallback<T>(
-    operation: (model: OpenAICompatibleModel, name: string) => Promise<T>,
+    operation: (model: Model, name: string) => Promise<T>,
     input: string,
     operationName: string
   ): Promise<T> {

@@ -7,6 +7,8 @@ import {
   isValidDeviceCommand,
 } from './DeviceTypes';
 import { LocalDeviceAccess } from './LocalDeviceAccess';
+import { DeviceAdapter, SimulatedDeviceAdapter } from './DeviceAdapter';
+import type { PythonAgentBridge } from '../ide/PythonAgentBridge';
 import {
   Device,
   DeviceCommand,
@@ -29,6 +31,26 @@ export {
   DeviceStatus,
 } from './types';
 
+/** W3：推送至 Python 环境感通道的设备遥测载荷。 */
+export interface DeviceTelemetryPayload {
+  device_id: string;
+  name: string;
+  kind: string;
+  state: string;
+  online: boolean;
+  location?: string;
+  batteryLevel?: number;
+  signalStrength?: number;
+  temperature?: number;
+  humidity?: number;
+  cpuUsage?: number;
+  memoryUsage?: number;
+  diskUsage?: number;
+  networkSpeed?: number;
+  uptime?: number;
+  otherMetrics?: Record<string, unknown>;
+}
+
 export class DeviceManager {
   private initialized: boolean = false;
   private devices: Map<string, Device> = new Map();
@@ -47,6 +69,10 @@ export class DeviceManager {
     timeout: 3000,
     backoffFactor: 2,
   };
+  // 设备状态来源（W3）：默认模拟，可替换为真实 HTTP/MQTT 适配器
+  private deviceAdapter: DeviceAdapter = new SimulatedDeviceAdapter();
+  // W3：遥测桥（TS 仅入口/透传，状态推送至 Python 环境感通道）。未设置则不推送。
+  private telemetryBridge: PythonAgentBridge | null = null;
 
   constructor() {}
 
@@ -529,24 +555,8 @@ export class DeviceManager {
 
     this.monitoringInterval = setInterval(() => {
       for (const device of this.devices.values()) {
-        const status: DeviceStatus = {
-          deviceId: device.id,
-          timestamp: new Date(),
-          status: this.simulateDeviceStatus(device),
-          batteryLevel: Math.floor(Math.random() * 100),
-          signalStrength: Math.floor(Math.random() * 100),
-          temperature: 20 + Math.random() * 10,
-          humidity: 40 + Math.random() * 20,
-          cpuUsage: Math.floor(Math.random() * 100),
-          memoryUsage: Math.floor(Math.random() * 100),
-          diskUsage: Math.floor(Math.random() * 100),
-          networkSpeed: Math.floor(Math.random() * 1000),
-          uptime: Math.floor(Math.random() * 86400),
-          otherMetrics: {
-            uptime: Math.floor(Math.random() * 86400),
-            responseTime: Math.random() * 1000,
-          },
-        };
+        // W3: 设备状态由注入的适配器提供（模拟或真实），不再硬编码随机
+        const status: DeviceStatus = this.deviceAdapter.sampleStatus(device);
 
         this.updateDeviceStatus(device.id, status);
 
@@ -555,23 +565,97 @@ export class DeviceManager {
         if (status.status === 'offline') {
           this.attemptReconnection(device.id);
         }
+
+        // 后台触发真实拉取（如为真实适配器），失败时降级到模拟
+        void this.deviceAdapter.refresh(device);
+      }
+
+      // W3：把最新设备快照透传至 Python 环境感通道（无桥则跳过）
+      if (this.telemetryBridge) {
+        void this.publishDeviceTelemetry();
       }
     }, 30000);
 
     Logger.info('🔄 设备管理器：开始监控设备状态', 'DeviceManager');
   }
 
-  private simulateDeviceStatus(_device: Device): Device['status'] {
-    const random = Math.random();
-    if (random < 0.1) {
-      return 'offline';
-    } else if (random < 0.2) {
-      return 'warning';
-    } else if (random < 0.25) {
-      return 'error';
-    } else {
-      return 'online';
+  /**
+   * 注入设备状态适配器（W3）。可传入 HttpDeviceAdapter / MqttDeviceAdapter
+   * 接入真实设备，未注入时默认使用 SimulatedDeviceAdapter。
+   */
+  public setDeviceAdapter(adapter: DeviceAdapter): void {
+    this.deviceAdapter = adapter;
+  }
+
+  public getDeviceAdapterKind(): DeviceAdapter['kind'] {
+    return this.deviceAdapter.kind;
+  }
+
+  /**
+   * 设置遥测桥（W3）：把设备状态推送至 Python 端 ``DeviceSenseChannel``，
+   * 经 ``POST /v1/devices/telemetry`` 灌入环境感通道（SensoryFusion）。
+   * 仅作入口/透传，不在此做融合逻辑（AGENTS.md §0.1）。
+   */
+  public setTelemetryBridge(bridge: PythonAgentBridge): void {
+    this.telemetryBridge = bridge;
+  }
+
+  /**
+   * 构造设备遥测载荷，供 Python ``POST /v1/devices/telemetry`` 消费。
+   * 字段对齐 python/agent/perception/device_sense.py::DeviceStatus.from_dict。
+   */
+  public buildDeviceTelemetry(): DeviceTelemetryPayload[] {
+    const payloads: DeviceTelemetryPayload[] = [];
+    for (const device of this.devices.values()) {
+      const status = this.deviceStatuses.get(device.id);
+      if (!status) {
+        continue;
+      }
+      const state = status.status;
+      const payload: DeviceTelemetryPayload = {
+        device_id: device.id,
+        name: device.name,
+        kind: device.type,
+        state,
+        online: state !== 'offline' && state !== 'error',
+        location: this.resolveDeviceLocation(device),
+        // 透传业务指标，便于 Python 决策复用
+        batteryLevel: status.batteryLevel,
+        signalStrength: status.signalStrength,
+        temperature: status.temperature,
+        humidity: status.humidity,
+        cpuUsage: status.cpuUsage,
+        memoryUsage: status.memoryUsage,
+        diskUsage: status.diskUsage,
+        networkSpeed: status.networkSpeed,
+        uptime: status.uptime,
+        otherMetrics: status.otherMetrics,
+      };
+      payloads.push(payload);
     }
+    return payloads;
+  }
+
+  /**
+   * 推送当前设备状态至 Python 环境感通道。返回成功写入的样本数（-1 表示未配置桥）。
+   */
+  public async publishDeviceTelemetry(): Promise<number> {
+    if (!this.telemetryBridge) {
+      return -1;
+    }
+    const payloads = this.buildDeviceTelemetry();
+    if (payloads.length === 0) {
+      return 0;
+    }
+    const result = await this.telemetryBridge.postDeviceTelemetry(payloads);
+    return result.ingested ?? payloads.length;
+  }
+
+  private resolveDeviceLocation(device: Device): string | undefined {
+    const loc =
+      (device as unknown as { location?: string }).location ??
+      (device.properties as Record<string, unknown> | undefined)?.['location'];
+    return typeof loc === 'string' ? loc : undefined;
   }
 
   private ensureInitialized(): void {

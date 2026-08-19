@@ -7,7 +7,10 @@ from pathlib import Path
 from typing import Any
 
 from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
+from agent.infrastructure.safe_json import safe_json_loads
 from agent.security.sensitive_detector import CheckScene, RiskLevel
+from agent.evolution.feedback_collector import FeedbackCollector
 from agent.evolution.types import (
     EvolutionAction,
     EvolutionCause,
@@ -52,6 +55,7 @@ class EvolutionEngine:
         self._data_dir = Path(data_dir) if data_dir else Path(__file__).resolve().parent.parent.parent / "data" / "evolution"
         self._state_path = self._data_dir / "engine-state.json"
         self._used_plan_ids: set[str] = set()
+        self._feedback_collector = FeedbackCollector()
         self._load_state()
 
     def _load_state(self) -> None:
@@ -59,43 +63,54 @@ class EvolutionEngine:
             return
         try:
             raw = self._state_path.read_text(encoding="utf-8")
-            state = json.loads(raw)
-            if state.get("tool_weights"):
-                self._tool_weights = state["tool_weights"]
-            if state.get("tool_call_stats"):
-                self._tool_call_stats = state["tool_call_stats"]
-            if state.get("prompt_examples"):
-                self._prompt_examples = state["prompt_examples"][-30:]
-            if state.get("correction_rules"):
-                self._correction_rules = state["correction_rules"][-20:]
-            if state.get("skills"):
-                self._skills = state["skills"]
-            if state.get("skill_quality_history"):
-                self._skill_quality_history = {k: v[-20:] for k, v in state["skill_quality_history"].items()}
-            if state.get("scene_quality"):
-                self._scene_quality = {k: v[-30:] for k, v in state["scene_quality"].items()}
-            if state.get("used_plan_ids"):
-                self._used_plan_ids = set(state["used_plan_ids"][-1000:])
-            if state.get("knowledge_nudges"):
-                self._knowledge_nudges = state["knowledge_nudges"][-50:]
-            if state.get("task_success_count"):
-                self._task_success_count = state["task_success_count"]
-            if state.get("task_failure_count"):
-                self._task_failure_count = state["task_failure_count"]
-            if state.get("total_signals"):
-                self._total_signals = state["total_signals"]
-            if state.get("metrics"):
-                m = state["metrics"]
-                self._metrics.total_interactions = m.get("total_interactions", 0)
-                self._metrics.total_evolutions = m.get("total_evolutions", 0)
-                self._metrics.successful_evolutions = m.get("successful_evolutions", 0)
-                self._metrics.average_quality = m.get("average_quality", 0.0)
-                self._metrics.quality_trend = m.get("quality_trend", "stable")
-                self._metrics.tool_weights = dict(self._tool_weights)
-                self._metrics.prompt_examples = list(self._prompt_examples[-20:])
-            log.info("Evolution state restored", examples=len(self._prompt_examples), tools=len(self._tool_call_stats), rules=len(self._correction_rules))
-        except Exception as e:
-            log.warning("Failed to load evolution state", error=str(e))
+        except OSError as _exc:
+            log_ignored(log, "evolution.EvolutionEngine._load_state", _exc)
+            return
+        state = safe_json_loads(raw, {}, context="evolution.load_state")
+        if not isinstance(state, dict):
+            # 顶层损坏：保留内存中已有（可能为空）的默认状态，不再抛异常
+            return
+        # 逐键容错：单条损坏仅跳过该键，不再把整份进化状态静默清空
+        if isinstance(state.get("tool_weights"), dict):
+            self._tool_weights = state["tool_weights"]
+        if isinstance(state.get("tool_call_stats"), dict):
+            self._tool_call_stats = state["tool_call_stats"]
+        if isinstance(state.get("prompt_examples"), list):
+            self._prompt_examples = state["prompt_examples"][-30:]
+        if isinstance(state.get("correction_rules"), list):
+            self._correction_rules = state["correction_rules"][-20:]
+        if isinstance(state.get("skills"), dict):
+            self._skills = state["skills"]
+        if isinstance(state.get("skill_quality_history"), dict):
+            self._skill_quality_history = {
+                k: (v[-20:] if isinstance(v, list) else v)
+                for k, v in state["skill_quality_history"].items()
+            }
+        if isinstance(state.get("scene_quality"), dict):
+            self._scene_quality = {
+                k: (v[-30:] if isinstance(v, list) else v)
+                for k, v in state["scene_quality"].items()
+            }
+        if isinstance(state.get("used_plan_ids"), list):
+            self._used_plan_ids = set(state["used_plan_ids"][-1000:])
+        if isinstance(state.get("knowledge_nudges"), list):
+            self._knowledge_nudges = state["knowledge_nudges"][-50:]
+        if isinstance(state.get("task_success_count"), (int, float)):
+            self._task_success_count = state["task_success_count"]
+        if isinstance(state.get("task_failure_count"), (int, float)):
+            self._task_failure_count = state["task_failure_count"]
+        if isinstance(state.get("total_signals"), (int, float)):
+            self._total_signals = state["total_signals"]
+        if isinstance(state.get("metrics"), dict):
+            m = state["metrics"]
+            self._metrics.total_interactions = m.get("total_interactions", 0)
+            self._metrics.total_evolutions = m.get("total_evolutions", 0)
+            self._metrics.successful_evolutions = m.get("successful_evolutions", 0)
+            self._metrics.average_quality = m.get("average_quality", 0.0)
+            self._metrics.quality_trend = m.get("quality_trend", "stable")
+            self._metrics.tool_weights = dict(self._tool_weights)
+            self._metrics.prompt_examples = list(self._prompt_examples[-20:])
+        log.info("Evolution state restored", examples=len(self._prompt_examples), tools=len(self._tool_call_stats), rules=len(self._correction_rules))
 
     def _schedule_persist(self) -> None:
         try:
@@ -274,8 +289,8 @@ class EvolutionEngine:
                 success = await self._execute_action(action)
                 if success:
                     executed += 1
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "engine.EvolutionEngine.execute_evolution", _exc)
 
         result = EvolutionResult(
             plan_id=plan.plan_id,
@@ -990,10 +1005,64 @@ class EvolutionEngine:
                     # 如果正向反馈比例很高，可以略微提升质量趋势信心
                     if ratio > 0.7 and self._metrics.quality_trend == "stable":
                         log.debug("High positive feedback ratio detected")
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    log_ignored(log, "engine.EvolutionEngine.record_implicit_feedback", _exc)
         except Exception as e:
             log.warning(f"Failed to record implicit feedback: {e}")
+
+    # ─── 反馈收集器集成 ───
+
+    def get_feedback_stats(self) -> list[dict[str, Any]]:
+        """获取反馈收集器的聚合统计数据。
+
+        Returns:
+            各工具的反馈统计列表，包含调用次数、成功率、平均耗时等。
+        """
+        stats = self._feedback_collector.get_aggregated_stats()
+        return [
+            {
+                "tool_name": s.tool_name,
+                "total_calls": s.total_calls,
+                "success_count": s.success_count,
+                "avg_duration": s.avg_duration,
+                "failure_rate": s.failure_rate,
+                "avg_rating": s.avg_rating,
+                "rating_count": s.rating_count,
+            }
+            for s in stats
+        ]
+
+    def apply_feedback_learning(self) -> dict[str, float]:
+        """根据反馈数据调整工具权重。
+
+        从FeedbackCollector导出权重调整建议，合并到进化引擎的
+        工具权重中，使工具推荐排序更精准。
+
+        Returns:
+            调整后的工具权重字典。
+        """
+        export = self._feedback_collector.export_for_evolution()
+        adjustments = export.get("weight_adjustments", {})
+        for tool_name, suggested_weight in adjustments.items():
+            if tool_name in self._tool_weights:
+                current = self._tool_weights[tool_name]
+                self._tool_weights[tool_name] = current * 0.7 + suggested_weight * 0.3
+            else:
+                self._tool_weights[tool_name] = suggested_weight
+            self._tool_weights[tool_name] = round(self._tool_weights[tool_name], 3)
+        self._metrics.tool_weights = dict(self._tool_weights)
+        if adjustments:
+            self._schedule_persist()
+            log.info("反馈学习已应用", adjusted_tools=len(adjustments))
+        return dict(self._tool_weights)
+
+    def get_feedback_collector(self) -> FeedbackCollector:
+        """获取反馈收集器实例。
+
+        Returns:
+            FeedbackCollector: 当前引擎关联的反馈收集器。
+        """
+        return self._feedback_collector
 
     def get_learning_status_data(self) -> dict[str, Any]:
         """
@@ -1012,4 +1081,113 @@ class EvolutionEngine:
             "skill_count": len(self._skills),
             "correction_rules_count": len(self._correction_rules),
             "insights_count": len(self.get_insights()),
+        }
+
+    def record_tool_signal(
+        self,
+        tool_name: str,
+        signal_type: str = "failure",
+        quality_score: float = 0.3,
+    ) -> None:
+        """P1-修复6: 记录工具运行时信号（成功/失败/降级），供进化闭环 TOOL_ENHANCE 路径调用。
+
+        与 record_tool_failure 不同，此方法同步、轻量，仅更新信号统计与权重，
+        不写入反馈历史（避免触发 should_evolve 的误判）。
+        """
+        if tool_name not in self._tool_signal_stats:
+            self._tool_signal_stats[tool_name] = {
+                "success": 0, "failure": 0, "degraded": 0, "total": 0,
+            }
+        stats = self._tool_signal_stats[tool_name]
+        key = signal_type if signal_type in stats else "failure"
+        stats[key] += 1
+        stats["total"] += 1
+        self._update_tool_weight(tool_name, quality_score)
+        self._total_signals += 1
+        log.debug(
+            "Tool signal recorded",
+            tool=tool_name, signal_type=signal_type, quality=round(quality_score, 2),
+        )
+
+    async def register_risk_signal(
+        self,
+        risk_type: str,
+        description: str,
+        severity: str = "medium",
+    ) -> None:
+        """P1-修复6: 注册运行时风险信号，供进化闭环在评估阶段上报高危风险。
+
+        风险信号累积后影响纠错规则生成与工具权重，形成"风险→进化"反馈。
+        """
+        if not hasattr(self, "_risk_signals"):
+            self._risk_signals: list[dict[str, Any]] = []
+        self._risk_signals.append({
+            "risk_type": risk_type,
+            "description": description,
+            "severity": severity,
+            "timestamp": time.time(),
+        })
+        if len(self._risk_signals) > 200:
+            self._risk_signals = self._risk_signals[-100:]
+        if severity in ("high", "critical"):
+            self._correction_rules.append({
+                "rule": f"检测到高危风险[{risk_type}]: {description[:80]}，执行前需人工确认或降级",
+                "avg_quality": f"{self._metrics.average_quality:.2f}",
+                "timestamp": str(int(time.time())),
+            })
+            if len(self._correction_rules) > 20:
+                self._correction_rules = self._correction_rules[-20:]
+        log.info(
+            "Risk signal registered",
+            risk_type=risk_type, severity=severity,
+        )
+
+    async def rollback_to_checkpoint(self, checkpoint_id: str = "latest") -> bool:
+        """P1-修复6: 回滚到检查点 — 进化闭环在执行失败时调用以恢复上次稳定状态。
+
+        EvolutionEngine 以持久化状态文件作为隐式检查点：重载 _state_path 即可恢复
+        上次成功持久化的工具权重/纠错规则/技能。返回是否成功恢复。
+        """
+        try:
+            before_weights = dict(self._tool_weights)
+            self._load_state()
+            restored = self._tool_weights != before_weights
+            log.info(
+                "Evolution checkpoint rollback",
+                checkpoint_id=checkpoint_id, restored=restored,
+            )
+            return True
+        except Exception as e:
+            log.warning("Evolution rollback failed", error=str(e))
+            return False
+
+    def get_realtime_feedback(self) -> dict[str, Any]:
+        """P1-修复6: 提供实时学习反馈，供 controller 自适应策略调整调用。
+
+        基于近期质量趋势与工具权重，输出建议的最大重试次数、是否降速、工具推荐。
+        """
+        scores = self._metrics.recent_quality_scores
+        recent_avg = sum(scores[-5:]) / min(5, len(scores)) if scores else 0.5
+
+        if recent_avg < 0.4:
+            suggested_max_retries = 1
+            should_slow_down = True
+        elif recent_avg < 0.6:
+            suggested_max_retries = 2
+            should_slow_down = True
+        else:
+            suggested_max_retries = 3
+            should_slow_down = False
+
+        weights = self.get_tool_weights()
+        tool_recommendations = {
+            tool: round(w, 2) for tool, w in weights.items() if w > 0.3
+        }
+
+        return {
+            "suggested_max_retries": suggested_max_retries,
+            "should_slow_down": should_slow_down,
+            "tool_recommendations": tool_recommendations,
+            "quality_trend": self._metrics.quality_trend,
+            "recent_avg_quality": round(recent_avg, 3),
         }

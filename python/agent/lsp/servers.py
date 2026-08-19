@@ -32,6 +32,7 @@ from typing import Any
 
 from agent.lsp.protocol import LspProtocol, LspServerCapabilities
 from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
 
 log = StructuredLogger("lsp.servers")
 
@@ -155,16 +156,16 @@ class LspServerManager:
             await self._send_and_receive(server_id, shutdown)
             exit_notif = self._protocol.build_notification("exit", None)
             await self._send(server_id, exit_notif)
-        except Exception:
-            pass
+        except Exception as _exc:
+            log_ignored(log, "servers.LspServerManager.disconnect", _exc)
         try:
             managed.process.terminate()
             await asyncio.wait_for(managed.process.wait(), timeout=5.0)
         except Exception:
             try:
                 managed.process.kill()
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "servers.LspServerManager.disconnect", _exc)
         log.info("LSP server disconnected", server=server_id)
 
     async def request(self, server_id: str, method: str, params: dict[str, Any] | None = None) -> dict[str, Any] | None:

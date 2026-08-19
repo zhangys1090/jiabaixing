@@ -7,7 +7,12 @@ import {
   PythonAgentBridge,
   type PythonAgentConfig,
 } from '../ide/PythonAgentBridge';
-import { MCPServerManager } from '../mcp/MCPServerManager';
+import {
+  getActivePythonBridge,
+  setActivePythonBridge,
+} from '../ide/bridgeRegistry';
+import { registerCognitionForwarder } from '../harness/cognition/cognitionForwarder';
+import { EventBus } from '../shared/EventBus';
 import { Logger } from '../utils/Logger';
 import { initEvolution } from './init/initEvolution';
 import { initGateway } from './init/initGateway';
@@ -19,14 +24,44 @@ import { initSecurity } from './init/initSecurity';
 /** Python Agent 桥接实例（AGENT_BACKEND=python 时启用） */
 let pythonBridge: PythonAgentBridge | null = null;
 
+/**
+ * 后端决策锁定（P0-1 收口）：在启动期一次性决定「Python 主实现」还是「TS 本地兜底」，
+ * 之后禁止运行时静默切换。所有 isPythonBackend() 调用（含 IPC / 路由层）均返回此锁定值，
+ * 避免 pythonBridge 连接状态在会话中途变化导致「双脑行为漂移且无告警」。
+ * - null：尚未锁定（极早期启动路径，isPythonBackend 回退到实时状态）。
+ * - 'python' / 'ts'：已锁定，全程不可变。
+ */
+let _backendDecision: 'python' | 'ts' | null = null;
+/** 漂移告警只发一次，避免日志刷屏 */
+let _driftWarned = false;
+
 /** 获取 PythonAgentBridge 实例 */
 export function getPythonBridge(): PythonAgentBridge | null {
   return pythonBridge;
 }
 
-/** 检查是否使用 Python 后端 */
+/** 检查是否使用 Python 后端
+ * 直接反映启动期锁定的后端决策（P0-1 收口）：
+ *   - 决策已锁定后返回锁定值，不再轮询 pythonBridge 实时状态，禁止运行时静默切换；
+ *     若实时连接状态与锁定决策冲突，仅告警一次、行为不变。
+ *   - 决策尚未锁定（极早期启动路径）时回退到 pythonBridge 实时状态，保证早期调用正确。
+ * 这样 AGENT_BACKEND 未设置时也能在启动期正确识别为 Python 后端。 */
 export function isPythonBackend(): boolean {
-  return process.env.AGENT_BACKEND === 'python' && pythonBridge !== null;
+  if (_backendDecision !== null) {
+    const locked = _backendDecision === 'python';
+    const live = pythonBridge !== null;
+    if (live !== locked && !_driftWarned) {
+      _driftWarned = true;
+      Logger.warn(
+        `后端连接状态与启动期锁定决策不一致（live=${live}, locked=${locked}）；` +
+          `已锁定为「${locked ? 'Python 主实现' : 'TS 本地兜底'}」，运行时不做静默切换。` +
+          `如需切换后端请重启进程或显式设置 AGENT_HARNESS_ENABLE。`,
+        'Bootstrap'
+      );
+    }
+    return locked;
+  }
+  return pythonBridge !== null;
 }
 
 /** 获取 Python Agent 后端 URL */
@@ -500,46 +535,46 @@ export function stopIpcServer(): Promise<void> {
 }
 
 export function printBanner(): void {
-  console.log('\n');
-  console.log('  ===========================================================');
-  console.log('  |                                                         |');
-  console.log('  |   jiabaixing v5.0                                       |');
-  console.log('  |                                                         |');
-  console.log('  ===========================================================');
-  console.log('');
+  Logger.info('\n  ===========================================================\n  |                                                         |\n  |   jiabaixing v5.0                                       |\n  |                                                         |\n  ===========================================================\n', 'Bootstrap');
 }
 
 export async function bootstrap(): Promise<JiabaixingCore> {
-  console.log('  🚀 jiabaixing v5.0 启动中...\n');
+  Logger.info('🚀 jiabaixing v5.0 启动中...', 'Bootstrap');
 
   let core: JiabaixingCore;
 
   try {
     process.stdout.write('  🧠 核心引擎... ');
     core = new JiabaixingCore();
-    console.log('✅');
+    Logger.info('✅ 核心引擎初始化完成', 'Bootstrap');
 
     process.stdout.write('  🔒 安全模块... ');
     const { sovereigntyPipeline } = await initSecurity();
-    console.log('✅');
+    Logger.info('✅ 安全模块初始化完成', 'Bootstrap');
+
+    process.stdout.write('  📡 可观测性... ');
+    Logger.info('✅ 可观测性就绪（OTel 由 Python 后端管理，TS 仅透传 traceId）', 'Bootstrap');
 
     process.stdout.write('  💾 数据库... ');
     const { memoryEngine } = await initMemory(core, sovereigntyPipeline);
-    console.log('✅');
+    Logger.info('✅ 数据库初始化完成', 'Bootstrap');
 
     process.stdout.write('  🎭 交互模块... ');
-    const { sceneRecognizer } = await initInteraction(core);
-    console.log('✅');
+    const { sceneRecognizer } = await initInteraction(
+      core,
+      memoryEngine as import('../core/IMemoryEngine').IMemoryEngine
+    );
+    Logger.info('✅ 交互模块初始化完成', 'Bootstrap');
 
     process.stdout.write('  🔧 技能系统... ');
-    console.log('✅ (内置)');
+    Logger.info('✅ 技能系统就绪（内置）', 'Bootstrap');
 
     process.stdout.write('  🧠 推理引擎... ');
-    console.log('✅');
+    Logger.info('✅ 推理引擎就绪', 'Bootstrap');
 
     process.stdout.write('  🧬 核心初始化... ');
     await core.initialize();
-    console.log('✅');
+    Logger.info('✅ 核心初始化完成', 'Bootstrap');
 
     process.stdout.write('  📡 调度器... ');
     const scenarioScheduler = new ScenarioAwareScheduler();
@@ -552,64 +587,134 @@ export async function bootstrap(): Promise<JiabaixingCore> {
     const { setSchedulerInstance } = await import('../routes/automation');
     setSchedulerInstance(scenarioScheduler);
 
-    console.log('✅');
+    Logger.info('✅ 调度器启动完成', 'Bootstrap');
 
     process.stdout.write('  🧬 进化引擎... ');
     await initEvolution(core, memoryEngine);
-    console.log('✅');
+    Logger.info('✅ 进化引擎初始化完成', 'Bootstrap');
 
-    process.stdout.write('  🏗️ Harness 框架... ');
-    const { harness } = await initHarness(core, memoryEngine, sceneRecognizer);
-    console.log('✅');
-
-    process.stdout.write('  📡 网关隔离... ');
-    await initGateway(core, harness);
-    console.log('✅');
-
-    process.stdout.write('  🔌 MCP Host... ');
-    const mcpManager = MCPServerManager.getInstance();
-    await mcpManager.startAutoStartServers();
-    console.log('✅');
+    // ── 后端选型（纯环境变量解析，无副作用；需前置以便决定 TS Harness 是否构建）──
+    // V5.0 默认启用 Python 后端（真后端）。
+    // 仅当显式设置 AGENT_BACKEND=local（或 ts / ts-local）时，才回退到 TS 本地实现。
+    const rawBackend = process.env.AGENT_BACKEND;
+    const isLocalOverride =
+      rawBackend === 'local' ||
+      rawBackend === 'ts' ||
+      rawBackend === 'ts-local';
+    const usePythonBackend = !isLocalOverride; // 未设置 / python / 其他 → 默认 python
 
     // ── Python Agent 桥接 ──
-    if (process.env.AGENT_BACKEND === 'python') {
+    // 必须先于 MCP Host 与 Harness：前者要用 bridge 实例，后者要根据 bridge
+    // 的**实际可用性**（而非配置意图）决定是否构建 TS 兜底实现。
+    if (usePythonBackend) {
       process.stdout.write('  🐍 Python Agent 桥接... ');
       const pythonConfig: PythonAgentConfig = {
         baseUrl: getPythonAgentUrl(),
         timeout: 60000,
       };
       pythonBridge = new PythonAgentBridge(pythonConfig);
+      setActivePythonBridge(pythonBridge);
+      // D2 (P2 第4轮): 注册认知信号回灌转发器 — 把 TS 认知工具的 cognition_result
+      // 经 PythonAgentBridge 转发到 Python 会话缓冲, 供 ReAct 循环 LLM 消费。
+      registerCognitionForwarder();
       const pyHealthy = await pythonBridge.healthCheck();
       if (pyHealthy) {
+        pythonBridge.setTsEventBusForward((event: string, payload: unknown) => {
+          try {
+            void (EventBus as any).emit(event, payload);
+          } catch {
+            // ignore emit errors
+          }
+        });
         pythonBridge.connectEvents();
-        console.log('✅');
+        pythonBridge.connectChatWs();
+        core.setPythonBridgeResolver(() => pythonBridge);
+        Logger.info('✅ Python Agent 桥接成功', 'Bootstrap');
         Logger.info(
           `Python Agent 桥接已启用: ${getPythonAgentUrl()}`,
           'Bootstrap'
         );
       } else {
-        console.log('⚠️ (不可用，降级到 TS 本地)');
+        Logger.warn('⚠️ Python Agent 不可用，降级到 TS 本地', 'Bootstrap');
         Logger.warn(
           `Python Agent 不可用: ${getPythonAgentUrl()}，降级到 TS 本地`,
           'Bootstrap'
         );
         pythonBridge = null;
+        setActivePythonBridge(null);
       }
     } else {
       process.stdout.write('  🐍 Python Agent 桥接... ');
-      console.log('⏭️ (使用 TS 本地)');
+      Logger.info('⏭️ 使用 TS 本地', 'Bootstrap');
     }
+
+    // W5（审计 §1.8）：此处原先位于 Python 桥接**之前**，
+    // getActivePythonBridge() 恒为 null → startAllMcpServers() 从未执行，
+    // 却照常打印 ✅（接线断裂 + 假成功）。现移到桥接之后并如实上报。
+    process.stdout.write('  🔌 MCP Host... ');
+    const mcpBridge = getActivePythonBridge();
+    if (mcpBridge) {
+      try {
+        await mcpBridge.startAllMcpServers();
+        Logger.info('✅ MCP Host 启动成功', 'Bootstrap');
+      } catch (err) {
+        Logger.warn('⚠️ MCP Host 启动失败', 'Bootstrap');
+        Logger.warn(
+          `MCP Host 启动失败: ${(err as Error).message}`,
+          'Bootstrap'
+        );
+      }
+    } else {
+      Logger.info('⏭️ 无 Python 桥接，MCP Host 未启动', 'Bootstrap');
+    }
+
+    // W2（审计 §1.8）：TS Harness 此前无条件构建。
+    // Python 后端为主实现时，这一整套 TS Loop/Tools/Context/Verification 只会空转，
+    // 既拖慢启动、占用内存，又制造"TS 侧也有一套 Agent 核心"的假象（违反 AGENTS.md §0.1）。
+    // 判据用 pythonBridge 实际可用性：Python 配了但连不上时仍会构建 TS Harness 兜底。
+    // 迁移期需要双端对拍时用 AGENT_HARNESS_ENABLE=1 强制开启。
+    const harnessForced =
+      process.env.AGENT_HARNESS_ENABLE === '1' ||
+      process.env.AGENT_HARNESS_ENABLE === 'true';
+    const pythonBackendLive = pythonBridge !== null;
+    // P0-1 收口：后端决策在启动期一次性锁定，禁止运行时静默切换双脑。
+    _backendDecision = pythonBackendLive ? 'python' : 'ts';
+    Logger.info(
+      `后端决策已锁定：${pythonBackendLive ? 'Python 主实现（AGENTS.md §0.1）' : 'TS 本地兜底'}`,
+      'Bootstrap'
+    );
+    const enableTsHarness = !pythonBackendLive || harnessForced;
+
+    process.stdout.write('  🏗️ Harness 框架... ');
+    let harness: Awaited<ReturnType<typeof initHarness>>['harness'] = null;
+    if (enableTsHarness) {
+      ({ harness } = await initHarness(core, memoryEngine, sceneRecognizer));
+      if (pythonBackendLive) {
+        Logger.info('✅ Harness 已构建 (AGENT_HARNESS_ENABLE 强制开启)', 'Bootstrap');
+      } else {
+        Logger.info('✅ Harness 已构建 (TS 本地兜底)', 'Bootstrap');
+      }
+    } else {
+      Logger.info('⏭️ Python 后端为主实现；AGENT_HARNESS_ENABLE=1 可强制开启', 'Bootstrap');
+      Logger.info(
+        'TS Harness 未构建：Agent 核心由 Python 后端承担（AGENTS.md §0.1）',
+        'Bootstrap'
+      );
+    }
+
+    process.stdout.write('  📡 网关隔离... ');
+    await initGateway(core, harness);
+    Logger.info('✅ 网关隔离启动完成', 'Bootstrap');
 
     process.stdout.write('  🔗 IPC 服务器... ');
     await startIpcServer(core);
-    console.log('✅');
+    Logger.info('✅ IPC 服务器启动完成', 'Bootstrap');
 
-    console.log('\n  ✅ 系统就绪\n');
+    Logger.info('✅ 系统就绪', 'Bootstrap');
     Logger.info('系统初始化完成', 'Bootstrap');
 
     return core;
   } catch (error) {
-    console.log('❌');
     Logger.error('❌ 初始化失败', error as Error, 'Bootstrap');
     process.exit(1);
   }

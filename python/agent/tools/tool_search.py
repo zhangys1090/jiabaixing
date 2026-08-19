@@ -25,6 +25,7 @@ from collections import Counter
 from typing import Any
 
 from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
 from agent.tools.registry import ToolCategory, ToolDefinition, ToolRegistry
 
 log = StructuredLogger("tool_search")
@@ -53,8 +54,8 @@ def _tokenize(text: str) -> list[str]:
         # 同时保留原始连续字母数字 token
         alpha_tokens = re.findall(r"[a-z0-9]+", text)
         return list(set(tokens + alpha_tokens))
-    except ImportError:
-        pass
+    except ImportError as _exc:
+        log_ignored(log, "tool_search._tokenize", _exc)
 
     # 回退：按空白/标点切分
     tokens = re.split(r"[,\s;|，；、\n\r\t]+", text)

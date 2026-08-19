@@ -39,6 +39,10 @@ export class ShellHooks {
     timestamp: number;
   }> = [];
 
+  public static create(): ShellHooks {
+    return new ShellHooks();
+  }
+
   public static getInstance(): ShellHooks {
     if (!ShellHooks.instance) {
       ShellHooks.instance = new ShellHooks();

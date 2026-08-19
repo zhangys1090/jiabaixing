@@ -36,7 +36,6 @@ export async function initGateway(
 
   try {
     await gatewayBridge.start();
-    console.log('✅ (隔离进程模式)');
     Logger.info('网关启动成功: 隔离进程模式', 'Bootstrap');
   } catch (err) {
     Logger.warn(
@@ -47,7 +46,6 @@ export async function initGateway(
       await import('../../integration/IntegrationManager');
     const integrationManager = IntegrationManager.getInstance();
     integrationManager.setCore(core);
-    console.log('✅ (内联模式)');
     Logger.info('网关启动成功: 内联模式', 'Bootstrap');
   }
 

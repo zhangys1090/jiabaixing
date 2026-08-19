@@ -4,6 +4,7 @@
 
 import type { ToolContext, ToolDefinition, ToolResult } from '../../types';
 import { Permission, ToolCategory } from '../../types';
+import { scanGeneratedCode } from './codeShared';
 
 export const CODE_GENERATE_DEF: ToolDefinition = {
   name: 'code_generate',
@@ -66,22 +67,16 @@ export function createCodeGenerateExecutor(deps: CodeGenerateDeps) {
     const complexity = (params.complexity as string) || 'medium';
 
     if (!deps.generateCode) {
-      const template = generateCodeTemplate(
-        requirements,
-        language,
-        framework,
-        complexity
-      );
+      // 审计 P2-9：原先在此返回 success:true 的 TODO 模板（假成功 / 静默降级）。
+      // 代码生成已由 Python 真后端承接，TS harness 不再伪造成功结果。
       return {
-        success: true,
-        output: `代码骨架生成完成（LLM不可用，仅生成模板）：\n\n\`\`\`${language}\n${template}\n\`\`\``,
+        success: false,
+        output: '',
+        error:
+          'code_generate 不可用：代码生成已由 Python 真后端承接，TS harness 未注入 generateCode 实现。',
         duration: 0,
         validated: false,
-        metadata: {
-          language,
-          codeLength: template.length,
-          fallback: true,
-        },
+        metadata: { language, fallback: false },
       };
     }
 
@@ -97,6 +92,15 @@ export function createCodeGenerateExecutor(deps: CodeGenerateDeps) {
         ? `${result.explanation}\n\n\`\`\`${result.language}\n${result.code}\n\`\`\``
         : `\`\`\`${result.language}\n${result.code}\n\`\`\``;
 
+      // D3: 生成物安全扫描（与 code_fix 共用中间件）
+      const scan = scanGeneratedCode(result.code);
+      if (scan.warnings.length > 0) {
+        Logger.warn(
+          `🔍 D3: code_generate 安全扫描告警: ${scan.warnings.join('; ')}`,
+          'CodeGenerate'
+        );
+      }
+
       return {
         success: true,
         output,
@@ -105,6 +109,8 @@ export function createCodeGenerateExecutor(deps: CodeGenerateDeps) {
         metadata: {
           language: result.language,
           codeLength: result.code.length,
+          securityWarnings: scan.warnings,
+          secretHits: scan.secrets,
         },
       };
     } catch (error) {

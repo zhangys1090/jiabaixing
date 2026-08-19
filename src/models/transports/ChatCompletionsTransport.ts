@@ -1,4 +1,7 @@
 /**
+ * @deprecated TS 本地 LLM 传输层（AGENT_BACKEND=local 回退）。
+ * AGENT_BACKEND=python（默认）经 PythonAgentBridge /v1/llm/* 委派 Python agent.llm，不再使用本层。
+ *
  * OpenAI Chat Completions 传输层
  *
  * 适配所有 OpenAI 兼容 API:

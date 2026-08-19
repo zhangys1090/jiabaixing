@@ -10,6 +10,8 @@ ContinuousFeedbackLoop + ProductionMetricsCollector 形成闭环。
 """
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Request
 
 from agent.core.logger import StructuredLogger
@@ -42,7 +44,8 @@ async def submit_feedback(request: Request):
     engine = _get_engine(request)
     try:
         body = await request.json()
-    except Exception:
+    except (json.JSONDecodeError, ValueError):
+        # 仅 JSON 解析失败返回 invalid JSON body；其余异常如实抛出由中间件记录（审计 E-02）
         return {"success": False, "error": "invalid JSON body"}
 
     session_id = body.get("session_id", "")
@@ -107,7 +110,8 @@ async def submit_correction(request: Request):
     engine = _get_engine(request)
     try:
         body = await request.json()
-    except Exception:
+    except (json.JSONDecodeError, ValueError):
+        # 仅 JSON 解析失败返回 invalid JSON body；其余异常如实抛出由中间件记录（审计 E-02）
         return {"success": False, "error": "invalid JSON body"}
 
     session_id = body.get("session_id", "")

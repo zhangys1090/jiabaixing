@@ -36,6 +36,8 @@ export interface TaskNode {
   error?: string;
   /** 分配给哪个Agent */
   assignedTo?: string;
+  /** W7/W8：任务元数据（如 traceId、感知模板类型） */
+  metadata?: Record<string, unknown>;
 }
 
 /** DAG分层结果 */
@@ -517,10 +519,19 @@ export class TaskDispatcher {
     }
 
     if (remaining > 0) {
-      Logger.warn(
-        `⚠️ DAG 可能存在环路: ${remaining} 个任务无法排序`,
+      // P0 修复：检测到环时抛异常，而非仅 warning，避免死锁
+      const cyclicTaskIds = tasks
+        .filter((t) => !visited.has(t.id))
+        .map((t) => t.id);
+      const cycleError = new Error(
+        `DAG_CYCLE_DETECTED: ${remaining} 个任务形成循环依赖: [${cyclicTaskIds.join(', ')}]`
+      );
+      Logger.error(
+        `❌ DAG 存在环路: ${cycleError.message}`,
+        cycleError,
         'TaskDispatcher'
       );
+      throw cycleError;
     }
 
     return layers;
@@ -549,11 +560,33 @@ export class TaskDispatcher {
   }
 
   /**
-   * 为任务分配Agent（使用findBestAgent优先）
+   * 为任务分配Agent（优先使用 OrchestratorAgent 的 assignedTo，其次 findBestAgent）
    */
   private assignAgent(
     task: TaskNode
   ): import('./AgentRegistry').AgentRegistration | null {
+    if (task.assignedTo) {
+      const agent = this.registry.getAgent(task.assignedTo);
+      if (agent) {
+        if (agent.status === 'idle') {
+          Logger.debug(
+            `使用 OrchestratorAgent 分配: ${task.id} → ${agent.name}`,
+            'TaskDispatcher'
+          );
+          return agent;
+        }
+        Logger.warn(
+          `OrchestratorAgent 分配的 Agent 不空闲: ${task.assignedTo} (${agent.status})，回退自动分配`,
+          'TaskDispatcher'
+        );
+      } else {
+        Logger.warn(
+          `OrchestratorAgent 分配的 Agent 不存在: ${task.assignedTo}，回退自动分配`,
+          'TaskDispatcher'
+        );
+      }
+    }
+
     if (task.agentId) {
       const agent = this.registry.getAgent(task.agentId);
       if (!agent) {

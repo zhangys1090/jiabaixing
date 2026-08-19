@@ -138,7 +138,7 @@ export class DeliveryRouter {
     try {
       const im = IntegrationManager.getInstance();
       const result = await im.sendMessage({
-        platform: platform as any,
+        platform: platform as import('../shared/contracts').IntegrationPlatform,
         message,
         to,
       });

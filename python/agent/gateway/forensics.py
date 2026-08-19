@@ -30,6 +30,7 @@ import os
 import platform
 import signal
 import sys
+import threading
 import time
 import traceback
 from collections import defaultdict
@@ -37,6 +38,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any
+
+from agent.config import DATA_ROOT
 
 from agent.core.logger import StructuredLogger
 
@@ -147,10 +150,16 @@ class ShutdownForensics:
     """
 
     def __init__(self, data_dir: Path | None = None) -> None:
-        self._dir = data_dir or Path("data/forensics")
+        self._dir = data_dir or DATA_ROOT / "forensics"
         self._records: list[ShutdownRecord] = []
         self._start_time: float = time.time()
         self._registered_signals: bool = False
+        # 自管道（self-pipe）：信号处理器内仅做 os.write（异步信号安全），
+        # 由独立守护线程读取并执行 record + 关闭回调（见 register_signal_handlers）。
+        self._signal_rfd: int | None = None
+        self._signal_wfd: int | None = None
+        self._pending_signal: ShutdownReason | None = None
+        self._shutdown_callback: Any = None
         self._load_records()
 
     def _load_records(self) -> None:
@@ -211,21 +220,74 @@ class ShutdownForensics:
         except (ImportError, Exception):
             return 0.0
 
+    def set_shutdown_callback(self, cb: Any) -> None:
+        """注册关闭回调：信号触发且记录完成后调用（如触发进程优雅关闭）。
+
+        回调在独立守护线程中执行，不应做重活或持有 GIL 外的非线程安全资源。
+        """
+        self._shutdown_callback = cb
+
     def register_signal_handlers(self) -> None:
         if self._registered_signals:
             return
 
-        def _sigterm_handler(signum: int, frame: Any) -> None:
-            self.record(ShutdownReason.SIGTERM, {"signal": signum})
+        try:
+            rfd, wfd = os.pipe()
+            # 写端非阻塞：避免信号高频时写满管道导致 os.write 阻塞（异步信号安全前提下）
+            os.set_blocking(wfd, False)
+            self._signal_rfd, self._signal_wfd = rfd, wfd
+        except OSError as e:
+            log.warning("无法创建信号自管道，信号记录降级为禁用", error=str(e))
+            return
 
-        def _sigint_handler(signum: int, frame: Any) -> None:
-            self.record(ShutdownReason.SIGINT, {"signal": signum})
+        def _sig_handler(signum: int, frame: Any) -> None:
+            # 仅执行异步信号安全操作（os.write + 置标志），绝不在处理器内做
+            # 对象构造 / 文件 I/O / traceback 等不安全工作（审计 S-05）。
+            reason = (
+                ShutdownReason.SIGTERM if signum == signal.SIGTERM
+                else ShutdownReason.SIGINT
+            )
+            self._pending_signal = reason
+            try:
+                os.write(self._signal_wfd, b"\x00")
+            except OSError:
+                pass
+
+        def _signal_reader() -> None:
+            # 守护线程：读取自管道，在「非信号上下文」中执行 record 与关闭回调，
+            # 既保证异步信号安全，又真正把信号「转发」给关闭流程。
+            while True:
+                try:
+                    self._signal_rfd is not None and os.read(self._signal_rfd, 1)
+                except OSError:
+                    return
+                reason = self._pending_signal
+                if reason is None:
+                    continue
+                try:
+                    signum = (
+                        signal.SIGTERM if reason is ShutdownReason.SIGTERM
+                        else signal.SIGINT
+                    )
+                    self.record(reason, {"signal": signum})
+                except Exception:
+                    pass
+                cb = self._shutdown_callback
+                if cb is not None:
+                    try:
+                        cb()
+                    except Exception:
+                        pass
 
         try:
-            signal.signal(signal.SIGTERM, _sigterm_handler)
-            signal.signal(signal.SIGINT, _sigint_handler)
+            signal.signal(signal.SIGTERM, _sig_handler)
+            signal.signal(signal.SIGINT, _sig_handler)
+            reader = threading.Thread(
+                target=_signal_reader, daemon=True, name="forensics-signal"
+            )
+            reader.start()
             self._registered_signals = True
-            log.info("关闭信号处理器已注册")
+            log.info("关闭信号处理器已注册（自管道模式，异步信号安全）")
         except (OSError, ValueError) as e:
             log.warning("信号处理器注册失败", error=str(e))
 

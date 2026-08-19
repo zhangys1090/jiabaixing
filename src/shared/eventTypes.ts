@@ -1,3 +1,5 @@
+import type { FeedbackSignal } from '../evolution/ImplicitFeedbackCollector';
+
 interface HealingResult {
   success: boolean;
   type: string;
@@ -332,6 +334,27 @@ export interface ResourceEvents {
   capability_metrics: [
     payload: { capability: string; score: number; timestamp: string },
   ];
+  memory_warning: [
+    payload: {
+      warnings: string[];
+      stats: {
+        heapUsedMB: number;
+        heapTotalMB: number;
+        rssMB: number;
+        externalMB: number;
+      };
+      timestamp: string;
+    },
+  ];
+  token_quota_warning: [
+    payload: {
+      sessionId: string;
+      usagePercent: number;
+      totalTokens: number;
+      maxTokens: number;
+      timestamp: string;
+    },
+  ];
 }
 
 export interface UserEvents {
@@ -355,6 +378,21 @@ export interface UserEvents {
       intensity: number;
       trend?: string;
       timestamp: string;
+    },
+  ];
+  /** D2 认知总线：认知类工具（emotion_detect/self_reflect 等）执行完毕后的结构化结果，
+   *  供 ReAct 循环的情绪/反思总线消费，驱动策略调整（如高负向情绪降速、反思建议进 evolution）。 */
+  cognition_result: [
+    payload: {
+      tool: string;
+      category: string;
+      success: boolean;
+      durationMs: number;
+      outputPreview?: string | null;
+      error?: string | null;
+      timestamp: string;
+      /** D2 会话标识: 由 ToolRegistry 从 ToolContext 捕获; null 表示无法归属会话(不转发 Python)。 */
+      sessionId: string | null;
     },
   ];
   behavior_analysis: [
@@ -498,6 +536,24 @@ export interface VibeCodingEvents {
         path: string;
         changeType: 'created' | 'modified' | 'deleted';
       }>;
+      timestamp: string;
+    },
+  ];
+  budget_exceeded: [
+    payload: {
+      tokensUsed: number;
+      roundsUsed: number;
+      toolCallsUsed: number;
+      elapsed: number;
+      timestamp: string;
+    },
+  ];
+  write_approval_request: [
+    payload: {
+      operation: string;
+      target: string;
+      changes: string;
+      riskReason?: string;
       timestamp: string;
     },
   ];
@@ -664,6 +720,109 @@ export interface CLIWSEvents {
   ];
 }
 
+export interface SecurityEvents {
+  approval_request: [
+    payload: {
+      id: string;
+      type: string;
+      description: string;
+      target: string;
+      risk: string;
+    },
+  ];
+}
+
+export interface ImplicitFeedbackEvents {
+  'user:message': [payload: { content: string; timestamp: number }];
+  'ai:message': [payload: { content: string; timestamp: number }];
+  'user:copy': [payload: { content: string; timestamp: number }];
+  'user:modify': [
+    payload: { original: string; modified: string; timestamp: number },
+  ];
+  'user:delete': [payload: { content: string; timestamp: number }];
+  'feedback:implicit': [payload: FeedbackSignal];
+}
+
+export interface SessionEvents {
+  session_reset: [payload: { reason?: string; timestamp: string }];
+  gateway_input_received: [
+    payload: {
+      traceId: string;
+      source: string;
+      textLength: number;
+      executionDepth: number;
+    },
+  ];
+  gateway_output_sent: [
+    payload: {
+      traceId: string;
+      response: string;
+      duration?: number;
+      success?: boolean;
+    },
+  ];
+  event_store_appended: [
+    payload: {
+      eventId: string;
+      sessionId: string;
+      eventType: string;
+      sequenceNum: number;
+    },
+  ];
+  event_store_snapshot_saved: [
+    payload: {
+      sessionId: string;
+      sequenceNum: number;
+      eventCount: number;
+    },
+  ];
+  session_replay_started: [
+    payload: {
+      sessionId: string;
+      fromSequence?: number;
+      toSequence?: number;
+    },
+  ];
+  session_replay_completed: [
+    payload: {
+      sessionId: string;
+      replayedEvents: number;
+      duration: number;
+    },
+  ];
+}
+
+export interface CommandEvents {
+  retry_requested: [payload: { traceId?: string; reason?: string }];
+  undo_requested: [payload: { traceId?: string; step?: string }];
+  agent_stop_requested: [payload: { traceId?: string; reason?: string }];
+  compress_requested: [payload: { sessionId?: string }];
+  session_title_set: [payload: { title: string; sessionId?: string }];
+  cron_list_requested: [payload: { userId?: string }];
+  cron_run_requested: [payload: { taskId: string; userId?: string }];
+  cron_pause_requested: [payload: { taskId: string; userId?: string }];
+}
+
+export interface BridgeEvents {
+  'bridge:fallback': [
+    payload: {
+      from: 'ws' | 'http';
+      to: 'ws' | 'http' | 'none';
+      phase: string;
+      error: string;
+      pythonHealthy: boolean;
+      timestamp: number;
+    },
+  ];
+  'bridge:unavailable': [
+    payload: {
+      phase: string;
+      error: string;
+      timestamp: number;
+    },
+  ];
+}
+
 export interface EventMap
   extends
     CoreEvents,
@@ -681,4 +840,9 @@ export interface EventMap
     IntegrationEvents,
     TraceEvents,
     FileWatchEvents,
-    CLIWSEvents {}
+    CLIWSEvents,
+    SecurityEvents,
+    ImplicitFeedbackEvents,
+    SessionEvents,
+    CommandEvents,
+    BridgeEvents {}

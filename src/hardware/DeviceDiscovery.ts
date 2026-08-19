@@ -25,6 +25,10 @@ export class DeviceDiscovery {
     };
   }
 
+  public static create(): DeviceDiscovery {
+    return new DeviceDiscovery();
+  }
+
   public static getInstance(): DeviceDiscovery {
     if (!DeviceDiscovery._instance) {
       DeviceDiscovery._instance = new DeviceDiscovery();

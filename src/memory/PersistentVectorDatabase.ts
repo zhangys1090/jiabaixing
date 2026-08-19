@@ -3,9 +3,9 @@
  * 使用 SQLite + better-sqlite3 实现向量持久化存储，支持跨会话记忆
  */
 
-import { createDatabase } from '../shared/DatabaseShim';
 import * as fs from 'fs';
 import * as path from 'path';
+import { createDatabase } from '../shared/DatabaseShim';
 import { Logger } from '../utils/Logger';
 import { BaseMemoryStore } from './BaseMemoryStore';
 import { VectorDatabase } from './VectorDatabaseInterface';
@@ -18,7 +18,7 @@ export class PersistentVectorDatabase
   extends BaseMemoryStore
   implements VectorDatabase
 {
-  private db: any = null;
+  private db: import('../shared/DatabaseShim').DatabaseAdapter | null = null;
   private dbPath: string;
   private vectorCache: Map<
     string,

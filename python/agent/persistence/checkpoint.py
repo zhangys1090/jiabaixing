@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from agent.config import DATA_DIR
+from agent.core.logger import log_ignored
 
 
 @dataclass
@@ -67,8 +68,8 @@ class CheckpointService:
             try:
                 shutil.copy2(str(src), str(dst))
                 total_size += f.size
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(None, "checkpoint.CheckpointService.create_checkpoint", _exc)
 
         entry = CheckpointEntry(
             id=cp_id,
@@ -97,10 +98,10 @@ class CheckpointService:
                     try:
                         data = json.loads(meta.read_text(encoding="utf-8"))
                         entries.append(_dict_to_checkpoint(data))
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+                    except Exception as _exc:
+                        log_ignored(None, "checkpoint.CheckpointService.list_checkpoints", _exc)
+        except Exception as _exc:
+            log_ignored(None, "checkpoint.CheckpointService.list_checkpoints", _exc)
 
         entries.sort(key=lambda e: e.timestamp, reverse=True)
         return entries
@@ -168,8 +169,8 @@ class CheckpointService:
                     hash=h,
                     size=len(content),
                 ))
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(None, "checkpoint.CheckpointService._scan_project_files", _exc)
 
         return files
 
@@ -189,8 +190,8 @@ class CheckpointService:
             d = self._snapshots_dir / cp.id
             try:
                 shutil.rmtree(d, ignore_errors=True)
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(None, "checkpoint.CheckpointService._prune_old_checkpoints", _exc)
 
 
 def _checkpoint_to_dict(entry: CheckpointEntry) -> dict[str, Any]:

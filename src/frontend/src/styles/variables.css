@@ -71,6 +71,7 @@
   --r-md: 8px;
   --r-lg: 12px;
   --r-xl: 16px;
+  --r-full: 9999px;
 
   /* === 阴影 === */
   --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);

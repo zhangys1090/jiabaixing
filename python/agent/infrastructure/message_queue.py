@@ -23,6 +23,8 @@ from enum import Enum
 from typing import Any, Callable, Coroutine, Optional
 
 from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
+from agent.infrastructure.priority_queue import AsyncPriorityQueue
 
 log = StructuredLogger("mq")
 
@@ -140,7 +142,8 @@ class RedisStreamsQueue:
         self._consumer_name = consumer_name or _get_consumer_name()
         self._redis: Any = None
         self._handlers: dict[str, list[Callable[[Message], Coroutine]]] = {}
-        self._fallback_queues: dict[str, asyncio.Queue[Message]] = {}
+        # P1-4：进程内降级队列改用优先级堆 + RWLock 保护的 AsyncPriorityQueue
+        self._fallback_queues: dict[str, AsyncPriorityQueue] = {}
         self._fallback_workers: dict[str, asyncio.Task] = {}
         self._running: bool = False
         self._use_redis: bool = False
@@ -198,8 +201,8 @@ class RedisStreamsQueue:
         if self._redis:
             try:
                 await self._redis.aclose()
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "message_queue.RedisStreamsQueue.stop", _exc)
             self._redis = None
 
         self._use_redis = False
@@ -284,8 +287,8 @@ class RedisStreamsQueue:
                 await self._redis.xgroup_create(
                     stream_key, self._consumer_group, id="0", mkstream=True
                 )
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "message_queue.RedisStreamsQueue._publish_redis", _exc)
 
             entry_id = await self._redis.xadd(
                 stream_key,
@@ -398,8 +401,8 @@ class RedisStreamsQueue:
         for sk in streams:
             try:
                 await self._redis.xgroup_create(sk, self._consumer_group, id="0", mkstream=True)
-            except Exception:
-                pass  # 组已存在或 stream 已有数据时忽略
+            except Exception as _exc:
+                log_ignored(log, "message_queue.RedisStreamsQueue._redis_worker", _exc)
         log.info("redis worker started", topic=topic, streams=list(streams.keys()))
         while self._running and self._use_redis and self._redis:
             try:
@@ -467,14 +470,14 @@ class RedisStreamsQueue:
                             "retry_count": str(msg.retry_count),
                         },
                     )
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    log_ignored(log, "message_queue.RedisStreamsQueue._handle_redis", _exc)
                 log.warning("redis msg retry", topic=msg.topic, id=msg.id, retry=msg.retry_count)
         finally:
             try:
                 await self._redis.xack(stream_key, self._consumer_group, entry_id)
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "message_queue.RedisStreamsQueue._handle_redis", _exc)
 
 
 class InMemoryMessageQueue:
@@ -485,7 +488,9 @@ class InMemoryMessageQueue:
     """
 
     def __init__(self, max_queue_size: int = INCOMING_QUEUE_MAX_SIZE) -> None:
-        self._queues: dict[str, asyncio.Queue[Message]] = {}
+        # P1-4：进程内队列改用优先级堆 + RWLock 保护的 AsyncPriorityQueue，
+        # 使高优先级消息真正优先被消费（旧实现用 asyncio.Queue 纯 FIFO，priority 仅元数据）。
+        self._queues: dict[str, AsyncPriorityQueue] = {}
         self._handlers: dict[str, list[Callable[[Message], Coroutine]]] = {}
         self._workers: dict[str, asyncio.Task] = {}
         self._running: bool = False
@@ -523,8 +528,9 @@ class InMemoryMessageQueue:
             max_retries=max_retries,
         )
         if topic not in self._queues:
-            self._queues[topic] = asyncio.Queue(maxsize=self._max_queue_size)
-        await self._queues[topic].put(msg)
+            self._queues[topic] = AsyncPriorityQueue(maxsize=self._max_queue_size)
+        # priority 作为出队权重，真正影响消费顺序（P1-4）
+        await self._queues[topic].put(msg, int(msg.priority))
         self._stats.setdefault(topic, QueueStats(topic=topic)).pending_count += 1
         return msg_id
 
@@ -553,15 +559,19 @@ class InMemoryMessageQueue:
         if topic in self._workers:
             return
         if topic not in self._queues:
-            self._queues[topic] = asyncio.Queue(maxsize=self._max_queue_size)
+            self._queues[topic] = AsyncPriorityQueue(maxsize=self._max_queue_size)
 
         async def _worker():
             queue = self._queues[topic]
             handlers = self._handlers.get(topic, [])
             while self._running:
+                # 阻塞等待直到有消息；优先级堆保证出队顺序为 priority 降序 + FIFO。
+                # 取消（stop）时从 get() 抛出 CancelledError，干净退出循环。
                 try:
-                    msg = await asyncio.wait_for(queue.get(), timeout=1.0)
-                except asyncio.TimeoutError:
+                    msg = await queue.get()
+                except asyncio.CancelledError:
+                    break
+                except Exception:
                     continue
 
                 msg.status = MessageStatus.PROCESSING
@@ -592,7 +602,8 @@ class InMemoryMessageQueue:
                                 stats.processing_count = max(0, stats.processing_count - 1)
                                 stats.failed_count += 1
                             await asyncio.sleep(2 ** msg.retry_count)
-                            await queue.put(msg)
+                            # 重试重投：保留原优先级，确保高优重试仍优先于低优新消息
+                            await queue.put(msg, int(msg.priority))
 
         task = asyncio.create_task(_worker())
         self._workers[topic] = task

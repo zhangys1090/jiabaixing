@@ -15,7 +15,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 // 尝试加载原生 better-sqlite3
-let BetterDatabase: any = null;
+let BetterDatabase: (new (dbPath: string) => DatabaseAdapter) | null = null;
 let nativeAvailable = false;
 
 try {
@@ -57,15 +57,32 @@ export interface DatabaseAdapter {
  * 创建数据库实例。
  * 优先使用原生 better-sqlite3，失败时降级为内存模式。
  */
-export function createDatabase(dbPath: string): Record<string, unknown> {
+export function createDatabase(dbPath: string): DatabaseAdapter {
   if (nativeAvailable) {
     try {
       const dir = path.dirname(dbPath);
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
       }
-      const db = new BetterDatabase(dbPath);
-      return db;
+      const db = new BetterDatabase!(dbPath);
+
+      try {
+        db.pragma('journal_mode = WAL');
+      } catch {}
+      try {
+        db.pragma('synchronous = NORMAL');
+      } catch {}
+      try {
+        db.pragma('temp_store = MEMORY');
+      } catch {}
+      try {
+        db.pragma('mmap_size = 268435456');
+      } catch {}
+      try {
+        db.pragma('cache_size = -64000');
+      } catch {}
+
+      return db as DatabaseAdapter;
     } catch (e) {
       console.warn(
         '[DatabaseShim] 创建数据库失败，降级为内存模式:',
@@ -73,7 +90,7 @@ export function createDatabase(dbPath: string): Record<string, unknown> {
       );
     }
   }
-  return new MemoryDatabase();
+  return new MemoryDatabase() as DatabaseAdapter;
 }
 
 /**
@@ -157,7 +174,7 @@ class MemoryDatabase {
     this.tables.clear();
   }
 
-  transaction<T extends (...args: any[]) => any>(fn: T): T {
+  transaction<T extends (...args: unknown[]) => unknown>(fn: T): T {
     // 内存模式下退化为直接执行（无事务隔离）
     return fn;
   }
@@ -167,7 +184,7 @@ class MemoryDatabase {
 class MemoryTable {
   name: string;
   columns: string[];
-  rows: any[][] = [];
+  rows: (string | number | null)[][] = [];
   autoIncrement = 1;
 
   constructor(name: string, columns: string[]) {
@@ -303,7 +320,7 @@ class PreparedStatement {
     return { type: 'unknown' };
   }
 
-  run(...args: any[]): { changes: number; lastInsertRowid: number } {
+  run(...args: unknown[]): { changes: number; lastInsertRowid: number } {
     const p = this.parsed;
     const table = p.tableName ? this.tables.get(p.tableName) : undefined;
 
@@ -327,7 +344,7 @@ class PreparedStatement {
         for (const { col, val } of assignments) {
           try {
             const idx = table.getColIndex(col);
-            row[idx] = val;
+            row[idx] = val as string | number | null;
           } catch {
             // 跳过无效列名
           }
@@ -353,12 +370,12 @@ class PreparedStatement {
     return { changes: 0, lastInsertRowid: 0 };
   }
 
-  get(...args: any[]): Record<string, unknown> {
+  get(...args: unknown[]): unknown {
     const rows = this.all(...args);
     return rows.length > 0 ? rows[0] : undefined;
   }
 
-  all(...args: any[]): any[] {
+  all(...args: unknown[]): Record<string, unknown>[] {
     const p = this.parsed;
     const table = p.tableName ? this.tables.get(p.tableName) : undefined;
 
@@ -394,8 +411,7 @@ class PreparedStatement {
       // DISTINCT
       if (p.distinct) {
         rows = rows.filter(
-          (r, i, a) =>
-            a.findIndex((x) => x.every((v: any, j: number) => v === r[j])) === i
+          (r, i, a) => a.findIndex((x) => x.every((v, j) => v === r[j])) === i
         );
       }
 
@@ -404,11 +420,10 @@ class PreparedStatement {
 
     if (p.type === 'aggregate') {
       if (!table) {
-        const r: any = {};
+        const r: Record<string, unknown> = {};
         r[p.alias || 'result'] = 0;
         return [r];
       }
-      // 应用 WHERE 过滤（如 "status = 'success'"）
       let rows = table.rows;
       if (p.whereClause) {
         rows = filterRows(table, p.whereClause, args);
@@ -420,12 +435,15 @@ class PreparedStatement {
       if (p.aggFn === 'count') result = rows.length;
       else if (p.aggFn === 'avg')
         result = vals.length
-          ? vals.reduce((a: number, b: number) => a + (Number(b) || 0), 0) /
+          ? (vals.reduce((a, b) => Number(a) + (Number(b) || 0), 0) as number) /
             vals.length
           : 0;
       else
-        result = vals.reduce((a: number, b: number) => a + (Number(b) || 0), 0);
-      const r: any = {};
+        result = vals.reduce(
+          (a, b) => Number(a) + (Number(b) || 0),
+          0
+        ) as number;
+      const r: Record<string, unknown> = {};
       r[p.alias || 'result'] = result;
       return [r];
     }
@@ -506,15 +524,17 @@ function parseValues(valStr: string): string[] {
   return valStr.split(',').map((v) => v.trim());
 }
 
-function parseSet(setClause: string, args: any[]): { col: string; val: any }[] {
-  const assignments: { col: string; val: any }[] = [];
-  // 按逗号拆分多列赋值，但需注意 @param 中不含逗号
+function parseSet(
+  setClause: string,
+  args: unknown[]
+): { col: string; val: string | number | null }[] {
+  const assignments: { col: string; val: string | number | null }[] = [];
   const parts = setClause.split(',');
   for (const part of parts) {
     const m = part.trim().match(/(\w+)\s*=\s*(.+)/);
     if (!m) continue;
     const col = m[1];
-    let val: any = m[2].trim();
+    let val: string | number | null = m[2].trim();
     if (val === '?' || val.match(/^@\w+$/)) {
       val = resolveValue(val, args);
     }
@@ -525,22 +545,23 @@ function parseSet(setClause: string, args: any[]): { col: string; val: any }[] {
 
 function resolveValue(
   placeholder: string,
-  args: any[]
-): Record<string, unknown> {
-  if (placeholder === '?') return args[0] ?? null;
+  args: unknown[]
+): string | number | null {
+  if (placeholder === '?') return (args[0] as string | number | null) ?? null;
   const name = placeholder.replace(/^@/, '');
   if (
     args.length === 1 &&
     typeof args[0] === 'object' &&
     !Array.isArray(args[0])
   ) {
-    return args[0][name] ?? args[0][`@${name}`] ?? null;
+    const obj = args[0] as Record<string, unknown>;
+    return (obj[name] ?? obj[`@${name}`] ?? null) as string | number | null;
   }
   return null;
 }
 
 function resolveArgs(
-  args: any[],
+  args: unknown[],
   valuePatterns: string[],
   namedColumns: string[],
   tableColumns: string[]
@@ -554,9 +575,10 @@ function resolveArgs(
     !Array.isArray(args[0])
   ) {
     for (const col of tableColumns) {
-      let val = (args[0] as any)[col];
-      if (val === undefined) val = (args[0] as any)[`@${col}`];
-      result.push(val ?? null);
+      let val = (args[0] as Record<string, unknown>)[col];
+      if (val === undefined)
+        val = (args[0] as Record<string, unknown>)[`@${col}`];
+      result.push((val as string | number | null) ?? null);
     }
     return result;
   }
@@ -565,14 +587,22 @@ function resolveArgs(
   if (namedColumns.length > 0) {
     for (const col of tableColumns) {
       const idx = namedColumns.indexOf(col);
-      result.push(idx >= 0 && idx < args.length ? args[idx] : null);
+      result.push(
+        idx >= 0 && idx < args.length
+          ? (args[idx] as string | number | null)
+          : null
+      );
     }
     return result;
   }
 
   // 情况3: VALUES (?, ?, ...)
   for (let i = 0; i < valuePatterns.length; i++) {
-    result.push(valuePatterns[i] === '?' && i < args.length ? args[i] : null);
+    result.push(
+      valuePatterns[i] === '?' && i < args.length
+        ? (args[i] as string | number | null)
+        : null
+    );
   }
   return result;
 }
@@ -580,8 +610,8 @@ function resolveArgs(
 function filterRows(
   table: MemoryTable,
   whereClause: string,
-  args: any[]
-): any[][] {
+  args: unknown[]
+): (string | number | null)[][] {
   if (!whereClause) return table.rows;
 
   // 按 AND 拆分条件（跳过 1=1 这类常量真表达式）
@@ -623,11 +653,11 @@ function filterRows(
 
     const col = condMatch[1];
     const op = condMatch[2];
-    let targetVal: any = condMatch[3].trim();
+    let targetVal: string | number | null = condMatch[3].trim();
 
     // 处理占位符
     if (targetVal === '?') {
-      targetVal = args[paramIndex] ?? null;
+      targetVal = (args[paramIndex] as string | number | null) ?? null;
       paramIndex++;
     } else if (targetVal.match(/^@\w+/)) {
       const name = targetVal.replace(/^@/, '');
@@ -636,9 +666,10 @@ function filterRows(
         typeof args[0] === 'object' &&
         !Array.isArray(args[0])
       ) {
-        targetVal = args[0][name] ?? args[0][`@${name}`] ?? null;
+        const obj = args[0] as Record<string, unknown>;
+        targetVal = (obj[name] ?? obj[`@${name}`]) as string | number | null;
       } else {
-        targetVal = args[paramIndex] ?? null;
+        targetVal = (args[paramIndex] as string | number | null) ?? null;
         paramIndex++;
       }
     } else if (targetVal.startsWith("'") && targetVal.endsWith("'")) {
@@ -663,13 +694,13 @@ function filterRows(
         case '<>':
           return cellVal !== targetVal;
         case '>=':
-          return cellVal >= targetVal;
+          return (cellVal ?? 0) >= (targetVal ?? 0);
         case '<=':
-          return cellVal <= targetVal;
+          return (cellVal ?? 0) <= (targetVal ?? 0);
         case '>':
-          return cellVal > targetVal;
+          return (cellVal ?? 0) > (targetVal ?? 0);
         case '<':
-          return cellVal < targetVal;
+          return (cellVal ?? 0) < (targetVal ?? 0);
         default:
           return true;
       }
@@ -680,31 +711,33 @@ function filterRows(
 }
 
 function sortRows(
-  rows: any[][],
+  rows: (string | number | null)[][],
   table: MemoryTable,
   orderClause: string
-): any[][] {
+): (string | number | null)[][] {
   const m = orderClause.match(/(\w+)\s*(DESC|ASC)?/i);
   if (!m) return rows;
   const colIdx = table.getColIndex(m[1]);
   const desc = m[2]?.toUpperCase() === 'DESC';
   return [...rows].sort((a, b) => {
-    if (a[colIdx] == null && b[colIdx] == null) return 0;
-    if (a[colIdx] == null) return 1;
-    if (b[colIdx] == null) return -1;
-    const cmp = a[colIdx] > b[colIdx] ? 1 : -1;
+    const valA = a[colIdx];
+    const valB = b[colIdx];
+    if (valA == null && valB == null) return 0;
+    if (valA == null) return 1;
+    if (valB == null) return -1;
+    const cmp = String(valA) > String(valB) ? 1 : -1;
     return desc ? -cmp : cmp;
   });
 }
 
 function rowsToObjects(
-  rows: any[][],
+  rows: (string | number | null)[][],
   table: MemoryTable,
   selectExpr: string
-): any[] {
+): Record<string, unknown>[] {
   const allCols = selectExpr === '*' || selectExpr === 'DISTINCT *';
   return rows.map((row) => {
-    const obj: any = {};
+    const obj: Record<string, unknown> = {};
     for (let i = 0; i < table.columns.length; i++) {
       if (allCols || selectExpr.includes(table.columns[i])) {
         obj[table.columns[i]] = row[i] ?? null;

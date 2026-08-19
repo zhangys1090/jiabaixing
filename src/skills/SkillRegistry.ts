@@ -122,6 +122,10 @@ export class SkillRegistry {
 
   private constructor() {}
 
+  public static create(): SkillRegistry {
+    return new SkillRegistry();
+  }
+
   public static getInstance(): SkillRegistry {
     if (!SkillRegistry.instance) {
       SkillRegistry.instance = new SkillRegistry();

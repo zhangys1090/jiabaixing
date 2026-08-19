@@ -6,12 +6,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
 from agent.tools.registry import (
     ToolCategory,
     ToolDefinition,
     ToolParameterDef,
     ToolResult,
 )
+
+log = StructuredLogger("daily_tools")
 
 
 TASK_MANAGE_DEF = ToolDefinition(
@@ -284,8 +288,8 @@ class DailyStore:
                     for item in data:
                         entry = cls_type(**{k: v for k, v in item.items() if k in cls_type.__dataclass_fields__})
                         store[entry.id] = entry
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    log_ignored(log, "daily_tools.DailyStore._load", _exc)
 
     def _save(self, name: str, store: dict) -> None:
         fp = self._dir / f"{name}.json"
@@ -366,6 +370,7 @@ _PRIORITY_ORDER = ["low", "medium", "high", "urgent"]
 async def task_manage_executor(params: dict[str, Any]) -> ToolResult:
     start = time.time()
     action = str(params.get("action", ""))
+    log.info("task_manage", action=action)
     store = _get_store()
 
     if action == "create":

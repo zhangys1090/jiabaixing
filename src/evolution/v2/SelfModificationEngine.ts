@@ -189,8 +189,8 @@ export class SelfModificationEngine {
    * 修改文件
    */
   private modifyFile(action: EvolutionAction): boolean {
-    const target = action.target as any;
-    const filePath = target.filePath || target;
+    const target = action.target as import('./types').CodeLocation | string;
+    const filePath = typeof target === 'string' ? target : target.filePath;
 
     if (!fs.existsSync(filePath)) {
       Logger.error(
@@ -218,7 +218,7 @@ export class SelfModificationEngine {
     const filePath =
       typeof action.target === 'string'
         ? action.target
-        : (action.target as any).filePath;
+        : (action.target as import('./types').CodeLocation).filePath;
 
     // 确保目录存在
     const dir = path.dirname(filePath);
@@ -238,7 +238,7 @@ export class SelfModificationEngine {
     const filePath =
       typeof action.target === 'string'
         ? action.target
-        : (action.target as any).filePath;
+        : (action.target as import('./types').CodeLocation).filePath;
 
     if (fs.existsSync(filePath)) {
       // 保存原内容（如果没提供）
@@ -259,7 +259,7 @@ export class SelfModificationEngine {
     const promptPath =
       typeof action.target === 'string'
         ? action.target
-        : (action.target as any).filePath;
+        : (action.target as import('./types').CodeLocation).filePath;
 
     if (!promptPath) {
       Logger.error(

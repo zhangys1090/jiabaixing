@@ -5,6 +5,8 @@
  */
 
 import { OpenAICompatibleModel } from '../models/OpenAICompatibleModel';
+import { PythonBackedModel } from '../models/PythonBackedModel';
+import { getActivePythonBridge } from '../ide/bridgeRegistry';
 import { Logger } from '../utils/Logger';
 
 /**
@@ -134,6 +136,7 @@ export interface Model {
   getModelInfo(): Promise<Record<string, unknown>>;
   shutdown(): Promise<void>;
   getName(): string;
+  isCircuitOpen?(): boolean;
 }
 
 /**
@@ -254,6 +257,11 @@ export class ModelFactory {
     switch (modelType) {
       case 'openai':
       case 'openai_compatible': {
+        // P2-3 C: AGENT_BACKEND=python 模式下桥壳化 — 经 PythonAgentBridge 委派，
+        // 不再实例化 TS 本地 LLM 客户端（OpenAICompatibleModel）。
+        if (getActivePythonBridge()) {
+          return new PythonBackedModel(config.modelName);
+        }
         return new OpenAICompatibleModel(config);
       }
       default:

@@ -79,6 +79,12 @@ type ResolvedConfig = Omit<
 > &
   Pick<OpenAICompatibleConfig, 'thinkingMode' | 'reasoningEffort'>;
 
+/**
+ * @deprecated TS 本地 LLM 客户端（AGENT_BACKEND=local 回退实现）。
+ * AGENT_BACKEND=python（默认）时，真实 LLM 调用由 PythonAgentBridge 经 /v1/llm/*
+ * 委派 Python agent.llm；LLMProviderBridge 在 python 模式使用 PythonBackedModel 占位壳，
+ * 不再实例化本类。本类仅在 local 模式使用，禁止在新代码中直接实例化。
+ */
 export class OpenAICompatibleModel implements Model {
   private config: ResolvedConfig;
   private initialized: boolean = false;
@@ -104,7 +110,8 @@ export class OpenAICompatibleModel implements Model {
         process.env.OPENAI_API_BASE ||
         'http://127.0.0.1:8000/v1',
       apiKey: config.apiKey || process.env.OPENAI_API_KEY || 'not-needed',
-      modelName: config.modelName || process.env.LLM_MODEL || 'deepseek-chat',
+      modelName:
+        config.modelName || process.env.LLM_MODEL || 'deepseek-v4-flash',
       timeout: config.timeout || 30000,
       maxTokens: config.maxTokens || 4096,
       temperature: config.temperature || 0.7,

@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import importlib
+import logging
 import os
 import shutil
 import socket
@@ -25,6 +26,9 @@ from pathlib import Path
 from typing import Any
 
 from agent.config import DATA_DIR
+from agent.core.logger import log_ignored
+
+log = logging.getLogger(__name__)
 
 # 最低 Python 版本要求
 _MIN_PYTHON_VERSION = (3, 11)
@@ -298,7 +302,18 @@ class Doctor:
             test_file = DATA_DIR / ".doctor_permission_test"
             test_file.write_text("test", encoding="utf-8")
             content = test_file.read_text(encoding="utf-8")
-            test_file.unlink()
+            # 仅做清理：Path.unlink 已被全局包装为 fail-closed 的安全删除（回收站）。
+            # 在无回收站环境（如 Windows 沙箱）会失败，不应影响"可读写"诊断结论。
+            # best-effort：先尝试安全删除，失败再原生 os.remove（该临时文件由本诊断
+            # 自建，硬删除安全）；两处异常以 log_ignored 记录，不静默吞掉。
+            try:
+                test_file.unlink()
+            except Exception as _exc:  # noqa: BLE001
+                log_ignored(log, "Doctor.check_file_permissions", _exc)
+                try:
+                    os.remove(str(test_file))
+                except Exception as _exc2:  # noqa: BLE001
+                    log_ignored(log, "Doctor.check_file_permissions", _exc2)
             if content == "test":
                 return DiagnosticResult(
                     name="文件权限",

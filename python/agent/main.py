@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
 from agent.api.chat import root_router, router as chat_router
@@ -26,9 +27,14 @@ from agent.api.trajectory import router as trajectory_router
 from agent.api.canary import router as canary_router
 from agent.api.multimodal import router as multimodal_router
 from agent.api.slo import router as slo_router
+from agent.api.devices import devices_router
+from agent.api.action_verify import router as action_verify_router
+from agent.api.cognition import router as cognition_router
+from agent.api.health import create_health_router
 from agent.config import AGENT_HOST, AGENT_PORT
 from agent.infrastructure.slo_collector import get_slo_collector
 from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
 
 log = StructuredLogger("main")
 
@@ -99,8 +105,17 @@ async def lifespan(app: FastAPI):
     from agent.core.engine import AgentEngine
 
     log.info("Python Agent starting...")
+    # 审计 P0-4：启动期应用 Alembic 迁移（默认记忆库；由 RUN_MIGRATIONS=1 开启，
+    # 失败仅告警不阻断启动）
+    if os.environ.get("RUN_MIGRATIONS", "0") == "1":
+        try:
+            from agent.infrastructure.migrations import run_migrations
+
+            run_migrations()
+        except Exception as e:  # noqa: BLE001
+            log.warning("启动期迁移失败", error=str(e))
     engine = AgentEngine()
-    await engine.initialize()
+    await engine.initialize_v2()
     # 将 engine 挂载到 app.state，供 canary/priority 等 API 路由访问
     app.state.engine = engine
 
@@ -140,9 +155,53 @@ async def lifespan(app: FastAPI):
         log.warning("A2A routes mount failed", error=str(e))
 
     log.info("Python Agent ready", host=AGENT_HOST, port=AGENT_PORT)
+    from agent.core.engine_extensions import init_extensions
+    init_extensions(engine)
+    app.include_router(create_health_router())
     yield
     log.info("Python Agent shutting down")
+    from agent.core.engine_extensions import shutdown_extensions
+    await shutdown_extensions(engine)
     engine = None
+
+
+class APIErrorLoggingMiddleware(BaseHTTPMiddleware):
+    """响应级错误日志（审计 E-01）：
+
+    端点普遍以 `except Exception: return {"error": str(e)}` 返回 200 + 错误体，
+    服务端原本零日志，运维对失败不可见。本中间件统一记录：
+      - 任意 4xx/5xx 响应；
+      - 以 200 返回、但响应体含 "error" / "success": false 的业务错误。
+    使全部 API 端点的失败对运维可见，无需逐文件改动 100+ 端点。
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        try:
+            if response.status_code >= 400:
+                body = response.body.decode("utf-8", "replace")
+                log.warning(
+                    "HTTP 错误响应",
+                    path=request.url.path,
+                    status=response.status_code,
+                    body=body[:500],
+                )
+            elif response.media_type == "application/json":
+                text = response.body.decode("utf-8", "replace")
+                if (
+                    '"error"' in text
+                    or '"success":false' in text
+                    or '"success": false' in text
+                ):
+                    log.warning(
+                        "API 业务错误响应（端点以 200 返回错误体）",
+                        path=request.url.path,
+                        body=text[:500],
+                    )
+        except Exception:
+            # 日志中间件自身绝不可影响主流程
+            pass
+        return response
 
 
 app = FastAPI(
@@ -156,23 +215,42 @@ app = FastAPI(
 # 因此添加顺序为 ApiGateway(先/最内) → Metrics → CORS(后/最外)。
 # 这样 MetricsMiddleware 能包裹 ApiGateway 的拒绝响应（如 429），使限流/鉴权错误也进入 SLO；
 # 同时 CORS 包裹一切（含拒绝），避免跨域预检/拒绝缺少 CORS 头。
+# P0-6: API 鉴权默认 fail-fast
+# 开发环境(ENV=development/dev)保持关闭以兼容本地；非开发环境若未配置 API_KEYS，
+# 启动即崩溃(fail-fast)，杜绝"生产裸奔"。AUTH_FAILFAST=false 可降级为 reject-all（仅测试/特例）。
+_env = os.environ.get("ENV", "development").lower()
+_is_dev = _env in ("development", "dev")
+_api_keys: dict[str, str] = {}
+keys_env = os.environ.get("API_KEYS", "")
+if keys_env:
+    for pair in keys_env.split(","):
+        if ":" in pair:
+            k, v = pair.split(":", 1)
+            _api_keys[k.strip()] = v.strip()
+require_api_key = (not _is_dev) or bool(_api_keys)
+if (not _is_dev) and not _api_keys:
+    _failfast = os.environ.get("AUTH_FAILFAST", "true").lower() != "false"
+    if _failfast:
+        raise RuntimeError(
+            f"API 鉴权 fail-fast: ENV={_env} 但 API_KEYS 未配置。"
+            "生产环境禁止裸奔，请在启动前设置 API_KEYS，或将 ENV 设为 development"
+            "（或显式 AUTH_FAILFAST=false 降级为拒绝全部请求）。"
+        )
+    log.error(
+        "API 鉴权降级为 reject-all: 未配置 API_KEYS，所有非公开请求将被拒绝(401)。"
+        "这是不安全配置，仅限测试/特例。",
+        env=_env,
+    )
 try:
     from agent.infrastructure.api_gateway import ApiGatewayMiddleware
-    _api_keys: dict[str, str] = {}
-    keys_env = os.environ.get("API_KEYS", "")
-    if keys_env:
-        for pair in keys_env.split(","):
-            if ":" in pair:
-                k, v = pair.split(":", 1)
-                _api_keys[k.strip()] = v.strip()
     app.add_middleware(
         ApiGatewayMiddleware,
         api_keys=_api_keys,
         rate_limit_capacity=int(os.environ.get("RATE_LIMIT_CAPACITY", "60")),
         rate_limit_refill=float(os.environ.get("RATE_LIMIT_REFILL", "1.0")),
-        require_api_key=bool(_api_keys),
+        require_api_key=require_api_key,
     )
-    log.info("API Gateway middleware enabled", keys=len(_api_keys))
+    log.info("API Gateway middleware enabled", keys=len(_api_keys), require_api_key=require_api_key)
 except Exception as e:
     log.warning("API Gateway middleware setup failed", error=str(e))
 
@@ -187,6 +265,9 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["Authorization", "Content-Type", "X-API-Key", "X-Trace-Id"],
 )
+
+# 错误响应日志中间件（审计 E-01）：须为最外层（最后 add），包裹一切以捕获最终响应。
+app.add_middleware(APIErrorLoggingMiddleware)
 
 app.include_router(root_router)
 app.include_router(chat_router, prefix="/v1")
@@ -207,6 +288,9 @@ app.include_router(trajectory_router, prefix="/v1/trajectory")
 app.include_router(canary_router, prefix="/v1")
 app.include_router(mcp_router, prefix="/v1")
 app.include_router(slo_router, prefix="/v1")
+app.include_router(devices_router, prefix="/v1")
+app.include_router(action_verify_router, prefix="/v1/perception")
+app.include_router(cognition_router, prefix="/v1")
 
 
 @app.get("/v1/metrics")
@@ -224,16 +308,16 @@ async def get_metrics():
                 refl = getattr(engine.loop, 'reflection', None)
                 if refl and hasattr(refl, 'get_metrics'):
                     llm_metrics = refl.get_metrics().__dict__ if hasattr(refl.get_metrics(), '__dict__') else {}
-        except Exception:
-            pass
+        except Exception as _exc:
+            log_ignored(log, "main.get_metrics", _exc)
         try:
             if hasattr(engine, 'tool_registry') and engine.tool_registry:
                 tool_metrics = {
                     "total_tools": engine.tool_registry.size(),
                     "toolsets": len(engine.tool_registry.get_all_definitions() or []),
                 }
-        except Exception:
-            pass
+        except Exception as _exc:
+            log_ignored(log, "main.get_metrics", _exc)
 
     return {
         "total_requests": total,
@@ -319,11 +403,16 @@ def _humanize_error(error: str) -> str:
     return f"处理请求时遇到问题: {error[:100]}"
 
 
+_MAX_WS_ITERATIONS = 100000  # 防止无限循环的安全上限
+
+
 @app.websocket("/")
 async def ws_root(websocket: WebSocket):
     await websocket.accept()
     try:
-        while True:
+        iteration = 0
+        while iteration < _MAX_WS_ITERATIONS:
+            iteration += 1
             data = await websocket.receive_json()
             msg_type = data.get("type", "")
 
@@ -482,6 +571,9 @@ async def ws_root(websocket: WebSocket):
                             "request_id": request_id,
                             "tool_calls_made": tool_calls_made,
                             "quality_score": event.get("quality_score", 0.0),
+                            "rounds_used": event.get("rounds_used", 0),
+                            "duration": event.get("duration", 0.0),
+                            "finish_reason": event.get("finish_reason", "stop"),
                             "done": True,
                         })
 
@@ -517,13 +609,13 @@ async def ws_root(websocket: WebSocket):
             finally:
                 _cancel_tokens.pop(session_id, None)
 
-    except WebSocketDisconnect:
-        pass
+    except WebSocketDisconnect as _exc:
+        log_ignored(log, "main.ws_root", _exc)
     except Exception as e:
         try:
             await websocket.send_json({"type": "error", "content": _humanize_error(str(e)), "done": True})
-        except Exception:
-            pass
+        except Exception as _exc:
+            log_ignored(log, "main.ws_root", _exc)
 
 
 async def _stream_process(
@@ -600,18 +692,19 @@ async def _stream_process(
             content = result.get("content", "")
             for i in range(0, len(content), 20):
                 if cancel_token.is_set():
-                    yield {"type": "done", "trace_id": "", "content": "任务已取消"}
+                    yield {"type": "done", "trace_id": "", "content": "任务已取消", "quality_score": 0.0, "finish_reason": "cancelled"}
                     return
                 yield {"type": "token", "content": content[i:i + 20]}
 
         yield {
             "type": "done",
             "trace_id": result.get("trace_id", "") if not streaming_supported else "",
-            "quality_score": result.get("quality_score", 0.0) if not streaming_supported else 0.0,
+            "quality_score": result.get("quality_score", 0.0),
+            "finish_reason": result.get("finish_reason", "stop"),
         }
 
     except Exception as e:
-        yield {"type": "error", "content": str(e)}
+        yield {"type": "error", "content": str(e), "quality_score": 0.0, "finish_reason": "error"}
 
 
 @app.websocket("/ws")
@@ -624,7 +717,9 @@ async def ws_events(websocket: WebSocket):
     await websocket.accept()
     _event_clients.add(websocket)
     try:
-        while True:
+        iteration = 0
+        while iteration < _MAX_WS_ITERATIONS:
+            iteration += 1
             data = await websocket.receive_json()
             event = data.get("event", "")
             payload = data.get("payload", {})

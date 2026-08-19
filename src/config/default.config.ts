@@ -41,7 +41,7 @@ export const defaultConfig = {
   },
 
   model: {
-    defaultModel: 'deepseek-chat',
+    defaultModel: 'deepseek-v4-flash',
     baseUrl: 'http://127.0.0.1:8001/v1',
     apiKey: 'not-needed',
     timeout: 90000,
@@ -61,7 +61,7 @@ export const defaultConfig = {
         displayName: 'DeepSeek',
         priority: 3,
         baseUrl: 'https://api.deepseek.com/v1',
-        modelName: 'deepseek-chat',
+        modelName: 'deepseek-v4-flash',
         enabled: true,
       },
     ],

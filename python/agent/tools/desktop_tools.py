@@ -506,3 +506,169 @@ async def desktop_clipboard_executor(params: dict[str, Any]) -> ToolResult:
 
 
 # desktop_shell_executor 已移除 — 与 shell_exec (code_tools) 重复
+
+
+# ─────────────────────────────────────────────────────────────
+# UIA 增强桌面操作工具 — 精确元素定位 + 操作验证闭环
+# ─────────────────────────────────────────────────────────────
+
+DESKTOP_UIA_ACTION_DEF = ToolDefinition(
+    name="desktop_uia_action",
+    description=(
+        "UIA增强桌面操作 — 通过Windows UIA精确元素定位执行桌面操作，"
+        "自动执行操作前截图、操作后验证的完整闭环。"
+        "适用场景：需要精确点击按钮、输入文字到指定输入框、读取界面元素文本。"
+        "比desktop_automate更精确，支持操作验证和自动重试。"
+        "不适用：简单截图、窗口管理（用desktop_screenshot/desktop_window）。"
+    ),
+    category=ToolCategory.DESKTOP,
+    parameters=[
+        ToolParameterDef(name="action", type="string", description="操作类型：click/type/get_text/set_text/screenshot/activate_window/hotkey/scroll", enum=["click", "type", "get_text", "set_text", "screenshot", "activate_window", "hotkey", "scroll"]),
+        ToolParameterDef(name="target", type="string", required=False, description="目标元素名称或窗口标题"),
+        ToolParameterDef(name="value", type="string", required=False, description="输入值（type/set_text时为文字，hotkey时为组合键如ctrl+c，scroll时为滚动次数）"),
+        ToolParameterDef(name="control_type", type="string", required=False, description="UIA控制类型（Button/Edit/Window等），提高定位精度"),
+        ToolParameterDef(name="verify", type="boolean", required=False, description="是否执行操作后验证（默认true）"),
+        ToolParameterDef(name="max_retries", type="number", required=False, description="最大重试次数（默认2）"),
+    ],
+    risk_level="high",
+)
+
+
+async def desktop_uia_action_executor(params: dict[str, Any]) -> ToolResult:
+    """UIA增强桌面操作执行器 — 精确元素定位 + 操作验证闭环。"""
+    start = time.time()
+    action = str(params.get("action", "click")).lower()
+    target = str(params.get("target", ""))
+    value = str(params.get("value", ""))
+    control_type = str(params.get("control_type", ""))
+    verify = bool(params.get("verify", True))
+    max_retries = int(params.get("max_retries", 2))
+
+    try:
+        from agent.desktop.operation_loop import DesktopOperationLoop, OperationSpec
+
+        loop = DesktopOperationLoop()
+        spec = OperationSpec(
+            action_type=action,
+            target=target,
+            value=value,
+            control_type=control_type,
+            max_retries=max_retries,
+            verify_strategy="auto" if verify else "pixel",
+        )
+        result = await loop.execute(spec)
+
+        output_parts = []
+        if result.success:
+            output_parts.append(f"✅ {action} 操作成功")
+        else:
+            output_parts.append(f"❌ {action} 操作失败")
+
+        if target:
+            output_parts.append(f"目标: {target}")
+        if result.evidence:
+            output_parts.append(f"验证: {result.evidence}")
+        if result.verification:
+            conf = result.verification.get("confidence", 0)
+            method = result.verification.get("method", "")
+            output_parts.append(f"置信度: {conf:.0%} (方法: {method})")
+        if result.retries > 0:
+            output_parts.append(f"重试: {result.retries} 次")
+
+        return ToolResult(
+            success=result.success,
+            output="\n".join(output_parts),
+            error=result.error if not result.success else None,
+            duration=time.time() - start,
+            metadata={
+                "verification": result.verification,
+                "retries": result.retries,
+                "duration_ms": result.duration_ms,
+            },
+        )
+
+    except Exception as e:
+        return ToolResult(
+            success=False,
+            error=f"UIA增强操作失败: {e}",
+            duration=time.time() - start,
+        )
+
+
+# ─────────────────────────────────────────────────────────────
+# 桌面元素探索工具 — UIA 元素树浏览
+# ─────────────────────────────────────────────────────────────
+
+DESKTOP_EXPLORE_DEF = ToolDefinition(
+    name="desktop_explore",
+    description=(
+        "桌面元素探索 — 通过UIA浏览当前桌面的UI元素树，"
+        "查看可交互的按钮、输入框、菜单等元素。"
+        "适用场景：在执行桌面操作前先了解界面结构，找到目标元素名称和控制类型。"
+        "不适用：直接执行操作（用desktop_uia_action/desktop_automate）。"
+    ),
+    category=ToolCategory.DESKTOP,
+    parameters=[
+        ToolParameterDef(name="filter", type="string", required=False, description="过滤关键词（只显示名称包含此关键词的元素）"),
+        ToolParameterDef(name="control_type", type="string", required=False, description="只显示指定控制类型的元素"),
+        ToolParameterDef(name="depth", type="number", required=False, description="搜索深度（默认3，越大越详细但越慢）"),
+    ],
+    risk_level="low",
+)
+
+
+async def desktop_explore_executor(params: dict[str, Any]) -> ToolResult:
+    """桌面元素探索执行器。"""
+    start = time.time()
+    filter_text = str(params.get("filter", "")).lower()
+    control_type = params.get("control_type")
+    depth = int(params.get("depth", 3))
+
+    try:
+        from agent.tools.windows_uia import UIAEngine, UIAQuery
+
+        engine = UIAEngine.get_instance()
+        query = UIAQuery(
+            name_contains=filter_text if filter_text else None,
+            control_type=control_type,
+            max_depth=depth,
+        )
+        elements = await engine.find_elements(query)
+
+        if not elements:
+            hint = "尝试减少过滤条件或增加搜索深度" if filter_text or control_type else "当前无可交互元素"
+            return ToolResult(
+                success=True,
+                output=f"未找到匹配元素。{hint}",
+                duration=time.time() - start,
+            )
+
+        lines = [f"🔍 找到 {len(elements)} 个元素:\n"]
+        for i, el in enumerate(elements[:30], 1):
+            rect = el.rect
+            line = f"{i}. [{el.control_type}] \"{el.name}\""
+            if el.automation_id:
+                line += f" id={el.automation_id}"
+            if el.value:
+                line += f" value=\"{el.value[:50]}\""
+            line += f" pos=({rect['x']},{rect['y']})"
+            if not el.is_enabled:
+                line += " [禁用]"
+            lines.append(line)
+
+        if len(elements) > 30:
+            lines.append(f"... 共 {len(elements)} 个元素（显示前30个）")
+
+        return ToolResult(
+            success=True,
+            output="\n".join(lines),
+            duration=time.time() - start,
+            metadata={"count": len(elements)},
+        )
+
+    except Exception as e:
+        return ToolResult(
+            success=False,
+            error=f"桌面探索失败: {e}",
+            duration=time.time() - start,
+        )

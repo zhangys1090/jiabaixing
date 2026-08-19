@@ -12,6 +12,7 @@ from agent.tools.registry import (
     ToolParameterDef,
     ToolResult,
 )
+from agent.core.logger import log_ignored
 
 
 IMAGE_GENERATE_DEF = ToolDefinition(
@@ -86,8 +87,8 @@ class _SkillStore:
                 data = json.loads(f.read_text(encoding="utf-8"))
                 name = data.get("name", f.stem)
                 self._skills[name] = data
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(None, "network_enhanced_tools._SkillStore._load", _exc)
 
     def _save(self, name: str) -> None:
         skill = self._skills.get(name)
@@ -175,8 +176,8 @@ async def image_generate_executor(params: dict[str, Any]) -> ToolResult:
                     output=f"🎨 图像已生成\n描述: {prompt}\n尺寸: {size}\nURL: {url}",
                     duration=time.time() - start,
                 )
-    except Exception:
-        pass
+    except Exception as _exc:
+        log_ignored(None, "network_enhanced_tools.image_generate_executor", _exc)
 
     return ToolResult(
         success=True,

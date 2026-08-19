@@ -1,0 +1,15 @@
+diff --git a/python/agent/persistence/database.py b/python/agent/persistence/database.py
+--- a/python/agent/persistence/database.py
++++ b/python/agent/persistence/database.py
+@@ -25,10 +25,11 @@
+ 
+ from __future__ import annotations
+ 
+ import logging
+ import os
++import re
+ import sqlite3
+ from pathlib import Path
+ from typing import Any
+ 
+ from agent.config import DATA_DIR

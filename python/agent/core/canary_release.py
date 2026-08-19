@@ -23,6 +23,7 @@ import time
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
+from agent.core.logger import log_ignored
 
 
 class RolloutStrategy(str, Enum):
@@ -160,6 +161,10 @@ class CanaryReleaseManager:
 
     # 触发自动回滚所需的最小灰度样本数
     _MIN_SAMPLES_FOR_ROLLBACK = 5
+    _MIN_TIME_WINDOW_SECONDS = 600
+    _MIN_SAMPLES_IN_WINDOW = 3
+    _MAX_OUTCOMES_PER_STRATEGY = 1000
+    _MAX_ASSIGNMENTS_PER_STRATEGY = 10000
 
     def __init__(self) -> None:
         """初始化灰度发布管理器。"""
@@ -300,7 +305,12 @@ class CanaryReleaseManager:
                 hash_bucket=bucket,
                 is_canary=is_canary,
             )
-            self._assignments.setdefault(strategy_name, {})[user_id] = assignment
+            assignments = self._assignments.setdefault(strategy_name, {})
+            assignments[user_id] = assignment
+            if len(assignments) > self._MAX_ASSIGNMENTS_PER_STRATEGY:
+                oldest_keys = list(assignments.keys())[: len(assignments) - self._MAX_ASSIGNMENTS_PER_STRATEGY]
+                for k in oldest_keys:
+                    assignments.pop(k, None)
             return assignment
 
     async def record_outcome(
@@ -343,19 +353,35 @@ class CanaryReleaseManager:
                 timestamp=time.time(),
                 is_canary=is_canary,
             )
-            self._outcomes.setdefault(strategy_name, []).append(record)
+            outcomes = self._outcomes.setdefault(strategy_name, [])
+            outcomes.append(record)
+            if len(outcomes) > self._MAX_OUTCOMES_PER_STRATEGY:
+                self._outcomes[strategy_name] = outcomes[-self._MAX_OUTCOMES_PER_STRATEGY:]
 
             # AUTO 模式下自动检查健康并回滚
             if strategy.rollout_strategy == RolloutStrategy.AUTO:
                 status = self._statuses.get(strategy_name, ReleaseStatus.IDLE)
                 if status == ReleaseStatus.CANARY:
                     metrics = self._compute_health_locked(strategy_name)
+                    should_rollback = False
                     if metrics.sample_count >= self._MIN_SAMPLES_FOR_ROLLBACK:
                         if (
                             metrics.error_rate > strategy.error_threshold
                             or metrics.avg_latency > strategy.latency_threshold
                         ):
-                            self._statuses[strategy_name] = ReleaseStatus.ROLLED_BACK
+                            should_rollback = True
+                    else:
+                        now = time.time()
+                        canary_outcomes = [
+                            o for o in self._outcomes.get(strategy_name, [])
+                            if o.is_canary and (now - o.timestamp) < self._MIN_TIME_WINDOW_SECONDS
+                        ]
+                        if len(canary_outcomes) >= self._MIN_SAMPLES_IN_WINDOW:
+                            window_errors = sum(1 for o in canary_outcomes if not o.success)
+                            if window_errors / len(canary_outcomes) > strategy.error_threshold:
+                                should_rollback = True
+                    if should_rollback:
+                        self._statuses[strategy_name] = ReleaseStatus.ROLLED_BACK
 
     def check_health(self, strategy_name: str) -> HealthMetrics:
         """检查灰度版本健康指标。
@@ -499,5 +525,5 @@ async def safe_record_outcome(
         await manager.record_outcome(
             user_id, strategy_name, success=success, latency_ms=latency_ms
         )
-    except Exception:
-        pass  # 灰度记录失败不影响主流程
+    except Exception as _exc:
+        log_ignored(None, "canary_release.safe_record_outcome", _exc)

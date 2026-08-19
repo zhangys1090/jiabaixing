@@ -501,6 +501,8 @@ export enum ToolCategory {
   SYSTEM = 'system',
   DAILY = 'daily',
   NETWORK = 'network',
+  PERCEPTION = 'perception',
+  META = 'meta',
 }
 
 /** 权限枚举 */
@@ -522,7 +524,15 @@ export type RiskLevel = 'low' | 'medium' | 'high' | 'critical';
 export interface ToolDefinition {
   name: string;
   description: string;
+  /** 简短描述（渐进式披露 Level 1: 一句话概括） */
+  shortDesc?: string;
   category: ToolCategory;
+  /** 语义标签（如 'git', 'search', 'file', 'code', 'debug'） */
+  tags?: string[];
+  /** 适用场景（如 'coding', 'desktop', 'daily', 'research', 'briefing'） */
+  scenes?: string[];
+  /** 工具能力等级: 1=基础(始终暴露), 2=中级(场景匹配时), 3=高级(明确需要时) */
+  capabilityLevel?: 1 | 2 | 3;
   /** JSON Schema 格式的参数定义 */
   parameters: Record<string, ToolParameterDef>;
   requiredParams: string[];
@@ -550,6 +560,9 @@ export interface ToolParameterDef {
 export interface ToolContext {
   userId?: string;
   traceId?: string;
+  /** D2 会话标识: 用于把认知工具结果回灌到对应 Python 会话的 LLM 上下文。
+   *  上层(编排/ActionDispatcher/聊天会话)应在构造 ctx 时写入; 缺失时 cognition_result 不带 sessionId(诚实降级, 不转发)。 */
+  sessionId?: string;
   permissions: Set<Permission>;
   metadata: Record<string, unknown>;
 }
@@ -691,6 +704,26 @@ export interface QualityScore {
   friendliness: number;
   efficiency: number;
   details: string;
+}
+
+export type Result<T> =
+  | { ok: true; value: T }
+  | { ok: false; error: string; code?: string };
+
+export function ok<T>(value: T): Result<T> {
+  return { ok: true, value };
+}
+
+export function err<T = never>(error: string, code?: string): Result<T> {
+  return { ok: false, error, code };
+}
+
+export function isOk<T>(result: Result<T>): result is { ok: true; value: T } {
+  return result.ok === true;
+}
+
+export function isErr<T>(result: Result<T>): result is { ok: false; error: string; code?: string } {
+  return result.ok === false;
 }
 
 /** 目标达成度 */
@@ -928,10 +961,16 @@ export function unifiedTaskNodeToPlanStep(node: UnifiedTaskNode): PlanStep {
 /**
  * 将UnifiedTaskNode转换为DAGTask的TaskNode
  */
+let _DAGTask: typeof import('../core/DAGTask') | null = null;
+function getDAGTask(): typeof import('../core/DAGTask') {
+  if (!_DAGTask) _DAGTask = require('../core/DAGTask');
+  return _DAGTask;
+}
+
 export function unifiedTaskNodeToDagTaskNode(
   node: UnifiedTaskNode
 ): import('../core/DAGTask').TaskNode {
-  const { TaskStatus, TaskPriority, TaskNode } = require('../core/DAGTask');
+  const { TaskStatus, TaskPriority, TaskNode } = getDAGTask();
   const statusMap: Record<
     UnifiedTaskStatus,
     import('../core/DAGTask').TaskStatus

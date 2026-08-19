@@ -23,6 +23,7 @@ const BASE_TOOLSET: ToolsetDefinition = {
     { name: 'ask_clarification' },
     { name: 'system_status' },
     { name: 'context_manage' },
+    { name: 'tool_inspect' },
   ],
   maxTools: 0,
 };
@@ -45,6 +46,8 @@ const CODING_TOOLSET: ToolsetDefinition = {
     { name: 'preview_execution' },
     { name: 'rollback_changes' },
     { name: 'delegate_task' },
+    { name: 'tool_define' },
+    { name: 'tool_undefine' },
   ],
   maxTools: 20,
 };

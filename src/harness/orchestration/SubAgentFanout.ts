@@ -9,6 +9,7 @@
  * 每个 Sub-Agent 拥有独立的上下文窗口，确保上下文隔离。
  */
 
+import { randomUUID } from 'crypto';
 import { Logger } from '../../utils/Logger';
 import type { TaskNode, TaskExecutor } from './TaskDispatcher';
 import { AgentRegistry } from './AgentRegistry';
@@ -35,6 +36,50 @@ const DEFAULT_FANOUT_CONFIG: FanoutConfig = {
   continueOnPartialFailure: true,
 };
 
+/**
+ * W7：感知型子 Agent 预设（对齐 Python PERCEPTION_AGENT_TEMPLATES）。
+ * 把五感能力下沉到专职子 Agent，声明其消费的模态与工具集。
+ */
+export interface PerceptionAgentTemplate {
+  kind: string;
+  description: string;
+  modalities: string[];
+  tools: string[];
+  useSharedFusion: boolean;
+}
+
+export const PERCEPTION_AGENT_TEMPLATES: Record<string, PerceptionAgentTemplate> = {
+  visual_operator: {
+    kind: 'visual_operator',
+    description: '视觉操作型子 Agent：结合视觉定位与 UI 自动化执行界面操作。',
+    modalities: ['visual', 'uia', 'ocr'],
+    tools: ['visual_grounding', 'uia', 'ocr', 'screen_capture'],
+    useSharedFusion: true,
+  },
+  desktop_automation: {
+    kind: 'desktop_automation',
+    description: '桌面自动化型子 Agent：调度桌面自动化完成点击/输入/拖拽等动作。',
+    modalities: ['uia', 'visual', 'proprioception'],
+    tools: ['nut', 'playwright', 'uia', 'action_verifier'],
+    useSharedFusion: true,
+  },
+  device_control: {
+    kind: 'device_control',
+    description: '设备控制型子 Agent：读取真实设备网关状态并下发控制指令。',
+    modalities: ['environment', 'proprioception'],
+    tools: ['device_manager', 'device_gateway', 'action_verifier'],
+    useSharedFusion: true,
+  },
+};
+
+/** 扇出可选参数（W7/W8：traceId 贯通 + 感知模板） */
+export interface FanoutOptions {
+  /** 贯通用链路ID；缺省自动生成并向下透传至每个子结果（W8） */
+  traceId?: string;
+  /** 感知型子 Agent 模板类型（W7），注入 task.perceptionTemplate */
+  perceptionTemplate?: string;
+}
+
 /** 子任务执行结果 */
 export interface SubTaskResult {
   /** 子任务ID */
@@ -49,6 +94,8 @@ export interface SubTaskResult {
   duration: number;
   /** 执行Agent ID */
   agentId?: string;
+  /** 贯通用链路ID（W8） */
+  traceId: string;
 }
 
 /** 扇出执行结果 */
@@ -67,6 +114,8 @@ export interface FanoutResult {
   totalDuration: number;
   /** 是否全部成功 */
   allSucceeded: boolean;
+  /** 贯通用链路ID（W8） */
+  traceId: string;
 }
 
 export class SubAgentFanout {
@@ -89,14 +138,17 @@ export class SubAgentFanout {
    * @param parentTaskId - 父任务ID
    * @param subTasks - 子任务节点列表
    * @param configOverride - 可选的配置覆盖
+   * @param options - W7/W8：traceId 贯通与感知模板
    * @returns 扇出执行结果
    */
   async fanout(
     parentTaskId: string,
     subTasks: TaskNode[],
-    configOverride?: Partial<FanoutConfig>
+    configOverride?: Partial<FanoutConfig>,
+    options?: FanoutOptions
   ): Promise<FanoutResult> {
     const runConfig = { ...this.config, ...configOverride };
+    const traceId = options?.traceId || randomUUID();
     const startTime = Date.now();
 
     const limitedTasks = subTasks.slice(0, runConfig.maxFanout);
@@ -107,9 +159,16 @@ export class SubAgentFanout {
       );
     }
 
+    // W7：把感知模板透传到每个子任务的元数据，供执行器注入感知上下文
+    if (options?.perceptionTemplate) {
+      for (const t of limitedTasks) {
+        t.metadata = { ...(t.metadata ?? {}), perceptionTemplate: options.perceptionTemplate };
+      }
+    }
+
     const strategy = this.resolveStrategy(limitedTasks, runConfig.strategy);
     Logger.info(
-      `🔀 Sub-Agent 扇出: ${parentTaskId} | 策略=${strategy} | 子任务=${limitedTasks.length}`,
+      `🔀 Sub-Agent 扇出: ${parentTaskId} | 策略=${strategy} | 子任务=${limitedTasks.length} | traceId=${traceId}`,
       'SubAgentFanout'
     );
 
@@ -120,14 +179,16 @@ export class SubAgentFanout {
         subResults = await this.executeParallel(
           parentTaskId,
           limitedTasks,
-          runConfig
+          runConfig,
+          traceId
         );
         break;
       case 'sequential':
         subResults = await this.executeSequential(
           parentTaskId,
           limitedTasks,
-          runConfig
+          runConfig,
+          traceId
         );
         break;
       case 'adaptive':
@@ -136,13 +197,15 @@ export class SubAgentFanout {
           subResults = await this.executeSequential(
             parentTaskId,
             limitedTasks,
-            runConfig
+            runConfig,
+            traceId
           );
         } else {
           subResults = await this.executeParallel(
             parentTaskId,
             limitedTasks,
-            runConfig
+            runConfig,
+            traceId
           );
         }
         break;
@@ -153,7 +216,7 @@ export class SubAgentFanout {
     const failedCount = subResults.filter((r) => !r.success).length;
 
     Logger.info(
-      `🏁 Sub-Agent 扇出完成: ${parentTaskId} | 成功=${successCount} 失败=${failedCount} | 耗时=${totalDuration}ms`,
+      `🏁 Sub-Agent 扇出完成: ${parentTaskId} | 成功=${successCount} 失败=${failedCount} | 耗时=${totalDuration}ms | traceId=${traceId}`,
       'SubAgentFanout'
     );
 
@@ -165,6 +228,7 @@ export class SubAgentFanout {
       failedCount,
       totalDuration,
       allSucceeded: failedCount === 0,
+      traceId,
     };
   }
 
@@ -174,10 +238,11 @@ export class SubAgentFanout {
   private async executeParallel(
     parentTaskId: string,
     tasks: TaskNode[],
-    config: FanoutConfig
+    config: FanoutConfig,
+    traceId: string
   ): Promise<SubTaskResult[]> {
     const promises = tasks.map((task) =>
-      this.executeSubTask(parentTaskId, task, config)
+      this.executeSubTask(parentTaskId, task, config, traceId)
     );
 
     const settled = await Promise.allSettled(promises);
@@ -191,6 +256,7 @@ export class SubAgentFanout {
         success: false,
         error: result.reason?.message || String(result.reason),
         duration: 0,
+        traceId,
       };
     });
   }
@@ -201,13 +267,14 @@ export class SubAgentFanout {
   private async executeSequential(
     parentTaskId: string,
     tasks: TaskNode[],
-    config: FanoutConfig
+    config: FanoutConfig,
+    traceId: string
   ): Promise<SubTaskResult[]> {
     const results: SubTaskResult[] = [];
 
     for (const task of tasks) {
       try {
-        const result = await this.executeSubTask(parentTaskId, task, config);
+        const result = await this.executeSubTask(parentTaskId, task, config, traceId);
         results.push(result);
 
         if (!result.success && !config.continueOnPartialFailure) {
@@ -217,6 +284,7 @@ export class SubAgentFanout {
               success: false,
               error: '前置任务失败，跳过执行',
               duration: 0,
+              traceId,
             });
           }
           break;
@@ -227,6 +295,7 @@ export class SubAgentFanout {
           success: false,
           error: (err as Error).message,
           duration: 0,
+          traceId,
         });
 
         if (!config.continueOnPartialFailure) {
@@ -236,6 +305,7 @@ export class SubAgentFanout {
               success: false,
               error: '前置任务失败，跳过执行',
               duration: 0,
+              traceId,
             });
           }
           break;
@@ -252,13 +322,20 @@ export class SubAgentFanout {
   private async executeSubTask(
     parentTaskId: string,
     task: TaskNode,
-    config: FanoutConfig
+    config: FanoutConfig,
+    traceId: string
   ): Promise<SubTaskResult> {
     const startTime = Date.now();
 
-    const agent =
-      this.registry.findBestAgent((task.tools && task.tools[0]) || '') ||
-      this.registry.findAgentByCapability((task.tools && task.tools[0]) || '');
+    // P0-4: 优先使用动态角色分配指定的 Agent
+    let agent = task.assignedTo
+      ? this.registry.getAgent(task.assignedTo)
+      : undefined;
+    if (!agent) {
+      agent =
+        this.registry.findBestAgent((task.tools && task.tools[0]) || '') ||
+        this.registry.findAgentByCapability((task.tools && task.tools[0]) || '');
+    }
 
     if (!agent) {
       return {
@@ -266,6 +343,7 @@ export class SubAgentFanout {
         success: false,
         error: `无可用的 Agent 执行子任务: ${task.id}`,
         duration: Date.now() - startTime,
+        traceId,
       };
     }
 
@@ -279,8 +357,14 @@ export class SubAgentFanout {
         );
       });
 
+      // W8：把 traceId 注入任务元数据，向下游执行器/Python 核心透传
+      const taskWithTrace: TaskNode = {
+        ...task,
+        metadata: { ...(task.metadata ?? {}), traceId },
+      };
+
       const result = this.executor
-        ? await Promise.race([this.executor(task), timeoutPromise])
+        ? await Promise.race([this.executor(taskWithTrace), timeoutPromise])
         : await Promise.race([
             Promise.resolve({
               taskId: task.id,
@@ -303,6 +387,7 @@ export class SubAgentFanout {
         result,
         duration,
         agentId: agent.id,
+        traceId,
       };
     } catch (err) {
       const duration = Date.now() - startTime;
@@ -317,6 +402,7 @@ export class SubAgentFanout {
         error: (err as Error).message,
         duration,
         agentId: agent.id,
+        traceId,
       };
     } finally {
       this.registry.updateStatus(agent.id, 'idle');

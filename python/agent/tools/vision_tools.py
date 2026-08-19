@@ -147,29 +147,31 @@ async def vision_understand_executor(params: dict[str, Any]) -> ToolResult:
         return ToolResult(success=False, error=f"Vision模型调用失败: {e}")
 
 
-async def _download_image(url: str) -> bytes:
-    """下载图片数据"""
+async def _download_image(url: str) -> bytes | None:
+    """下载图片数据，失败返回 None"""
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
                 if resp.status != 200:
+                    log.warning("图片下载失败: HTTP %d", resp.status, url=url)
                     return None
                 return await resp.read()
-    except Exception:
+    except Exception as exc:
+        log.warning("图片下载异常", url=url, error=str(exc))
         return None
 
 
 async def _call_gpt4o_vision(image_data: bytes, question: str) -> str:
     """调用GPT-4o Vision API"""
     import json
-    
+
     try:
         from litellm import acompletion
-        
+
         # 准备请求
         base64_image = base64.b64encode(image_data).decode("utf-8")
         image_url = f"data:image/jpeg;base64,{base64_image}"
-        
+
         messages = [
             {
                 "role": "system",
@@ -192,7 +194,7 @@ async def _call_gpt4o_vision(image_data: bytes, question: str) -> str:
                 ]
             }
         ]
-        
+
         # 调用LiteLLM
         response = await acompletion(
             model=os.getenv("VISION_MODEL", "gpt-4o"),
@@ -200,25 +202,25 @@ async def _call_gpt4o_vision(image_data: bytes, question: str) -> str:
             max_tokens=4000,
             temperature=0.3,
         )
-        
+
         return response.choices[0].message.content
-    
+
     except ImportError:
-        return "LiteLLM未安装，请运行: pip install litellm"
+        raise RuntimeError("LiteLLM未安装，请运行: pip install litellm")
     except Exception as e:
-        return f"GPT-4o Vision调用失败: {e}"
+        raise RuntimeError(f"GPT-4o Vision调用失败: {e}") from e
 
 
 async def _call_claude_vision(image_data: bytes, question: str) -> str:
     """调用Claude Vision API"""
     import os
-    
+
     try:
         from litellm import acompletion
-        
+
         base64_image = base64.b64encode(image_data).decode("utf-8")
         image_url = f"data:image/jpeg;base64,{base64_image}"
-        
+
         messages = [
             {
                 "role": "user",
@@ -237,20 +239,20 @@ async def _call_claude_vision(image_data: bytes, question: str) -> str:
                 ]
             }
         ]
-        
+
         response = await acompletion(
             model=os.getenv("VISION_MODEL", "claude-sonnet-4-20250514"),
             messages=messages,
             max_tokens=4000,
             temperature=0.3,
         )
-        
+
         return response.choices[0].message.content
-    
+
     except ImportError:
-        return "LiteLLM未安装"
+        raise RuntimeError("LiteLLM未安装，请运行: pip install litellm")
     except Exception as e:
-        return f"Claude Vision调用失败: {e}"
+        raise RuntimeError(f"Claude Vision调用失败: {e}") from e
 
 
 async def _call_custom_vision(image_data: bytes, question: str, model: str) -> str:

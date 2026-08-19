@@ -56,9 +56,13 @@ export class NormalizedCoordinateSystem {
     this.refreshScreenInfo();
   }
 
+  public static create(): NormalizedCoordinateSystem {
+    return new NormalizedCoordinateSystem();
+  }
+
   public static getInstance(): NormalizedCoordinateSystem {
     if (!NormalizedCoordinateSystem.instance) {
-      NormalizedCoordinateSystem.instance = new NormalizedCoordinateSystem();
+      NormalizedCoordinateSystem.instance = NormalizedCoordinateSystem.create();
     }
     return NormalizedCoordinateSystem.instance;
   }

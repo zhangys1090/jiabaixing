@@ -77,8 +77,8 @@ class SlackAdapter(PlatformAdapter):
 
     async def start(self) -> None:
         if not self._bot_token:
-            log.warning("Slack Bot Token 未配置，适配器以模拟模式运行")
-            self._connected = True
+            log.warning("Slack Bot Token 未配置，适配器以模拟模式运行（不会真实连接）")
+            self._enter_simulated()
             return
 
         try:
@@ -118,8 +118,8 @@ class SlackAdapter(PlatformAdapter):
             self._connected = True
             log.info("Slack 适配器已启动")
         except ImportError:
-            log.warning("slack_bolt 未安装，Slack 适配器以模拟模式运行")
-            self._connected = True
+            log.warning("slack_bolt 未安装，Slack 适配器以模拟模式运行（不会真实连接）")
+            self._enter_simulated()
         except Exception as e:
             log.error("Slack 适配器启动失败", error=str(e))
             self._connected = False
@@ -130,8 +130,9 @@ class SlackAdapter(PlatformAdapter):
 
     async def send_message(self, chat_id: str, text: str) -> bool:
         if self._app is None:
-            log.debug("Slack 模拟发送", chat_id=chat_id, text=text[:50])
-            return True
+            # 诚实化：模拟态（未配置 Token / 未安装 SDK）未真实发送
+            log.warning("Slack 适配器未连接，消息未真实发送", chat_id=chat_id)
+            return False
 
         try:
             client = self._app.client

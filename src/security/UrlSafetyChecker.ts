@@ -69,6 +69,10 @@ export class UrlSafetyChecker {
   private allowlist: Set<string> = new Set();
   private blocklist: Set<string> = new Set();
 
+  public static create(): UrlSafetyChecker {
+    return new UrlSafetyChecker();
+  }
+
   public static getInstance(): UrlSafetyChecker {
     if (!UrlSafetyChecker.instance) {
       UrlSafetyChecker.instance = new UrlSafetyChecker();

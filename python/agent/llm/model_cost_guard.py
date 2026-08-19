@@ -30,6 +30,7 @@ from enum import Enum
 from typing import Any
 
 from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
 
 log = StructuredLogger("model_cost_guard")
 
@@ -64,6 +65,10 @@ _MODEL_PRICING: dict[str, ModelPricing] = {
     "gemini/gemini-2.0-flash": ModelPricing(0.10, 0.40, "", "cheap"),
     "deepseek-chat": ModelPricing(0.14, 0.28, "", "cheap"),
     "deepseek/deepseek-chat": ModelPricing(0.14, 0.28, "", "cheap"),
+    "deepseek-v4-flash": ModelPricing(0.14, 0.28, "", "cheap"),
+    "deepseek/deepseek-v4-flash": ModelPricing(0.14, 0.28, "", "cheap"),
+    "deepseek-v4-pro": ModelPricing(0.42, 0.83, "deepseek-v4-flash", "standard"),
+    "deepseek/deepseek-v4-pro": ModelPricing(0.42, 0.83, "deepseek/deepseek-v4-flash", "standard"),
 }
 
 
@@ -216,8 +221,8 @@ class ModelCostGuard:
             for cb in self._alert_callbacks:
                 try:
                     cb(model, level, reason)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    log_ignored(log, "model_cost_guard.ModelCostGuard.check_before_call", _exc)
             log.warning("模型成本守卫触发", model=model, level=level.value, reason=reason)
 
         return CostCheckResult(

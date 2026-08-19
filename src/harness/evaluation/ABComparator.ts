@@ -161,3 +161,260 @@ export class ABComparator {
     return 'neutral';
   }
 }
+
+/**
+ * P2 #13: 灰度发布管理器 — 提示词/模型渐进式发布
+ *
+ * 流量分配策略：
+ * 1. 基于用户ID哈希 → 稳定分流（同一用户始终看到同一版本）
+ * 2. 百分比渐进：5% → 20% → 50% → 100%
+ * 3. 自动回滚：监控错误率/延迟，超阈值自动回退
+ */
+export type CanaryTarget = 'prompt' | 'model';
+
+export interface CanaryRule {
+  id: string;
+  target: CanaryTarget;
+  targetName: string;
+  baselineValue: string;
+  candidateValue: string;
+  trafficPercent: number;
+  status: 'draft' | 'running' | 'paused' | 'completed' | 'rolled_back';
+  createdAt: string;
+  updatedAt: string;
+  autoRollbackThreshold?: {
+    errorRate: number;
+    latencyMs: number;
+  };
+}
+
+export interface CanaryMetrics {
+  ruleId: string;
+  baselineErrorRate: number;
+  candidateErrorRate: number;
+  baselineAvgLatencyMs: number;
+  candidateAvgLatencyMs: number;
+  sampleCount: number;
+}
+
+export class CanaryReleaseManager {
+  private rules: Map<string, CanaryRule> = new Map();
+  private metrics: Map<
+    string,
+    {
+      baseline: number[];
+      candidate: number[];
+      baselineLatency: number[];
+      candidateLatency: number[];
+    }
+  > = new Map();
+  private comparator: ABComparator = new ABComparator();
+
+  /**
+   * 创建灰度发布规则
+   */
+  createRule(input: {
+    target: CanaryTarget;
+    targetName: string;
+    baselineValue: string;
+    candidateValue: string;
+    initialTrafficPercent?: number;
+    autoRollbackThreshold?: { errorRate: number; latencyMs: number };
+  }): CanaryRule {
+    const rule: CanaryRule = {
+      id: `canary_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      target: input.target,
+      targetName: input.targetName,
+      baselineValue: input.baselineValue,
+      candidateValue: input.candidateValue,
+      trafficPercent: input.initialTrafficPercent ?? 5,
+      status: 'draft',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      autoRollbackThreshold: input.autoRollbackThreshold ?? {
+        errorRate: 0.1,
+        latencyMs: 30000,
+      },
+    };
+    this.rules.set(rule.id, rule);
+    this.metrics.set(rule.id, {
+      baseline: [],
+      candidate: [],
+      baselineLatency: [],
+      candidateLatency: [],
+    });
+    Logger.info(
+      `灰度规则已创建: ${rule.id} (${rule.target}/${rule.targetName})`,
+      'CanaryRelease'
+    );
+    return rule;
+  }
+
+  /**
+   * 启动灰度发布
+   */
+  startRule(ruleId: string): CanaryRule | null {
+    const rule = this.rules.get(ruleId);
+    if (!rule) return null;
+    rule.status = 'running';
+    rule.updatedAt = new Date().toISOString();
+    Logger.info(
+      `灰度发布已启动: ${ruleId}, 流量=${rule.trafficPercent}%`,
+      'CanaryRelease'
+    );
+    return rule;
+  }
+
+  /**
+   * 递增流量百分比
+   */
+  increaseTraffic(ruleId: string, step?: number): CanaryRule | null {
+    const rule = this.rules.get(ruleId);
+    if (!rule || rule.status !== 'running') return null;
+
+    const increment = step ?? 15;
+    rule.trafficPercent = Math.min(100, rule.trafficPercent + increment);
+    rule.updatedAt = new Date().toISOString();
+
+    if (rule.trafficPercent >= 100) {
+      rule.status = 'completed';
+      Logger.info(`灰度发布已完成(100%): ${ruleId}`, 'CanaryRelease');
+    } else {
+      Logger.info(
+        `灰度流量递增: ${ruleId} → ${rule.trafficPercent}%`,
+        'CanaryRelease'
+      );
+    }
+    return rule;
+  }
+
+  /**
+   * 回滚灰度发布
+   */
+  rollback(ruleId: string, reason?: string): CanaryRule | null {
+    const rule = this.rules.get(ruleId);
+    if (!rule) return null;
+    rule.status = 'rolled_back';
+    rule.trafficPercent = 0;
+    rule.updatedAt = new Date().toISOString();
+    Logger.warn(
+      `灰度发布已回滚: ${ruleId}, 原因: ${reason || '手动回滚'}`,
+      'CanaryRelease'
+    );
+    return rule;
+  }
+
+  /**
+   * 判断请求应使用 baseline 还是 candidate
+   * 基于用户ID哈希实现稳定分流
+   */
+  shouldUseCandidate(ruleId: string, userId: string): boolean {
+    const rule = this.rules.get(ruleId);
+    if (!rule || rule.status !== 'running') return false;
+
+    const hash = this.hashUserId(userId);
+    return hash % 100 < rule.trafficPercent;
+  }
+
+  /**
+   * 获取当前生效的值（baseline 或 candidate）
+   */
+  getActiveValue(ruleId: string, userId: string): string | null {
+    const rule = this.rules.get(ruleId);
+    if (!rule) return null;
+    return this.shouldUseCandidate(ruleId, userId)
+      ? rule.candidateValue
+      : rule.baselineValue;
+  }
+
+  /**
+   * 记录请求指标（用于自动回滚判断）
+   */
+  recordMetric(
+    ruleId: string,
+    isCandidate: boolean,
+    isError: boolean,
+    latencyMs: number
+  ): void {
+    const metric = this.metrics.get(ruleId);
+    if (!metric) return;
+
+    if (isCandidate) {
+      metric.candidate.push(isError ? 1 : 0);
+      metric.candidateLatency.push(latencyMs);
+    } else {
+      metric.baseline.push(isError ? 1 : 0);
+      metric.baselineLatency.push(latencyMs);
+    }
+
+    this.checkAutoRollback(ruleId);
+  }
+
+  /**
+   * 获取灰度指标摘要
+   */
+  getMetrics(ruleId: string): CanaryMetrics | null {
+    const rule = this.rules.get(ruleId);
+    const metric = this.metrics.get(ruleId);
+    if (!rule || !metric) return null;
+
+    const avg = (arr: number[]) =>
+      arr.length > 0 ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+
+    return {
+      ruleId,
+      baselineErrorRate: avg(metric.baseline),
+      candidateErrorRate: avg(metric.candidate),
+      baselineAvgLatencyMs: avg(metric.baselineLatency),
+      candidateAvgLatencyMs: avg(metric.candidateLatency),
+      sampleCount: metric.baseline.length + metric.candidate.length,
+    };
+  }
+
+  /**
+   * 获取所有规则
+   */
+  listRules(): CanaryRule[] {
+    return Array.from(this.rules.values());
+  }
+
+  /**
+   * 获取指定规则
+   */
+  getRule(ruleId: string): CanaryRule | undefined {
+    return this.rules.get(ruleId);
+  }
+
+  private hashUserId(userId: string): number {
+    let hash = 0;
+    for (let i = 0; i < userId.length; i++) {
+      const char = userId.charCodeAt(i);
+      hash = (hash << 5) - hash + char;
+      hash = hash & hash;
+    }
+    return Math.abs(hash);
+  }
+
+  private checkAutoRollback(ruleId: string): void {
+    const rule = this.rules.get(ruleId);
+    if (!rule || rule.status !== 'running' || !rule.autoRollbackThreshold)
+      return;
+
+    const metrics = this.getMetrics(ruleId);
+    if (!metrics || metrics.sampleCount < 10) return;
+
+    const { errorRate, latencyMs } = rule.autoRollbackThreshold;
+
+    if (metrics.candidateErrorRate > errorRate) {
+      this.rollback(
+        ruleId,
+        `候选版本错误率 ${(metrics.candidateErrorRate * 100).toFixed(1)}% 超过阈值 ${(errorRate * 100).toFixed(1)}%`
+      );
+    } else if (metrics.candidateAvgLatencyMs > latencyMs) {
+      this.rollback(
+        ruleId,
+        `候选版本延迟 ${metrics.candidateAvgLatencyMs.toFixed(0)}ms 超过阈值 ${latencyMs}ms`
+      );
+    }
+  }
+}

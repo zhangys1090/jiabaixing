@@ -8,12 +8,23 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { MemoryContent } from '../interfaces';
 import { FileSystem } from '../io/FileSystem';
+import { Logger } from '../utils/Logger';
 import { BaseMemoryStore } from './BaseMemoryStore';
 import { ChineseTokenizer } from './ChineseTokenizer';
-import { Logger } from '../utils/Logger';
 import { MemoryItem, MemoryType } from './MemoryEngine';
 
 const fileSystem = new FileSystem();
+
+/**
+ * @deprecated 短期记忆核心逻辑已迁移至 Python agent/memory (AGENTS.md §0.1)。
+ * 本类仅保留为类型契约/本地回退存根，不再由生产代码实例化。运行时走 Python。
+ */
+import { emitDeprecationWarning } from '../shared/deprecationWarning';
+emitDeprecationWarning(
+  'ShortTermMemory',
+  'Python MemoryEngine (AGENT_BACKEND=python)',
+  'V6.0'
+);
 
 export class ShortTermMemory extends BaseMemoryStore {
   private storagePath: string;

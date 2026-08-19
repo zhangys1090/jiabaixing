@@ -1,18 +1,24 @@
-export { PerformanceMonitor } from './PerformanceMonitor';
-export type {
-  PerformanceAlert,
-  PerformanceConfig,
-  PerformanceMetrics,
-  PerformanceMetric,
-  PerformanceStats,
-  PerformanceReport,
-} from './PerformanceMonitor';
 export {
-  perf,
+  endSpan,
+  getMeter,
+  getTracer,
   measure,
   measureSync,
+  perf,
+  PerformanceMonitor,
+  recordOTelRequest,
+  shutdownOTel,
+  startOTelSpan,
   startSpan,
-  endSpan,
+} from './PerformanceMonitor';
+export type {
+  OTelConfig,
+  PerformanceAlert,
+  PerformanceConfig,
+  PerformanceMetric,
+  PerformanceMetrics,
+  PerformanceReport,
+  PerformanceStats,
 } from './PerformanceMonitor';
 
 // ── SecurityAuditor 兼容层导出 ──

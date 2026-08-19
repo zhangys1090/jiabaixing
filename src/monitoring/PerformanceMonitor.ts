@@ -685,4 +685,85 @@ export const measureSync = perf.measureSync.bind(perf);
 export const startSpan = perf.startSpan.bind(perf);
 export const endSpan = perf.endSpan.bind(perf);
 
+// ═══════════════════════════════════════════════════════════
+// OpenTelemetry 集成 — 可观测性标准追踪
+// ═══════════════════════════════════════════════════════════
+
+import * as opentelemetry from '@opentelemetry/api';
+
+export interface OTelConfig {
+  enabled: boolean;
+  serviceName: string;
+  otlpEndpoint?: string;
+  prometheusPort?: number;
+}
+
+let tracer: opentelemetry.Tracer | null = null;
+let meter: opentelemetry.Meter | null = null;
+
+const requestCounter = { value: 0 };
+const errorCounter = { value: 0 };
+const latencyHistogram = new Map<string, number[]>();
+
+/**
+ * 获取 OTel Tracer
+ */
+export function getTracer(): opentelemetry.Tracer | null {
+  return tracer;
+}
+
+/**
+ * 获取 OTel Meter
+ */
+export function getMeter(): opentelemetry.Meter | null {
+  return meter;
+}
+
+/**
+ * 创建 OTel Span — 与 PerformanceMonitor.startSpan 桥接
+ */
+export function startOTelSpan(
+  name: string,
+  options?: opentelemetry.SpanOptions
+): opentelemetry.Span | undefined {
+  if (!tracer) return undefined;
+  return tracer.startSpan(name, options);
+}
+
+/**
+ * 记录请求指标到 Prometheus
+ */
+export function recordOTelRequest(
+  operation: string,
+  durationMs: number,
+  success: boolean
+): void {
+  requestCounter.value++;
+  if (!success) errorCounter.value++;
+
+  const key = operation;
+  if (!latencyHistogram.has(key)) latencyHistogram.set(key, []);
+  latencyHistogram.get(key)!.push(durationMs);
+
+  if (meter) {
+    try {
+      const counter = meter.createCounter('jiabaixing_requests_total', {
+        description: 'Total requests',
+      });
+      counter.add(1, { operation, success: String(success) });
+    } catch {
+      // 降级处理
+    }
+  }
+}
+
+/**
+ * 关闭 OTel 透传句柄（TS 侧不持有 SDK，仅需清理本地引用）
+ */
+export async function shutdownOTel(): Promise<void> {
+  tracer = null;
+  meter = null;
+  Logger.info('📡 OpenTelemetry 透传句柄已清理（SDK 由 Python 后端管理）', 'OTel');
+}
+
 export default PerformanceMonitor;

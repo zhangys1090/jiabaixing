@@ -52,11 +52,14 @@ class TaskDispatcher:
         """兼容旧 dispatch 接口。"""
         for t in tasks:
             deps = t.get("dependencies", []) or []
+            task_id = t.get("id", "")
             self._inner.add_task(
-                name=t.get("goal", t.get("id", "")),
-                executor=lambda _: {"task_id": t.get("id", ""), "result": None},
+                name=t.get("goal", task_id),
+                # 用默认参数绑定当次 task_id：普通闭包会晚绑定，
+                # 导致所有任务的 executor 都返回循环最后一个 id。
+                executor=lambda _, _tid=task_id: {"task_id": _tid, "result": None},
                 dependencies=deps,
-                metadata={"task_id": t.get("id", "")},
+                metadata={"task_id": task_id},
             )
         result = await self._inner.execute()
         return result.aggregated_result or {}

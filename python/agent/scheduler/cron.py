@@ -12,6 +12,7 @@ from typing import Any, Callable, Awaitable
 
 from agent.config import DATA_DIR
 from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
 from agent.infrastructure.message_queue import (
     Message,
     MessagePriority,
@@ -109,19 +110,6 @@ class CronJobResult:
     stderr: str = ""
     success: bool = False
 
-
-class CronJobScheduler:
-    """定时任务调度器——管理定时任务的注册、调度和执行。
-
-    支持every:N{s|m|h|d}格式的间隔调度规则，内置危险命令检测。
-    单例模式，自动持久化任务配置。
-
-    Usage:
-        scheduler = CronJobScheduler.get_instance()
-        job = CronJob(id="1", name="backup", schedule="every:1h", command="echo backup")
-        scheduler.add_job(job)
-        await scheduler.start()
-    """
 
 _DANGEROUS_PATTERNS = [
     r"rm\s+-rf\s+/",
@@ -232,6 +220,18 @@ def _parse_interval(schedule: str) -> int | None:
 
 
 class CronJobScheduler:
+    """定时任务调度器——管理定时任务的注册、调度和执行。
+
+    支持 every:N{s|m|h|d} 与 cron:<expr> 两种调度规则，内置危险命令检测。
+    单例模式，自动持久化任务配置。多副本部署下仅 leader 运行调度循环。
+
+    Usage:
+        scheduler = CronJobScheduler.get_instance()
+        job = CronJob(id="1", name="backup", schedule="every:1h", command="echo backup")
+        scheduler.add_job(job)
+        await scheduler.start()
+    """
+
     _instance: CronJobScheduler | None = None
 
     def __init__(self, data_dir: Path | None = None) -> None:
@@ -309,27 +309,42 @@ class CronJobScheduler:
         if self._task:
             self._task.cancel()
             self._task = None
-        # 仅在运行中的事件循环内调度异步清理，避免无循环场景（如同步 teardown）崩溃
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
-            self._leader = None
-            self._mq = None
-            return
-        if self._leader is not None:
-            loop.create_task(self._leader.stop())
-            self._leader = None
-        if self._mq is not None:
-            loop.create_task(self._mq.stop())
-            self._mq = None
+            loop = None
+        if loop is not None:
+            # 运行中的事件循环：异步清理（由事件循环驱动，fire-and-forget）
+            if self._leader is not None:
+                loop.create_task(self._leader.stop())
+                self._leader = None
+            if self._mq is not None:
+                loop.create_task(self._mq.stop())
+                self._mq = None
+        else:
+            # 无运行中的事件循环（同步 teardown / 测试）：尽力同步释放 Redis leader 锁与 MQ，
+            # 避免锁泄漏至 TTL 过期（审计 L-03）。asyncio.run 起独立循环执行清理，
+            # 仅在本分支（确认无运行循环）调用，不会与既有循环冲突。
+            if self._leader is not None:
+                try:
+                    asyncio.run(self._leader.stop())
+                except Exception as _exc:
+                    log_ignored(log, "cron.CronJobScheduler.stop.leader", _exc)
+                self._leader = None
+            if self._mq is not None:
+                try:
+                    asyncio.run(self._mq.stop())
+                except Exception as _exc:
+                    log_ignored(log, "cron.CronJobScheduler.stop.mq", _exc)
+                self._mq = None
 
     async def _tick_loop(self) -> None:
         # 仅 leader 执行；若领导权在运行中转移，立即停止以避免双副本调度
         while self._running and (self._leader is not None and self._leader.is_leader):
             try:
                 await self._tick()
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "cron.CronJobScheduler._tick_loop", _exc)
             await asyncio.sleep(self._tick_interval)
 
     async def _tick(self) -> None:
@@ -342,7 +357,13 @@ class CronJobScheduler:
                 asyncio.create_task(self._safe_dispatch(job))
 
     async def _safe_dispatch(self, job: CronJob) -> None:
-        """加调度锁后派发：仅持有者触发，另一副本抢不到即跳过。"""
+        """加调度锁后派发：仅持有者触发，另一副本抢不到即跳过。
+
+        派发前同步将 job.status 置为 running 并落盘，使 _tick 的
+        `status == "running"` 守卫立即生效，避免慢任务在下次 tick 被重复派发
+        （审计 L-01：原 next_run/status 仅在 _run_job 执行完成后才更新，
+        调度锁又在 publish 后立刻释放，导致执行中的任务仍被每 tick 重新派发）。
+        """
         lock = create_lock(
             f"cron:sched:{job.id}",
             ttl_ms=job.timeout or 60_000,
@@ -351,7 +372,14 @@ class CronJobScheduler:
         )
         if await lock.acquire():
             try:
+                job.status = "running"
+                self._save()
                 await self.dispatch(job)
+            except Exception as _exc:
+                # 派发失败：回滚 running 状态，允许后续 tick 按 next_run 重试
+                job.status = "idle"
+                self._save()
+                log_ignored(log, "cron.CronJobScheduler._safe_dispatch", _exc)
             finally:
                 await lock.release()
 
@@ -479,8 +507,8 @@ class CronJobScheduler:
                             if interval:
                                 job.next_run = now + interval
                 self._save()
-            except (json.JSONDecodeError, OSError):
-                pass
+            except (json.JSONDecodeError, OSError) as _exc:
+                log_ignored(log, "cron.CronJobScheduler._load", _exc)
 
     def _save(self) -> None:
         jobs_file = self._data_dir / "jobs.json"
@@ -624,8 +652,8 @@ class BlueprintCatalog:
                 for item in data:
                     entry = BlueprintEntry.from_dict(item)
                     self._entries[entry.id] = entry
-            except (json.JSONDecodeError, OSError):
-                pass
+            except (json.JSONDecodeError, OSError) as _exc:
+                log_ignored(log, "cron.BlueprintCatalog._load", _exc)
 
     def _save(self) -> None:
         index_file = self._blueprint_dir / "index.json"

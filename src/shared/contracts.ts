@@ -66,6 +66,9 @@ export const API_ENDPOINTS = {
   SYSTEM_INTEGRITY: '/api/system/integrity',
   SYSTEM_METRICS: '/api/metrics',
   SYSTEM_CONFIG: '/api/config',
+  SYSTEM_OSV_SCAN: '/api/system/osv-scan',
+  SYSTEM_DISK_CLEANUP: '/api/system/disk-cleanup',
+  SYSTEM_SUBDIRECTORY_HINTS: '/api/system/subdirectory-hints',
 
   AUTOMATION_TASKS: '/api/automation/tasks',
   AUTOMATION_TRIGGERS: '/api/automation/triggers',
@@ -162,6 +165,15 @@ export const API_ENDPOINTS = {
   // Tool execution (Hermes P2: image_generate / tts_speak / web_fetch)
   TOOL_EXECUTE: '/api/tools/execute',
   TOOL_LIST: '/api/tools/list',
+
+  // File upload & access
+  FILE_UPLOAD: '/api/upload',
+  FILE_ACCESS: '/api/files/:filename',
+  FILE_UPLOAD_HISTORY: '/api/upload/history',
+
+  // Audio upload & STT
+  AUDIO_UPLOAD: '/api/audio/upload',
+  AUDIO_STREAM: '/api/audio/stream',
 } as const;
 
 export type ApiEndpoint = (typeof API_ENDPOINTS)[keyof typeof API_ENDPOINTS];
@@ -181,6 +193,39 @@ export const SYSTEM_CONSTANTS = {
   MAX_IMAGE_SIZE_BYTES: 10 * 1024 * 1024,
   /** 允许的图片类型 */
   ALLOWED_IMAGE_TYPES: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'],
+  /** 文件上传最大大小（字节，50MB） */
+  MAX_FILE_SIZE_BYTES: 50 * 1024 * 1024,
+  /** 允许的通用文件类型 */
+  ALLOWED_FILE_TYPES: [
+    'image/jpeg',
+    'image/png',
+    'image/gif',
+    'image/webp',
+    'image/svg+xml',
+    'application/pdf',
+    'text/plain',
+    'text/csv',
+    'text/markdown',
+    'text/html',
+    'application/json',
+    'application/xml',
+    'application/zip',
+    'application/gzip',
+  ],
+  /** 允许的音频文件类型 */
+  ALLOWED_AUDIO_TYPES: [
+    'audio/wav',
+    'audio/mp3',
+    'audio/mpeg',
+    'audio/webm',
+    'audio/ogg',
+    'audio/flac',
+    'audio/x-m4a',
+  ],
+  /** 音频文件最大大小（字节，25MB） */
+  MAX_AUDIO_SIZE_BYTES: 25 * 1024 * 1024,
+  /** 音频流采样率 */
+  AUDIO_STREAM_SAMPLE_RATE: 16000,
   /** 对话历史保存 debounce 时间 */
   HISTORY_SAVE_DEBOUNCE_MS: 2000,
   /** WebSocket 重连初始延迟 */
@@ -646,6 +691,8 @@ export const WS_EVENTS = {
     CLARIFICATION_RESPONSE: 'clarification_response',
     EXECUTION_CONFIRM: 'execution_confirm',
     CANCEL_TASK: 'cancel_task',
+    AUDIO_CHUNK: 'audio_chunk',
+    AUDIO_END: 'audio_end',
   },
 
   // 后端 → 前端
@@ -683,6 +730,9 @@ export const WS_EVENTS = {
     STREAM_START: 'stream_start',
     STREAM_CHUNK: 'stream_chunk',
     STREAM_DONE: 'stream_done',
+    TOOL_START: 'tool_start',
+    TOOL_END: 'tool_end',
+    PROGRESS: 'progress',
   },
 } as const;
 

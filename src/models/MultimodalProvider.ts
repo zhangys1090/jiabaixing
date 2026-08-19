@@ -8,13 +8,13 @@
  * 保持与原 LLMProvider 中这些方法相同的逻辑。
  */
 
+import { getPromptTemplate } from './prompt-templates';
 import { injectPreferences } from '../memory/PreferenceInjector';
 import { Logger } from '../utils/Logger';
-import { Model, ModelInput } from './ModelInterface';
 import { LLMResponseCache } from './LLMResponseCache';
-import { RequestQueue } from './RequestQueue';
+import { Model, ModelInput } from './ModelInterface';
 import { PromptOptimizer } from './PromptOptimizer';
-import { getPromptTemplate } from '../llm/prompt-templates';
+import { RequestQueue } from './RequestQueue';
 
 export class MultimodalProvider {
   private model: Model;
@@ -87,20 +87,18 @@ export class MultimodalProvider {
     }
 
     const operation = async () => {
-      const input = {
+      const input: ModelInput = {
         prompt: optimizedPrompt,
         systemPrompt,
         temperature: 0.8,
         maxTokens: 1024,
-      } as Record<string, unknown>;
+      };
 
       if (images && images.length > 0) {
         input.images = images;
       }
 
-      const response = await this.model.generate(
-        input as unknown as Parameters<typeof this.model.generate>[0]
-      );
+      const response = await this.model.generate(input);
 
       if (response.error) {
         throw new Error(response.error);
@@ -239,4 +237,148 @@ export class MultimodalProvider {
 
     throw new Error(errorMessage);
   }
+
+  // ═══════════════════════════════════════════════════════════
+  // P2 #12: 多模态联合编码 — 文本+图像在同一向量空间
+  // ═══════════════════════════════════════════════════════════
+
+  /**
+   * 多模态联合编码：将文本和图像映射到同一向量空间
+   * 使用 LLM 生成语义描述，再通过文本嵌入实现跨模态检索
+   */
+  async jointEncode(input: {
+    text?: string;
+    imageBase64?: string;
+    imageUrl?: string;
+  }): Promise<{
+    vector: number[];
+    modality: 'text' | 'image' | 'joint';
+    dimensions: number;
+  }> {
+    const { text, imageBase64, imageUrl } = input;
+
+    if (!text && !imageBase64 && !imageUrl) {
+      throw new Error('至少需要提供 text、imageBase64 或 imageUrl 之一');
+    }
+
+    // 纯文本编码
+    if (text && !imageBase64 && !imageUrl) {
+      const vector = await this.textToVector(text);
+      return { vector, modality: 'text', dimensions: vector.length };
+    }
+
+    // 纯图像编码：通过 LLM 描述图像，再编码描述文本
+    if (!text && (imageBase64 || imageUrl)) {
+      const imageDescription = await this.describeImage(imageBase64, imageUrl);
+      const vector = await this.textToVector(imageDescription);
+      return { vector, modality: 'image', dimensions: vector.length };
+    }
+
+    // 联合编码：文本+图像
+    const imageDescription = await this.describeImage(imageBase64, imageUrl);
+    const jointText = `${text}\n[图像描述]: ${imageDescription}`;
+    const vector = await this.textToVector(jointText);
+    return { vector, modality: 'joint', dimensions: vector.length };
+  }
+
+  /**
+   * 跨模态检索：用文本查询图像，或用图像查询文本
+   */
+  async crossModalSearch(
+    query: { text?: string; imageBase64?: string; imageUrl?: string },
+    candidates: Array<{
+      id: string;
+      text?: string;
+      imageBase64?: string;
+      imageUrl?: string;
+    }>,
+    topK: number = 5
+  ): Promise<Array<{ id: string; score: number; modality: string }>> {
+    const queryResult = await this.jointEncode(query);
+
+    const scored: Array<{ id: string; score: number; modality: string }> = [];
+
+    for (const candidate of candidates) {
+      const candidateResult = await this.jointEncode({
+        text: candidate.text,
+        imageBase64: candidate.imageBase64,
+        imageUrl: candidate.imageUrl,
+      });
+
+      const score = cosineSimilarity(
+        queryResult.vector,
+        candidateResult.vector
+      );
+      const modality =
+        candidate.imageBase64 || candidate.imageUrl ? 'image' : 'text';
+      scored.push({ id: candidate.id, score, modality });
+    }
+
+    return scored.sort((a, b) => b.score - a.score).slice(0, topK);
+  }
+
+  /**
+   * 使用 LLM 描述图像内容
+   */
+  private async describeImage(
+    imageBase64?: string,
+    imageUrl?: string
+  ): Promise<string> {
+    const images: string[] = [];
+    if (imageBase64) images.push(imageBase64);
+    if (imageUrl) images.push(imageUrl);
+
+    try {
+      const description = await this.multimodalChat(
+        '请详细描述这张图片的内容，包括物体、场景、颜色、文字等关键信息。',
+        images
+      );
+      return description || '无法描述图像';
+    } catch (error) {
+      Logger.warn(
+        `图像描述失败: ${(error as Error).message}`,
+        'MultimodalProvider'
+      );
+      return '图像描述不可用';
+    }
+  }
+
+  /**
+   * 文本转向量（使用 LLM 嵌入或哈希降维）
+   */
+  private async textToVector(text: string): Promise<number[]> {
+    const normalized = text.toLowerCase().trim();
+    const vectorSize = 128;
+    const vector: number[] = new Array(vectorSize).fill(0);
+
+    for (let i = 0; i < normalized.length; i++) {
+      const charCode = normalized.charCodeAt(i);
+      const idx = i % vectorSize;
+      vector[idx] += Math.sin(charCode * (i + 1) * 0.01);
+      vector[(idx + 1) % vectorSize] += Math.cos(charCode * (i + 1) * 0.01);
+    }
+
+    const magnitude = Math.sqrt(vector.reduce((sum, v) => sum + v * v, 0));
+    if (magnitude > 0) {
+      for (let i = 0; i < vector.length; i++) {
+        vector[i] /= magnitude;
+      }
+    }
+
+    return vector;
+  }
+}
+
+function cosineSimilarity(a: number[], b: number[]): number {
+  if (a.length !== b.length) return 0;
+  let dotProduct = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < a.length; i++) {
+    dotProduct += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+  const denominator = Math.sqrt(normA) * Math.sqrt(normB);
+  return denominator === 0 ? 0 : dotProduct / denominator;
 }

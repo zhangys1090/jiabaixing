@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { Logger } from '../../utils/Logger';
-import { RollbackCheckpoint, EvolutionAction } from './types';
+import { EvolutionAction, RollbackCheckpoint } from './types';
 
 export class EvolutionRollback {
   private checkpointDir: string;
@@ -30,7 +30,8 @@ export class EvolutionRollback {
     for (const action of actions) {
       if (action.type === 'MODIFY_FILE' || action.type === 'DELETE_FILE') {
         const filePath =
-          (action.target as any).filePath || (action.target as string);
+          (action.target as import('./types').CodeLocation).filePath ||
+          (action.target as string);
         if (fs.existsSync(filePath)) {
           try {
             snapshot[filePath] = fs.readFileSync(filePath, 'utf-8');

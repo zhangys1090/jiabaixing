@@ -12,10 +12,11 @@
  */
 
 import { EvolutionOrchestrator } from '../../evolution/EvolutionOrchestrator';
+import { getActivePythonBridge } from '../../ide/bridgeRegistry';
 import { Logger } from '../../utils/Logger';
 import type {
-  FeedbackCollectorDeps,
   EvolutionEngineDeps,
+  FeedbackCollectorDeps,
   MemoryAssistantDeps,
 } from '../deps';
 import type { HookContext, HookResult, LifecycleHook } from '../types';
@@ -72,9 +73,9 @@ export class FeedbackLoops {
   private async executeLoops(ctx: HookContext): Promise<void> {
     const meta = ctx.metadata as unknown as AfterResponseMetadata;
 
-    // 偏好学习闭环 — 同步执行（快速，仅正则匹配）
+    // 偏好学习闭环 — 快速执行（仅正则匹配 + 偏好提取）
     try {
-      this.runPreferenceLoop(meta);
+      await this.runPreferenceLoop(meta);
     } catch (err) {
       Logger.debug(
         `偏好学习闭环失败（非关键）: ${(err as Error).message}`,
@@ -101,7 +102,9 @@ export class FeedbackLoops {
             meta.response,
             meta.userId
           )
-          .catch(() => {});
+          .catch((err) =>
+            Logger.debug(`知识提取失败（非关键）: ${(err as Error).message}`, 'FeedbackLoops')
+          );
       });
     }
   }
@@ -132,20 +135,40 @@ export class FeedbackLoops {
         executionTime: s.duration || 0,
       }));
 
-    // 记录交互到进化编排器
+    // 记录交互到进化引擎（python 模式经 PythonAgentBridge 委派；local 模式用 TS 编排器）
     try {
-      const orchestrator = EvolutionOrchestrator.getInstance();
-      orchestrator.recordInteraction({
-        traceId: meta.traceId,
-        input,
-        response,
-        success: qualityScore >= 0.5,
-        qualityScore,
-        executionDuration: meta.trace?.totalDuration ?? 0,
-        toolCalls,
-        scene,
-        userId: userId || 'default',
-      });
+      const bridge = getActivePythonBridge();
+      if (bridge) {
+        void bridge
+          .submitFeedback({
+            kind: 'interaction',
+            traceId: meta.traceId,
+            input,
+            response,
+            success: qualityScore >= 0.5,
+            qualityScore,
+            executionDuration: meta.trace?.totalDuration ?? 0,
+            toolCalls,
+            scene,
+            userId: userId || 'default',
+          })
+          .catch((err) =>
+            Logger.debug(`反馈提交失败（非关键）: ${(err as Error).message}`, 'FeedbackLoops')
+          );
+      } else {
+        const orchestrator = EvolutionOrchestrator.getInstance();
+        orchestrator.recordInteraction({
+          traceId: meta.traceId,
+          input,
+          response,
+          success: qualityScore >= 0.5,
+          qualityScore,
+          executionDuration: meta.trace?.totalDuration ?? 0,
+          toolCalls,
+          scene,
+          userId: userId || 'default',
+        });
+      }
     } catch (err) {
       Logger.debug(
         `进化编排器记录失败（非关键）: ${(err as Error).message}`,
@@ -180,7 +203,7 @@ export class FeedbackLoops {
   /**
    * 偏好学习闭环：用户纠正 → PreferenceManager
    */
-  private runPreferenceLoop(meta: AfterResponseMetadata): void {
+  private async runPreferenceLoop(meta: AfterResponseMetadata): Promise<void> {
     const input = meta.input;
     const response = meta.response;
     const userId = meta.userId;
@@ -212,7 +235,7 @@ export class FeedbackLoops {
 
       // 从纠正中自动学习用户偏好
       try {
-        const { PreferenceManager } = require('../../memory/PreferenceManager');
+        const { PreferenceManager } = await import('../../memory/PreferenceManager');
         const pm = PreferenceManager.getInstance();
         const entry = pm.applyCorrection(input, 'general');
         if (entry) {

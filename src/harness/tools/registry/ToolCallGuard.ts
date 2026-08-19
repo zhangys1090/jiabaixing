@@ -23,6 +23,31 @@ interface ToolCallRecord {
   timestamp: number;
 }
 
+/** 宪法/人格约束违规项（与 Python ConstitutionGuard 对齐） */
+export interface ConstitutionGuardViolation {
+  ruleId: string;
+  reason: string;
+}
+
+/** 宪法/人格约束裁决（与 Python ConstitutionGuard 对齐） */
+export interface ConstitutionGuardVerdict {
+  allowed: boolean;
+  violations: ConstitutionGuardViolation[];
+  reason: string;
+  dangerDetected: boolean;
+}
+
+/**
+ * 宪法守卫 provider（TS 入口透传 → Python 宪法守卫核心）。
+ * 实际"危险感知 → 动作拦截"判断在 Python 端完成，TS 仅调用与渲染。
+ */
+export type ConstitutionGuardProvider = (
+  action: { toolName: string; args: Record<string, unknown> }
+) => Promise<ConstitutionGuardVerdict>;
+
+/** check / guard 的统一返回类型 */
+type GuardOutcome = { blocked: boolean; result?: ToolResult; reason?: string };
+
 export class ToolCallGuard {
   // 结果缓存：(toolName + argsHash) → cached result
   private resultCache: Map<string, CachedResult> = new Map();
@@ -38,6 +63,9 @@ export class ToolCallGuard {
 
   // 去重窗口
   private readonly DEDUP_WINDOW_MS = 30_000; // 30 秒内相同调用视为重复
+
+  // 宪法/人格约束 provider（U4 第2项）：TS 入口透传 → Python 宪法守卫核心
+  private constitutionProvider?: ConstitutionGuardProvider;
 
   /**
    * 检查工具调用是否应该被拦截
@@ -115,6 +143,48 @@ export class ToolCallGuard {
     }
 
     return { blocked: false };
+  }
+
+  /**
+   * 设置宪法/人格约束 provider（可选）。
+   * 未设置时 guard() 等价于 check()，不影响既有行为。
+   */
+  setConstitutionGuardProvider(provider: ConstitutionGuardProvider): void {
+    this.constitutionProvider = provider;
+  }
+
+  /**
+   * 执行前守卫：先咨询宪法/人格约束（若注入 provider），
+   * 再走去重/缓存/限速。异步以兼容 Python 端感知融合裁决（与 ToolCallGuard 协同）。
+   *
+   * 实现"宪法约束前置到动作执行守卫"——避免"感知到危险仍执行"。
+   */
+  async guard(
+    toolName: string,
+    args: Record<string, unknown>
+  ): Promise<GuardOutcome> {
+    if (this.constitutionProvider) {
+      const verdict = await this.constitutionProvider({ toolName, args });
+      if (!verdict.allowed) {
+        Logger.warn(
+          `🛡️ 宪法守卫拦截: ${toolName} - ${verdict.reason}`,
+          'ToolCallGuard'
+        );
+        return {
+          blocked: true,
+          reason: verdict.reason,
+          result: {
+            success: false,
+            output: `[宪法守卫拦截] ${verdict.reason}`,
+            metadata: {
+              constitutionBlocked: true,
+              violations: verdict.violations.map((v) => v.ruleId),
+            },
+          },
+        };
+      }
+    }
+    return this.check(toolName, args);
   }
 
   /**

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import difflib
 import os
+import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +14,29 @@ from agent.tools.registry import (
     ToolParameterDef,
     ToolResult,
 )
+from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
+_log = StructuredLogger("tools.file")
+
+# P2-7（审计 §3.3）：read-before-edit 安全约束。
+# 记录本进程内已通过 file_read 读取过的文件绝对路径；编辑工具在写入前校验，
+# 避免"盲改"未见过内容的文件。bypass_read_check 参数提供程序化写入的安全阀。
+_READ_FILES: set[str] = set()
+
+
+def _mark_read(file_path: Path) -> None:
+    _READ_FILES.add(str(file_path.resolve()))
+
+
+def _read_before_edit_check(file_path: Path, create_if_missing: bool, bypass: bool) -> str | None:
+    """返回错误描述（若违反 read-before-edit），否则 None。"""
+    if bypass:
+        return None
+    if create_if_missing and not file_path.exists():
+        return None  # 新建文件无需先读
+    if str(file_path.resolve()) not in _READ_FILES:
+        return f"编辑前请先使用 file_read 读取该文件（read-before-edit 安全约束）：{file_path}"
+    return None
 
 
 FILE_READ_DEF = ToolDefinition(
@@ -56,10 +82,16 @@ FILE_GREP_DEF = ToolDefinition(
     scenes=["coding", "development", "research"],
     capability_level=1,
     parameters=[
-        ToolParameterDef(name="pattern", type="string", description="搜索的正则表达式或关键词"),
+        ToolParameterDef(name="pattern", type="string", description="搜索的正则表达式或关键词；ast 模式下为符号名/正则"),
         ToolParameterDef(name="path", type="string", required=False, description="搜索的文件或目录路径"),
         ToolParameterDef(name="file_pattern", type="string", required=False, description="文件名过滤模式，如 *.py"),
         ToolParameterDef(name="case_insensitive", type="boolean", required=False, description="是否忽略大小写"),
+        ToolParameterDef(name="context", type="number", required=False, description="上下文行数（-C，前后各 N 行）"),
+        ToolParameterDef(name="before", type="number", required=False, description="匹配前上下文行数（-B）"),
+        ToolParameterDef(name="after", type="number", required=False, description="匹配后上下文行数（-A）"),
+        ToolParameterDef(name="multiline", type="boolean", required=False, description="多行匹配（ripgrep -U --multiline-dotall，跨行正则）"),
+        ToolParameterDef(name="mode", type="string", required=False, description="搜索模式", enum=["text", "ast"]),
+        ToolParameterDef(name="language", type="string", required=False, description="ast 模式语言（默认 python）", enum=["python", "ts"]),
         ToolParameterDef(name="max_results", type="number", required=False, description="最大结果数"),
     ],
     risk_level="low",
@@ -67,16 +99,22 @@ FILE_GREP_DEF = ToolDefinition(
 
 FILE_SEARCH_DEF = ToolDefinition(
     name="file_search",
-    description="按文件名搜索文件。适用场景：查找项目中的配置文件、定位源代码文件。不适用：搜索文件内容（用 file_grep）、列出目录（用 file_list）。",
+    description=(
+        "按文件名搜索文件。支持 glob 模式、多模式（空白/逗号分隔）与模糊匹配兜底。"
+        "适用场景：查找项目中的配置文件、定位源代码文件。"
+        "不适用：搜索文件内容（用 file_grep）、列出目录（用 file_list）。"
+    ),
     short_desc="按文件名搜索",
     category=ToolCategory.FILE,
-    tags=["file", "search", "find"],
+    tags=["file", "search", "find", "fuzzy"],
     scenes=["coding", "development", "research"],
     capability_level=1,
     parameters=[
-        ToolParameterDef(name="pattern", type="string", description="文件名匹配模式"),
+        ToolParameterDef(name="pattern", type="string", description="文件名匹配模式，支持空白/逗号分隔的多模式"),
         ToolParameterDef(name="dir_path", type="string", required=False, description="搜索的根目录"),
         ToolParameterDef(name="max_results", type="number", required=False, description="最大结果数"),
+        ToolParameterDef(name="fuzzy", type="boolean", required=False, description="无精确命中时启用模糊匹配兜底，默认true"),
+        ToolParameterDef(name="fuzzy_threshold", type="number", required=False, description="模糊匹配相似度阈值(0-1)，默认0.6"),
     ],
     risk_level="low",
 )
@@ -94,6 +132,7 @@ FILE_EDIT_DEF = ToolDefinition(
         ToolParameterDef(name="old_text", type="string", description="要替换的原始文本"),
         ToolParameterDef(name="new_text", type="string", description="替换后的新文本"),
         ToolParameterDef(name="replace_all", type="boolean", required=False, description="是否替换所有匹配项"),
+        ToolParameterDef(name="bypass_read_check", type="boolean", required=False, description="跳过 read-before-edit 校验（仅程序化写入新建文件时使用）"),
     ],
     risk_level="medium",
 )
@@ -119,6 +158,7 @@ INCREMENTAL_EDIT_DEF = ToolDefinition(
         ToolParameterDef(name="create_if_missing", type="boolean", required=False, description="文件不存在时是否创建"),
         ToolParameterDef(name="preview_only", type="boolean", required=False, description="仅预览修改，不实际写入文件"),
         ToolParameterDef(name="validate_syntax", type="boolean", required=False, description="是否验证修改后的语法（仅支持TS/JS/Python）"),
+        ToolParameterDef(name="bypass_read_check", type="boolean", required=False, description="跳过 read-before-edit 校验（仅程序化写入新建文件时使用）"),
     ],
     risk_level="medium",
 )
@@ -134,6 +174,7 @@ MULTI_FILE_EDIT_DEF = ToolDefinition(
     parameters=[
         ToolParameterDef(name="files", type="array", description='文件修改列表，每项包含 {path, edits: [{search, replace, description}]}'),
         ToolParameterDef(name="atomic", type="boolean", required=False, description="是否原子操作（任一失败则全部回滚）"),
+        ToolParameterDef(name="bypass_read_check", type="boolean", required=False, description="跳过 read-before-edit 校验（仅程序化写入新建文件时使用）"),
     ],
     risk_level="high",
     permissions=["file_write"],
@@ -199,6 +240,7 @@ async def file_read_executor(params: dict[str, Any]) -> ToolResult:
     if len(output) > _MAX_OUTPUT_LENGTH:
         output = output[:_MAX_OUTPUT_LENGTH] + f"\n... (截断，共 {total_lines} 行)"
 
+    _mark_read(file_path)
     return ToolResult(
         success=True,
         output=output,
@@ -270,85 +312,270 @@ async def file_list_executor(params: dict[str, Any]) -> ToolResult:
 
 
 async def file_grep_executor(params: dict[str, Any]) -> ToolResult:
-    import re
-    import time
+    """在文件中搜索文本（优先 ripgrep，支持上下文/多行；回退纯 Python）/ AST 符号。"""
     start = time.time()
     pattern = str(params.get("pattern", ""))
-    # 兼容 TS 前端的 "directory" 参数名
     raw_path = str(params.get("path") or params.get("directory", "."))
     file_pattern = str(params.get("file_pattern", "*"))
     case_insensitive = bool(params.get("case_insensitive") or params.get("ignore_case", False))
     max_results = int(params.get("max_results", 50))
+    ctx = params.get("context")
+    before = int(params.get("before", 0) or 0)
+    after = int(params.get("after", 0) or 0)
+    multiline = bool(params.get("multiline", False))
+    mode = str(params.get("mode", "text")).lower()
+    language = str(params.get("language", "python")).lower()
 
     if not pattern:
         return ToolResult(success=False, error="搜索模式不能为空")
+    if ctx is not None:
+        before = after = int(ctx)
 
     search_path = _resolve_path(raw_path)
-    flags = re.IGNORECASE if case_insensitive else 0
 
+    if mode == "ast":
+        return await _ast_grep(pattern, search_path, language, max_results, start)
+
+    rg = shutil.which("rg")
+    if rg:
+        try:
+            return _rg_grep(rg, pattern, search_path, file_pattern, case_insensitive,
+                            before, after, multiline, max_results, start)
+        except Exception as e:
+            _log.warning("ripgrep 调用失败，回退纯 Python 搜索", error=str(e))
+
+    return _py_grep(pattern, search_path, file_pattern, case_insensitive, before, after, max_results, start)
+
+
+def _rg_grep(rg, pattern, search_path, file_pattern, case_insensitive, before, after, multiline, max_results, start):
+    args = [rg, "--line-number", "--with-filename", "--color", "never", "-e", pattern]
+    if case_insensitive:
+        args.append("-i")
+    if before:
+        args += ["-B", str(before)]
+    if after:
+        args += ["-A", str(after)]
+    if multiline:
+        args += ["-U", "--multiline-dotall"]
+    if file_pattern and file_pattern != "*":
+        args += ["--glob", file_pattern]
+    args += [str(search_path)]
+    proc = subprocess.run(args, capture_output=True, text=True, errors="replace", timeout=60)
+    lines = (proc.stdout or "").splitlines()
+    shown = lines[:max_results] if max_results else lines
+    if not shown:
+        return ToolResult(success=True, output="未找到匹配项")
+    output = f"找到 {len(lines)} 处匹配（ripgrep）:\n" + "\n".join(shown)
+    return ToolResult(success=True, output=output, duration=time.time() - start,
+                      metadata={"match_count": len(lines), "engine": "ripgrep"})
+
+
+def _py_grep(pattern, search_path, file_pattern, case_insensitive, before, after, max_results, start):
+    import re
+    flags = re.IGNORECASE if case_insensitive else 0
     try:
         regex = re.compile(pattern, flags)
     except re.error as e:
         return ToolResult(success=False, error=f"正则表达式无效: {e}")
-
-    matches: list[str] = []
-    _IGNORE_DIRS = {
-        "node_modules", ".git", "dist", "build", "__pycache__",
-        ".venv", "venv", ".mypy_cache", ".pytest_cache",
-    }
-
-    files_to_search: list[Path] = []
+    _IGNORE_DIRS = {"node_modules", ".git", "dist", "build", "__pycache__", ".venv", "venv", ".mypy_cache", ".pytest_cache"}
+    files: list[Path] = []
     if search_path.is_file():
-        files_to_search = [search_path]
+        files = [search_path]
     elif search_path.is_dir():
-        for root, dirs, files in os.walk(search_path):
+        for root, dirs, fnames in os.walk(search_path):
             dirs[:] = [d for d in dirs if d not in _IGNORE_DIRS and not d.startswith(".")]
-            for f in files:
-                if Path(f).match(file_pattern) or file_pattern == "*":
-                    files_to_search.append(Path(root) / f)
-            if len(files_to_search) > 500:
+            for f in fnames:
+                if file_pattern == "*" or Path(f).match(file_pattern):
+                    files.append(Path(root) / f)
+            if len(files) > 2000:
                 break
     else:
         return ToolResult(success=False, error=f"路径不存在: {search_path}")
-
-    for fp in files_to_search:
+    matches: list[str] = []
+    for fp in files:
         if len(matches) >= max_results:
             break
         try:
             content = fp.read_text(encoding="utf-8", errors="ignore")
-            for line_no, line in enumerate(content.splitlines(), 1):
-                if regex.search(line):
-                    rel = fp.relative_to(search_path) if search_path.is_dir() else fp.name
-                    matches.append(f"{rel}:{line_no}: {line.strip()[:200]}")
-                    if len(matches) >= max_results:
-                        break
-        except Exception:
+        except Exception as e:
+            log_ignored(_log, "file_tools._grep_read", e)
             continue
-
+        flines = content.splitlines()
+        for i, line in enumerate(flines, 1):
+            if regex.search(line):
+                rel = fp.relative_to(search_path) if search_path.is_dir() else fp.name
+                block = []
+                for j in range(max(1, i - before), min(len(flines), i + after) + 1):
+                    prefix = ">" if j == i else " "
+                    block.append(f"{rel}:{j}: {prefix} {flines[j - 1].strip()[:200]}")
+                matches.append("\n".join(block))
+                if len(matches) >= max_results:
+                    break
     if not matches:
         return ToolResult(success=True, output="未找到匹配项")
+    output = f"找到 {len(matches)} 处匹配（纯 Python）:\n" + "\n".join(matches)
+    return ToolResult(success=True, output=output, duration=time.time() - start,
+                      metadata={"match_count": len(matches), "engine": "python"})
 
-    output = f"找到 {len(matches)} 处匹配:\n" + "\n".join(matches)
-    return ToolResult(
-        success=True,
-        output=output,
-        duration=time.time() - start,
-        metadata={"match_count": len(matches)},
-    )
+
+async def _ast_grep(pattern, search_path, language, max_results, start):
+    if language != "python":
+        return ToolResult(success=False, error=f"ast 模式暂仅支持 python（收到: {language}）")
+    import ast as _ast, re as _re
+    sym = pattern.strip()
+    rx = None
+    if not sym.isidentifier():
+        try:
+            rx = _re.compile(sym)
+        except _re.error:
+            return ToolResult(success=False, error="ast 模式 pattern 需为标识符或合法正则")
+    _IGNORE = {"node_modules", ".git", "dist", "build", "__pycache__", ".venv", "venv", ".mypy_cache", ".pytest_cache"}
+    hits: list[str] = []
+    files: list[Path] = [search_path] if search_path.is_file() else []
+    if search_path.is_dir():
+        for p in search_path.rglob("*.py"):
+            if any(s in p.parts for s in _IGNORE):
+                continue
+            files.append(p)
+    for fp in files:
+        if len(hits) >= max_results:
+            break
+        try:
+            tree = _ast.parse(fp.read_text(encoding="utf-8", errors="replace"))
+        except Exception as e:
+            log_ignored(_log, "file_tools._symbol_scan_parse", e)
+            continue
+        for node in _ast.walk(tree):
+            name = None
+            kind = None
+            if isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef, _ast.ClassDef)):
+                name, kind = node.name, "def"
+            elif isinstance(node, _ast.Name) and isinstance(getattr(node, "ctx", None), _ast.Store):
+                name, kind = node.id, "assign"
+            elif isinstance(node, _ast.arg):
+                name, kind = node.arg, "arg"
+            if name is None:
+                continue
+            if rx is not None:
+                if not rx.search(name):
+                    continue
+            elif name != sym:
+                continue
+            hits.append(f"{fp}:{getattr(node, 'lineno', '?')}: {kind} {name}")
+            if len(hits) >= max_results:
+                break
+    if not hits:
+        return ToolResult(success=True, output="未找到符号")
+    return ToolResult(success=True, output="AST 符号命中:\n" + "\n".join(hits),
+                      duration=time.time() - start, metadata={"match_count": len(hits), "engine": "ast"})
+
+
+def _file_name_match(
+    filename: str,
+    pattern: str | list[str],
+    fuzzy: bool = True,
+    threshold: float = 0.72,
+) -> bool:
+    """文件名匹配——多策略融合，提升 file_search 召回率。
+
+    依次尝试：大小写不敏感 glob → 子串 → token 全命中 → 模糊相似度。
+    覆盖 LLM 常见误用：漏写通配符、大小写不符、拼写小偏差、多词拆分。
+    支持多模式：pattern 为空白/逗号分隔的字符串或列表，任一命中即收录。
+    """
+    import fnmatch
+    import re
+    from difflib import SequenceMatcher
+
+    if isinstance(pattern, str):
+        sub_patterns = [p for p in pattern.replace(",", " ").split() if p] or [pattern]
+    else:
+        sub_patterns = [p for p in pattern if p]
+
+    f_lower = filename.lower()
+    stem = f_lower.rsplit(".", 1)[0]
+
+    for p_raw in sub_patterns:
+        p_lower = p_raw.lower()
+        if fnmatch.fnmatch(f_lower, p_lower):
+            return True
+        if p_lower in f_lower:
+            return True
+
+        tokens = [t for t in re.split(r"[\s_\-\.]+", p_lower) if t]
+        if tokens and all(t in f_lower for t in tokens):
+            return True
+
+        if fuzzy and len(p_lower) >= 3 and SequenceMatcher(None, p_lower, stem).ratio() >= threshold:
+            return True
+
+    return False
+
+
+def _collect_all_files(dir_path: Path, max_scan: int = 4000) -> list[str]:
+    """收集目录下全部文件名（用于无结果时的模糊建议）。"""
+    _IGNORE_DIRS = {
+        "node_modules", ".git", "dist", "build", "__pycache__",
+        ".venv", "venv", ".mypy_cache", ".pytest_cache",
+    }
+    names: list[str] = []
+    for root, dirs, files in os.walk(dir_path):
+        dirs[:] = [d for d in dirs if d not in _IGNORE_DIRS and not d.startswith(".")]
+        for f in files:
+            names.append(f)
+            if len(names) >= max_scan:
+                return names
+    return names
+
+
+def _suggest_closest_files(
+    dir_path: Path,
+    pattern: str,
+    top_n: int = 5,
+    min_score: float = 0.3,
+) -> str:
+    """无精确命中时，给出最接近的文件名建议，避免"零结果"挫败。
+
+    基于 difflib 相似度对全目录文件名排序，返回 top_n 个建议文本。
+    无任何相近文件时返回 "未找到匹配文件。"。
+    """
+    from difflib import SequenceMatcher
+
+    sub_patterns = [p for p in pattern.replace(",", " ").split() if p] or [pattern]
+    names = _collect_all_files(dir_path)
+    if not names:
+        return "未找到匹配文件。"
+
+    scored: list[tuple[float, str]] = []
+    for name in names:
+        stem = name.lower().rsplit(".", 1)[0]
+        best = max(
+            SequenceMatcher(None, p.lower(), stem).ratio() for p in sub_patterns
+        )
+        if best >= min_score:
+            scored.append((best, name))
+
+    if not scored:
+        return "未找到匹配文件。"
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    lines = [f"未找到精确匹配，相近文件建议（模糊匹配）："]
+    for score, name in scored[:top_n]:
+        lines.append(f"  - {name} (相似度 {score:.2f})")
+    return "\n".join(lines)
 
 
 async def file_search_executor(params: dict[str, Any]) -> ToolResult:
-    import fnmatch
     import json
     import logging
-    import time
     from pathlib import Path
     start = time.time()
     # 兼容 TS 前端的 "query"/"filePattern" 参数名
     pattern = str(params.get("pattern") or params.get("query", ""))
     raw_dir = str(params.get("dir_path") or params.get("baseDir", "."))
     max_results = int(params.get("max_results") or params.get("maxResults", 30))
-    
+    fuzzy = bool(params.get("fuzzy", True))
+    fuzzy_threshold = float(params.get("fuzzy_threshold", 0.72))
+
     # 创建logger用于记录file_search详细日志
     log = logging.getLogger("file_search")
 
@@ -367,26 +594,21 @@ async def file_search_executor(params: dict[str, Any]) -> ToolResult:
         return ToolResult(success=False, error="搜索模式不能为空")
 
     dir_path = _resolve_path(raw_dir)
-    
+
     # 检查目录是否存在且是有效目录
     if not dir_path.exists():
         log.warning(f"file_search failed: directory not found, dir={dir_path}")
         return ToolResult(success=False, error=f"目录不存在: {dir_path}")
-    
+
     if not dir_path.is_dir():
         log.warning(f"file_search failed: not a directory, path={dir_path}")
         return ToolResult(success=False, error=f"路径不是目录: {dir_path}")
-
-    _IGNORE_DIRS = {
-        "node_modules", ".git", "dist", "build", "__pycache__",
-        ".venv", "venv", ".mypy_cache", ".pytest_cache",
-    }
 
     results: list[str] = []
     for root, dirs, files in os.walk(dir_path):
         dirs[:] = [d for d in dirs if d not in _IGNORE_DIRS and not d.startswith(".")]
         for f in files:
-            if fnmatch.fnmatch(f, pattern) or pattern in f:
+            if _file_name_match(f, pattern, fuzzy=fuzzy, threshold=fuzzy_threshold):
                 rel = Path(root).relative_to(dir_path) / f
                 results.append(str(rel))
                 if len(results) >= max_results:
@@ -396,7 +618,13 @@ async def file_search_executor(params: dict[str, Any]) -> ToolResult:
 
     if not results:
         log.warning(f"file_search completed with no results: pattern='{pattern}', dir='{raw_dir}'")
-        return ToolResult(success=True, output="未找到匹配文件")
+        suggestion = _suggest_closest_files(dir_path, pattern)
+        return ToolResult(
+            success=True,
+            output=suggestion,
+            duration=time.time() - start,
+            metadata={"file_count": 0, "fuzzy_suggested": bool(suggestion)},
+        )
 
     log.info(f"file_search success: found {len(results)} files for pattern='{pattern}'")
     output = f"找到 {len(results)} 个文件:\n" + "\n".join(results)
@@ -426,6 +654,11 @@ async def file_edit_executor(params: dict[str, Any]) -> ToolResult:
     if not file_path.exists():
         return ToolResult(success=False, error=f"文件不存在: {file_path}")
 
+    bypass = bool(params.get("bypass_read_check", False))
+    rb_err = _read_before_edit_check(file_path, create_if_missing=False, bypass=bypass)
+    if rb_err:
+        return ToolResult(success=False, error=rb_err)
+
     try:
         content = file_path.read_text(encoding="utf-8")
     except Exception as e:
@@ -434,6 +667,12 @@ async def file_edit_executor(params: dict[str, Any]) -> ToolResult:
     count = content.count(old_text)
     if count == 0:
         return ToolResult(success=False, error="未找到要替换的文本")
+
+    if not replace_all and count > 1:
+        return ToolResult(
+            success=False,
+            error=f"old_text 匹配到 {count} 处，为避免静默替换请设置 replace_all=true 或提供更精确的 old_text",
+        )
 
     if replace_all:
         new_content = content.replace(old_text, new_text)
@@ -516,6 +755,11 @@ async def incremental_edit_executor(params: dict[str, Any]) -> ToolResult:
     if not file_exists and not create_if_missing:
         return ToolResult(success=False, error=f"文件不存在: {file_path}。设置 create_if_missing=true 可创建新文件。")
 
+    bypass = bool(params.get("bypass_read_check", False))
+    rb_err = _read_before_edit_check(file_path, create_if_missing=create_if_missing, bypass=bypass)
+    if rb_err:
+        return ToolResult(success=False, error=rb_err)
+
     try:
         content = file_path.read_text(encoding="utf-8") if file_exists else ""
     except Exception as e:
@@ -524,13 +768,21 @@ async def incremental_edit_executor(params: dict[str, Any]) -> ToolResult:
     original_content = content
     applied: list[dict[str, Any]] = []
     modified = False
+    ambiguous: list[str] = []
 
     for edit in edits:
         search_text = edit["search"]
         replace_text = edit["replace"]
         desc = edit["description"]
 
-        if search_text in content:
+        n = content.count(search_text)
+        if n == 0:
+            applied.append({"description": desc, "found": False})
+        elif n > 1:
+            # 多匹配：静默替换首处会破坏其它位置，直接报错要求更精确
+            ambiguous.append(desc)
+            applied.append({"description": desc, "found": True, "ambiguous": True})
+        else:
             before = content[:content.index(search_text)]
             line_number = before.count("\n") + 1
             content = content.replace(search_text, replace_text, 1)
@@ -543,8 +795,13 @@ async def incremental_edit_executor(params: dict[str, Any]) -> ToolResult:
                 "preview": f"行{line_number}:\n- {preview_before}\n+ {preview_after}",
             })
             modified = True
-        else:
-            applied.append({"description": desc, "found": False})
+
+    if ambiguous:
+        return ToolResult(
+            success=False,
+            error="以下修改项匹配到多处，为避免静默替换请提供更精确的 search 文本：\n"
+            + "\n".join(f"- {d}" for d in ambiguous),
+        )
 
     if not modified:
         not_found_list = "\n".join(f'- "{a["description"]}": 未找到' for a in applied)
@@ -623,6 +880,12 @@ async def multi_file_edit_executor(params: dict[str, Any]) -> ToolResult:
 
         file_path = _resolve_path(raw_path)
 
+        bypass = bool(params.get("bypass_read_check", False))
+        rb_err = _read_before_edit_check(file_path, create_if_missing=not file_path.exists(), bypass=bypass)
+        if rb_err:
+            results.append({"path": raw_path, "success": False, "applied_count": 0, "error": rb_err})
+            continue
+
         try:
             file_exists = file_path.exists()
             content = file_path.read_text(encoding="utf-8") if file_exists else ""
@@ -655,8 +918,8 @@ async def multi_file_edit_executor(params: dict[str, Any]) -> ToolResult:
         for file_path, original_content in rollback_stack:
             try:
                 file_path.write_text(original_content, encoding="utf-8")
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(_log, "file_tools.multi_file_edit_executor", _exc)
 
         failure_details = "\n".join(f'{r["path"]}: {r["error"]}' for r in failures)
         return ToolResult(

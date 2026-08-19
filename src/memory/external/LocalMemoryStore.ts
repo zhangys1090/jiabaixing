@@ -10,10 +10,10 @@
  *   - SQLite 持久化
  */
 
-import { createDatabase } from '../../shared/DatabaseShim';
-import type { DatabaseAdapter } from '../../shared/DatabaseShim';
-import { Logger } from '../../utils/Logger';
 import path from 'path';
+import type { DatabaseAdapter } from '../../shared/DatabaseShim';
+import { createDatabase } from '../../shared/DatabaseShim';
+import { Logger } from '../../utils/Logger';
 
 export interface KnowledgeEntry {
   id: string;
@@ -173,7 +173,7 @@ export class LocalMemoryStore {
   get size(): number {
     const row = this.db
       .prepare('SELECT COUNT(*) as count FROM knowledge_entries')
-      .get() as any;
+      .get() as { count: number };
     return row?.count ?? 0;
   }
 

@@ -13,9 +13,9 @@ import { handleScheduleMenu } from './commands/schedule';
 import { handleSkillsCommand } from './commands/skills';
 import { handleStatusCommand } from './commands/status';
 import { BANNER, COLORS, COMMANDS, HELP_TEXT, c } from './constants';
-import { initCLIWebSocket } from './wsClient';
 import { KeypressResult, ReadlineInternal, ReplState } from './types';
 import { checkBackendHealth, detectShellCommand } from './utils';
+import { initCLIWebSocket } from './wsClient';
 
 /** 当前 REPL 状态实例 */
 let currentReplState: ReplState | null = null;
@@ -169,6 +169,15 @@ async function handleDaemonMenu(rl: readline.Interface): Promise<void> {
     Logger.info(`  状态: ${statusIcon} ${statusText}`, 'CLI');
     if (status.running && status.memoryUsage) {
       Logger.info(`  内存: ${status.memoryUsage}`, 'CLI');
+    }
+    if (status.running) {
+      const pyIcon = status.pythonReady
+        ? '\x1b[32m●\x1b[0m'
+        : '\x1b[33m○\x1b[0m';
+      const pyText = status.pythonReady
+        ? `运行中 (PID: ${status.state!.pythonPid}, :${status.state!.pythonPort})`
+        : '未运行';
+      Logger.info(`  Python: ${pyIcon} ${pyText}`, 'CLI');
     }
     Logger.info('', 'CLI');
     Logger.info(`  \x1b[36mstart\x1b[0m    启动后台服务`, 'CLI');
@@ -441,10 +450,9 @@ export async function replLoop(
         case '/quit':
         case '/exit':
         case '/q':
-          Logger.info(`\n  ${COLORS.yellow}👋 再见！${COLORS.reset}\n`, 'CLI');
-          rl.close();
-          process.exit(0);
-          break;
+          Logger.info(`\n  ${COLORS.yellow}再见！${COLORS.reset}\n`, 'CLI');
+          state.aborted = true;
+          return;
         default:
           Logger.info(`  ${COLORS.red}未知命令: ${cmd}${COLORS.reset}`, 'CLI');
           Logger.info(
@@ -561,14 +569,21 @@ export async function mainLoop(): Promise<void> {
     }
   );
 
+  let sigintCount = 0;
   const sigintHandler = (): void => {
+    sigintCount++;
+    if (sigintCount >= 2) {
+      Logger.info('\n  强制退出...', 'CLI');
+      process.exit(1);
+    }
     if (currentReplState) {
       currentReplState.aborted = true;
     }
     Logger.info(
-      `\n  ${COLORS.yellow}(按 Ctrl+C 再次或输入 /quit 退出)${COLORS.reset}`,
+      `\n  ${COLORS.yellow}(按 Ctrl+C 再次强制退出，或输入 /quit)${COLORS.reset}`,
       'CLI'
     );
+    setTimeout(() => { sigintCount = 0; }, 3000);
   };
 
   process.on('SIGINT', sigintHandler);

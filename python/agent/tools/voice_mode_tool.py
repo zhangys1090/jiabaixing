@@ -219,8 +219,8 @@ class VoiceModeManager:
                 model = faster_whisper.WhisperModel("base")
                 segments, _ = model.transcribe(audio_path)  # type: ignore[arg-type]
                 return "".join(getattr(s, "text", "") for s in segments).strip()
-            except ImportError:
-                pass
+            except ImportError as _exc:
+                log_ignored(None, "voice_mode_tool.VoiceModeManager.transcribe", _exc)
             except Exception as _exc:
                 log_ignored(None, "voice_mode_tool.VoiceModeManager.transcribe.faster", _exc)
 
@@ -230,15 +230,15 @@ class VoiceModeManager:
                 model = whisper.load_model("base")  # type: ignore[attr-defined]
                 result = model.transcribe(audio_path)  # type: ignore[arg-type]
                 return (result.get("text") if isinstance(result, dict) else "") or None
-            except ImportError:
-                pass
+            except ImportError as _exc:
+                log_ignored(None, "voice_mode_tool.VoiceModeManager.transcribe", _exc)
             except Exception as _exc:
                 log_ignored(None, "voice_mode_tool.VoiceModeManager.transcribe.whisper", _exc)
         finally:
             try:
                 os.unlink(audio_path)
-            except OSError:
-                pass
+            except OSError as _exc:
+                log_ignored(None, "voice_mode_tool.VoiceModeManager.transcribe", _exc)
 
         return None
 

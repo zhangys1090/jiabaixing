@@ -209,7 +209,10 @@ export type SecurityEventType =
   | 'suspicious_activity'
   | 'data_breach_attempt'
   | 'rate_limit_exceeded'
-  | 'malicious_input';
+  | 'malicious_input'
+  | 'apikey.rotated'
+  | 'apikey.revoked'
+  | 'apikey.expired';
 
 /**
  * 安全事件
@@ -223,6 +226,31 @@ export interface SecurityEvent {
   severity: 'low' | 'medium' | 'high' | 'critical';
   metadata: Record<string, unknown>;
   acknowledged: boolean;
+}
+
+export type ApiKeyStatus = 'active' | 'rotating' | 'deprecated' | 'revoked' | 'expired';
+
+export interface ApiKeyEntry {
+  id: string;
+  name: string;
+  provider: string;
+  keyHash: string;
+  encryptedKey: string;
+  status: ApiKeyStatus;
+  createdAt: number;
+  expiresAt: number | null;
+  rotatedFrom: string | null;
+  rotatedTo: string | null;
+  lastUsedAt: number | null;
+  usageCount: number;
+  metadata: Record<string, unknown>;
+}
+
+export interface ApiKeyRotationConfig {
+  autoRotateDays: number;
+  gracePeriodMs: number;
+  maxUsageBeforeRotation: number;
+  encryptKeys: boolean;
 }
 
 export interface User {

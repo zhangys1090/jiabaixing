@@ -5,6 +5,9 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from agent.core.logger import StructuredLogger
+from agent.core.tracing import new_trace_id
+from agent.orchestration.perception_bus import SharedPerceptionBus
+from agent.perception.sensory_fusion import SenseSample, FusedPerception
 
 log = StructuredLogger("fanout")
 
@@ -22,6 +25,7 @@ class SubTaskResult:
         error: 错误信息。
         duration_ms: 耗时（毫秒）。
         agent_id: 执行的Agent ID。
+        trace_id: 贯通用链路ID（W8，跨子 Agent + OTel 透传）。
     """
 
     task_id: str
@@ -30,6 +34,7 @@ class SubTaskResult:
     error: str | None = None
     duration_ms: float = 0.0
     agent_id: str = ""
+    trace_id: str = ""
 
 
 @dataclass
@@ -43,6 +48,7 @@ class FanoutResult:
         failed_count: 失败数。
         sub_results: 子任务结果列表。
         duration_ms: 总耗时（毫秒）。
+        trace_id: 贯通用链路ID（W8）。
     """
 
     all_succeeded: bool = False
@@ -51,6 +57,7 @@ class FanoutResult:
     failed_count: int = 0
     sub_results: list[SubTaskResult] = field(default_factory=list)
     duration_ms: float = 0.0
+    trace_id: str = ""
 
 
 @dataclass
@@ -110,15 +117,23 @@ class SubAgentFanout:
         print(f"成功: {result.success_count}/{result.total_count}")
     """
 
-    def __init__(self, config: FanoutConfig | None = None) -> None:
+    def __init__(
+        self,
+        config: FanoutConfig | None = None,
+        perception_bus: SharedPerceptionBus | None = None,
+    ) -> None:
         self._config = config or FanoutConfig()
         self._semaphore = asyncio.Semaphore(self._config.max_fanout)
+        self._perception_bus = perception_bus or SharedPerceptionBus()
+        self._current_trace: str = ""
 
     async def fanout(
         self,
         tasks: list[TaskNode],
         executor: Any,
         parent_id: str = "",
+        trace_id: str | None = None,
+        perception_bus: SharedPerceptionBus | None = None,
     ) -> FanoutResult:
         """扇出执行任务列表。
 
@@ -126,16 +141,22 @@ class SubAgentFanout:
             tasks: 任务节点列表。
             executor: 任务执行器，需实现execute(task)方法。
             parent_id: 父任务ID。
+            trace_id: 贯通用链路ID（W8）；缺省自动生成并向下透传至每个子结果。
+            perception_bus: 共享感知总线；缺省复用实例级总线。
 
         Returns:
-            FanoutResult: 扇出执行结果。
+            FanoutResult: 扇出执行结果（含 trace_id）。
         """
         import time
+
+        if perception_bus is not None:
+            self._perception_bus = perception_bus
+        self._current_trace = trace_id or new_trace_id()
 
         start = time.time()
 
         if not tasks:
-            return FanoutResult(all_succeeded=True)
+            return FanoutResult(all_succeeded=True, trace_id=self._current_trace)
 
         strategy = self._resolve_strategy(tasks)
 
@@ -153,6 +174,7 @@ class SubAgentFanout:
             strategy=strategy,
             duration_ms=duration,
             parent_id=parent_id,
+            trace_id=self._current_trace,
         )
 
         return FanoutResult(
@@ -162,6 +184,34 @@ class SubAgentFanout:
             failed_count=failed_count,
             sub_results=sub_results,
             duration_ms=duration,
+            trace_id=self._current_trace,
+        )
+
+    # ---- W7/W8 感知融合与 traceId 贯通 ------------------------------------
+    @property
+    def perception_bus(self) -> SharedPerceptionBus:
+        return self._perception_bus
+
+    def collect_perception(
+        self,
+        agent_id: str,
+        sample: SenseSample,
+        task_id: str | None = None,
+    ) -> str:
+        """汇聚某子 Agent 的感知样本（带当前 trace_id 贯通）。返回 trace_id。"""
+        return self._perception_bus.ingest(
+            agent_id=agent_id,
+            sample=sample,
+            trace_id=self._current_trace or None,
+            task_id=task_id,
+        )
+
+    def aggregate_perception(
+        self, strategy: str = "weighted", weights: dict[str, float] | None = None
+    ) -> FusedPerception:
+        """按当前 trace_id 聚合所有子 Agent 的感知样本。"""
+        return self._perception_bus.aggregate(
+            self._current_trace, strategy=strategy, weights=weights
         )
 
     async def _execute_parallel(
@@ -221,6 +271,7 @@ class SubAgentFanout:
                     result=result,
                     duration_ms=(time.time() - start) * 1000,
                     agent_id=task.assigned_to or "",
+                    trace_id=self._current_trace,
                 )
             except asyncio.TimeoutError:
                 task.status = "failed"
@@ -231,6 +282,7 @@ class SubAgentFanout:
                     error=task.error,
                     duration_ms=(time.time() - start) * 1000,
                     agent_id=task.assigned_to or "",
+                    trace_id=self._current_trace,
                 )
             except Exception as e:
                 task.status = "failed"
@@ -241,6 +293,7 @@ class SubAgentFanout:
                     error=str(e),
                     duration_ms=(time.time() - start) * 1000,
                     agent_id=task.assigned_to or "",
+                    trace_id=self._current_trace,
                 )
 
     async def _execute_task(self, task: TaskNode, executor: Any) -> Any:

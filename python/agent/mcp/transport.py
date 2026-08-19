@@ -18,6 +18,7 @@ from urllib.parse import urljoin
 import httpx
 
 from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
 
 log = StructuredLogger("mcp.transport")
 
@@ -226,12 +227,12 @@ class StdioMCPTransport(BaseMCPTransport):
         if self._process:
             try:
                 self._process.stdin.close()
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "transport.StdioMCPTransport.stop", _exc)
             try:
                 self._process.kill()
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "transport.StdioMCPTransport.stop", _exc)
             self._process = None
         for task in (self._stdout_task, self._stderr_task):
             if task and not task.done():
@@ -323,8 +324,8 @@ class StdioMCPTransport(BaseMCPTransport):
                     continue
                 try:
                     self._handle_jsonrpc_message(json.loads(text))
-                except json.JSONDecodeError:
-                    pass
+                except json.JSONDecodeError as _exc:
+                    log_ignored(log, "transport.StdioMCPTransport._read_stdout", _exc)
             except Exception:
                 break
 
@@ -407,8 +408,8 @@ class HttpSseMCPTransport(BaseMCPTransport):
             self._sse_task.cancel()
             try:
                 await self._sse_task
-            except asyncio.CancelledError:
-                pass
+            except asyncio.CancelledError as _exc:
+                log_ignored(log, "transport.HttpSseMCPTransport.stop", _exc)
         self._sse_task = None
         if self._client and not self._client.is_closed:
             await self._client.aclose()

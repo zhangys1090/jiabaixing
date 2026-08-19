@@ -105,3 +105,25 @@ async def test_handler_error_recorded_no_deadlock(tmp_scheduler) -> None:
     result = await tmp_scheduler._run_job(job)
     assert result.success is False
     assert tmp_scheduler.get_job("j3").status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_safe_dispatch_marks_running_before_execution(tmp_scheduler) -> None:
+    """审计 L-01 回归：派发时同步置 running，使 _tick 守卫立即生效，
+
+    避免慢任务在下次 tick 被重复派发。无此修复时，_safe_dispatch 返回后
+    job.status 仍为 idle（_run_job 尚未设置），断言会失败。
+    此处桩掉 dispatch 的实际执行，仅验证「派发即置 running」这一前置行为。
+    """
+    job = CronJob(id="jL01", name="slow", schedule="every:1h", command="slow", next_run=0.0)
+    tmp_scheduler.register(job)
+    dispatched = []
+
+    async def noop_dispatch(j):
+        dispatched.append(j)
+
+    tmp_scheduler.dispatch = noop_dispatch  # 阻断真实执行，隔离守卫前置行为
+    await tmp_scheduler._safe_dispatch(job)
+    # 派发发起点立即置 running，_tick 的 status=="running" 守卫随即生效
+    assert tmp_scheduler.get_job("jL01").status == "running"
+    assert dispatched, "应确实发起了派发"

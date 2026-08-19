@@ -1,0 +1,37 @@
+diff --git a/python/agent/persistence/database.py b/python/agent/persistence/database.py
+index e5b8eba..c5282c5 100644
+--- a/python/agent/persistence/database.py
++++ b/python/agent/persistence/database.py
+@@ -206,11 +311,22 @@ class DatabaseMigration:
+         finally:
+             conn.close()
+ 
++    def _validate_table_identifier(self, table_name: str) -> str:
++        """校验表名为合法 SQL 标识符（防标识符注入）。
++
++        SQLite 表名无法通过参数化占位符绑定，故采用严格白名单校验：
++        仅允许字母/数字/下划线且以字母或下划线开头。非法则抛 ValueError，
++        避免 `table_name` 来自不可信输入时篡改 SQL 结构。
++        """
++        if not isinstance(table_name, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", table_name):
++            raise ValueError(f"非法的表名标识符: {table_name!r}")
++        return table_name
++
+     def get_table_schema(self, table_name: str) -> list[dict[str, Any]]:
+         """获取表的列信息."""
+         conn = self._get_sqlite_conn()
+         try:
+-            cursor = conn.execute(f"PRAGMA table_info({table_name})")
++            cursor = conn.execute(f"PRAGMA table_info({self._validate_table_identifier(table_name)})")
+             return [
+                 {
+                     "cid": row[0],
+@@ -229,7 +345,7 @@ class DatabaseMigration:
+         """获取表行数."""
+         conn = self._get_sqlite_conn()
+         try:
+-            cursor = conn.execute(f"SELECT COUNT(*) FROM {table_name}")
++            cursor = conn.execute(f"SELECT COUNT(*) FROM {self._validate_table_identifier(table_name)}")
+             return cursor.fetchone()[0]
+         finally:
+             conn.close()

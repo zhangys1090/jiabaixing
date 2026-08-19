@@ -1,7 +1,9 @@
 import { ModelConfig, ModelInput, ModelOutput } from '../core/ModelInterface';
+import { getActivePythonBridge } from '../ide/bridgeRegistry';
 import { Logger } from '../utils/Logger';
-import { OpenAICompatibleModel } from './OpenAICompatibleModel';
 import { ModelSelector } from './ModelSelector';
+import { OpenAICompatibleModel } from './OpenAICompatibleModel';
+import { PythonBackedModel } from './PythonBackedModel';
 import {
   ModelCapabilityProfile,
   ModelHealthStatus,
@@ -21,8 +23,8 @@ export type {
 
 export { RoutingStrategy } from './types';
 
-export class MultiModelLLMProvider {
-  private static instance: MultiModelLLMProvider | null = null;
+export class MultiModelLLMProviderBridge {
+  private static instance: MultiModelLLMProviderBridge | null = null;
   private models: Map<string, RegisteredModel> = new Map();
   private config: Required<MultiModelConfig>;
   private initialized: boolean = false;
@@ -40,18 +42,22 @@ export class MultiModelLLMProvider {
     this.modelSelector = ModelSelector.getInstance();
   }
 
-  public static getInstance(config?: MultiModelConfig): MultiModelLLMProvider {
-    if (!MultiModelLLMProvider.instance) {
-      MultiModelLLMProvider.instance = new MultiModelLLMProvider(config);
+  public static getInstance(
+    config?: MultiModelConfig
+  ): MultiModelLLMProviderBridge {
+    if (!MultiModelLLMProviderBridge.instance) {
+      MultiModelLLMProviderBridge.instance = new MultiModelLLMProviderBridge(
+        config
+      );
     }
-    return MultiModelLLMProvider.instance;
+    return MultiModelLLMProviderBridge.instance;
   }
 
   public static reset(): void {
-    if (MultiModelLLMProvider.instance) {
-      MultiModelLLMProvider.instance.cleanup();
+    if (MultiModelLLMProviderBridge.instance) {
+      MultiModelLLMProviderBridge.instance.cleanup();
     }
-    MultiModelLLMProvider.instance = null;
+    MultiModelLLMProviderBridge.instance = null;
   }
 
   public async initialize(): Promise<void> {
@@ -65,8 +71,8 @@ export class MultiModelLLMProvider {
 
     this.initialized = true;
     Logger.info(
-      `✅ MultiModelLLMProvider 初始化完成，已注册 ${this.models.size} 个模型`,
-      'MultiModelLLMProvider'
+      `✅ MultiModelLLMProviderBridge 初始化完成，已注册 ${this.models.size} 个模型`,
+      'MultiModelLLMProviderBridge'
     );
   }
 
@@ -78,7 +84,7 @@ export class MultiModelLLMProvider {
       'http://127.0.0.1:8001/v1';
     const localApiKey =
       process.env.OPENAI_API_KEY || process.env.LLM_API_KEY || 'not-needed';
-    const localModelName = process.env.LLM_MODEL || 'deepseek-chat';
+    const localModelName = process.env.LLM_MODEL || 'deepseek-v4-flash';
 
     await this.registerModel(
       'local-llm',
@@ -106,7 +112,7 @@ export class MultiModelLLMProvider {
     );
     Logger.info(
       `✅ 已注册本地模型: ${localModelName} @ ${localBaseUrl}`,
-      'MultiModelLLMProvider'
+      'MultiModelLLMProviderBridge'
     );
     */
 
@@ -143,12 +149,12 @@ export class MultiModelLLMProvider {
       );
       Logger.info(
         `✅ 已注册小米 MiMo 模型: ${xiaomiModelName} @ ${xiaomiBaseUrl}`,
-        'MultiModelLLMProvider'
+        'MultiModelLLMProviderBridge'
       );
     } else {
       Logger.info(
         'ℹ️ 未配置 XIAOMI_API_KEY，跳过小米 MiMo 模型注册',
-        'MultiModelLLMProvider'
+        'MultiModelLLMProviderBridge'
       );
     }
 
@@ -184,19 +190,21 @@ export class MultiModelLLMProvider {
       );
       Logger.info(
         `✅ 已注册智谱模型: ${zhipuModelName} @ ${zhipuBaseUrl}`,
-        'MultiModelLLMProvider'
+        'MultiModelLLMProviderBridge'
       );
     } else {
       Logger.info(
         'ℹ️ 未配置 ZHIPU_API_KEY，跳过智谱模型注册',
-        'MultiModelLLMProvider'
+        'MultiModelLLMProviderBridge'
       );
     }
   }
 
   private ensureInitialized(): void {
     if (!this.initialized) {
-      throw new Error('MultiModelLLMProvider 未初始化，请先调用 initialize()');
+      throw new Error(
+        'MultiModelLLMProviderBridge 未初始化，请先调用 initialize()'
+      );
     }
   }
 
@@ -207,18 +215,22 @@ export class MultiModelLLMProvider {
     capabilities: ModelCapabilityProfile,
     priority: number = 10
   ): Promise<void> {
-    const model = new OpenAICompatibleModel({
-      baseUrl: config.baseUrl,
-      apiKey: config.apiKey,
-      modelName: name,
-    });
+    // P2-3 C: AGENT_BACKEND=python 模式下桥壳化 — 经 PythonAgentBridge 委派，
+    // 不再实例化 TS 本地 LLM 客户端（OpenAICompatibleModel）。
+    const model = getActivePythonBridge()
+      ? new PythonBackedModel(name)
+      : new OpenAICompatibleModel({
+          baseUrl: config.baseUrl,
+          apiKey: config.apiKey,
+          modelName: name,
+        });
 
     try {
       await model.initialize();
     } catch (err) {
       Logger.warn(
         `⚠️ 模型 ${name} 初始化失败: ${(err as Error).message}`,
-        'MultiModelLLMProvider'
+        'MultiModelLLMProviderBridge'
       );
     }
 
@@ -247,7 +259,7 @@ export class MultiModelLLMProvider {
 
     const model = this.models.get(id);
     if (!model) {
-      Logger.warn(`⚠️ 模型未找到: ${id}`, 'MultiModelLLMProvider');
+      Logger.warn(`⚠️ 模型未找到: ${id}`, 'MultiModelLLMProviderBridge');
       return false;
     }
 
@@ -280,7 +292,7 @@ export class MultiModelLLMProvider {
       model.enabled = enabled;
       Logger.info(
         `${enabled ? '✅' : '❌'} 模型 ${model.name} 已${enabled ? '启用' : '禁用'}`,
-        'MultiModelLLMProvider'
+        'MultiModelLLMProviderBridge'
       );
     }
   }
@@ -317,7 +329,7 @@ export class MultiModelLLMProvider {
       if (!model.health.available) {
         Logger.info(
           `⏭️ 跳过不可用模型 ${model.name}（上次失败: ${model.health.lastError || '未知'}）`,
-          'MultiModelLLMProvider'
+          'MultiModelLLMProviderBridge'
         );
         continue;
       }
@@ -325,7 +337,7 @@ export class MultiModelLLMProvider {
       try {
         Logger.info(
           `🎯 使用模型: ${model.name} (原因: ${routingResult.reason})`,
-          'MultiModelLLMProvider'
+          'MultiModelLLMProviderBridge'
         );
 
         const startTime = Date.now();
@@ -343,7 +355,7 @@ export class MultiModelLLMProvider {
 
         Logger.info(
           `✅ 模型 ${model.name} 生成成功 (${latency}ms)`,
-          'MultiModelLLMProvider'
+          'MultiModelLLMProviderBridge'
         );
         return output;
       } catch (error) {
@@ -351,7 +363,7 @@ export class MultiModelLLMProvider {
         this.updateHealthStatus(model, false, 0, (error as Error).message);
         Logger.warn(
           `⚠️ 模型 ${model.name} 失败，尝试降级: ${(error as Error).message}`,
-          'MultiModelLLMProvider'
+          'MultiModelLLMProviderBridge'
         );
 
         const errorMsg = (error as Error).message.toLowerCase();
@@ -365,7 +377,7 @@ export class MultiModelLLMProvider {
           model.health.available = false;
           Logger.warn(
             `🚫 连接错误，立即禁用模型 ${model.name}`,
-            'MultiModelLLMProvider'
+            'MultiModelLLMProviderBridge'
           );
         }
       }
@@ -398,7 +410,10 @@ export class MultiModelLLMProvider {
       throw new Error(`模型未找到: ${modelId}`);
     }
 
-    Logger.info(`📊 开始评估模型: ${model.name}`, 'MultiModelLLMProvider');
+    Logger.info(
+      `📊 开始评估模型: ${model.name}`,
+      'MultiModelLLMProviderBridge'
+    );
 
     const speedScore = await this.testSpeed(model);
     const codingScore = await this.testCoding(model);
@@ -420,7 +435,7 @@ export class MultiModelLLMProvider {
 
     Logger.info(
       `📊 模型 ${model.name} 评估完成: 速度=${speedScore}, 代码=${codingScore}, 推理=${reasoningScore}, 视觉=${visionScore}`,
-      'MultiModelLLMProvider'
+      'MultiModelLLMProviderBridge'
     );
 
     return profile;
@@ -441,7 +456,10 @@ export class MultiModelLLMProvider {
 
   public async healthCheck(): Promise<{ available: boolean; message: string }> {
     if (!this.initialized) {
-      return { available: false, message: 'MultiModelLLMProvider 未初始化' };
+      return {
+        available: false,
+        message: 'MultiModelLLMProviderBridge 未初始化',
+      };
     }
 
     const availableModels = this.getAvailableModels();
@@ -526,7 +544,7 @@ export class MultiModelLLMProvider {
         );
         Logger.warn(
           `⚠️ 模型 ${registeredModel.name} chat失败，尝试降级: ${(error as Error).message}`,
-          'MultiModelLLMProvider'
+          'MultiModelLLMProviderBridge'
         );
       }
     }
@@ -601,7 +619,10 @@ export class MultiModelLLMProvider {
 
   public async shutdown(): Promise<void> {
     this.cleanup();
-    Logger.info('🛑 MultiModelLLMProvider 已关闭', 'MultiModelLLMProvider');
+    Logger.info(
+      '🛑 MultiModelLLMProviderBridge 已关闭',
+      'MultiModelLLMProviderBridge'
+    );
   }
 
   public async checkAllModelsHealth(): Promise<void> {
@@ -660,7 +681,7 @@ export class MultiModelLLMProvider {
         model.health.available = false;
         Logger.warn(
           `🚫 模型 ${model.name} 连续失败 ${model.health.consecutiveFailures} 次，已标记为不可用`,
-          'MultiModelLLMProvider'
+          'MultiModelLLMProviderBridge'
         );
       }
     }

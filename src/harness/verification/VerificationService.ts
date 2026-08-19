@@ -208,11 +208,12 @@ export class VerificationService {
       };
     }
 
-    // 检查输出是否包含错误标记
-    const errorIndicators = ['抱歉', '无法', '失败', '错误', 'error', 'failed'];
-    const hasErrors = errorIndicators.some((e) =>
-      currentOutput.toLowerCase().includes(e)
-    );
+    // 检查输出是否包含错误标记。
+    // 仅在自然语言部分判定：先剥离代码块( ```...``` )与行内代码( `...` )，
+    // 避免把教程、代码示例中的 error/failed 字样误判为真实失败而触发
+    // 无谓的 replan 循环；英文指示词额外用词边界匹配避免 terror/errorless 误命中。
+    const prose = this.stripCodeSpans(currentOutput);
+    const hasErrors = this.containsErrorIndicator(prose);
 
     if (hasErrors) {
       return {
@@ -238,6 +239,30 @@ export class VerificationService {
       remainingSteps: [],
       suggestedAction: 'continue',
     };
+  }
+
+  /**
+   * 去除输出中的代码块与行内代码，仅保留自然语言文本。
+   * 用于错误指示词判定，避免把教程/代码示例中的 error/failed 误判为真实失败。
+   */
+  private stripCodeSpans(text: string): string {
+    return text
+      .replace(/```[\s\S]*?```/g, ' ')
+      .replace(/`[^`\n]*`/g, ' ');
+  }
+
+  /**
+   * 在自然语言文本中检测"真实失败"指示词。
+   * 中文指示词按子串匹配（无空格分隔）；英文指示词按词边界匹配，
+   * 避免 terror / errorless 等子串误命中。
+   */
+  private containsErrorIndicator(text: string): boolean {
+    const lower = text.toLowerCase();
+    const cjk = ['抱歉', '无法', '失败', '错误'];
+    if (cjk.some((w) => lower.includes(w))) return true;
+    return ['error', 'failed'].some((w) =>
+      new RegExp(`\\b${w}\\b`, 'i').test(lower)
+    );
   }
 
   /**

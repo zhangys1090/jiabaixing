@@ -6,9 +6,10 @@
  * - 依赖注入：支持注入 MemoryAssistant 实例作为备用检索源
  */
 
+import type { MemoryAssistant } from '../../../core/MemoryAssistant';
 import type { ToolContext, ToolDefinition, ToolResult } from '../../types';
 import { Permission, ToolCategory } from '../../types';
-import type { MemoryAssistant } from '../../../core/MemoryAssistant';
+import { Logger } from '../../utils/Logger';
 
 export const MEMORY_RECALL_DEF: ToolDefinition = {
   name: 'memory_recall',
@@ -42,6 +43,8 @@ export interface MemoryRecallDeps {
   updateAccessStats?: (query: string) => Promise<void>;
   /** 可选的 MemoryAssistant 实例，当 retrieveRelevant 不可用时作为备用 */
   memoryAssistant?: MemoryAssistant;
+  /** 模糊检索模式：启用子串分词匹配 + 相关度排序 */
+  fuzzyMatch?: boolean;
 }
 
 /** 创建 memory_recall 执行器 */
@@ -68,10 +71,40 @@ export function createMemoryRecallExecutor(deps: MemoryRecallDeps = {}) {
         const memories = await deps.retrieveRelevant({ query, limit });
 
         if (deps.updateAccessStats && memories.length > 0) {
-          deps.updateAccessStats(query).catch(() => {});
+          deps.updateAccessStats(query).catch((err) =>
+            Logger.warn('更新记忆访问统计失败（非关键）', err as Error, 'memory_recall')
+          );
         }
 
-        const formatted = memories
+        let results = memories;
+        if (deps.fuzzyMatch && memories.length === 0) {
+          const allMemories = await deps.retrieveRelevant({
+            query: '',
+            limit: 1000,
+          });
+          const queryTokens = tokenize(query);
+          const scored = allMemories
+            .map((m) => {
+              const item = m as { content: string; importance?: number };
+              const contentTokens = tokenize(item.content);
+              let matchScore = 0;
+              for (const qt of queryTokens) {
+                for (const ct of contentTokens) {
+                  if (ct.includes(qt) || qt.includes(ct)) {
+                    matchScore += qt.length;
+                  }
+                }
+              }
+              if (item.content.includes(query)) matchScore += query.length * 2;
+              return { item: m, score: matchScore };
+            })
+            .filter((s) => s.score > 0)
+            .sort((a, b) => b.score - a.score)
+            .slice(0, limit);
+          results = scored.map((s) => s.item);
+        }
+
+        const formatted = results
           .map((m, i) => {
             const item = m as {
               content: string;
@@ -146,4 +179,33 @@ export function createMemoryRecallExecutor(deps: MemoryRecallDeps = {}) {
       validated: false,
     };
   };
+}
+
+function tokenize(text: string): string[] {
+  const tokens: string[] = [];
+  const cjkRegex = /[\u4e00-\u9fff\u3400-\u4dbf]/;
+  let i = 0;
+  while (i < text.length) {
+    if (cjkRegex.test(text[i])) {
+      for (let len = Math.min(4, text.length - i); len >= 2; len--) {
+        tokens.push(text.substring(i, i + len));
+      }
+      tokens.push(text[i]);
+      i++;
+    } else {
+      let end = i;
+      while (
+        end < text.length &&
+        !cjkRegex.test(text[end]) &&
+        /[\w]/.test(text[end])
+      ) {
+        end++;
+      }
+      if (end > i) {
+        tokens.push(text.substring(i, end).toLowerCase());
+      }
+      i = end + 1;
+    }
+  }
+  return tokens;
 }

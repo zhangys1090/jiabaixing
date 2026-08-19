@@ -1,6 +1,6 @@
 import express from 'express';
-import * as path from 'path';
 import * as fs from 'fs';
+import * as path from 'path';
 import { Logger } from '../../utils/Logger';
 import { DocsIndexGenerator } from '../docs/docsIndexGenerator';
 
@@ -81,7 +81,7 @@ export function registerDocsRoutes(
 
   // 静态文档访问
   app.get('/docs/*', async (req, res) => {
-    const docPath = (req.params as unknown as { 0: string })[0];
+    const docPath = (req.params as Record<string, string>)['0'];
     const fullPath = path.join(docsDir, docPath);
 
     // 安全检查：防止目录遍历

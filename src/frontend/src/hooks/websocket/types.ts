@@ -6,11 +6,12 @@
 import {
   ConnectionStatus as ContractConnectionStatus,
   DialogStateValue as ContractDialogStateValue,
+  WS_EVENTS,
   WsAgentExecutionUpdateData,
   WsBrainStageUpdateData,
   WsClarificationRequestData,
-  WsErrorData,
   WsEnvironmentUpdateData,
+  WsErrorData,
   WsEvolutionEventData,
   WsExecutionPreviewData,
   WsFileModifiedData,
@@ -18,12 +19,11 @@ import {
   WsPerceptionUpdateData,
   WsProactiveMessageData,
   WsProjectChangeData,
+  WsServerEventType,
   WsServerLogData,
   WsSkillExecutionUpdateData,
   WsToolTraceData,
   WsWeightUpdateData,
-  WS_EVENTS,
-  WsServerEventType,
 } from '@shared/contracts';
 
 export type ConnectionStatus = ContractConnectionStatus;
@@ -105,9 +105,26 @@ export type StreamStartListener = (data: StreamStartData) => void;
 export type StreamChunkListener = (data: StreamChunkData) => void;
 export type StreamDoneListener = (data: StreamDoneData) => void;
 
+export type AgentProgressData = {
+  traceId?: string;
+  type: 'thinking' | 'tool_start' | 'tool_end' | 'progress';
+  content?: string;
+  toolName?: string;
+  toolArgs?: Record<string, unknown>;
+  success?: boolean;
+  resultSummary?: string;
+  durationMs?: number;
+  phase?: string;
+  stepsCompleted?: number;
+  stepsTotal?: number;
+  message?: string;
+};
+
+export type AgentProgressListener = (data: AgentProgressData) => void;
+
 export interface WebSocketMessage {
   type: WsServerEventType;
-  data?: Record<string, unknown>;
+  data?: unknown;
   traceId?: string;
   timestamp?: number;
 }
@@ -172,6 +189,7 @@ export interface UseWebSocketOptions {
   onStreamStart?: (data: StreamStartData) => void;
   onStreamChunk?: (data: StreamChunkData) => void;
   onStreamDone?: (data: StreamDoneData) => void;
+  onAgentProgress?: (data: AgentProgressData) => void;
 }
 
 export interface WebSocketState {

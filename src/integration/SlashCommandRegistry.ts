@@ -175,11 +175,13 @@ export class SlashCommandRegistry {
         try {
           // 通过 EventBus 发送新会话信号
           const { EventBus } = await import('../shared/EventBus');
-          (EventBus as any).emit('session_reset', {
-            platform: ctx.platform,
-            userId: ctx.userId,
-            timestamp: new Date().toISOString(),
-          });
+          (EventBus as import('../shared/EventBus').JiabaixingEventBus).emit(
+            'session_reset',
+            {
+              reason: `${ctx.platform} 用户请求重置`,
+              timestamp: new Date().toISOString(),
+            }
+          );
           return '🔄 已开始新对话！';
         } catch {
           return '🔄 已尝试重置会话。';
@@ -219,11 +221,13 @@ export class SlashCommandRegistry {
         // 通过 EventBus 触发重试
         try {
           const { EventBus } = await import('../shared/EventBus');
-          (EventBus as any).emit('retry_requested', {
-            platform: ctx.platform,
-            userId: ctx.userId,
-            timestamp: new Date().toISOString(),
-          });
+          (EventBus as import('../shared/EventBus').JiabaixingEventBus).emit(
+            'retry_requested',
+            {
+              traceId: ctx.userId,
+              reason: `${ctx.platform} 用户请求重试`,
+            }
+          );
           return '🔄 正在重试...';
         } catch {
           return '❌ 重试失败。';
@@ -237,11 +241,13 @@ export class SlashCommandRegistry {
       handler: async (_args, ctx) => {
         try {
           const { EventBus } = await import('../shared/EventBus');
-          (EventBus as any).emit('undo_requested', {
-            platform: ctx.platform,
-            userId: ctx.userId,
-            timestamp: new Date().toISOString(),
-          });
+          (EventBus as import('../shared/EventBus').JiabaixingEventBus).emit(
+            'undo_requested',
+            {
+              traceId: ctx.userId,
+              step: 'last',
+            }
+          );
           return '↩️ 已撤销上一轮。';
         } catch {
           return '❌ 撤销失败。';
@@ -255,11 +261,13 @@ export class SlashCommandRegistry {
       handler: async (_args, ctx) => {
         try {
           const { EventBus } = await import('../shared/EventBus');
-          (EventBus as any).emit('agent_stop_requested', {
-            platform: ctx.platform,
-            userId: ctx.userId,
-            timestamp: new Date().toISOString(),
-          });
+          (EventBus as import('../shared/EventBus').JiabaixingEventBus).emit(
+            'agent_stop_requested',
+            {
+              traceId: ctx.userId,
+              reason: `${ctx.platform} 用户请求停止`,
+            }
+          );
           return '⏹️ 正在停止...';
         } catch {
           return '❌ 停止失败。';
@@ -284,11 +292,12 @@ export class SlashCommandRegistry {
       handler: async (_args, ctx) => {
         try {
           const { EventBus } = await import('../shared/EventBus');
-          (EventBus as any).emit('compress_requested', {
-            platform: ctx.platform,
-            userId: ctx.userId,
-            timestamp: new Date().toISOString(),
-          });
+          (EventBus as import('../shared/EventBus').JiabaixingEventBus).emit(
+            'compress_requested',
+            {
+              sessionId: ctx.userId,
+            }
+          );
           return '📦 压缩请求已发送。下次 LLM 调用时将使用压缩后的上下文。';
         } catch {
           return '❌ 压缩请求失败。';
@@ -406,12 +415,13 @@ export class SlashCommandRegistry {
         }
         try {
           const { EventBus } = await import('../shared/EventBus');
-          (EventBus as any).emit('session_title_set', {
-            platform: ctx.platform,
-            userId: ctx.userId,
-            title: name,
-            timestamp: new Date().toISOString(),
-          });
+          (EventBus as import('../shared/EventBus').JiabaixingEventBus).emit(
+            'session_title_set',
+            {
+              title: name,
+              sessionId: ctx.userId,
+            }
+          );
           return `📋 会话已命名为: "${name}"`;
         } catch {
           return `📋 会话已命名为: "${name}"`;
@@ -494,11 +504,12 @@ export class SlashCommandRegistry {
         if (subcmd === 'list') {
           try {
             const { EventBus } = await import('../shared/EventBus');
-            (EventBus as any).emit('cron_list_requested', {
-              platform: ctx.platform,
-              userId: ctx.userId,
-              timestamp: new Date().toISOString(),
-            });
+            (EventBus as import('../shared/EventBus').JiabaixingEventBus).emit(
+              'cron_list_requested',
+              {
+                userId: ctx.userId,
+              }
+            );
             // Scheduler 监听此事件并通过 IntegrationManager 回复
             return '⏰ 正在获取任务列表...';
           } catch {
@@ -511,12 +522,13 @@ export class SlashCommandRegistry {
           if (!taskId) return '❌ 用法: /cron run <task_id>';
           try {
             const { EventBus } = await import('../shared/EventBus');
-            (EventBus as any).emit('cron_run_requested', {
-              taskId,
-              platform: ctx.platform,
-              userId: ctx.userId,
-              timestamp: new Date().toISOString(),
-            });
+            (EventBus as import('../shared/EventBus').JiabaixingEventBus).emit(
+              'cron_run_requested',
+              {
+                taskId,
+                userId: ctx.userId,
+              }
+            );
             return `⏰ 正在触发任务: ${taskId}...`;
           } catch {
             return '❌ 无法触发任务。';
@@ -528,12 +540,13 @@ export class SlashCommandRegistry {
           if (!taskId) return '❌ 用法: /cron pause <task_id>';
           try {
             const { EventBus } = await import('../shared/EventBus');
-            (EventBus as any).emit('cron_pause_requested', {
-              taskId,
-              platform: ctx.platform,
-              userId: ctx.userId,
-              timestamp: new Date().toISOString(),
-            });
+            (EventBus as import('../shared/EventBus').JiabaixingEventBus).emit(
+              'cron_pause_requested',
+              {
+                taskId,
+                userId: ctx.userId,
+              }
+            );
             return `⏸️ 已切换任务状态: ${taskId}`;
           } catch {
             return '❌ 无法切换任务状态。';
@@ -662,9 +675,11 @@ export class SlashCommandRegistry {
             const { IntegrationManager } = await import('./IntegrationManager');
             const im = IntegrationManager.getInstance();
             // 通过 core.processInput 处理
-            const core = (im as any).core as
-              | import('../core/JiabaixingCore').JiabaixingCore
-              | null;
+            const core = (
+              im as unknown as {
+                core?: import('../core/JiabaixingCore').JiabaixingCore | null;
+              }
+            ).core as import('../core/JiabaixingCore').JiabaixingCore | null;
             if (core) {
               const result = await core.processInput(prompt, `bg:${taskId}`);
               if (result.response) {
@@ -673,7 +688,8 @@ export class SlashCommandRegistry {
                 if (response.includes('[SILENT]')) return;
 
                 await im.sendMessage({
-                  platform: ctx.platform as any,
+                  platform:
+                    ctx.platform as import('../shared/contracts').IntegrationPlatform,
                   message: `✅ **Background task complete**\n\n${response.substring(0, 2000)}`,
                   to: ctx.userId,
                 });
@@ -685,7 +701,8 @@ export class SlashCommandRegistry {
                 await import('./IntegrationManager');
               const im = IntegrationManager.getInstance();
               await im.sendMessage({
-                platform: ctx.platform as any,
+                platform:
+                  ctx.platform as import('../shared/contracts').IntegrationPlatform,
                 message: `❌ **Background task failed**: ${(err as Error).message}`,
                 to: ctx.userId,
               });

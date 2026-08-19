@@ -12,38 +12,37 @@ jest.mock('../../../src/utils/Logger', () => ({
   },
 }));
 
-jest.mock('../../../src/mcp/MCPServerManager', () => ({
-  MCPServerManager: {
-    getInstance: jest.fn().mockReturnValue({
-      getRunningServers: jest.fn().mockReturnValue(['test-server']),
-      listTools: jest.fn().mockResolvedValue([
-        {
-          name: 'read_file',
-          description: '读取文件内容',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              path: { type: 'string', description: '文件路径' },
-            },
-            required: ['path'],
+jest.mock('../../../src/ide/bridgeRegistry', () => ({
+  getActivePythonBridge: jest.fn().mockReturnValue({
+    getRunningMcpServers: jest.fn().mockResolvedValue(['test-server']),
+    listMcpTools: jest.fn().mockResolvedValue([
+      {
+        name: 'read_file',
+        description: '读取文件内容',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: { type: 'string', description: '文件路径' },
           },
+          required: ['path'],
         },
-        {
-          name: 'write_file',
-          description: '写入文件',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              path: { type: 'string', description: '文件路径' },
-              content: { type: 'string', description: '文件内容' },
-            },
-            required: ['path', 'content'],
+      },
+      {
+        name: 'write_file',
+        description: '写入文件',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: { type: 'string', description: '文件路径' },
+            content: { type: 'string', description: '文件内容' },
           },
+          required: ['path', 'content'],
         },
-      ]),
-      callTool: jest.fn().mockResolvedValue({ content: 'test result' }),
-    }),
-  },
+      },
+    ]),
+    callMcpTool: jest.fn().mockResolvedValue({ content: 'test result' }),
+  }),
+  setActivePythonBridge: jest.fn(),
 }));
 
 import { MCPToolBridge } from '../../../src/harness/tools/registry/MCPToolBridge';

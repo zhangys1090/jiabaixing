@@ -8,13 +8,13 @@
  */
 
 import { EventEmitter } from 'events';
+import { Logger } from '../utils/Logger';
 import {
-  DesktopActionExecutor,
-  DesktopAction,
-  DesktopActionResult,
+    DesktopAction,
+    DesktopActionExecutor,
+    DesktopActionResult,
 } from './DesktopActionExecutor';
 import { NormalizedCoordinateSystem } from './NormalizedCoordinates';
-import { Logger } from '../utils/Logger';
 
 export interface MCPTool {
   name: string;
@@ -350,6 +350,10 @@ export class DesktopMCPServer extends EventEmitter {
     super();
     this.executor = DesktopActionExecutor.getInstance();
     this.coords = NormalizedCoordinateSystem.getInstance();
+  }
+
+  public static create(): DesktopMCPServer {
+    return new DesktopMCPServer();
   }
 
   public static getInstance(): DesktopMCPServer {

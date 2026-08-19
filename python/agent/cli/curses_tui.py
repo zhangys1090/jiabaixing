@@ -33,6 +33,7 @@ from enum import Enum
 from typing import Any, Callable
 
 from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
 
 log = StructuredLogger("curses_tui")
 
@@ -190,8 +191,8 @@ class CursesTUI:
                 import textual
 
                 return TUIBackend.TEXTUAL
-            except ImportError:
-                pass
+            except ImportError as _exc:
+                log_ignored(log, "curses_tui.CursesTUI._detect_backend", _exc)
 
         if self._config.backend == TUIBackend.CURSES or self._config.backend == TUIBackend.TEXTUAL:
             try:
@@ -199,8 +200,8 @@ class CursesTUI:
 
                 if sys.stdout.isatty():
                     return TUIBackend.CURSES
-            except ImportError:
-                pass
+            except ImportError as _exc:
+                log_ignored(log, "curses_tui.CursesTUI._detect_backend", _exc)
 
         return TUIBackend.FALLBACK
 
@@ -262,24 +263,24 @@ class CursesTUI:
             line = f" {prefix} {msg.content[: width - len(prefix) - 3]}"
             try:
                 stdscr.addstr(i, 0, line)
-            except curses.error:
-                pass
+            except curses.error as _exc:
+                log_ignored(log, "curses_tui.CursesTUI._render_curses", _exc)
 
         try:
             stdscr.addstr(height - 2, 0, "-" * width)
-        except curses.error:
-            pass
+        except curses.error as _exc:
+            log_ignored(log, "curses_tui.CursesTUI._render_curses", _exc)
 
         try:
             stdscr.addstr(height - 1, 0, f"> {self._input_text}")
-        except curses.error:
-            pass
+        except curses.error as _exc:
+            log_ignored(log, "curses_tui.CursesTUI._render_curses", _exc)
 
         if self._config.show_status_bar and self._status_text:
             try:
                 stdscr.addstr(0, width - len(self._status_text) - 1, self._status_text)
-            except curses.error:
-                pass
+            except curses.error as _exc:
+                log_ignored(log, "curses_tui.CursesTUI._render_curses", _exc)
 
         stdscr.refresh()
 

@@ -2,8 +2,13 @@
  * BaseAgent — 抽象 Agent 基类
  *
  * 定义统一的 Agent 接口，持有 llm、tools、memory 引用。
- * 具体 Agent（CodingAgent/FileAgent/DesktopAgent）继承此类，
+ * 具体 Agent（CodingAgent/FileAgent/DesktopAgent/OrchestratorAgent）继承此类，
  * 配置各自工具集和执行逻辑。
+ *
+ * V5.6 增强：
+ * - bid() 竞标接口：供 OrchestratorAgent 选择最佳执行者
+ * - healthCheck() 健康检查：供 AgentRegistry 监控
+ * - canHandle() 能力匹配：供任务分配
  *
  * 设计原则：
  * - Agent 自治：每个 Agent 独立持有自己的资源
@@ -24,6 +29,34 @@ export interface AgentResult {
   data?: Record<string, unknown>;
   /** 执行时长 (ms) */
   duration: number;
+}
+
+/** Agent 竞标结果 — 供 OrchestratorAgent 选择执行者 */
+export interface AgentBid {
+  /** 竞标 Agent ID */
+  agentId: string;
+  /** 置信度 0-1 */
+  confidence: number;
+  /** 预估执行时长 (ms) */
+  estimatedDuration?: number;
+  /** 竞标理由 */
+  reason?: string;
+}
+
+/** Agent 健康状态 */
+export interface AgentHealthStatus {
+  /** 是否健康 */
+  healthy: boolean;
+  /** 成功率 0-1 */
+  successRate: number;
+  /** 平均响应时间 (ms) */
+  avgResponseTime: number;
+  /** 最后活跃时间 */
+  lastActiveAt: number;
+  /** 错误次数 */
+  errorCount: number;
+  /** 总执行次数 */
+  totalExecutions: number;
 }
 
 /** Agent 执行函数类型 */
@@ -62,6 +95,7 @@ export abstract class BaseAgent {
   private lastExecuteTime: number = 0;
   private errorCount: number = 0;
   private successCount: number = 0;
+  private totalResponseTime: number = 0;
 
   constructor(config: BaseAgentConfig) {
     this.id = config.id;
@@ -116,6 +150,7 @@ export abstract class BaseAgent {
       this._status = 'idle';
       this.successCount++;
       this.lastExecuteTime = Date.now() - startTime;
+      this.totalResponseTime += this.lastExecuteTime;
 
       Logger.info(
         `✅ ${this.name} 执行完成 (${this.lastExecuteTime}ms)`,
@@ -127,11 +162,69 @@ export abstract class BaseAgent {
       this._status = 'error';
       this.errorCount++;
       this.lastExecuteTime = Date.now() - startTime;
+      this.totalResponseTime += this.lastExecuteTime;
 
       Logger.error(`${this.name} 执行失败`, error as Error, this.id);
 
       throw error;
     }
+  }
+
+  /**
+   * 竞标接口 — 供 OrchestratorAgent 选择最佳执行者
+   * 子类可覆盖以实现更精细的竞标逻辑
+   * @param taskGoal - 任务目标
+   * @param requiredTools - 所需工具列表
+   * @returns 竞标结果，null 表示不参与竞标
+   */
+  async bid(taskGoal: string, requiredTools?: string[]): Promise<AgentBid | null> {
+    if (this._status !== 'idle') return null;
+    if (!this.canHandle(taskGoal, requiredTools)) return null;
+
+    const confidence = this.estimateConfidence(taskGoal);
+    return {
+      agentId: this.id,
+      confidence,
+      estimatedDuration: this.lastExecuteTime > 0 ? this.lastExecuteTime * 1.2 : undefined,
+      reason: `${this.name} 匹配能力: ${this.capabilities.join(', ')}`,
+    };
+  }
+
+  /**
+   * 能力匹配 — 检查本 Agent 是否能处理给定任务
+   * @param taskGoal - 任务目标
+   * @param requiredTools - 所需工具列表
+   */
+  canHandle(taskGoal: string, requiredTools?: string[]): boolean {
+    if (requiredTools && requiredTools.length > 0) {
+      return requiredTools.some(tool =>
+        this.toolCategories.some(cat => cat === tool || cat === '*')
+      );
+    }
+    return true;
+  }
+
+  /**
+   * 估算置信度 — 基于历史成功率
+   * 子类可覆盖以实现更精细的估算
+   */
+  protected estimateConfidence(_taskGoal: string): number {
+    return this.successRate;
+  }
+
+  /**
+   * 健康检查 — 供 AgentRegistry 监控
+   */
+  async healthCheck(): Promise<AgentHealthStatus> {
+    const total = this.successCount + this.errorCount;
+    return {
+      healthy: this._status !== 'error',
+      successRate: this.successRate,
+      avgResponseTime: total > 0 ? this.totalResponseTime / total : 0,
+      lastActiveAt: Date.now() - this.lastExecuteTime,
+      errorCount: this.errorCount,
+      totalExecutions: total,
+    };
   }
 
   /** 重置状态 */
@@ -147,13 +240,16 @@ export abstract class BaseAgent {
     errorCount: number;
     successRate: number;
     lastExecuteTime: number;
+    avgResponseTime: number;
   } {
+    const total = this.successCount + this.errorCount;
     return {
       status: this._status,
       successCount: this.successCount,
       errorCount: this.errorCount,
       successRate: this.successRate,
       lastExecuteTime: this.lastExecuteTime,
+      avgResponseTime: total > 0 ? this.totalResponseTime / total : 0,
     };
   }
 }

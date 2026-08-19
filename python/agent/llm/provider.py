@@ -13,7 +13,9 @@ from agent.config import EMBEDDING_MODEL, LLM_API_KEY, LLM_BASE_URL, LLM_MAX_TOK
 from agent.core.canary_release import CanaryReleaseManager, safe_record_outcome
 from agent.core.otel_metrics import llm_tokens_counter
 from agent.core.production_metrics import get_production_metrics_collector
-from agent.llm.cache import LLMCache
+from agent.llm.cache import LLMCache, TieredCache
+from agent.llm.circuit_breaker import CircuitBreaker, CircuitBreakerRegistry, CircuitConfig
+from agent.llm.connection_pool import ConnectionPoolManager, PoolConfig
 from agent.llm.credential_pool import CostGuard, CredentialEntry, CredentialPool, RotationStrategy, _MODEL_PRICING
 from agent.llm.prompt_cache import (
     AnthropicPrefixCacheBuilder,
@@ -21,6 +23,7 @@ from agent.llm.prompt_cache import (
     apply_anthropic_prefix_cache,
 )
 from agent.llm.queue import RequestQueue
+from agent.llm.rate_limiter import AdaptiveRateLimiter, Priority, PriorityRequestQueue, RateLimiter
 from agent.llm.router import ProviderConfig, ProviderManager
 from agent.llm.stream import stream_via_litellm, stream_via_transport
 from agent.llm.transports import (
@@ -30,6 +33,7 @@ from agent.llm.transports import (
     TransportResponse,
     TransportType,
 )
+from agent.core.logger import log_ignored
 
 
 def _record_llm_tokens(model: str, usage: dict[str, Any] | None) -> None:
@@ -62,9 +66,9 @@ def _record_llm_tokens(model: str, usage: dict[str, Any] | None) -> None:
             completion_tokens=output_tokens,
             cost=cost,
         )
-    except Exception:
+    except Exception as _exc:
         # OTel 记录失败不影响 LLM 主流程
-        pass
+        log_ignored(None, "provider._record_llm_tokens", _exc)
 
 
 class LLMProvider:
@@ -73,10 +77,14 @@ class LLMProvider:
         self.temperature = LLM_TEMPERATURE
         self.max_tokens = LLM_MAX_TOKENS
         self._available: bool | None = None
-        self.cache = LLMCache()
+        self.tiered_cache = TieredCache()
         self.queue = RequestQueue(max_concurrent=3)
+        self.priority_queue = PriorityRequestQueue(max_concurrent=3)
         self.provider_manager = ProviderManager()
         self.prompt_cache = PromptCacheManager()
+        self.rate_limiter = AdaptiveRateLimiter(initial_rate=10.0)
+        self._circuit_registry = CircuitBreakerRegistry()
+        self._connection_pool = ConnectionPoolManager()
         # Anthropic 前缀缓存构建器：为 Claude 模型自动标记 cache_control 断点
         # 可节省 90% 前缀 token 成本，首字延迟降低 30%
         self.anthropic_cache_builder = AnthropicPrefixCacheBuilder(
@@ -87,6 +95,11 @@ class LLMProvider:
         self.credential_pool: CredentialPool | None = None
         self.cost_guard = CostGuard()
         self._transport_cache: dict[str, BaseTransport] = {}
+        # 故障转移 / 重试配置（P0-2：跨厂商 failover + 指数退避 + 显式超时）
+        self.llm_timeout: float = float(os.environ.get("LLM_TIMEOUT", "60"))
+        self.max_failover_attempts: int = int(os.environ.get("LLM_MAX_FAILOVER", "4"))
+        self.failover_base_backoff: float = float(os.environ.get("LLM_FAILOVER_BACKOFF", "0.2"))
+        self.failover_max_backoff: float = float(os.environ.get("LLM_FAILOVER_MAX_BACKOFF", "5.0"))
         # 灰度发布管理器：可选，由 LoopController 注入
         self.canary_manager: CanaryReleaseManager | None = None
 
@@ -102,6 +115,38 @@ class LLMProvider:
                 os.environ["OPENAI_API_KEY"] = primary.api_key
             if primary.base_url:
                 litellm.api_base = primary.base_url
+
+    def get_circuit_breaker(self, provider_name: str = "") -> CircuitBreaker:
+        """获取指定 provider 的熔断器。"""
+        name = provider_name or self.model
+        return self._circuit_registry.get_sync(name)
+
+    def _failover_backoff(self, attempt_idx: int) -> float:
+        """指数退避（秒），封顶于 ``failover_max_backoff``，并加 ±10% 抖动避免惊群。"""
+        import random
+
+        raw = self.failover_base_backoff * (2 ** max(attempt_idx, 0))
+        capped = min(raw, self.failover_max_backoff)
+        return capped * (0.9 + 0.2 * random.random())
+
+    @staticmethod
+    def _extract_base_url(url: str) -> str:
+        """从完整 URL 提取 base URL（scheme + netloc）。"""
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        return f"{parsed.scheme}://{parsed.netloc}"
+
+    async def get_connection_pool(self, base_url: str) -> Any:
+        return await self._connection_pool.get_pool(base_url, LLM_API_KEY or "")
+
+    async def startup(self) -> None:
+        """启动时预热连接池。"""
+        if LLM_BASE_URL:
+            await self._connection_pool.warmup(LLM_BASE_URL, LLM_API_KEY or "")
+
+    async def shutdown(self) -> None:
+        """关闭所有连接池。"""
+        await self._connection_pool.close_all()
 
     @staticmethod
     def _normalize_model(model: str) -> str:
@@ -132,7 +177,24 @@ class LLMProvider:
         system_prompt: str | None = None,
         user_id: str | None = None,
         strategy_name: str | None = None,
+        task_type: str | None = None,
     ) -> dict[str, Any]:
+        # ── 离线 E2E 模式（AGENT_MOCK_LLM=1）──
+        # 返回确定性 canned 响应，使 Python 后端可在无真实 LLM API 密钥下启动并响应，
+        # 供 docker-compose 跨服务 E2E 验证「用户输入 → 网关 → Python → 输出」完整链路。
+        # 仅由环境变量开关控制，生产环境默认不启用，对线上行为零侵入。
+        if os.environ.get("AGENT_MOCK_LLM") == "1":
+            return {
+                "content": "[MOCK] 家百星离线端到端响应",
+                "role": "assistant",
+                "finish_reason": "stop",
+            }
+
+        # OTel追踪：记录LLM调用span
+        from agent.core.tracing import get_tracing_manager
+        _tracing = get_tracing_manager()
+        _span = _tracing.start_span("llm.chat", {"model": self.model, "stream": stream})
+
         # 灰度发布：基于用户哈希分桶选择版本
         model_override: str | None = None
         canary_active = False
@@ -142,8 +204,21 @@ class LLMProvider:
                 if assignment.is_canary:
                     model_override = assignment.canary_version
                     canary_active = True
-            except Exception:
-                pass  # 灰度选择失败不影响主流程
+            except Exception as _exc:
+                log_ignored(None, "provider.LLMProvider.chat", _exc)
+
+        # 能力驱动选型：当指定 task_type 且未触发灰度覆盖时，
+        # 按 LLMCapabilities 为任务挑选最合适的 Provider（增强 LLM 底座）。
+        # 未挂载路由器或选型失败时静默回退到 self.model，保持零侵入。
+        if model_override is None and task_type:
+            try:
+                from agent.llm.capability_aware_router import TaskRequirement
+                requirement = TaskRequirement.from_task_type(task_type)
+                scored = self.provider_manager.select_for_task(requirement)
+                if scored is not None and scored.capabilities and scored.capabilities.model_name:
+                    model_override = self._normalize_model(scored.capabilities.model_name)
+            except Exception as _exc:
+                log_ignored(None, "provider.LLMProvider.chat.capability_router", _exc)
 
         effective_model = model_override or self.model
 
@@ -171,7 +246,7 @@ class LLMProvider:
             }
 
         if use_cache and not stream and not tools:
-            cached = self.cache.get(
+            cached = self.tiered_cache.get(
                 messages, effective_model, system_prompt=system_prompt, tools=tools
             )
             if cached is not None:
@@ -199,8 +274,16 @@ class LLMProvider:
         _start = time.time()
         _success = False
         try:
+            # W3（审计 §1.6）：system_prompt / effective_model 必须透传到写缓存的下游，
+            # 否则写入键用 system_prompt=None 而读取键用真实 system_prompt，
+            # 二者 sha256 不同 → 响应缓存命中率结构性恒为 0（静默降级）。
             result = await self.queue.submit(
-                self._do_chat, messages, tools, stream, model_override=model_override
+                self._do_chat,
+                messages,
+                tools,
+                stream,
+                model_override=model_override,
+                system_prompt=system_prompt,
             )
             _success = True
 
@@ -212,6 +295,7 @@ class LLMProvider:
 
             return result
         finally:
+            _tracing.end_span(_span)
             if canary_active:
                 latency_ms = (time.time() - _start) * 1000
                 await safe_record_outcome(self.canary_manager, user_id, strategy_name, _success, latency_ms)
@@ -223,13 +307,26 @@ class LLMProvider:
         stream: bool = False,
         tool_choice: str = "auto",
         model_override: str | None = None,
+        system_prompt: str | None = None,
     ) -> dict[str, Any]:
         # 灰度版本切换时跳过 transport，统一走 litellm 路径
         transport = None if model_override else self._resolve_transport()
         if transport is not None:
-            return await self._do_chat_via_transport(transport, messages, tools, tool_choice)
+            try:
+                return await self._do_chat_via_transport(
+                    transport, messages, tools, tool_choice, system_prompt=system_prompt
+                )
+            except Exception as e:  # noqa: BLE001 - transport 失败回退到 litellm 路径
+                # P0-2：transport 路径旧实现异常直接 raise，无 failover。
+                # 此处回退到 litellm 路径（其自带多厂商故障转移 + 退避重试）。
+                log_ignored(None, "provider.chat.transport_fallback", e)
+                return await self._do_chat_via_litellm(
+                    messages, tools, stream, model_override=self.model, system_prompt=system_prompt
+                )
 
-        return await self._do_chat_via_litellm(messages, tools, stream, model_override)
+        return await self._do_chat_via_litellm(
+            messages, tools, stream, model_override, system_prompt=system_prompt
+        )
 
     def _resolve_transport(self) -> BaseTransport | None:
         primary = self.provider_manager.get_primary()
@@ -278,8 +375,14 @@ class LLMProvider:
         messages: list[dict[str, str]],
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str = "auto",
+        system_prompt: str | None = None,
     ) -> dict[str, Any]:
-        """通过 transport 执行非流式聊天请求，返回包含 content/role/finish_reason/tool_calls/usage 的响应."""
+        """通过 transport 执行非流式聊天请求，返回包含 content/role/finish_reason/tool_calls/usage 的响应.
+
+        Args:
+            system_prompt: 上游 chat() 使用的系统提示。必须原样传入并用于写缓存键，
+                否则与 chat() 的读缓存键不一致，响应缓存将永远 miss（W3 修复）。
+        """
         converted_msgs = transport.convert_messages(messages)
         converted_tools = transport.convert_tools(tools)
         request = transport.build_request(converted_msgs, converted_tools, stream=False, tool_choice=tool_choice)
@@ -288,7 +391,14 @@ class LLMProvider:
         if api_key and "Authorization" in request.headers:
             request.headers["Authorization"] = f"Bearer {api_key}"
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        breaker = self.get_circuit_breaker(self.model)
+        start_time = time.time()
+
+        async def _do_request() -> Any:
+            pool = await self._connection_pool.get_pool(
+                self._extract_base_url(request.url), api_key or ""
+            )
+            client = await pool.get_client()
             resp = await client.request(
                 method=request.method,
                 url=request.url,
@@ -296,7 +406,18 @@ class LLMProvider:
                 json=request.body,
             )
             resp.raise_for_status()
-            raw = resp.json()
+            return resp.json()
+
+        try:
+            if not await self.rate_limiter.acquire():
+                raise RuntimeError("Rate limit exceeded")
+            raw = await breaker.call(_do_request)
+            elapsed = time.time() - start_time
+            await self.rate_limiter.record_result(True)
+        except Exception as e:
+            elapsed = time.time() - start_time
+            await self.rate_limiter.record_result(False)
+            raise
 
         transport_resp: TransportResponse = transport.normalize_response(raw)
 
@@ -316,8 +437,14 @@ class LLMProvider:
             _record_llm_tokens(self.model, result["usage"])
 
         if not tools:
-            self.cache.set(
-                messages, transport_resp.text, self.model, system_prompt=None, tools=tools
+            # W3：写键必须与 chat() 的读键完全一致（model + system_prompt + tools）。
+            # 此前硬编码 system_prompt=None 导致缓存只写不中。
+            self.tiered_cache.set(
+                messages,
+                transport_resp.text,
+                self.model,
+                system_prompt=system_prompt,
+                tools=tools,
             )
 
         return result
@@ -328,6 +455,7 @@ class LLMProvider:
         tools: list[dict[str, Any]] | None = None,
         stream: bool = False,
         model_override: str | None = None,
+        system_prompt: str | None = None,
     ) -> dict[str, Any]:
         api_key = self._resolve_api_key()
         # 灰度发布：优先使用灰度版本模型
@@ -353,21 +481,73 @@ class LLMProvider:
             kwargs["tools"] = processed_tools
         if api_key:
             kwargs["api_key"] = api_key
+        # 显式超时：旧实现依赖 litellm 默认值，超时可失控（P0-2）。
+        kwargs["timeout"] = self.llm_timeout
 
-        try:
-            response = await acompletion(**kwargs)
-        except Exception as e:
-            if self.credential_pool:
-                self.credential_pool.report_failure(api_key or "")
-            fallback = self.provider_manager.get_fallback(exclude=None)
-            if fallback and fallback.api_key:
-                kwargs["model"] = fallback.model
-                kwargs["api_key"] = fallback.api_key
-                if fallback.base_url:
-                    litellm.api_base = fallback.base_url
-                response = await acompletion(**kwargs)
-            else:
-                raise
+        # ---- 跨厂商故障转移 + 指数退避重试（P0-2 核心修复） ----
+        # 旧实现：失败后调 get_fallback(exclude=None)，会再次选中刚刚失败的
+        # primary（最高优先级），导致跨厂商切换实际不发生。
+        # 新实现：构造「primary 优先、随后按优先级排除已失败项」的候选链，
+        # 逐个尝试，失败则带退避重试下一个，直至穷尽或成功。
+        primary = self.provider_manager.get_primary()
+        primary_name = primary.name if primary else None
+        candidates = self.provider_manager.fallback_chain(exclude=primary_name)
+        # 把 primary 放到链首（若其不在链中），保证先试当前主路
+        ordered: list[ProviderConfig] = []
+        seen_names: set[str] = set()
+        if primary is not None:
+            ordered.append(primary)
+            seen_names.add(primary.name)
+        for prov in candidates:
+            if prov.name not in seen_names:
+                ordered.append(prov)
+                seen_names.add(prov.name)
+        # 限制尝试次数，避免雪崩
+        ordered = ordered[: max(self.max_failover_attempts, 1)]
+
+        last_exc: Exception | None = None
+        response: Any = None
+        for attempt_idx, prov in enumerate(ordered):
+            attempt_kwargs: dict[str, Any] = dict(kwargs)
+            attempt_kwargs["model"] = prov.model or effective_model
+            if prov.api_key:
+                attempt_kwargs["api_key"] = prov.api_key
+            elif "api_key" in attempt_kwargs and not api_key:
+                # 主路用环境变量 key，回退 provider 无自身 key 时清除显式 key
+                attempt_kwargs.pop("api_key", None)
+            if prov.base_url:
+                litellm.api_base = prov.base_url
+            breaker = self.get_circuit_breaker(prov.model or effective_model)
+
+            async def _do_litellm_call(k: dict[str, Any] = attempt_kwargs) -> Any:
+                return await acompletion(**k)
+
+            try:
+                if not await self.rate_limiter.acquire():
+                    raise RuntimeError("Rate limit exceeded")
+                response = await breaker.call(_do_litellm_call)
+                await self.rate_limiter.record_result(True)
+                if self.credential_pool and api_key:
+                    self.credential_pool.report_success(api_key)
+                break  # 成功，跳出候选链
+            except Exception as e:  # noqa: BLE001 - 故障转移需要捕获所有异常
+                last_exc = e
+                await self.rate_limiter.record_result(False)
+                if self.credential_pool and prov.api_key:
+                    self.credential_pool.report_failure(prov.api_key)
+                log_ignored(
+                    None,
+                    f"provider._do_chat_via_litellm.failover.{prov.name}.{attempt_idx}",
+                    e,
+                )
+                # 退避后尝试下一个候选（最后一项不再退避）
+                if attempt_idx < len(ordered) - 1:
+                    await asyncio.sleep(self._failover_backoff(attempt_idx))
+
+        if response is None:
+            if last_exc is not None:
+                raise last_exc
+            raise RuntimeError("No available LLM provider in fallback chain")
 
         if self.credential_pool and api_key:
             self.credential_pool.report_success(api_key)
@@ -405,8 +585,13 @@ class LLMProvider:
             _record_llm_tokens(effective_model, result["usage"])
 
         if not tools:
-            self.cache.set(
-                messages, result["content"], effective_model, system_prompt=None, tools=tools
+            # W3：写键与 chat() 读键对齐（effective_model + 真实 system_prompt）。
+            self.tiered_cache.set(
+                messages,
+                result["content"],
+                effective_model,
+                system_prompt=system_prompt,
+                tools=tools,
             )
 
         return result
@@ -433,6 +618,15 @@ class LLMProvider:
         Raises:
             httpx.HTTPStatusError: LLM API 返回错误状态码时抛出.
         """
+        # 离线 E2E 模式：与 chat 一致的确定性 canned 响应（无真实 LLM 调用）
+        if os.environ.get("AGENT_MOCK_LLM") == "1":
+            return {
+                "content": "[MOCK] 家百星离线端到端响应（tools）",
+                "role": "assistant",
+                "finish_reason": "stop",
+                "tool_calls": [],
+            }
+
         if not tools:
             # 无工具时退化为普通 chat
             return await self.chat(messages=messages, tools=None, use_cache=False)
@@ -468,6 +662,16 @@ class LLMProvider:
         Raises:
             httpx.HTTPStatusError: LLM API 返回错误状态码时抛出.
         """
+        # 离线 E2E 模式：yield 单个确定性 chunk（无真实 LLM 调用）
+        if os.environ.get("AGENT_MOCK_LLM") == "1":
+            yield {
+                "content": "[MOCK] 家百星离线端到端响应（stream）",
+                "role": "assistant",
+                "finish_reason": "stop",
+                "done": True,
+            }
+            return
+
         # 灰度发布：先做分桶判断，命中灰度则必须走 litellm 路径
         canary_active = False
         if self.canary_manager and user_id and strategy_name:
@@ -475,8 +679,8 @@ class LLMProvider:
                 assignment = await self.canary_manager.select_version(user_id, strategy_name)
                 if assignment.is_canary:
                     canary_active = True
-            except Exception:
-                pass  # 灰度选择失败不影响主流程
+            except Exception as _exc:
+                log_ignored(None, "provider.LLMProvider.chat_stream", _exc)
 
         # 非灰度场景优先使用 transport
         if not canary_active:
@@ -518,11 +722,15 @@ class LLMProvider:
                     embedding = first.get("embedding")
             if isinstance(embedding, list):
                 return embedding
-        except Exception:
-            pass
+        except Exception as _exc:
+            log_ignored(None, "provider.LLMProvider.embed", _exc)
         return None
 
     async def check_available(self) -> bool:
+        # 离线 E2E 模式（AGENT_MOCK_LLM=1）：恒为 True，
+        # 使健康检查在无真实 LLM 密钥时仍标记 LLM 可用，便于跨服务 E2E 验证。
+        if os.environ.get("AGENT_MOCK_LLM") == "1":
+            return True
         if self._available is not None:
             return self._available
         try:
@@ -562,7 +770,63 @@ class LLMProvider:
         return self.cost_guard.get_daily_stats()
 
     def get_cache_stats(self) -> dict[str, Any]:
-        return self.prompt_cache.get_stats()
+        """返回 LLM 侧全部缓存的统计。
+
+        W3（审计 §1.8）：此前只返回 prompt_cache，**响应缓存 tiered_cache 完全不可观测**
+        —— 命中率、L1/L2 分布全无信号，无法判断缓存是否真在生效。
+        现同时上报两者；prompt_cache 的原有键保留在顶层以兼容既有调用方。
+
+        Returns:
+            dict: 含 prompt_cache 原有键 + ``prompt_cache`` / ``response_cache`` 两个明细段。
+        """
+        from agent.core.logger import StructuredLogger
+        log = StructuredLogger("llm_provider")
+
+        prompt_stats = self.prompt_cache.get_stats()
+        try:
+            # 注意：TieredCache 的统计方法名是 stats()，不是 get_stats()。
+            response_stats = self.tiered_cache.stats()
+        except Exception as exc:  # 统计失败不应影响接口可用性，但必须留痕
+            log.warning("响应缓存统计获取失败", error=str(exc))
+            response_stats = {"error": str(exc)}
+
+        return {
+            **prompt_stats,
+            "prompt_cache": prompt_stats,
+            "response_cache": response_stats,
+        }
+
+    def clear_cache(self) -> dict[str, Any]:
+        """清空 LLM 侧全部缓存（响应缓存 + prompt 缓存）。
+
+        W3（审计 §1.8）：``api/llm.py`` 原先调用 ``engine.llm.cache.clear()``，
+        但 LLMProvider 上根本没有 ``cache`` 属性（只有 ``tiered_cache`` / ``prompt_cache``），
+        导致 ``DELETE /v1/llm/cache`` 必抛 AttributeError。此方法提供正确入口。
+
+        Returns:
+            dict: 各缓存的清理结果，单项失败不影响其余项。
+        """
+        from agent.core.logger import StructuredLogger
+        log = StructuredLogger("llm_provider")
+
+        cleared: dict[str, Any] = {}
+
+        try:
+            self.tiered_cache.clear()
+            cleared["response_cache"] = "cleared"
+        except Exception as exc:
+            log.error("响应缓存清理失败", error=str(exc))
+            cleared["response_cache"] = f"error: {exc}"
+
+        try:
+            removed = self.prompt_cache.invalidate_all()
+            cleared["prompt_cache"] = f"cleared:{removed}"
+        except Exception as exc:
+            log.error("prompt 缓存清理失败", error=str(exc))
+            cleared["prompt_cache"] = f"error: {exc}"
+
+        log.info("LLM 缓存已清理", **{k: str(v) for k, v in cleared.items()})
+        return cleared
 
     def get_credential_stats(self) -> dict[str, Any]:
         if self.credential_pool:

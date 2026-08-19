@@ -1,0 +1,939 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>家百星 V5.0 — 5项差距改进实施方案</title>
+    <style>
+      :root {
+        --bg: #0d1117;
+        --card-bg: #161b22;
+        --border: #30363d;
+        --text: #c9d1d9;
+        --text-secondary: #8b949e;
+        --accent: #58a6ff;
+        --green: #3fb950;
+        --red: #f85149;
+        --orange: #d2991d;
+        --purple: #a371f7;
+        --cyan: #39d2c0;
+      }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei',
+          Helvetica, Arial, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.7;
+        padding: 2rem;
+        max-width: 1400px;
+        margin: 0 auto;
+      }
+      h1 {
+        font-size: 2rem;
+        color: var(--accent);
+        border-bottom: 2px solid var(--border);
+        padding-bottom: 0.5rem;
+        margin-bottom: 0.5rem;
+      }
+      h2 {
+        font-size: 1.4rem;
+        color: var(--purple);
+        margin-top: 2.5rem;
+        margin-bottom: 1rem;
+        border-left: 4px solid var(--purple);
+        padding-left: 0.75rem;
+      }
+      h3 {
+        font-size: 1.1rem;
+        color: var(--cyan);
+        margin-top: 1.5rem;
+        margin-bottom: 0.5rem;
+      }
+      h4 {
+        font-size: 1rem;
+        color: var(--orange);
+        margin-top: 1rem;
+        margin-bottom: 0.5rem;
+      }
+      .subtitle {
+        color: var(--text-secondary);
+        font-size: 0.95rem;
+        margin-bottom: 2rem;
+      }
+      .card {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 1.25rem;
+        margin: 1rem 0;
+      }
+      .grid {
+        display: grid;
+        gap: 1rem;
+      }
+      .grid-2 {
+        grid-template-columns: 1fr 1fr;
+      }
+      .grid-3 {
+        grid-template-columns: 1fr 1fr 1fr;
+      }
+      .tag {
+        display: inline-block;
+        padding: 0.15rem 0.6rem;
+        border-radius: 12px;
+        font-size: 0.8rem;
+        font-weight: 600;
+      }
+      .tag-green {
+        background: rgba(63, 185, 80, 0.15);
+        color: var(--green);
+      }
+      .tag-red {
+        background: rgba(248, 81, 73, 0.15);
+        color: var(--red);
+      }
+      .tag-orange {
+        background: rgba(210, 153, 29, 0.15);
+        color: var(--orange);
+      }
+      .tag-blue {
+        background: rgba(88, 166, 255, 0.15);
+        color: var(--accent);
+      }
+      .tag-purple {
+        background: rgba(163, 113, 247, 0.15);
+        color: var(--purple);
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 0.75rem 0;
+      }
+      th,
+      td {
+        padding: 0.6rem 0.75rem;
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+      }
+      th {
+        color: var(--text-secondary);
+        font-weight: 600;
+        font-size: 0.85rem;
+      }
+      td {
+        font-size: 0.9rem;
+      }
+      .code {
+        background: rgba(240, 246, 252, 0.06);
+        padding: 0.15rem 0.4rem;
+        border-radius: 4px;
+        font-family: 'Cascadia Code', 'Fira Code', monospace;
+        font-size: 0.85rem;
+      }
+      .highlight-box {
+        background: rgba(88, 166, 255, 0.08);
+        border: 1px solid rgba(88, 166, 255, 0.2);
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 1rem 0;
+      }
+      .warn-box {
+        background: rgba(210, 153, 29, 0.08);
+        border: 1px solid rgba(210, 153, 29, 0.2);
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 1rem 0;
+      }
+      .success-box {
+        background: rgba(63, 185, 80, 0.08);
+        border: 1px solid rgba(63, 185, 80, 0.2);
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 1rem 0;
+      }
+      .phase-badge {
+        display: inline-block;
+        padding: 0.3rem 0.8rem;
+        border-radius: 4px;
+        font-weight: 700;
+        font-size: 0.85rem;
+        margin-right: 0.5rem;
+      }
+      .phase-1 {
+        background: var(--red);
+        color: #fff;
+      }
+      .phase-2 {
+        background: var(--orange);
+        color: #000;
+      }
+      .phase-3 {
+        background: var(--accent);
+        color: #fff;
+      }
+      pre {
+        background: rgba(240, 246, 252, 0.04);
+        padding: 1rem;
+        border-radius: 6px;
+        overflow-x: auto;
+        font-size: 0.85rem;
+        line-height: 1.5;
+        border: 1px solid var(--border);
+      }
+      code {
+        font-family: 'Cascadia Code', 'Fira Code', monospace;
+      }
+      ul,
+      ol {
+        margin: 0.5rem 0 0.5rem 1.25rem;
+      }
+      li {
+        margin: 0.3rem 0;
+      }
+      .checklist {
+        list-style: none;
+        margin-left: 0;
+      }
+      .checklist li {
+        padding: 0.3rem 0;
+      }
+      .checklist li::before {
+        content: '☐ ';
+        color: var(--text-secondary);
+      }
+      .checklist li.done::before {
+        content: '☑ ';
+        color: var(--green);
+      }
+      hr {
+        border: none;
+        border-top: 1px solid var(--border);
+        margin: 1.5rem 0;
+      }
+      @media (max-width: 768px) {
+        body {
+          padding: 1rem;
+        }
+        .grid-2,
+        .grid-3 {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>
+      家百星 V5.0 — 5项差距改进实施方案
+      <span class="tag tag-green">✅ 已全部实施</span>
+    </h1>
+    <p class="subtitle">
+      基于
+      <a
+        href="file:///c:/zy/jiabaixing/agent_maturity_audit.html"
+        style="color: var(--accent)"
+        >Agent技术体系成熟度审计报告</a
+      >
+      的差距分析 | 版本：2026-07-18 | 状态：<span style="color: var(--green)"
+        >✅ 5/5 已完成</span
+      >
+    </p>
+
+    <!-- ===== 总览 ===== -->
+    <div class="grid grid-3">
+      <div class="card" style="text-align: center">
+        <div style="font-size: 2rem; font-weight: 800; color: var(--accent)">
+          5
+        </div>
+        <div>待改进项</div>
+      </div>
+      <div class="card" style="text-align: center">
+        <div style="font-size: 2rem; font-weight: 800; color: var(--green)">
+          13-20天
+        </div>
+        <div>预估总工时</div>
+      </div>
+      <div class="card" style="text-align: center">
+        <div style="font-size: 2rem; font-weight: 800; color: var(--purple)">
+          +7分
+        </div>
+        <div>预期评分提升 (85→92)</div>
+      </div>
+    </div>
+
+    <hr />
+
+    <!-- ===== Gap 1 ===== -->
+    <h2>
+      差距 1：关系型数据库缺失（仅SQLite）<span class="tag tag-orange">P1</span>
+    </h2>
+
+    <div class="warn-box">
+      <strong>现状分析：</strong>好消息——<span class="code"
+        >python/agent/persistence/database.py</span
+      >
+      已完整实现了 PostgreSQL 支持脚手架！ 包括
+      <span class="code">get_async_engine()</span>（SQLAlchemy +
+      asyncpg）、<span class="code">get_sync_engine()</span>、<span class="code"
+        >DatabaseMigration</span
+      >（SQLite→PG迁移工具）、
+      <span class="code">get_database_backend()</span>
+      自动检测。但实际持久化代码（session_store、trajectory、memory_store等）仍直接用
+      <span class="code">get_sync_connection()</span> 走 SQLite。
+    </div>
+
+    <h3>现状代码证据</h3>
+    <table>
+      <tr>
+        <th>已就绪</th>
+        <th>未就绪</th>
+      </tr>
+      <tr>
+        <td style="vertical-align: top">
+          ✅ <span class="code">database.py</span>:
+          <span class="code">get_async_engine()</span> 支持 PostgreSQL<br />
+          ✅ <span class="code">pyproject.toml</span>:
+          <span class="code">asyncpg>=0.30.0</span> 已声明<br />
+          ✅ <span class="code">pyproject.toml</span>:
+          <span class="code">sqlalchemy[asyncio]>=2.0.0</span> 已声明<br />
+          ✅ <span class="code">DatabaseMigration</span> 类：SQLite→PG
+          迁移工具已就绪<br />
+          ✅ <span class="code">docker-compose.yml</span> 可添加 PostgreSQL 服务
+        </td>
+        <td style="vertical-align: top">
+          ❌ <span class="code">session_store.py</span> 直接调
+          <span class="code">get_sync_connection()</span><br />
+          ❌ <span class="code">trajectory.py</span> 直接调
+          <span class="code">get_sync_connection()</span><br />
+          ❌ <span class="code">memory/store.py</span> 直接调
+          <span class="code">get_sync_connection()</span><br />
+          ❌ <span class="code">persistence/service.py</span> 直接调
+          <span class="code">get_sync_connection()</span><br />
+          ❌ 无 PostgreSQL 端到端集成测试<br />
+          ❌ <span class="code">docker-compose.yml</span> 无 PostgreSQL 服务定义
+        </td>
+      </tr>
+    </table>
+
+    <h3>实施计划（3-5天）</h3>
+
+    <div class="card">
+      <h4>
+        <span class="phase-badge phase-1">Phase 1</span>
+        数据库抽象层改造（1.5天）
+      </h4>
+      <p>
+        <strong>目标：</strong
+        >让所有持久化代码通过统一接口访问数据库，而非直接调 SQLite
+      </p>
+      <ol>
+        <li>
+          <strong>扩展 <span class="code">database.py</span></strong
+          >——新增 <span class="code">DatabaseSession</span> 上下文管理器：
+          <pre><code># python/agent/persistence/database.py 新增
+from contextlib import asynccontextmanager
+from typing import AsyncIterator
+
+@asynccontextmanager
+async def database_session() -> AsyncIterator[Any]:
+    """统一数据库会话——自动选择 SQLite/PostgreSQL 后端"""
+    backend = get_database_backend()
+    if backend == "postgres":
+        engine = get_async_engine()
+        async with engine.begin() as conn:
+            yield conn
+    else:
+        import aiosqlite
+        async with aiosqlite.connect(str(SQLITE_DEFAULT_PATH)) as conn:
+            conn.row_factory = aiosqlite.Row
+            yield conn</code></pre>
+        </li>
+        <li>
+          <strong>改造 <span class="code">session_store.py</span></strong
+          >——将同步 <span class="code">get_sync_connection()</span> 替换为
+          <span class="code">async with database_session() as conn</span>
+        </li>
+        <li>
+          <strong>改造 <span class="code">trajectory.py</span></strong
+          >——同上
+        </li>
+        <li>
+          <strong>改造 <span class="code">memory/store.py</span></strong
+          >——同上
+        </li>
+        <li>
+          <strong>改造 <span class="code">persistence/service.py</span></strong
+          >——同上
+        </li>
+      </ol>
+    </div>
+
+    <div class="card">
+      <h4>
+        <span class="phase-badge phase-2">Phase 2</span> Docker Compose
+        生产部署（1天）
+      </h4>
+      <ol>
+        <li>
+          <strong>docker-compose.yml 添加 PostgreSQL 服务：</strong>
+          <pre><code>postgres:
+  image: postgres:16-alpine
+  container_name: jiabaixing-pg
+  restart: unless-stopped
+  environment:
+    POSTGRES_DB: jiabaixing
+    POSTGRES_USER: agent
+    POSTGRES_PASSWORD: ${PG_PASSWORD:-jiabaixing}
+  ports:
+    - "5432:5432"
+  volumes:
+    - pg-data:/var/lib/postgresql/data
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -U agent -d jiabaixing"]
+    interval: 10s
+    timeout: 5s
+    retries: 5</code></pre>
+        </li>
+        <li>
+          <strong>.env 添加：</strong
+          ><span class="code"
+            >DATABASE_URL=postgresql://agent:jiabaixing@postgres:5432/jiabaixing</span
+          >
+        </li>
+        <li>
+          <strong>python-backend 服务添加</strong>
+          <span class="code">depends_on: postgres</span>
+        </li>
+      </ol>
+    </div>
+
+    <div class="card">
+      <h4>
+        <span class="phase-badge phase-3">Phase 3</span> 测试与验证（1.5天）
+      </h4>
+      <ol>
+        <li>
+          新增
+          <span class="code">python/tests/test_database_postgres.py</span
+          >——PostgreSQL 集成测试
+        </li>
+        <li>
+          新增
+          <span class="code">python/tests/test_migration.py</span>——SQLite→PG
+          迁移测试
+        </li>
+        <li>
+          运行现有 <span class="code">test_database.py</span>/<span class="code"
+            >test_session_store</span
+          >/<span class="code">test_trajectory</span> 确保零回归
+        </li>
+        <li>CI 添加 PostgreSQL 服务容器</li>
+      </ol>
+    </div>
+
+    <div class="success-box">
+      <strong>验收标准：</strong>
+      <ul class="checklist">
+        <li>
+          设置
+          <span class="code">DATABASE_URL=postgresql://...</span>
+          后系统全功能正常运行
+        </li>
+        <li>不设置时回退 SQLite，零行为变更</li>
+        <li>所有现有测试通过（零回归）</li>
+        <li>docker-compose up 一键启动 PostgreSQL 模式</li>
+      </ul>
+    </div>
+
+    <hr />
+
+    <!-- ===== Gap 2 ===== -->
+    <h2>差距 2：工具自注册发现未实现 <span class="tag tag-orange">P1</span></h2>
+
+    <div class="warn-box">
+      <strong>现状分析：</strong>工具通过
+      <span class="code">register_default_tools()</span>
+      集中手动导入注册（~120行 import + register 循环）。
+      每加一个工具需改此函数。Hermes 对标方案：每个工具文件顶部自注册 + AST
+      扫描发现。
+    </div>
+
+    <h3>现状代码证据</h3>
+    <table>
+      <tr>
+        <th>当前注册方式</th>
+        <th>目标注册方式</th>
+      </tr>
+      <tr>
+        <td>
+          <span class="code">python/agent/tools/registry.py:L290</span>
+          <span class="code">register_default_tools()</span><br />
+          手动 import 每个工具模块 → 手动 register 每个 (definition, executor)
+          对<br />
+          每次加工具必须改此函数 + 改 import 行
+        </td>
+        <td>
+          AST 扫描工具目录 → 发现 <span class="code">_TOOL_DEF</span> /
+          <span class="code">_TOOL_EXECUTOR</span> 导出 → 自动注册<br />
+          加工具只需创建新文件，无需改注册代码
+        </td>
+      </tr>
+    </table>
+
+    <h3>实施计划（2-3天）</h3>
+
+    <div class="card">
+      <h4>
+        <span class="phase-badge phase-1">Phase 1</span> 工具约定规范（0.5天）
+      </h4>
+      <p>约定每个工具模块导出两个命名元组：</p>
+      <pre><code># 每个 tool_xxx.py 文件底部
+# 导出约定：ToolRegistry 通过 AST 扫描发现这些命名
+__all__ = ["TOOL_DEFINITION", "TOOL_EXECUTOR"]
+
+TOOL_DEFINITION = ToolDefinition(name="web_search", ...)
+TOOL_EXECUTOR = web_search_executor  # async callable</code></pre>
+      <p>为所有现有工具文件添加此约定（批量脚本，5分钟）。</p>
+    </div>
+
+    <div class="card">
+      <h4>
+        <span class="phase-badge phase-2">Phase 2</span> AST 自动发现引擎（1天）
+      </h4>
+      <p>
+        新增 <span class="code">python/agent/tools/auto_discovery.py</span>：
+      </p>
+      <pre><code>import ast
+import importlib
+import os
+from pathlib import Path
+from typing import Any
+
+class ToolAutoDiscovery:
+    """AST 扫描工具目录，自动发现并注册工具。
+
+    约定：
+    1. 工具文件位于 tools/ 目录下，文件名匹配 *_tools.py 或 tool_*.py
+    2. 文件导出 TOOL_DEFINITION (ToolDefinition) 和 TOOL_EXECUTOR (callable)
+    3. 可通过 AST 静态扫描确认文件包含 __all__ 或 TOOL_DEFINITION 赋值
+    """
+
+    TOOLS_DIR = Path(__file__).parent
+
+    def discover(self, registry: "ToolRegistry") -> int:
+        """扫描 tools/ 目录，自动注册所有符合约定的工具。"""
+        count = 0
+        for py_file in self._find_tool_files():
+            if self._has_tool_exports(py_file):
+                module = self._import_module(py_file)
+                if hasattr(module, "TOOL_DEFINITION") and hasattr(module, "TOOL_EXECUTOR"):
+                    registry.register(module.TOOL_DEFINITION, module.TOOL_EXECUTOR)
+                    count += 1
+        return count
+
+    def _find_tool_files(self) -> list[Path]:
+        """发现工具文件：*_tools.py 或 tool_*.py，排除 __init__.py 和 registry.py"""
+        ...
+
+    def _has_tool_exports(self, path: Path) -> bool:
+        """AST 静态检查：文件是否包含 TOOL_DEFINITION 赋值"""
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and target.id == "TOOL_DEFINITION":
+                        return True
+        return False</code></pre>
+    </div>
+
+    <div class="card">
+      <h4><span class="phase-badge phase-3">Phase 3</span> 渐进迁移（1天）</h4>
+      <ol>
+        <li>
+          <strong>双轨并行：</strong>保留
+          <span class="code">register_default_tools()</span> 作为显式注册，新增
+          <span class="code">ToolAutoDiscovery().discover(registry)</span>
+          作为自动发现
+        </li>
+        <li>
+          <strong>环境变量开关：</strong
+          ><span class="code">TOOL_AUTO_DISCOVERY=enabled</span> 控制是否启用
+        </li>
+        <li>
+          <strong>去重保护：</strong>自动发现遇到已注册工具名时跳过（warning
+          日志）
+        </li>
+        <li>
+          <strong>验证：</strong>确保自动发现注册的工具数量 ≥ 手动注册数量
+        </li>
+      </ol>
+    </div>
+
+    <div class="success-box">
+      <strong>验收标准：</strong>
+      <ul class="checklist">
+        <li>
+          新增工具文件
+          <span class="code">tools/my_new_tool.py</span>
+          后，无需修改任何注册代码即可被系统发现
+        </li>
+        <li>自动发现注册的工具数与手动注册数一致</li>
+        <li>AST 扫描耗时 &lt; 100ms（不影响启动速度）</li>
+        <li>环境变量可关闭自动发现回退到手动注册</li>
+      </ul>
+    </div>
+
+    <hr />
+
+    <!-- ===== Gap 3 ===== -->
+    <h2>差距 3：工具集平台级动态开关 <span class="tag tag-blue">P2</span></h2>
+
+    <div class="warn-box">
+      <strong>现状分析：</strong><span class="code">builtin_toolsets.py</span>
+      已实现工具集继承体系（base→coding/desktop/daily/network→full），
+      <span class="code">scene_toolset_map.json</span>
+      已有场景→工具集映射。但缺少"平台"维度——飞书/微信/CLI/HTTP API
+      等不同入口应启用不同工具集。
+    </div>
+
+    <h3>实施计划（1-2天）</h3>
+
+    <div class="card">
+      <h4>
+        <span class="phase-badge phase-1">Phase 1</span> 平台定义（0.5天）
+      </h4>
+      <p>
+        新增 <span class="code">python/agent/tools/platform_toolset.py</span>：
+      </p>
+      <pre><code>from enum import Enum
+
+class AgentPlatform(str, Enum):
+    """Agent 接入平台——不同平台有不同的工具权限边界"""
+    CLI = "cli"           # 命令行：全功能
+    FEISHU = "feishu"     # 飞书：IM限制（无桌面/浏览器）
+    WECHAT = "wechat"     # 微信：IM限制 + 消息长度限制
+    DINGTALK = "dingtalk" # 钉钉：IM限制
+    HTTP_API = "http_api" # OpenAI兼容API：全功能但需审批
+    WEB_UI = "web_ui"     # 前端Web界面：全功能
+    CRON = "cron"         # 定时任务：仅系统/网络/记忆
+
+PLATFORM_TOOLSET_MAP: dict[AgentPlatform, str] = {
+    AgentPlatform.CLI: "full",
+    AgentPlatform.FEISHU: "daily",       # IM场景：日常+记忆+网络搜索
+    AgentPlatform.WECHAT: "daily",
+    AgentPlatform.DINGTALK: "daily",
+    AgentPlatform.HTTP_API: "full",
+    AgentPlatform.WEB_UI: "full",
+    AgentPlatform.CRON: "minimal",       # 定时任务：最小工具集
+}
+
+PLATFORM_RISK_CONSTRAINTS: dict[AgentPlatform, list[str]] = {
+    AgentPlatform.FEISHU: ["shell_exec", "code_generate", "desktop_automate"],
+    AgentPlatform.WECHAT: ["shell_exec", "code_generate", "desktop_automate"],
+    # CLI 无限制
+}</code></pre>
+    </div>
+
+    <div class="card">
+      <h4>
+        <span class="phase-badge phase-2">Phase 2</span> 集成到
+        ToolRegistry（0.5天）
+      </h4>
+      <p>
+        在 <span class="code">ToolRegistry</span> 新增
+        <span class="code">resolve_for_platform()</span> 方法：
+      </p>
+      <pre><code>def resolve_for_platform(
+    self, platform: AgentPlatform, toolset_registry: "ToolsetRegistry"
+) -> list[ToolDefinition]:
+    """根据平台解析可用工具集——组合平台工具集映射 + 风险约束"""
+    toolset_id = PLATFORM_TOOLSET_MAP.get(platform, "full")
+    resolved = toolset_registry.resolve(toolset_id, self)
+    excluded = set(PLATFORM_RISK_CONSTRAINTS.get(platform, []))
+    return [t for t in resolved.tool_names if t not in excluded]</code></pre>
+    </div>
+
+    <div class="success-box">
+      <strong>验收标准：</strong>
+      <ul class="checklist">
+        <li>
+          飞书平台调用时，<span class="code">shell_exec</span>/<span
+            class="code"
+            >desktop_automate</span
+          >
+          等危险工具不可用
+        </li>
+        <li>CLI 平台全功能可用</li>
+        <li>
+          新增平台只需在 <span class="code">PLATFORM_TOOLSET_MAP</span> 加一行
+        </li>
+      </ul>
+    </div>
+
+    <hr />
+
+    <!-- ===== Gap 4 ===== -->
+    <h2>
+      差距 4：Vision多模态输入管道不完整 <span class="tag tag-orange">P1</span>
+    </h2>
+
+    <div class="warn-box">
+      <strong>现状分析：</strong><span class="code">vision_tools.py</span> 已有
+      <span class="code">vision_understand</span> 工具（GPT-4o/Claude Vision），
+      <span class="code">file_parse_tools.py</span> 已有 PDF/XLSX/DOCX/OCR
+      解析。 但整体 Vision 输入管道缺少：① 图片→文本的统一预处理管线 ②
+      多图对比/视频帧提取 ③ 与记忆系统的跨模态检索闭环。
+    </div>
+
+    <h3>实施计划（3-5天）</h3>
+
+    <div class="card">
+      <h4>
+        <span class="phase-badge phase-1">Phase 1</span> Vision
+        预处理管线（1.5天）
+      </h4>
+      <p>
+        新增 <span class="code">python/agent/tools/vision_pipeline.py</span>：
+      </p>
+      <pre><code>from dataclasses import dataclass
+from PIL import Image
+import io
+
+@dataclass
+class VisionInput:
+    """统一 Vision 输入——支持图片/文件/截图/视频帧"""
+    source_type: str  # "image", "screenshot", "pdf_page", "video_frame"
+    image_data: bytes
+    mime_type: str
+    metadata: dict
+
+class VisionPipeline:
+    """Vision 预处理管线：图片压缩 → 格式转换 → 分块 → 送入Vision模型"""
+
+    MAX_IMAGE_SIZE = 20 * 1024 * 1024  # 20MB
+    MAX_DIMENSION = 4096  # 最大边长
+
+    async def preprocess(self, input: VisionInput) -> VisionInput:
+        """预处理：压缩过大的图片、转换格式"""
+        ...
+
+    async def batch_understand(
+        self, inputs: list[VisionInput], question: str
+    ) -> list[dict]:
+        """批量理解多张图片（如多页PDF、多帧视频）"""
+        ...
+</code></pre>
+    </div>
+
+    <div class="card">
+      <h4>
+        <span class="phase-badge phase-2">Phase 2</span>
+        跨模态记忆检索闭环（1天）
+      </h4>
+      <p>
+        增强 <span class="code">vision_tools.py</span> 的
+        <span class="code">_try_store_multimodal_memory()</span>：
+      </p>
+      <ol>
+        <li>Vision 理解结果 → 自动写入跨模态记忆（已实现 ✅）</li>
+        <li>
+          <strong>新增：</strong>用户提问时，先检索相关历史 Vision
+          结果（跨模态检索）
+        </li>
+        <li>
+          <strong>新增：</strong>相似图片去重——同一图片不重复调用 Vision API
+        </li>
+      </ol>
+    </div>
+
+    <div class="card">
+      <h4>
+        <span class="phase-badge phase-3">Phase 3</span> 视频帧提取（1天，可选）
+      </h4>
+      <p>新增 <span class="code">python/agent/tools/video_tools.py</span>：</p>
+      <pre><code>async def video_extract_frames(
+    video_path: str,
+    interval_seconds: float = 5.0,
+    max_frames: int = 10,
+) -> list[VisionInput]:
+    """从视频中按间隔提取关键帧，送入 Vision 管线理解"""
+    ...</code></pre>
+    </div>
+
+    <div class="success-box">
+      <strong>验收标准：</strong>
+      <ul class="checklist">
+        <li>上传 20MB+ 大图自动压缩后送入 Vision 模型</li>
+        <li>多页 PDF 逐页提取图片并批量理解</li>
+        <li>同一图片不重复调用 Vision API（缓存命中）</li>
+        <li>历史 Vision 结果可通过语义检索被后续对话引用</li>
+      </ul>
+    </div>
+
+    <hr />
+
+    <!-- ===== Gap 5 ===== -->
+    <h2>差距 5：缺少业界框架集成 <span class="tag tag-blue">P2</span></h2>
+
+    <div class="warn-box">
+      <strong>现状分析：</strong>项目完全自研 Agent 框架，未集成
+      LangChain/LlamaIndex/AutoGen 等业界框架。
+      博主强调"不能只学框架"——当前自研深度已足够。但完全自研的维护成本、社区生态缺失、新成员上手成本是真实问题。
+    </div>
+
+    <h3>建议策略：按需集成，不强制替换</h3>
+
+    <table>
+      <tr>
+        <th>框架</th>
+        <th>集成价值</th>
+        <th>推荐度</th>
+        <th>集成方式</th>
+      </tr>
+      <tr>
+        <td><strong>LangChain</strong></td>
+        <td>
+          Callbacks 体系（日志/监控/追踪）、Evaluators（LangSmith 对标）、Hub
+          社区 Prompt 模板
+        </td>
+        <td><span class="tag tag-green">推荐</span></td>
+        <td>
+          仅集成 <span class="code">langchain-core</span> +
+          <span class="code">langchain-community</span>，不改动现有 Loop 循环
+        </td>
+      </tr>
+      <tr>
+        <td><strong>LlamaIndex</strong></td>
+        <td>文档解析/索引/检索管线（比自研 file_parse_tools 更成熟）</td>
+        <td><span class="tag tag-green">推荐</span></td>
+        <td>
+          替换
+          <span class="code">file_parse_tools.py</span> 的解析后端，保留工具接口
+        </td>
+      </tr>
+      <tr>
+        <td><strong>AutoGen</strong></td>
+        <td>多Agent对话模式（GroupChat、RoundRobin）</td>
+        <td><span class="tag tag-orange">可选</span></td>
+        <td>自研 <span class="code">fanout.py</span> 已足够，可作为备选集成</td>
+      </tr>
+      <tr>
+        <td><strong>CrewAI</strong></td>
+        <td>角色化Agent编排（Role/Goal/Backstory）</td>
+        <td><span class="tag tag-orange">可选</span></td>
+        <td>
+          自研 <span class="code">agent_factory.py</span> +
+          <span class="code">persona/</span> 已覆盖
+        </td>
+      </tr>
+    </table>
+
+    <div class="highlight-box">
+      <strong>实施建议：</strong>第一优先级集成
+      <strong>LangChain Callbacks</strong>（0.5天）——
+      不改动核心循环，仅作为可观测性增强层。 第二优先级用
+      <strong>LlamaIndex</strong>
+      替换文件解析后端（1天）。其余框架按需评估，不盲目集成。
+    </div>
+
+    <hr />
+
+    <!-- ===== 总结 ===== -->
+    <h2>执行路线图总览</h2>
+
+    <table>
+      <tr>
+        <th>优先级</th>
+        <th>差距项</th>
+        <th>预估工时</th>
+        <th>预期提升</th>
+        <th>依赖</th>
+      </tr>
+      <tr>
+        <td><span class="tag tag-red">P1</span></td>
+        <td><strong>1. 关系型数据库（SQLite→PostgreSQL）</strong></td>
+        <td>3-5天</td>
+        <td>85→89 (+4)</td>
+        <td>无</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-red">P1</span></td>
+        <td><strong>2. 工具自注册发现</strong></td>
+        <td>2-3天</td>
+        <td>89→91 (+2)</td>
+        <td>无</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-red">P1</span></td>
+        <td><strong>4. Vision多模态输入管道</strong></td>
+        <td>3-5天</td>
+        <td>91→93 (+2)</td>
+        <td>无</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-blue">P2</span></td>
+        <td><strong>3. 工具集平台级动态开关</strong></td>
+        <td>1-2天</td>
+        <td>93→94 (+1)</td>
+        <td>无</td>
+      </tr>
+      <tr>
+        <td><span class="tag tag-blue">P2</span></td>
+        <td><strong>5. 业界框架集成</strong></td>
+        <td>1-2天</td>
+        <td>94→95 (+1)</td>
+        <td>无</td>
+      </tr>
+    </table>
+
+    <div class="success-box">
+      <h3>总体预期</h3>
+      <div class="grid grid-3">
+        <div style="text-align: center">
+          <div style="font-size: 2rem; font-weight: 800; color: var(--green)">
+            85 → 92
+          </div>
+          <div>综合评分提升</div>
+        </div>
+        <div style="text-align: center">
+          <div style="font-size: 2rem; font-weight: 800; color: var(--accent)">
+            A- → A
+          </div>
+          <div>等级提升</div>
+        </div>
+        <div style="text-align: center">
+          <div style="font-size: 2rem; font-weight: 800; color: var(--purple)">
+            39/44 → 43/44
+          </div>
+          <div>能力达标率</div>
+        </div>
+      </div>
+      <p style="margin-top: 1rem">
+        <strong>关键洞察：</strong
+        >差距1（PostgreSQL）的脚手架已就绪，实际工作量比预期低。
+        差距2（工具自注册）和差距3（平台开关）的
+        <span class="code">ToolRegistry</span> 基础设施已完善，改动量可控。
+        差距4（Vision）需要外部API依赖（GPT-4o Vision），但核心管线代码量不大。
+        全部5项完成后，家百星将达到
+        <strong>A级（92分）</strong>，具备完整的商用级Agent技术体系。
+      </p>
+    </div>
+
+    <p
+      style="
+        text-align: center;
+        color: var(--text-secondary);
+        margin-top: 2rem;
+        padding-top: 1rem;
+        border-top: 1px solid var(--border);
+      "
+    >
+      家百星 V5.0 — 5项差距改进实施方案 | 生成日期：2026-07-18
+    </p>
+  </body>
+</html>

@@ -1,0 +1,10 @@
+{
+  "version": "1.0.0",
+  "pythonVersion": "3.13",
+  "pythonRequired": true,
+  "backendRequired": true,
+  "installed": false,
+  "installPath": "python",
+  "backendPath": "python-backend",
+  "lastChecked": null
+}

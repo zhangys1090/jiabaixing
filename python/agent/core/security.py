@@ -32,15 +32,38 @@ DEFAULT_PERMISSIONS = [
 ]
 
 _DANGEROUS_PATTERNS = [
-    (r"rm\s+-rf\s+/", "危险删除命令"),
+    # 递归删除根目录：必须同时覆盖合并短选项(-rf/-fr)、分离短选项(-r -f)、
+    # 长选项(--recursive --force)与 sudo/前置其它选项的组合。
+    # 注意：曾有一版"改进"写成 (-[rR].*-[fF]|-[fF].*-[rR])，要求两个独立选项，
+    # 反而漏掉了最常见的 `rm -rf /` / `rm -rf /*` / `sudo rm -rf /`（fail-open 回归）。
+    (r"\brm\b\s+(?:-{1,2}[\w-]+\s+)*-{1,2}[\w-]*[rR][\w-]*\s+(?:-{1,2}[\w-]+\s+)*/(?:\s|$|\*)",
+     "危险删除命令"),
     (r"del\s+/[sS]", "危险删除命令"),
+    (r"rmdir\s+/[sS]", "危险删除目录"),
     (r"format\s+[cC]:", "格式化磁盘"),
-    (r"shutdown", "关机命令"),
-    (r"reboot", "重启命令"),
-    (r"mkfs", "格式化文件系统"),
+    # 关机：命令位出现即拦截（覆盖 `shutdown now` / 裸 `shutdown` / `sudo shutdown`），
+    # 同时保留带选项的内嵌形式（如 ssh host 'shutdown -h now'）。
+    # 散文中的 "graceful shutdown of the service" 不在命令位，不会误报。
+    (r"(?:^|[\n;&|]\s*)(?:sudo\s+)?(?:shutdown|poweroff)\b", "关机命令"),
+    (r"\bshutdown\b\s+(?:-[hPrsft]|/[srhpfta]|now|\+\d+)", "关机命令"),
+    (r"(?:^|[\n;&|]\s*)(?:sudo\s+)?init\s+0\b", "关机命令"),
+    (r"\bsystemctl\s+(?:poweroff|halt|reboot)\b", "关机/重启命令"),
+    (r"\breboot\b", "重启命令"),
+    (r"\bmkfs\b", "格式化文件系统"),
     (r">\s*/dev/sd", "设备写入"),
-    (r"curl\s+.*\|\s*sh", "远程脚本执行"),
-    (r"wget\s+.*\|\s*sh", "远程脚本执行"),
+    (r"\bcurl\b.*\|\s*(ba)?sh", "远程脚本执行"),
+    (r"\bwget\b.*\|\s*(ba)?sh", "远程脚本执行"),
+    (r"\bchmod\b\s+[0-7]*77[0-7]\s+/", "危险权限修改"),
+    (r"\bdd\b\s+.*of=/dev/", "设备直接写入"),
+    (r":\(\)\{\s*:\|:&\s*\};:", "fork炸弹"),
+    (r"\bRemove-Item\b.*-Recurse", "PowerShell危险删除"),
+    (r"\bStop-Computer\b", "PowerShell关机"),
+    (r"\bRestart-Computer\b", "PowerShell重启"),
+    (r"\bSet-ExecutionPolicy\b\s+Unrestricted", "PowerShell执行策略降级"),
+    (r"\bInvoke-Expression\b", "PowerShell动态执行"),
+    (r"\bStart-Process\b.*-Verb\s+RunAs", "PowerShell提权执行"),
+    (r"\bnetsh\b.*firewall.*disable", "防火墙禁用"),
+    (r"\breg\b.*delete\s+HKLM", "注册表危险删除"),
 ]
 
 _SENSITIVE_PATTERNS = [
@@ -48,7 +71,7 @@ _SENSITIVE_PATTERNS = [
     (r"(?:api[_-]?key|secret[_-]?key)\s*[=:]\s*\S+", "API密钥泄露"),
     (r"(?:token|auth)\s*[=:]\s*\S{20,}", "认证令牌泄露"),
     (r"\b\d{16,19}\b", "银行卡号"),
-    (r"\b\d{6}\b", "验证码"),
+    (r"验证码[：:\s]*\d{4,8}", "验证码泄露"),
 ]
 
 
@@ -88,6 +111,7 @@ class SecurityGuard:
         """初始化安全守卫。"""
         self._user_permissions: dict[str, set[str]] = {}
         self._audit_log: list[dict[str, Any]] = []
+        self._max_audit_log_size: int = 10000
 
     def check_command(self, command: str) -> SecurityCheckResult:
         """检查命令安全性，检测危险命令和敏感信息。
@@ -102,11 +126,11 @@ class SecurityGuard:
         blocked: list[str] = []
 
         for pattern, desc in _DANGEROUS_PATTERNS:
-            if re.search(pattern, command, re.IGNORECASE):
+            if re.search(pattern, command, re.IGNORECASE) and desc not in blocked:
                 blocked.append(desc)
 
         for pattern, desc in _SENSITIVE_PATTERNS:
-            if re.search(pattern, command, re.IGNORECASE):
+            if re.search(pattern, command, re.IGNORECASE) and desc not in warnings:
                 warnings.append(desc)
 
         if blocked:
@@ -122,28 +146,44 @@ class SecurityGuard:
         self._audit({"action": "command_checked", "risk": risk, "warnings": warnings})
         return SecurityCheckResult(allowed=True, risk_level=risk, warnings=warnings)
 
-    def check_output(self, text: str) -> SecurityCheckResult:
+    def check_output(self, text: str, block_on_sensitive: bool = True) -> SecurityCheckResult:
         """检查输出文本安全性，检测敏感信息泄露。
+
+        默认 fail-closed：命中敏感信息即 ``allowed=False``，由调用方决定脱敏或拒答。
+        若调用方只想拿到提示而自行处理，可显式传 ``block_on_sensitive=False`` 降级为警告模式。
+
+        Note:
+            本方法当前在 agent 包内**无调用点**（孤儿能力）。实际接线的输出安全检查是
+            ``agent/verification/service.py::check_output_safety``。二者职责重叠，
+            后续应择一收口，详见审计报告 §1.8 W4。
 
         Args:
             text: 待检查的输出文本。
+            block_on_sensitive: 命中敏感信息时是否阻止输出，默认 True（阻止）。
 
         Returns:
-            SecurityCheckResult: 检查结果，含敏感信息阻止原因。
+            SecurityCheckResult: 检查结果，含敏感信息警告/阻止原因。
         """
-        warnings: list[str] = []
-        blocked: list[str] = []
+        hits: list[str] = []
 
         for pattern, desc in _SENSITIVE_PATTERNS:
-            if re.search(pattern, text, re.IGNORECASE):
-                blocked.append(desc)
+            if re.search(pattern, text, re.IGNORECASE) and desc not in hits:
+                hits.append(desc)
 
-        if blocked:
-            self._audit({"action": "output_blocked", "reasons": blocked})
+        if hits:
+            if block_on_sensitive:
+                self._audit({"action": "output_blocked", "reasons": hits})
+                return SecurityCheckResult(
+                    allowed=False,
+                    risk_level="high",
+                    warnings=hits,
+                    blocked_reasons=hits,
+                )
+            self._audit({"action": "output_warning", "reasons": hits})
             return SecurityCheckResult(
-                allowed=False,
+                allowed=True,
                 risk_level="high",
-                blocked_reasons=blocked,
+                warnings=hits,
             )
 
         return SecurityCheckResult(allowed=True, risk_level="low")
@@ -205,3 +245,5 @@ class SecurityGuard:
         import time
         entry["timestamp"] = time.time()
         self._audit_log.append(entry)
+        if len(self._audit_log) > self._max_audit_log_size:
+            self._audit_log = self._audit_log[-(self._max_audit_log_size // 2):]

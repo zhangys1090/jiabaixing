@@ -108,16 +108,18 @@ describe('ProviderManager 路由', () => {
 
     it('setSortStrategy 应更新策略', () => {
       pm.setSortStrategy('cost');
-      // 无法直接验证私有 store，但方法不应抛异常
-      expect(true).toBe(true);
+      // 切换策略后方法不应抛异常，且仍能正常返回提供商
+      expect(() => pm.getProvidersForInput('hello')).not.toThrow();
+      expect(pm.getProvidersForInput('hello').length).toBeGreaterThanOrEqual(1);
     });
 
     it('应支持设置所有排序策略类型', () => {
       const strategies = ['priority', 'cost', 'latency', 'manual'] as const;
       for (const s of strategies) {
-        pm.setSortStrategy(s);
+        expect(() => pm.setSortStrategy(s)).not.toThrow();
       }
-      expect(true).toBe(true);
+      // 策略循环后仍能正常获取提供商
+      expect(pm.getProvidersForInput('hello').length).toBeGreaterThanOrEqual(1);
     });
   });
 

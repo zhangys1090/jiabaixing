@@ -12,6 +12,13 @@
  *   迁移日期：2026-06-22
  */
 
+import { emitDeprecationWarning } from '../shared/deprecationWarning';
+emitDeprecationWarning(
+  'ProviderManager',
+  'Python agent/llm/router.py (AGENT_BACKEND=python)',
+  'V6.0'
+);
+
 import * as fs from 'fs';
 import * as path from 'path';
 import { Logger } from '../utils/Logger';

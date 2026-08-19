@@ -41,8 +41,8 @@
  * @since 2026-06-24
  */
 
+import EventBus, { JiabaixingEventBus } from '../shared/EventBus';
 import { Logger } from '../utils/Logger';
-import EventBus from '../shared/EventBus';
 
 // ========== 常量定义 ==========
 
@@ -177,6 +177,10 @@ export class ImplicitFeedbackCollector {
     }
   }
 
+  static create(): ImplicitFeedbackCollector {
+    return new ImplicitFeedbackCollector();
+  }
+
   static getInstance(): ImplicitFeedbackCollector {
     if (!ImplicitFeedbackCollector.instance) {
       ImplicitFeedbackCollector.instance = new ImplicitFeedbackCollector();
@@ -196,7 +200,8 @@ export class ImplicitFeedbackCollector {
     if (ImplicitFeedbackCollector.instance) {
       // 清理事件监听器
       ImplicitFeedbackCollector.instance.cleanupEventListeners();
-      ImplicitFeedbackCollector.instance = null as any;
+      ImplicitFeedbackCollector.instance =
+        null as unknown as ImplicitFeedbackCollector;
     }
   }
 
@@ -208,9 +213,7 @@ export class ImplicitFeedbackCollector {
     if (!this.listenersRegistered) return;
 
     try {
-      // 使用 any 类型断言绕过 EventMap 严格类型检查
-      // 这些事件名称在运行时有效，但尚未在 EventMap 类型中声明
-      const bus = EventBus as any;
+      const bus = EventBus as JiabaixingEventBus;
       bus.off('user:message', this.onUserMessageHandler);
       bus.off('ai:message', this.onAiMessageHandler);
       bus.off('user:copy', this.onCopyHandler);
@@ -245,8 +248,7 @@ export class ImplicitFeedbackCollector {
     if (this.listenersRegistered) return;
 
     try {
-      // 使用 any 类型断言绕过 EventMap 严格类型检查
-      const bus = EventBus as any;
+      const bus = EventBus as JiabaixingEventBus;
 
       // 监听用户消息
       bus.on('user:message', this.onUserMessageHandler);
@@ -464,7 +466,7 @@ export class ImplicitFeedbackCollector {
     // 发布事件
     try {
       if (EventBus && typeof EventBus.emit === 'function') {
-        (EventBus as any).emit('feedback:implicit', fullSignal);
+        (EventBus as JiabaixingEventBus).emit('feedback:implicit', fullSignal);
       }
     } catch {
       // 静默

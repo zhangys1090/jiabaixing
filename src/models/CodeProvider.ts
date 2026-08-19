@@ -9,7 +9,7 @@
 import { injectPreferences } from '../memory/PreferenceInjector';
 import { Logger } from '../utils/Logger';
 import { Model } from './ModelInterface';
-import { getPromptTemplate } from '../llm/prompt-templates';
+import { getPromptTemplate } from './prompt-templates';
 
 /** 连接错误关键词列表（与 LLMProvider 保持一致） */
 const CONNECTION_ERRORS = [

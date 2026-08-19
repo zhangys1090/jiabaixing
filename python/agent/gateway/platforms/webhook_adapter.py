@@ -29,6 +29,7 @@ from fastapi.responses import JSONResponse
 
 from agent.gateway.base import Message, PlatformAdapter
 from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
 
 log = StructuredLogger("gateway.webhook_adapter")
 
@@ -166,8 +167,8 @@ class WebhookAdapter(PlatformAdapter):
                 self._task.cancel()
                 try:
                     await self._task
-                except asyncio.CancelledError:
-                    pass
+                except asyncio.CancelledError as _exc:
+                    log_ignored(log, "webhook_adapter.WebhookAdapter.stop", _exc)
             self._server = None
         self._connected = False
         log.info("Webhook 适配器已停止")

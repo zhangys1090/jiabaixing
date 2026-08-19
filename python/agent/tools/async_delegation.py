@@ -115,7 +115,37 @@ class AsyncDelegator:
     """异步委派管理器。
 
     管理子 Agent 的并行委派、条件路由和结果聚合。
+    支持委派暂停开关（审计 P0-1：防失控 Agent 树）。
     """
+
+    # ─── 审计 P0-1：委派暂停开关 ───
+    _spawn_paused: asyncio.Event = asyncio.Event()
+    _spawn_paused.set()
+
+    @classmethod
+    def is_spawn_paused(cls) -> bool:
+        """检查委派是否暂停。非阻塞，调用方在发起新委派前检查。"""
+        return not cls._spawn_paused.is_set()
+
+    @classmethod
+    async def pause_spawn(cls, reason: str = "") -> None:
+        """暂停所有新委派。已运行的委派不受影响。"""
+        cls._spawn_paused.clear()
+        log.warning("委派已暂停", reason=reason)
+
+    @classmethod
+    async def resume_spawn(cls) -> None:
+        """恢复委派。"""
+        cls._spawn_paused.set()
+        log.info("委派已恢复")
+
+    @classmethod
+    def get_pause_state(cls) -> dict[str, Any]:
+        """获取委派暂停状态。"""
+        return {
+            "paused": cls.is_spawn_paused(),
+            "reason": "委派已暂停" if cls.is_spawn_paused() else "正常运行",
+        }
 
     def __init__(self, max_depth: int = 3, default_timeout: float = 60.0) -> None:
         self._handlers: dict[str, Callable[..., Awaitable[str]]] = {}
@@ -146,6 +176,12 @@ class AsyncDelegator:
         self._capabilities.pop(agent_id, None)
 
     async def delegate_single(self, spec: DelegationSpec) -> DelegationResult:
+        if self.is_spawn_paused():
+            return DelegationResult(
+                spec=spec,
+                status=DelegationStatus.FAILED,
+                error="委派已暂停，新任务被拒绝",
+            )
         handler = self._handlers.get(spec.agent)
         if handler is None:
             return DelegationResult(

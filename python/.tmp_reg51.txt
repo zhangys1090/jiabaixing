@@ -1,0 +1,47 @@
+................................................F..                      [100%]
+================================== FAILURES ===================================
+______________ test_w3_response_cache_actually_hits_after_write _______________
+
+    @pytest.mark.asyncio
+    async def test_w3_response_cache_actually_hits_after_write():
+        """行为锁：带真实 system_prompt 写入后，用同样的 system_prompt 必须命中。"""
+        from unittest.mock import patch
+    
+        from agent.llm.provider import LLMProvider
+    
+        class _Msg:
+            content = "W3-cached-answer"
+            role = "assistant"
+            tool_calls = None
+    
+        class _Choice:
+            message = _Msg()
+            finish_reason = "stop"
+    
+        class _Resp:
+            choices = [_Choice()]
+            usage = None
+    
+        async def _fake_acompletion(**_kwargs):
+            return _Resp()
+    
+        provider = LLMProvider()
+>       provider.tiered_cache.clear()
+
+tests\test_defect_fixes_orphan_silent.py:520: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+agent\llm\cache.py:294: in clear
+    self._l2.clear()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <agent.llm.cache.PersistentCache object at 0x0000016E20FD6F90>
+
+    def clear(self) -> None:
+        conn = self._get_conn()
+>       conn.execute("DELETE FROM llm_cache")
+E       sqlite3.OperationalError: attempt to write a readonly database
+
+agent\llm\cache.py:197: OperationalError
+=========================== short test summary info ===========================
+FAILED tests/test_defect_fixes_orphan_silent.py::test_w3_response_cache_actually_hits_after_write
+1 failed, 50 passed in 27.92s

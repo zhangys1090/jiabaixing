@@ -7,9 +7,10 @@ import { Router, json } from 'express';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { EvolutionOrchestrator } from '../../evolution/EvolutionOrchestrator';
+import { getActivePythonBridge } from '../../ide/bridgeRegistry';
 import { JiabaixingCorePublicAPI } from '../../interfaces';
 import { SkillRegistry } from '../../skills/SkillRegistry';
-import { EvolutionOrchestrator } from '../../evolution/EvolutionOrchestrator';
 import { Logger } from '../../utils/Logger';
 
 const router = Router();
@@ -487,6 +488,13 @@ router.get('/api/config', (_req, res) => {
 
 router.get('/api/evolution/status', async (_req, res) => {
   try {
+    const bridge = getActivePythonBridge();
+    if (bridge) {
+      const metrics = (await bridge.getEvolutionMetrics()) as
+        | Record<string, unknown>
+        | null;
+      return res.json({ orchestrator: metrics ?? {} });
+    }
     const orchestrator = EvolutionOrchestrator.getInstance();
     const metrics = orchestrator.getUnifiedMetrics();
 
@@ -891,6 +899,126 @@ router.get('/api/optimization/history', (req, res) => {
     res.status(500).json({
       success: false,
       error: (error as Error).message,
+    });
+  }
+});
+
+// ── OSV 依赖漏洞扫描 ──
+
+router.post('/api/system/osv-scan', async (req, res) => {
+  try {
+    const directory = (req.body?.directory as string) || process.cwd();
+    const severity = (req.body?.severity as string) || 'MEDIUM';
+
+    const { createOsvScanExecutor } =
+      await import('../../harness/tools/system/osv_scan');
+    const executor = createOsvScanExecutor({ projectRoot: directory });
+    const result = await executor(
+      { directory, severity },
+      { permissions: new Set(), metadata: {} }
+    );
+
+    const metadata = result.metadata as
+      | {
+          totalVulns?: number;
+          critical?: number;
+          high?: number;
+          medium?: number;
+          low?: number;
+        }
+      | undefined;
+
+    res.json({
+      success: result.success,
+      data: {
+        totalVulns: metadata?.totalVulns ?? 0,
+        critical: metadata?.critical ?? 0,
+        high: metadata?.high ?? 0,
+        medium: metadata?.medium ?? 0,
+        low: metadata?.low ?? 0,
+        report: String(result.output || ''),
+      },
+    });
+  } catch (error) {
+    Logger.error('OSV扫描失败', error as Error, 'SystemState');
+    res.status(500).json({
+      success: false,
+      error: `OSV扫描失败: ${(error as Error).message}`,
+    });
+  }
+});
+
+// ── 磁盘清理 ──
+
+router.post('/api/system/disk-cleanup', async (req, res) => {
+  try {
+    const directory = (req.body?.directory as string) || process.cwd();
+    const categories = (req.body?.categories as string[]) || ['all'];
+    const confirm = Boolean(req.body?.confirm);
+    const dryRun =
+      req.body?.dryRun !== undefined ? Boolean(req.body?.dryRun) : true;
+
+    const { createDiskCleanupExecutor } =
+      await import('../../harness/tools/system/disk_cleanup');
+    const executor = createDiskCleanupExecutor({ projectRoot: directory });
+    const result = await executor(
+      { directory, categories, confirm, dry_run: dryRun },
+      { permissions: new Set(), metadata: {} }
+    );
+
+    const metadata = result.metadata as
+      | { totalItems?: number; totalSize?: number; executed?: boolean }
+      | undefined;
+
+    res.json({
+      success: result.success,
+      data: {
+        totalItems: metadata?.totalItems ?? 0,
+        totalSize: metadata?.totalSize ?? 0,
+        report: String(result.output || ''),
+        executed: metadata?.executed ?? false,
+      },
+    });
+  } catch (error) {
+    Logger.error('磁盘清理失败', error as Error, 'SystemState');
+    res.status(500).json({
+      success: false,
+      error: `磁盘清理失败: ${(error as Error).message}`,
+    });
+  }
+});
+
+// ── 子目录导航提示 ──
+
+router.get('/api/system/subdirectory-hints', async (req, res) => {
+  try {
+    const directory = (req.query.directory as string) || '.';
+    const query = req.query.query as string | undefined;
+
+    const { createSubdirectoryHintsExecutor } =
+      await import('../../harness/tools/file/subdirectory_hints');
+    const executor = createSubdirectoryHintsExecutor({
+      projectRoot: process.cwd(),
+    });
+    const result = await executor(
+      { directory, query },
+      { permissions: new Set(), metadata: {} }
+    );
+
+    const metadata = result.metadata as { totalDirs?: number } | undefined;
+
+    res.json({
+      success: result.success,
+      data: {
+        totalDirs: metadata?.totalDirs ?? 0,
+        hints: String(result.output || ''),
+      },
+    });
+  } catch (error) {
+    Logger.error('子目录提示失败', error as Error, 'SystemState');
+    res.status(500).json({
+      success: false,
+      error: `子目录提示失败: ${(error as Error).message}`,
     });
   }
 });

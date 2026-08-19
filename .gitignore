@@ -7,6 +7,11 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+nul
+
+# Desktop release binaries (exceed GitHub 100MB limit)
+src/frontend/release/
+
 node_modules
 dist
 dist-ssr

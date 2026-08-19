@@ -14,6 +14,7 @@ from typing import Any
 
 from agent.config import DATA_DIR
 from agent.llm.credential_pool import CredentialEntry
+from agent.core.logger import log_ignored
 
 
 class CredentialStore:
@@ -111,8 +112,8 @@ class CredentialStore:
         # 设置文件权限 600（仅所有者可读写）
         try:
             os.chmod(tmp_path, 0o600)
-        except OSError:
-            pass
+        except OSError as _exc:
+            log_ignored(None, "credential_persistence.CredentialStore.save", _exc)
 
         tmp_path.replace(target_path)
 

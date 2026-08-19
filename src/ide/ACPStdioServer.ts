@@ -132,7 +132,11 @@ export class ACPStdioServer {
             this.sendResponse(response);
           })
           .catch((err) => {
-            Logger.error(`ACPServer 处理请求失败: ${err.message}`, 'ACPStdio');
+            Logger.error(
+              `ACPServer 处理请求失败: ${(err as Error).message}`,
+              err as Error,
+              'ACPStdio'
+            );
           });
       } catch (err) {
         this.sendResponse({

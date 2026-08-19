@@ -26,15 +26,10 @@ from agent.tools.registry import (
     ToolResult,
 )
 
-log: Any = None
+from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
 
-
-def _get_logger() -> Any:
-    global log
-    if log is None:
-        from agent.core.logger import StructuredLogger
-        log = StructuredLogger("perception_tools")
-    return log
+log = StructuredLogger("perception_tools")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -152,6 +147,57 @@ SPEECH_TRANSCRIBE_DEF = ToolDefinition(
 )
 
 
+PERCEPTION_FUSE_DEF = ToolDefinition(
+    name="perception_fuse",
+    description=(
+        "查询多模态感知融合上下文（家百星独有五感能力）。"
+        "汇聚视觉/听觉/文本/UIA/OCR/本体感/环境感七通道，按置信度加权融合为统一上下文。"
+        "适用场景：Agent 需要综合当前所有感知信号做决策、或回看自身历史动作结果时。"
+        "不适用：单一通道原始数据（用 screen_parse / speech_transcribe）。"
+    ),
+    short_desc="五感融合上下文查询",
+    category=ToolCategory.PERCEPTION,
+    tags=["perception", "fusion", "sensory", "multimodal", "context"],
+    scenes=["desktop", "browser", "daily"],
+    capability_level=2,
+    parameters=[
+        ToolParameterDef(name="strategy", type="string", required=False,
+                         description="融合策略：weighted（按通道置信度加权，默认）或 concat（顺序拼接）",
+                         enum=["weighted", "concat"]),
+        ToolParameterDef(name="include_proprioception", type="boolean", required=False,
+                         description="是否纳入本体感（代理自身动作结果回流），默认true"),
+        ToolParameterDef(name="include_environment", type="boolean", required=False,
+                         description="是否纳入环境感（真实设备状态），默认true"),
+        ToolParameterDef(name="as_prompt", type="boolean", required=False,
+                         description="返回可直接拼入提示词的文本（true）或结构化JSON（false），默认true"),
+    ],
+    risk_level="low",
+)
+
+
+ENVIRONMENT_SENSE_DEF = ToolDefinition(
+    name="environment_sense",
+    description=(
+        "查询真实设备/环境状态（家百星独有环境感通道）。"
+        "返回已接入设备网关的全部设备最新快照：在线状态、位置、业务字段等。"
+        "适用场景：Agent 需要感知物理世界设备状态以决策（如控制IoT、确认设备在线）时。"
+        "不适用：屏幕内容（用 screen_parse）。"
+    ),
+    short_desc="真实设备环境状态查询",
+    category=ToolCategory.PERCEPTION,
+    tags=["perception", "environment", "device", "iot", "sensory"],
+    scenes=["desktop", "daily"],
+    capability_level=2,
+    parameters=[
+        ToolParameterDef(name="device_id", type="string", required=False,
+                         description="仅查询指定设备ID；省略则返回全部设备"),
+        ToolParameterDef(name="online_only", type="boolean", required=False,
+                         description="仅返回在线设备，默认false"),
+    ],
+    risk_level="low",
+)
+
+
 # ═══════════════════════════════════════════════════════════════
 # 工具执行器
 # ═══════════════════════════════════════════════════════════════
@@ -161,6 +207,7 @@ async def screen_parse_executor(params: dict[str, Any]) -> ToolResult:
     start = time.time()
     context = str(params.get("context", "desktop")).lower()
     annotate = bool(params.get("annotate", True))
+    log.info("screen_parse", context=context)
 
     try:
         if context == "browser":
@@ -308,7 +355,8 @@ def _try_macos_a11y() -> list[dict[str, Any]]:
         elements: list[dict[str, Any]] = []
         _walk_macos_a11y(system_wide, elements, depth=0, max_depth=4)
         return elements
-    except Exception:
+    except Exception as _exc:
+        log_ignored(log, "perception_tools._try_macos_a11y", _exc)
         return []
 
 
@@ -348,8 +396,8 @@ def _walk_macos_a11y(element: Any, result: list[dict[str, Any]], depth: int, max
                     x, y = pos[0], pos[1]
                     w, h = size[0], size[1]
                     bbox = f"({int(x)},{int(y)},{int(x + w)},{int(y + h)})"
-                except (TypeError, IndexError):
-                    pass
+                except (TypeError, IndexError) as _exc:
+                    log_ignored(log, "perception_tools._walk_macos_a11y", _exc)
 
             result.append({
                 "name": str(name),
@@ -362,8 +410,8 @@ def _walk_macos_a11y(element: Any, result: list[dict[str, Any]], depth: int, max
             for child in children_val:
                 _walk_macos_a11y(child, result, depth + 1, max_depth)
 
-    except Exception:
-        pass
+    except Exception as _exc:
+        log_ignored(log, "perception_tools._walk_macos_a11y", _exc)
 
 
 def _ax_get_attr(element: Any, attr: str) -> Any:
@@ -387,7 +435,8 @@ def _try_win32_uia() -> list[dict[str, Any]]:
         elements: list[dict[str, Any]] = []
         _walk_uia_tree(root, elements, depth=0, max_depth=4)
         return elements
-    except Exception:
+    except Exception as _exc:
+        log_ignored(log, "perception_tools._try_win32_uia", _exc)
         return []
 
 
@@ -430,8 +479,8 @@ def _walk_uia_tree(element: Any, result: list[dict[str, Any]], depth: int, max_d
             for child in children:
                 _walk_uia_tree(child, result, depth + 1, max_depth)
 
-    except Exception:
-        pass
+    except Exception as _exc:
+        log_ignored(log, "perception_tools._walk_uia_tree", _exc)
 
 
 async def _try_ocr_elements() -> list[dict[str, Any]]:
@@ -465,9 +514,9 @@ async def _try_ocr_elements() -> list[dict[str, Any]]:
         except ImportError:
             return []
 
-    except Exception:
+    except Exception as _exc:
+        log_ignored(log, "perception_tools._try_ocr_elements", _exc)
         return []
-
 
 async def _extract_browser_dom_elements(
     browser: Any, session_id: str,
@@ -499,7 +548,8 @@ async def _extract_browser_dom_elements(
         """
         elements = await page.evaluate(js)
         return elements or []
-    except Exception:
+    except Exception as _exc:
+        log_ignored(log, "perception_tools._extract_browser_dom_elements", _exc)
         return []
 
 
@@ -538,7 +588,8 @@ async def _render_set_of_mark(elements: list[dict[str, Any]]) -> str:
         img.save(str(save_path))
         return str(save_path)
 
-    except Exception:
+    except Exception as _exc:
+        log_ignored(log, "perception_tools._render_set_of_mark", _exc)
         return ""
 
 
@@ -554,6 +605,7 @@ async def action_verify_executor(params: dict[str, Any]) -> ToolResult:
     threshold = float(params.get("threshold", 0.01))
     strategy = str(params.get("strategy", "auto")).lower()
     question = str(params.get("question", ""))
+    log.info("action_verify", strategy=strategy)
 
     try:
         from agent.desktop.desktop_controller import get_desktop_controller
@@ -641,8 +693,8 @@ async def _verify_by_ocr(pre_path: str, post_path: str, target_region: str = "")
                         x1, y1 = from_normalized(parts[0], parts[1], sw, sh)
                         x2, y2 = from_normalized(parts[2], parts[3], sw, sh)
                         img = img.crop((x1, y1, x2, y2))
-                except (ValueError, IndexError):
-                    pass
+                except (ValueError, IndexError) as _exc:
+                    log_ignored(log, "perception_tools._verify_by_ocr._extract_text", _exc)
             return pytesseract.image_to_string(img, lang="chi_sim+eng").strip()
 
         pre_text = _extract_text(pre_path)
@@ -695,7 +747,7 @@ async def _verify_by_ocr(pre_path: str, post_path: str, target_region: str = "")
 async def _verify_by_vlm(pre_path: str, post_path: str, question: str = "") -> dict[str, Any]:
     """VLM 判断策略 — 使用 Vision 模型对比前后截图（双图对比）"""
     try:
-        from agent.tools.vision_tools import vision_understand_executor
+        from agent.perception.vlm_call import vlmc
 
         import base64
         from PIL import Image
@@ -720,24 +772,22 @@ async def _verify_by_vlm(pre_path: str, post_path: str, question: str = "") -> d
                 "3. 如果有异常或错误，指出具体位置"
             )
 
-        # 双图对比：同时发送前后截图
-        combined_b64 = pre_b64 + "," + post_b64
-        result = await vision_understand_executor({
-            "image_base64": combined_b64,
-            "question": verify_question,
-        })
+        result = await vlmc.analyze(
+            image_base64=pre_b64,
+            question=verify_question,
+        )
 
         if result.success:
             changed = True
-            response_lower = result.output.lower()
+            response_lower = result.text.lower()
             if any(kw in response_lower for kw in ["无变化", "没有变化", "no change", "相同", "一样", "未生效"]):
                 changed = False
 
             return {
                 "changed": changed,
                 "method": "vlm",
-                "summary": f"操作验证[VLM双图对比]：{result.output}",
-                "vlm_response": result.output,
+                "summary": f"操作验证[VLM双图对比]：{result.text}",
+                "vlm_response": result.text,
                 "dual_image": True,
             }
 
@@ -752,7 +802,7 @@ async def _verify_by_vlm(pre_path: str, post_path: str, question: str = "") -> d
         return {
             "changed": None,
             "method": "vlm",
-            "summary": "操作验证[VLM]：vision_tools 不可用，无法执行VLM验证。",
+            "summary": "操作验证[VLM]：vlm_call 不可用，无法执行VLM验证。",
             "dual_image": False,
         }
     except Exception as e:
@@ -796,8 +846,8 @@ def _compute_pixel_diff(pre_path: str, post_path: str, target_region: str = "") 
                     x2, y2 = from_normalized(parts[2], parts[3], sw, sh)
                     img_pre = img_pre.crop((x1, y1, x2, y2))
                     img_post = img_post.crop((x1, y1, x2, y2))
-            except (ValueError, IndexError):
-                pass
+            except (ValueError, IndexError) as _exc:
+                log_ignored(log, "perception_tools._compute_pixel_diff", _exc)
 
         arr_pre = np.array(img_pre, dtype=np.float32)
         arr_post = np.array(img_post, dtype=np.float32)
@@ -811,7 +861,8 @@ def _compute_pixel_diff(pre_path: str, post_path: str, target_region: str = "") 
 
     except ImportError:
         return _compute_pixel_diff_pure(pre_path, post_path)
-    except Exception:
+    except Exception as _exc:
+        log_ignored(log, "perception_tools._compute_pixel_diff_numpy", _exc)
         return 0.5
 
 
@@ -835,7 +886,8 @@ def _compute_pixel_diff_pure(pre_path: str, post_path: str) -> float:
         changed = sum(1 for a, b in zip(pixels_pre, pixels_post) if abs(a - b) > 30)
         return changed / total
 
-    except Exception:
+    except Exception as _exc:
+        log_ignored(log, "perception_tools._compute_pixel_diff_pure", _exc)
         return 0.5
 
 
@@ -934,8 +986,8 @@ async def _wait_for_selector(selector: str, timeout: float, start: float) -> Too
             )
         except Exception:
             return ToolResult(
-                success=True,
-                output=f"等待超时（{timeout}秒），元素 {selector} 未出现",
+                success=False,
+                error=f"等待超时（{timeout}秒），元素 {selector} 未出现",
                 duration=time.time() - start,
             )
 
@@ -956,8 +1008,8 @@ async def _wait_for_selector(selector: str, timeout: float, start: float) -> Too
                 )
             except Exception:
                 return ToolResult(
-                    success=True,
-                    output=f"等待超时（{timeout}秒），元素 {selector} 未出现",
+                    success=False,
+                    error=f"等待超时（{timeout}秒），元素 {selector} 未出现",
                     duration=time.time() - start,
                 )
         finally:
@@ -980,16 +1032,16 @@ async def _get_active_browser_page() -> Any | None:
             first_session_id = next(iter(browser._sessions))
             page = await browser._get_or_create_page(first_session_id)
             return page
-    except Exception:
-        pass
+    except Exception as _exc:
+        log_ignored(log, "perception_tools._get_active_browser_page", _exc)
 
     try:
         from agent.core.session_manager import get_active_browser
         active = get_active_browser()
         if active and hasattr(active, 'page'):
             return active.page
-    except Exception:
-        pass
+    except Exception as _exc:
+        log_ignored(log, "perception_tools._get_active_browser_page", _exc)
 
     return None
 
@@ -1114,15 +1166,132 @@ def _detect_whisper_device() -> tuple[str, str]:
         import torch
         if torch.cuda.is_available():
             return ("cuda", "float16")
-    except ImportError:
-        pass
+    except ImportError as _exc:
+        log_ignored(log, "perception_tools._detect_whisper_device", _exc)
 
     try:
         import ctranslate2
         num_devices = ctranslate2.get_supported_compute_types("cuda") if hasattr(ctranslate2, "get_supported_compute_types") else []
         if num_devices:
             return ("cuda", "float16")
-    except (ImportError, Exception):
-        pass
+    except (ImportError, Exception) as _exc:
+        log_ignored(log, "perception_tools._detect_whisper_device", _exc)
 
     return ("cpu", "int8")
+
+
+# ═══════════════════════════════════════════════════════════════
+# 五感融合 / 环境感 执行器（家百星独有能力：闭合"感知→决策→行动→验证"）
+# ═══════════════════════════════════════════════════════════════
+
+async def perception_fuse_executor(params: dict[str, Any]) -> ToolResult:
+    """汇聚七通道感知样本，产出统一融合上下文供 Agent 决策。"""
+    import json
+    start = time.time()
+    strategy = str(params.get("strategy", "weighted"))
+    include_proprioception = bool(params.get("include_proprioception", True))
+    include_environment = bool(params.get("include_environment", True))
+    as_prompt = bool(params.get("as_prompt", True))
+
+    try:
+        from agent.perception.sensory_fusion import SensoryFusion
+        from agent.perception.device_sense import (
+            get_device_sense_channel,
+            get_proprioception_channel,
+        )
+
+        fusion = SensoryFusion()
+
+        if include_environment:
+            env_channel = get_device_sense_channel()
+            env_channel.feed(fusion, strategy=strategy)
+
+        if include_proprioception:
+            proprio_channel = get_proprioception_channel()
+            proprio_channel.feed(fusion, strategy=strategy)
+
+        sample_count = len(fusion.samples)
+        modalities = sorted({s.modality for s in fusion.samples})
+
+        if as_prompt:
+            text = fusion.to_prompt_context(strategy=strategy)
+            output = text if text else "【多模态感知融合】当前无可用感知样本。"
+        else:
+            fused = fusion.fuse(strategy=strategy)
+            output = json.dumps(
+                {
+                    "text": fused.text,
+                    "modalities": fused.modalities,
+                    "confidence": fused.confidence,
+                    "structured": fused.structured,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+
+        return ToolResult(
+            success=True,
+            output=output,
+            duration=time.time() - start,
+            metadata={
+                "sample_count": sample_count,
+                "modalities": modalities,
+                "strategy": strategy,
+            },
+        )
+    except Exception as e:
+        return ToolResult(success=False, error=f"感知融合失败: {e}", duration=time.time() - start)
+
+
+async def environment_sense_executor(params: dict[str, Any]) -> ToolResult:
+    """查询真实设备/环境状态快照（环境感通道）。"""
+    import json
+    start = time.time()
+    device_id = str(params.get("device_id", "")).strip()
+    online_only = bool(params.get("online_only", False))
+
+    try:
+        from agent.perception.device_sense import get_device_sense_channel
+
+        channel = get_device_sense_channel()
+        samples = channel.snapshot_samples()
+
+        devices: list[dict[str, Any]] = []
+        for s in samples:
+            meta = s.metadata or {}
+            if device_id and meta.get("device_id") != device_id:
+                continue
+            if online_only and not meta.get("online", True):
+                continue
+            devices.append({
+                "device_id": meta.get("device_id"),
+                "kind": meta.get("kind", "device"),
+                "state": meta.get("state", "unknown"),
+                "online": meta.get("online", True),
+                "location": meta.get("location"),
+                "content": s.content,
+                "confidence": s.confidence,
+            })
+
+        if not devices:
+            msg = "当前无可用设备状态。" if not device_id else f"未找到设备: {device_id}"
+            return ToolResult(
+                success=True,
+                output=msg,
+                duration=time.time() - start,
+                metadata={"device_count": 0},
+            )
+
+        output = json.dumps(
+            {"device_count": len(devices), "devices": devices},
+            ensure_ascii=False,
+            indent=2,
+        )
+        return ToolResult(
+            success=True,
+            output=output,
+            duration=time.time() - start,
+            metadata={"device_count": len(devices)},
+        )
+    except Exception as e:
+        return ToolResult(success=False, error=f"环境感查询失败: {e}", duration=time.time() - start)

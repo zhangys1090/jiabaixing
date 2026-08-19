@@ -9,6 +9,30 @@ x-common-env: &common-env
   REDIS_PORT: '6379'
 
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: jiabaixing-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: jiabaixing
+      POSTGRES_USER: ${PG_USER:-agent}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-jiabaixing}
+    ports:
+      - '${PG_PORT:-5432}:5432'
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${PG_USER:-agent} -d jiabaixing']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
+
   redis:
     image: redis:7-alpine
     container_name: jiabaixing-redis
@@ -36,12 +60,15 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     ports:
       - '${PYTHON_PORT:-8765}:8765'
     environment:
       <<: *common-env
+      DATABASE_URL: postgresql://${PG_USER:-agent}:${PG_PASSWORD:-jiabaixing}@postgres:5432/jiabaixing
       PYTHONUNBUFFERED: '1'
       AGENT_HOST: '0.0.0.0'
       AGENT_PORT: '8765'
@@ -135,4 +162,6 @@ volumes:
   python-logs:
     driver: local
   redis-data:
+    driver: local
+  pg-data:
     driver: local

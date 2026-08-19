@@ -1,0 +1,255 @@
+  console.info
+    [MainWindow] Created
+
+      at MainWindow.create (electron/windows/MainWindow.js:71:17)
+
+  console.info
+    [MainWindow] Created
+
+      at MainWindow.create (electron/windows/MainWindow.js:71:17)
+
+  console.info
+    [MainWindow] Created
+
+      at MainWindow.create (electron/windows/MainWindow.js:71:17)
+
+  console.info
+    [MainWindow] Created
+
+      at MainWindow.create (electron/windows/MainWindow.js:71:17)
+
+  console.info
+    [MainWindow] Created
+
+      at MainWindow.create (electron/windows/MainWindow.js:71:17)
+
+  console.info
+    [MainWindow] Created
+
+      at MainWindow.create (electron/windows/MainWindow.js:71:17)
+
+  console.info
+    [MainWindow] Created
+
+      at MainWindow.create (electron/windows/MainWindow.js:71:17)
+
+  console.info
+    [MainWindow] Hidden to tray (close intercepted)
+
+      at MockBrowserWindow.<anonymous> (electron/windows/MainWindow.js:189:21)
+
+  console.info
+    [MainWindow] Created
+
+      at MainWindow.create (electron/windows/MainWindow.js:71:17)
+
+  console.info
+    [MainWindow] Created
+
+      at MainWindow.create (electron/windows/MainWindow.js:71:17)
+
+  console.info
+    [MainWindow] Created
+
+      at MainWindow.create (electron/windows/MainWindow.js:71:17)
+
+  console.info
+    [MainWindow] Created
+
+      at MainWindow.create (electron/windows/MainWindow.js:71:17)
+
+  console.info
+    [MainWindow] Created
+
+      at MainWindow.create (electron/windows/MainWindow.js:71:17)
+
+  console.info
+    [MainWindow] Created
+
+      at MainWindow.create (electron/windows/MainWindow.js:71:17)
+
+  console.info
+    [MainWindow] Created
+
+      at MainWindow.create (electron/windows/MainWindow.js:71:17)
+
+  console.info
+    [MainWindow] Created
+
+      at MainWindow.create (electron/windows/MainWindow.js:71:17)
+
+  console.info
+    [MainWindow] Created
+
+      at MainWindow.create (electron/windows/MainWindow.js:71:17)
+
+  console.info
+    [MainWindow] Created
+
+      at MainWindow.create (electron/windows/MainWindow.js:71:17)
+
+  console.info
+    [MainWindow] Created
+
+      at MainWindow.create (electron/windows/MainWindow.js:71:17)
+
+  console.info
+    [MainWindow] Created
+
+      at MainWindow.create (electron/windows/MainWindow.js:71:17)
+
+  console.info
+    [Tray] Destroyed
+
+      at TrayManager.destroy (electron/tray/TrayManager.js:125:17)
+
+  console.info
+    [Tray] Destroyed
+
+      at TrayManager.destroy (electron/tray/TrayManager.js:125:17)
+
+  console.info
+    [Tray] Destroyed
+
+      at TrayManager.destroy (electron/tray/TrayManager.js:125:17)
+
+  console.info
+    [Tray] Created
+
+      at TrayManager.create (electron/tray/TrayManager.js:58:17)
+
+  console.info
+    [Tray] Destroyed
+
+      at TrayManager.destroy (electron/tray/TrayManager.js:125:17)
+
+  console.info
+    [Tray] Created
+
+      at TrayManager.create (electron/tray/TrayManager.js:58:17)
+
+  console.info
+    [Tray] Destroyed
+
+      at TrayManager.destroy (electron/tray/TrayManager.js:125:17)
+
+  console.info
+    [Tray] Created
+
+      at TrayManager.create (electron/tray/TrayManager.js:58:17)
+
+  console.info
+    [Tray] Destroyed
+
+      at TrayManager.destroy (electron/tray/TrayManager.js:125:17)
+
+  console.info
+    [Tray] Created
+
+      at TrayManager.create (electron/tray/TrayManager.js:58:17)
+
+  console.info
+    [Tray] Destroyed
+
+      at TrayManager.destroy (electron/tray/TrayManager.js:125:17)
+
+  console.info
+    [Tray] Destroyed
+
+      at TrayManager.destroy (electron/tray/TrayManager.js:125:17)
+
+  console.info
+    [Tray] Created
+
+      at TrayManager.create (electron/tray/TrayManager.js:58:17)
+
+  console.info
+    [Tray] Destroyed
+
+      at TrayManager.destroy (electron/tray/TrayManager.js:125:17)
+
+  console.info
+    [Tray] Destroyed
+
+      at TrayManager.destroy (electron/tray/TrayManager.js:125:17)
+
+  console.info
+    [Tray] Destroyed
+
+      at TrayManager.destroy (electron/tray/TrayManager.js:125:17)
+
+  console.info
+    [Tray] Destroyed
+
+      at TrayManager.destroy (electron/tray/TrayManager.js:125:17)
+
+  console.info
+    [Tray] Created
+
+      at TrayManager.create (electron/tray/TrayManager.js:58:17)
+
+  console.info
+    [Tray] Destroyed
+
+      at TrayManager.destroy (electron/tray/TrayManager.js:125:17)
+
+  console.info
+    [Tray] Created
+
+      at TrayManager.create (electron/tray/TrayManager.js:58:17)
+
+  console.info
+    [Tray] Destroyed
+
+      at TrayManager.destroy (electron/tray/TrayManager.js:125:17)
+
+  console.info
+    [Tray] Created
+
+      at TrayManager.create (electron/tray/TrayManager.js:58:17)
+
+  console.info
+    [Tray] Destroyed
+
+      at TrayManager.destroy (electron/tray/TrayManager.js:125:17)
+
+  console.info
+    [Tray] Created
+
+      at TrayManager.create (electron/tray/TrayManager.js:58:17)
+
+  console.info
+    [Tray] Destroyed
+
+      at TrayManager.destroy (electron/tray/TrayManager.js:125:17)
+
+  console.info
+    [Tray] Destroyed
+
+      at TrayManager.destroy (electron/tray/TrayManager.js:125:17)
+
+  console.info
+    [Tray] Created
+
+      at TrayManager.create (electron/tray/TrayManager.js:58:17)
+
+  console.info
+    [Tray] Destroyed
+
+      at TrayManager.destroy (electron/tray/TrayManager.js:125:17)
+
+  console.info
+    [Tray] Destroyed
+
+      at TrayManager.destroy (electron/tray/TrayManager.js:125:17)
+
+  console.info
+    [Tray] Destroyed
+
+      at TrayManager.destroy (electron/tray/TrayManager.js:125:17)
+
+  console.info
+    [Tray] Destroyed
+
+      at TrayManager.destroy (electron/tray/TrayManager.js:125:17)
+

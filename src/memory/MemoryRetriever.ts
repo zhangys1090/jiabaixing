@@ -12,10 +12,10 @@
 
 import Logger from '../utils/Logger';
 import { ChineseTokenizer } from './ChineseTokenizer';
+import { MemoryDatabase } from './Database';
+import { LongTermMemory } from './LongTermMemory';
 import { MemoryItem, MemoryTier } from './MemoryEngine';
 import { ShortTermMemory } from './ShortTermMemory';
-import { LongTermMemory } from './LongTermMemory';
-import { MemoryDatabase } from './Database';
 
 /** 记忆存储接口（支持获取所有记忆项） */
 interface MemoryStoreWithGetAll {
@@ -731,10 +731,10 @@ export class MemoryRetriever {
 
       return results.map((record) => ({
         id: `fts5_${record.id}`,
-        type: record.type as any,
+        type: record.type as import('./MemoryEngine').MemoryType,
         content: record.content,
         timestamp: new Date(record.timestamp),
-        relevanceScore: 1 - (record.rank || 0) / 1000, // FTS5 rank是越小越好
+        relevanceScore: 1 - (record.rank || 0) / 1000,
         keywordScore: 1 - (record.rank || 0) / 1000,
       }));
     } catch {

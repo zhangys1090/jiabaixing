@@ -4,7 +4,7 @@
  * 专注于文本对话和工具调用，不含模型选择/降级逻辑
  */
 
-import { getPromptTemplate } from '../llm/prompt-templates';
+import { getPromptTemplate } from './prompt-templates';
 import { injectPreferences } from '../memory/PreferenceInjector';
 import { Logger } from '../utils/Logger';
 import { LLMResponseCache } from './LLMResponseCache';

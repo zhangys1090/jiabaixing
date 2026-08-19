@@ -10,6 +10,7 @@ from typing import Any
 
 from agent.config import DATA_DIR
 from agent.persistence.database import get_sync_connection
+from agent.core.logger import log_ignored
 
 
 @dataclass
@@ -126,6 +127,20 @@ class PromptCacheStore:
         r2 = self._conn.execute("DELETE FROM prefix_cache WHERE created_at + ttl_ms < ?", (now,)).rowcount
         self._conn.commit()
         return r1 + r2
+
+    def clear(self) -> int:
+        """清空全部 prompt 缓存条目（不区分是否过期）。
+
+        W3（审计 §1.8）：此前只有 ``cleanup_expired``（仅清过期），
+        缺少"立即全清"入口，导致 ``DELETE /v1/llm/cache`` 无法真正生效。
+
+        Returns:
+            int: 被删除的条目总数。
+        """
+        r1 = self._conn.execute("DELETE FROM exact_cache").rowcount
+        r2 = self._conn.execute("DELETE FROM prefix_cache").rowcount
+        self._conn.commit()
+        return max(r1, 0) + max(r2, 0)
 
     def close(self) -> None:
         self._conn.close()
@@ -292,6 +307,20 @@ class PromptCacheManager:
     def cleanup(self) -> int:
         return self._store.cleanup_expired()
 
+    def invalidate_all(self) -> int:
+        """清空全部 prompt 缓存并重置会话命中计数。
+
+        Returns:
+            int: 被删除的缓存条目总数。
+        """
+        removed = self._store.clear()
+        self._session_hits = 0
+        self._session_misses = 0
+        self._exact_hits = 0
+        self._prefix_hits = 0
+        self._semantic_hits = 0
+        return removed
+
     def close(self) -> None:
         self._store.close()
 
@@ -301,8 +330,8 @@ class PromptCacheManager:
             parsed = json.loads(raw)
             if isinstance(parsed, dict) and "response" in parsed:
                 return parsed["response"]
-        except (json.JSONDecodeError, TypeError):
-            pass
+        except (json.JSONDecodeError, TypeError) as _exc:
+            log_ignored(None, "prompt_cache.PromptCacheManager._parse_cache_value", _exc)
         return raw
 
     @staticmethod

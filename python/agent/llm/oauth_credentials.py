@@ -26,6 +26,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Callable
+from agent.core.logger import log_ignored
 
 # ── 通用 OAuth2 配置 ──
 
@@ -176,8 +177,8 @@ def _normalize_token(token: dict[str, Any]) -> dict[str, Any]:
     if "expires_in" in token and "expires_at" not in token:
         try:
             token["expires_at"] = time.time() + float(token["expires_in"])
-        except (TypeError, ValueError):
-            pass
+        except (TypeError, ValueError) as _exc:
+            log_ignored(None, "oauth_credentials._normalize_token", _exc)
     return token
 
 
@@ -195,8 +196,8 @@ class OAuthTokenStore:
         )
         try:
             os.makedirs(self.directory, exist_ok=True)
-        except OSError:
-            pass
+        except OSError as _exc:
+            log_ignored(None, "oauth_credentials.OAuthTokenStore.__init__", _exc)
 
     def _path(self, provider: str) -> str:
         return os.path.join(self.directory, f"{provider}.json")
@@ -209,8 +210,8 @@ class OAuthTokenStore:
         os.replace(tmp, path)
         try:
             os.chmod(path, 0o600)
-        except OSError:
-            pass
+        except OSError as _exc:
+            log_ignored(None, "oauth_credentials.OAuthTokenStore.save", _exc)
 
     def load(self, provider: str) -> dict[str, Any] | None:
         path = self._path(provider)

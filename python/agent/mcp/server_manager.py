@@ -6,7 +6,9 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from agent.config import DATA_ROOT
 from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
 from agent.mcp.logging import MCPLoggingManager
 from agent.mcp.progress import MCPProgressManager
 from agent.mcp.sampling import MCPSamplingManager
@@ -19,7 +21,7 @@ from agent.mcp.transport import (
 
 log = StructuredLogger("mcp.manager")
 
-MCP_CONFIG_PATH = os.path.join(os.getcwd(), "data", "mcp-servers.json")
+MCP_CONFIG_PATH = str(DATA_ROOT / "mcp-servers.json")
 
 REQUEST_TIMEOUT: float = 30.0
 MAX_OUTPUT_BUFFER: int = 512 * 1024
@@ -124,8 +126,8 @@ class MCPServerManager:
         for handler in self._event_handlers.get(event, []):
             try:
                 handler(data)
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(log, "server_manager.MCPServerManager._emit", _exc)
 
     def _initialize_default_servers(self) -> None:
         self.register_server(MCPServerConfig(
@@ -364,8 +366,8 @@ class MCPServerManager:
             code = await server_proc.process.wait()
             log.warning(f"MCP服务器进程退出: {name} (code={code})")
             self._cleanup_server(name, server_proc)
-        except Exception:
-            pass
+        except Exception as _exc:
+            log_ignored(log, "server_manager.MCPServerManager._monitor_exit", _exc)
 
     def _handle_server_output(
         self, name: str, server_proc: MCPServerProcess, chunk: str
@@ -402,8 +404,8 @@ class MCPServerManager:
                     if handler:
                         handler(message)
                     self._emit("message", {"serverName": name, "message": message})
-            except json.JSONDecodeError:
-                pass
+            except json.JSONDecodeError as _exc:
+                log_ignored(log, "server_manager.MCPServerManager._handle_server_output", _exc)
 
     def _schedule_dispatch(self, name: str, message: dict) -> None:
         """将内建 MCP 原语方法分发调度到事件循环.
@@ -982,8 +984,8 @@ class MCPServerManager:
                         headers=cfg.get("headers"),
                     )
             log.info(f"从文件加载了 {len(configs)} 个 MCP 服务器配置")
-        except FileNotFoundError:
-            pass
+        except FileNotFoundError as _exc:
+            log_ignored(log, "server_manager.MCPServerManager._load_config_from_file", _exc)
         except Exception as e:
             log.warning(f"加载 MCP 配置文件失败: {e}")
 

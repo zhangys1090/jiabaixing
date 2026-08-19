@@ -314,6 +314,7 @@ class TestCostGuardEnhanced:
         assert "claude-3.5-sonnet" in models
         assert "gemini-pro" in models
         assert "deepseek-chat" in models
+        assert "deepseek-v4-flash" in models
 
     def test_gemini_pricing(self):
         guard = CostGuard()

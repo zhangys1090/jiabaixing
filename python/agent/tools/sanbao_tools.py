@@ -1,4 +1,4 @@
-﻿"""Sanbao AGI 工具集 — 群论驱动的0-token推理引擎
+"""Sanbao AGI 工具集 — 群论驱动的0-token推理引擎
 
 在家百星工具系统中注册Sanbao的认知能力。
 Sanbao作为家百星的"群论大脑"，替代特定场景下LLM的token消耗。

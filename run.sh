@@ -57,11 +57,47 @@ cleanup() {
   # 清理 node 进程
   pkill -f "ts-node.*main.ts" 2>/dev/null || true
   pkill -f "react-scripts" 2>/dev/null || true
+  # 清理 Python Agent 后端
+  if [ -f "$SCRIPT_DIR/.python_pid" ]; then
+    kill "$(cat "$SCRIPT_DIR/.python_pid")" 2>/dev/null || true
+  fi
   echo -e "${GREEN}✅ 已关闭${NC}"
   exit 0
 }
 
 trap cleanup SIGINT SIGTERM
+
+# 启动 Python Agent 后端（V5.0 真后端，best-effort，非致命）
+start_python_backend() {
+  local PY_DIR="$SCRIPT_DIR/python"
+  local PY_VENV="$SCRIPT_DIR/.venv/Scripts/python.exe"
+  [ -f "$PY_VENV" ] || PY_VENV="$SCRIPT_DIR/.venv/bin/python"
+  if [ ! -f "$PY_VENV" ]; then
+    echo -e "${YELLOW}⚠️  未找到 Python 虚拟环境 (.venv)，将仅使用 TS 本地实现（已废弃）${NC}"
+    return 0
+  fi
+  if [ ! -d "$PY_DIR" ]; then
+    echo -e "${YELLOW}⚠️  未找到 python/ 目录，跳过 Python 后端启动${NC}"
+    return 0
+  fi
+  echo -e "  ${CYAN}▶${NC} 启动 Python Agent 后端 (端口 3112)..."
+  ( cd "$PY_DIR" && "$PY_VENV" -m uvicorn agent.main:app --host 127.0.0.1 --port 3112 > "$SCRIPT_DIR/logs/python_backend.log" 2>&1 & )
+  echo $! > "$SCRIPT_DIR/.python_pid"
+  # 等待 Python 后端就绪（最多 40s），确保 TS 网关能成功桥接
+  local ok=0
+  for i in $(seq 1 40); do
+    if curl -s "http://127.0.0.1:3112/health" >/dev/null 2>&1; then
+      ok=1
+      break
+    fi
+    sleep 1
+  done
+  if [ "$ok" -eq 1 ]; then
+    echo -e "  ${GREEN}✅${NC} Python Agent 后端就绪 (3112)"
+  else
+    echo -e "${YELLOW}⚠️  Python Agent 后端启动超时，TS 网关将降级到本地实现${NC}"
+  fi
+}
 
 # Banner
 echo ""
@@ -127,6 +163,8 @@ echo ""
 
 # 启动后端
 export PORT=$PORT
+# 启动 Python Agent 后端（V5.0 真后端，best-effort）
+start_python_backend
 echo -e "  ${GREEN}▶${NC} 启动后端服务 (端口 ${PORT})..."
 npx tsx --env-file=.env src/main.ts &
 BACKEND_PID=$!

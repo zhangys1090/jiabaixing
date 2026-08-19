@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
 from agent.llm.provider import LLMProvider
 from agent.loop.reflection_knowledge_base import (
     ExperienceType,
@@ -188,6 +189,9 @@ class ReflectionEngine:
                 self._logger.warning("Failed to initialize knowledge base", error=str(e))
                 self._kb = None
 
+        # 情景记忆存储（可选，由 engine.py 注入）
+        self._episodic_store: Any = None
+
     @otel_trace("loop.reflection")
     async def reflect(
         self,
@@ -203,8 +207,8 @@ class ReflectionEngine:
         # OTel span 属性：反思类型
         try:
             _otel_trace_api.get_current_span().set_attribute("reflection_type", "failure")
-        except Exception:
-            pass
+        except Exception as _exc:
+            log_ignored(None, "reflection.ReflectionEngine.reflect", _exc)
 
         prompt = self._build_reflect_prompt(tool_name, args, error, ctx, similar)
         try:
@@ -221,8 +225,8 @@ class ReflectionEngine:
                 # OTel span 属性：反思成功
                 try:
                     _otel_trace_api.get_current_span().set_attribute("success", True)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    log_ignored(None, "reflection.ReflectionEngine.reflect", _exc)
                 return ReflectionResult(
                     root_cause=parsed.get("rootCause", f"{tool_name} 执行失败"),
                     corrected_args=parsed.get("correctedArgs"),
@@ -230,13 +234,27 @@ class ReflectionEngine:
                     should_retry=parsed.get("shouldRetry", True),
                 )
 
+            # 存储失败反思到情景记忆
+            if self._episodic_store:
+                try:
+                    self._episodic_store.store(
+                        content=f"失败反思: {tool_name} → {error[:100]}",
+                        scene="work",
+                        emotion="sad",
+                        importance=6.0,
+                        tags=["reflection_failure", tool_name],
+                        metadata={"tool_name": tool_name, "error": error[:200]},
+                    )
+                except Exception as _exc:
+                    log_ignored(None, "reflection.ReflectionEngine.reflect", _exc)
+
             return self._fallback_reflect(tool_name, error)
         except Exception:
             # OTel span 属性：反思失败
             try:
                 _otel_trace_api.get_current_span().set_attribute("success", False)
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(None, "reflection.ReflectionEngine.reflect", _exc)
             return self._fallback_reflect(tool_name, error)
 
     @otel_trace("loop.reflection")
@@ -259,8 +277,8 @@ class ReflectionEngine:
         # OTel span 属性：反思类型
         try:
             _otel_trace_api.get_current_span().set_attribute("reflection_type", "deep")
-        except Exception:
-            pass
+        except Exception as _exc:
+            log_ignored(None, "reflection.ReflectionEngine.deep_reflect", _exc)
 
         try:
             response = await self.llm.chat(
@@ -275,8 +293,8 @@ class ReflectionEngine:
                 # OTel span 属性：深度反思成功
                 try:
                     _otel_trace_api.get_current_span().set_attribute("success", True)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    log_ignored(None, "reflection.ReflectionEngine.deep_reflect", _exc)
                 return DeepReflectionResult(
                     diagnosis=parsed.get("diagnosis", "未知诊断"),
                     root_cause=parsed.get("rootCause", "未知"),
@@ -289,8 +307,8 @@ class ReflectionEngine:
             # OTel span 属性：深度反思失败
             try:
                 _otel_trace_api.get_current_span().set_attribute("success", False)
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(None, "reflection.ReflectionEngine.deep_reflect", _exc)
             return self._fallback_deep_reflect(trajectory, eval_result)
 
     async def reflect_on_task_failure(
@@ -356,6 +374,20 @@ class ReflectionEngine:
 
         # 记录成功经验到知识库
         self._record_success_experience(tool_name, args, result, pattern, insight)
+
+        # 存储成功反思到情景记忆
+        if self._episodic_store:
+            try:
+                self._episodic_store.store(
+                    content=f"成功经验: {tool_name} → {insight[:100]}",
+                    scene="work",
+                    emotion="happy",
+                    importance=7.0,
+                    tags=["reflection_success", tool_name],
+                    metadata={"tool_name": tool_name, "pattern": pattern, "tips_count": len(tips)},
+                )
+            except Exception as _exc:
+                log_ignored(None, "reflection.ReflectionEngine.reflect_on_success", _exc)
 
         return SuccessReflectionResult(
             success_pattern=pattern,

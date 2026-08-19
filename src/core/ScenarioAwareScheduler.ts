@@ -344,9 +344,19 @@ export class ScenarioAwareScheduler {
       '🚀 调度器启动（含环境感知+Git感知+文件监听）',
       'ScenarioAwareScheduler'
     );
-    void this.checkAndExecuteTasks();
+    this.checkAndExecuteTasks().catch((err) =>
+      Logger.warn(
+        `调度任务执行异常: ${(err as Error)?.message ?? String(err)}`,
+        'ScenarioAwareScheduler'
+      )
+    );
     this.checkInterval = setInterval(() => {
-      void this.checkAndExecuteTasks();
+      this.checkAndExecuteTasks().catch((err) =>
+        Logger.warn(
+          `调度任务执行异常: ${(err as Error)?.message ?? String(err)}`,
+          'ScenarioAwareScheduler'
+        )
+      );
     }, this.CHECK_INTERVAL_MS);
     this.startFileWatching();
     EventBus.emit('scheduler_started', { timestamp: new Date().toISOString() });
@@ -1240,7 +1250,14 @@ export class ScenarioAwareScheduler {
 
     const timer = setTimeout(() => {
       this.fileDebounceMap.delete(filePath);
-      void this.handleFileChange(filePath, changeType);
+      this.handleFileChange(filePath, changeType).catch((err) =>
+        Logger.warn(
+          `文件变更处理异常: ${filePath} -> ${
+            (err as Error)?.message ?? String(err)
+          }`,
+          'ScenarioAwareScheduler'
+        )
+      );
     }, this.FILE_DEBOUNCE_MS);
 
     this.fileDebounceMap.set(filePath, { timer, changeType });

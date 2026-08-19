@@ -59,6 +59,8 @@ class SignalType(str):
     KNOWLEDGE_ACQUISITION = "knowledge_acquisition"
     SKILL_IMPROVEMENT = "skill_improvement"
     PATTERN_RECOGNITION = "pattern_recognition"
+    # 闭环信号（U1 × U3）：感知→行动→验证 命中率，作为进化适应度反馈
+    PERCEPTION_ACTION_HIT_RATE = "perception_action_hit_rate"
 
 
 class SignalSource(str):

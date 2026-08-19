@@ -1,22 +1,23 @@
 /**
  * 代码审查工具 — 多维度代码审查
  *
- * 从 Agent Code Review Automation 学到：
- * - 四层审查：语法 → 逻辑 → 安全 → 性能
- * - 集成 SecurityAuditor 做安全扫描
- * - LLM 做逻辑审查
+ * 实际能力（如实描述，避免夸大）：
+ * - 规则检查(质量/风格)：console.log / any / 空 catch / 文件过长
+ * - 安全模式扫描：硬编码密钥 / SQL 注入 / eval / innerHTML / 原型链污染 / document.write
+ * - 可选 LLM 逻辑审查（超 10000 字符自动跳过；失败如实记录）
  * - 返回结构化审查报告
  */
 
-import type { ToolContext, ToolDefinition, ToolResult } from '../../types';
-import { Permission, ToolCategory } from '../../types';
 import * as fs from 'fs';
 import * as path from 'path';
+import type { ToolContext, ToolDefinition, ToolResult } from '../../types';
+import { Permission, ToolCategory } from '../../types';
+import { Logger } from '../../../utils/Logger';
 
 export const CODE_REVIEW_DEF: ToolDefinition = {
   name: 'code_review',
   description:
-    '审查代码文件，从语法、逻辑、安全、性能四个维度分析问题。USE WHEN: 用户要求代码审查、找bug、安全检查、代码质量分析。DO NOT USE WHEN: 用户要修改代码（用code_fix）或生成新代码（用code_generate）。返回结构化审查报告。',
+    '审查代码文件，从规则检查(质量/风格)、安全模式扫描、可选 LLM 逻辑审查三个层面发现问题。USE WHEN: 用户要求代码审查、找bug、安全检查、代码质量分析。DO NOT USE WHEN: 用户要修改代码（用code_fix）或生成新代码（用code_generate）。返回结构化审查报告（注：非真实语法树/性能剖析，仅模式匹配 + 可选 LLM）。',
   category: ToolCategory.CODE,
   parameters: {
     file_path: {
@@ -55,7 +56,7 @@ interface ReviewFinding {
   suggestion: string;
 }
 
-export function createCodeReviewExecutor(deps: CodeReviewDeps) {
+export function createCodeReviewExecutor(deps: CodeReviewDeps = {}) {
   return async (
     params: Record<string, unknown>,
     _context?: ToolContext
@@ -87,12 +88,21 @@ export function createCodeReviewExecutor(deps: CodeReviewDeps) {
 
       // Layer 3: LLM 逻辑审查（如果可用）
       let llmFindings: ReviewFinding[] = [];
+      let llmSkipped = false;
+      let llmFailed = false;
       if (deps.llm && content.length < 10000) {
         try {
           llmFindings = await runLLMReview(deps.llm, content, filePath, focus);
-        } catch {
-          // LLM 审查失败不影响整体
+        } catch (llmErr) {
+          // LLM 审查失败不再静默吞：记录日志并在报告/metadata 中如实呈现
+          llmFailed = true;
+          Logger.warn(
+            `⚠️ code_review LLM 逻辑审查失败，仅返回规则检查+安全扫描: ${(llmErr as Error).message}`,
+            'CodeReview'
+          );
         }
+      } else if (deps.llm && content.length >= 10000) {
+        llmSkipped = true;
       }
 
       // 合并结果
@@ -115,12 +125,21 @@ export function createCodeReviewExecutor(deps: CodeReviewDeps) {
       );
 
       // 格式化输出
-      const output = formatReviewReport(
+      let output = formatReviewReport(
         filePath,
         lines.length,
         allFindings,
         focus
       );
+
+      if (llmSkipped) {
+        output +=
+          '\n\n[LLM审查已跳过: 文件超过10000字符，仅执行规则检查和安全扫描]';
+      }
+      if (llmFailed) {
+        output +=
+          '\n\n[LLM审查失败: 逻辑审查未执行，仅返回规则检查和安全扫描结果]';
+      }
 
       return {
         success: true,
@@ -134,6 +153,8 @@ export function createCodeReviewExecutor(deps: CodeReviewDeps) {
           criticalCount: allFindings.filter((f) => f.severity === 'critical')
             .length,
           highCount: allFindings.filter((f) => f.severity === 'high').length,
+          llmSkipped,
+          llmFailed,
         },
       };
     } catch (err) {
@@ -261,6 +282,54 @@ function runSecurityChecks(content: string, lines: string[]): ReviewFinding[] {
         line: i + 1,
         message: '使用了 eval()，存在代码注入风险',
         suggestion: '避免使用 eval，考虑替代方案',
+      });
+    }
+  }
+
+  // 检查 innerHTML 注入风险
+  for (let i = 0; i < lines.length; i++) {
+    if (
+      lines[i].match(/\.innerHTML\s*[+=]/) &&
+      !lines[i].trim().startsWith('//')
+    ) {
+      findings.push({
+        severity: 'high',
+        category: 'security',
+        line: i + 1,
+        message: '使用 innerHTML 赋值，存在 XSS 注入风险',
+        suggestion: '使用 textContent 或 DOMPurify.sanitize() 替代',
+      });
+    }
+  }
+
+  // 检查 prototype pollution 风险
+  for (let i = 0; i < lines.length; i++) {
+    if (
+      lines[i].match(/__proto__|constructor\s*\[\s*['"]prototype['"]\s*\]/) &&
+      !lines[i].trim().startsWith('//')
+    ) {
+      findings.push({
+        severity: 'high',
+        category: 'security',
+        line: i + 1,
+        message: '可能存在原型链污染风险',
+        suggestion: '避免直接操作 __proto__，使用 Object.create()',
+      });
+    }
+  }
+
+  // 检查 document.write 风险
+  for (let i = 0; i < lines.length; i++) {
+    if (
+      lines[i].match(/document\.write\s*\(/) &&
+      !lines[i].trim().startsWith('//')
+    ) {
+      findings.push({
+        severity: 'medium',
+        category: 'security',
+        line: i + 1,
+        message: '使用 document.write()，存在 XSS 风险且影响性能',
+        suggestion: '使用 DOM API（createElement/appendChild）替代',
       });
     }
   }

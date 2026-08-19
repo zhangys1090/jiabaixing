@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmitOnError": false,
+    "noImplicitAny": false,
+    "strict": false,
+    "outDir": ".p1out",
+    "rootDir": "src"
+  },
+  "include": ["src/harness/action/**/*.ts"]
+}

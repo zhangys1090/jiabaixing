@@ -86,7 +86,10 @@ export class SystemInitState {
 
   private constructor() {}
 
-  /** 获取全局单例 */
+  public static create(): SystemInitState {
+    return new SystemInitState();
+  }
+
   public static getInstance(): SystemInitState {
     if (!SystemInitState._instance) {
       SystemInitState._instance = new SystemInitState();

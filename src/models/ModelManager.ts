@@ -3,14 +3,16 @@
  * 统一使用 MultiModelManager 实现，保持向后兼容
  */
 
+import { getActivePythonBridge } from '../ide/bridgeRegistry';
 import { Logger } from '../utils/Logger';
 import {
-  Model,
-  ModelInput,
-  ModelManagerInterface,
-  ModelOutput,
+    Model,
+    ModelInput,
+    ModelManagerInterface,
+    ModelOutput,
 } from './ModelInterface';
 import { OpenAICompatibleModel } from './OpenAICompatibleModel';
+import { PythonBackedModel } from './PythonBackedModel';
 
 /** 模型配置（原 MultiModelManager 已删除，本地定义） */
 interface ModelConfig {
@@ -31,6 +33,9 @@ interface ModelConfig {
 class MultiModelManager {
   private static instance: MultiModelManager;
   private currentModelName: string = 'default';
+  static create(): MultiModelManager {
+    return new MultiModelManager();
+  }
   static getInstance(): MultiModelManager {
     if (!MultiModelManager.instance) {
       MultiModelManager.instance = new MultiModelManager();
@@ -92,7 +97,7 @@ export class ModelManager implements ModelManagerInterface {
 
     const llmModel = xiaomiApiKey
       ? xiaomiModel
-      : process.env.LLM_MODEL || 'deepseek-chat';
+      : process.env.LLM_MODEL || 'deepseek-v4-flash';
     const baseUrl = xiaomiApiKey
       ? xiaomiBaseUrl
       : process.env.OPENAI_API_BASE || 'http://127.0.0.1:8001/v1';
@@ -111,6 +116,17 @@ export class ModelManager implements ModelManagerInterface {
     };
 
     this.multiModelManager.registerModel(defaultConfig);
+
+    // P2-3 C: AGENT_BACKEND=python 模式下桥壳化 — 经 PythonAgentBridge 委派，
+    // 不再实例化 TS 本地 LLM 客户端（OpenAICompatibleModel）。
+    if (getActivePythonBridge()) {
+      const pythonModel = new PythonBackedModel(llmModel);
+      await pythonModel.initialize();
+      this.models.set('openai_compatible', pythonModel);
+      this.models.set('default', pythonModel);
+      Logger.info('✅ Python 后端模型占位注册成功', 'ModelManager');
+      return;
+    }
 
     const openaiModel = new OpenAICompatibleModel({
       baseUrl: baseUrl,

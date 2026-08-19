@@ -15,6 +15,14 @@ import { getPythonBridge, isPythonBackend } from './bootstrap';
 
 type WSServer = WebSocket.Server;
 
+/** 音频流会话缓冲区（用于 audio_chunk/audio_end 实时语音识别） */
+interface AudioStreamSession {
+  chunks: string[];
+  format: string;
+  startedAt: number;
+}
+const audioStreamBuffers = new Map<string, AudioStreamSession>();
+
 // LRU风格去重缓存（带容量限制）
 class DedupCache {
   private cache: Map<string, number>;
@@ -101,11 +109,16 @@ function isRetryableError(error: Error): boolean {
 // 活跃任务自动清理定时器
 let activeTaskCleanupInterval: NodeJS.Timeout | null = null;
 
+const MAX_WS_CONNECTIONS = 100;
+const HEARTBEAT_INTERVAL_MS = 30_000;
+const HEARTBEAT_TIMEOUT_MS = 10_000;
+
 export function setupWebSocket(
   wss: WSServer | null,
   core: JiabaixingCore | null
 ): void {
-  // 启动活跃任务自动清理定时器
+  if (!wss) return;
+
   if (activeTaskCleanupInterval === null) {
     activeTaskCleanupInterval = setInterval(() => {
       const now = Date.now();
@@ -125,14 +138,43 @@ export function setupWebSocket(
           );
         }
       }
-    }, 60 * 1000); // 每分钟检查一次
+    }, 60 * 1000);
   }
 
-  wss?.on('connection', (ws, req) => {
-    const clientIp = req.socket.remoteAddress || 'unknown';
-    Logger.info(`💖 新客户端连接: ${clientIp}`, 'WebSocket');
+  const heartbeatInterval = setInterval(() => {
+    for (const client of wss.clients) {
+      const ext = client as WebSocket.WebSocket & { isAlive?: boolean };
+      if (!ext.isAlive) {
+        ext.terminate();
+        continue;
+      }
+      ext.isAlive = false;
+      ext.ping();
+    }
+  }, HEARTBEAT_INTERVAL_MS);
 
-    ws.on('message', (message) => {
+  wss.on('close', () => {
+    clearInterval(heartbeatInterval);
+  });
+
+  wss.on('connection', (ws, req) => {
+    if (wss.clients.size > MAX_WS_CONNECTIONS) {
+      Logger.warn(
+        `⚠️ WebSocket 连接数超限 (${wss.clients.size}/${MAX_WS_CONNECTIONS})，拒绝新连接`,
+        'WebSocket'
+      );
+      ws.close(1013, 'Server busy: max connections reached');
+      return;
+    }
+
+    const clientIp = req.socket.remoteAddress || 'unknown';
+    Logger.info(`💖 新客户端连接: ${clientIp} (在线: ${wss.clients.size})`, 'WebSocket');
+
+    const ext = ws as WebSocket.WebSocket & { isAlive?: boolean };
+    ext.isAlive = true;
+    ws.on('pong', () => { ext.isAlive = true; });
+
+    ws.on('message', async (message) => {
       try {
         const data = JSON.parse(message.toString());
 
@@ -321,6 +363,96 @@ export function setupWebSocket(
             'WebSocket'
           );
           void EventBus.emit('automation_trigger_execute', data);
+        } else if (data.type === 'audio_chunk') {
+          // 实时音频流块 — 累积到会话缓冲区
+          try {
+            const sessionId = data.sessionId as string | undefined;
+            const chunk = data.chunk as string | undefined;
+            const format = (data.format as string) || 'webm';
+            if (!chunk) return;
+
+            const sid = sessionId || `audio_${clientIp}_${Date.now()}`;
+            if (!audioStreamBuffers.has(sid)) {
+              audioStreamBuffers.set(sid, {
+                chunks: [],
+                format,
+                startedAt: Date.now(),
+              });
+            }
+            audioStreamBuffers.get(sid)!.chunks.push(chunk);
+          } catch {
+            // 静默处理音频块错误
+          }
+        } else if (data.type === 'audio_end') {
+          // 音频流结束 — 合并缓冲区，送入语音识别
+          try {
+            const sessionId = data.sessionId as string | undefined;
+            const sid = sessionId || '';
+            if (sid && audioStreamBuffers.has(sid)) {
+              const session = audioStreamBuffers.get(sid)!;
+              audioStreamBuffers.delete(sid);
+
+              // 将 base64 音频块合并为 Buffer
+              const audioBuffers: Buffer[] = [];
+              for (const chunk of session.chunks) {
+                audioBuffers.push(Buffer.from(chunk, 'base64'));
+              }
+              const fullAudio = Buffer.concat(audioBuffers);
+
+              // 发送 ASR 识别结果
+              try {
+                const { SpeechRecognizer } =
+                  await import('../multimodal/SpeechRecognizer');
+                const recognizer = new SpeechRecognizer();
+                await recognizer.initialize();
+
+                // SpeechRecognizer 只有 recognize(buffer) 接口
+                const result = await recognizer.recognize(fullAudio);
+
+                if (ws.readyState === 1) {
+                  ws.send(
+                    JSON.stringify({
+                      type: 'asr_result',
+                      data: {
+                        text: result.text,
+                        confidence: result.confidence,
+                        language: result.language || 'zh-CN',
+                        duration: result.duration || 0,
+                        sessionId: sid,
+                      },
+                    })
+                  );
+                }
+
+                // 将识别文本作为用户输入处理
+                if (result.text) {
+                  const traceId = Logger.generateTraceId();
+                  processInputWithRetry(
+                    result.text,
+                    'voice_user',
+                    traceId,
+                    ws,
+                    core,
+                    clientIp
+                  ).catch((err: Error) => {
+                    Logger.error('❌ 语音输入处理失败', err, 'WebSocket');
+                  });
+                }
+              } catch (asrErr) {
+                Logger.error('❌ ASR识别失败', asrErr as Error, 'WebSocket');
+                if (ws.readyState === 1) {
+                  ws.send(
+                    JSON.stringify({
+                      type: 'error',
+                      data: { message: '语音识别失败', sessionId: sid },
+                    })
+                  );
+                }
+              }
+            }
+          } catch (audioErr) {
+            Logger.error('❌ 音频流处理失败', audioErr as Error, 'WebSocket');
+          }
         } else {
           Logger.info(`📨 WebSocket收到未知类型: ${data.type}`, 'WebSocket');
         }
@@ -355,7 +487,7 @@ export function setupWebSocket(
         type: 'connected',
         data: {
           message: '💖 已连接到家百星智能助手',
-          model: process.env.LLM_MODEL || 'deepseek-chat',
+          model: process.env.LLM_MODEL || 'deepseek-v4-flash',
           status: 'running',
           timestamp: new Date().toISOString(),
         },
@@ -490,7 +622,7 @@ async function processInputWithRetry(
   }
 }
 
-async function processInputOnce(
+export async function processInputOnce(
   input: string,
   userId: string,
   traceId: string,
@@ -498,7 +630,8 @@ async function processInputOnce(
   core: JiabaixingCore | null,
   taskHandle: { aborted: boolean; loopController?: { abort(): void } }
 ): Promise<void> {
-  // ── Python 后端路径 ──
+  // WS 通道直接处理聊天消息：转发到 Python 后端并以流式事件回推，
+  // 与 HTTP /api/process 互斥（前端仅在 WS 断开时回退 HTTP），保证单次生成只走一条路径。
   if (isPythonBackend()) {
     const bridge = getPythonBridge()!;
 
@@ -526,11 +659,117 @@ async function processInputOnce(
 
     try {
       Logger.info(
-        `[Python] 开始处理输入 [${traceId}]: "${input.substring(0, 50)}..."`,
+        `[Python] 开始流式处理 [${traceId}]: "${input.substring(0, 50)}..."`,
         'WebSocket'
       );
 
-      const result = await bridge.processInput(input, userId, traceId);
+      const contentBuffer: string[] = [];
+
+      for await (const event of bridge.processInputStream(
+        input,
+        userId,
+        traceId
+      )) {
+        if (taskHandle.aborted || ws.readyState !== 1) break;
+
+        const eventTraceId = event.trace_id || traceId;
+
+        switch (event.type) {
+          case 'stream_start':
+            ws.send(
+              JSON.stringify({
+                type: 'stream_start',
+                data: { traceId: eventTraceId },
+              })
+            );
+            break;
+
+          case 'stream_chunk':
+            if (event.content) {
+              contentBuffer.push(event.content);
+              ws.send(
+                JSON.stringify({
+                  type: 'stream_chunk',
+                  data: { traceId: eventTraceId, chunk: event.content },
+                })
+              );
+            }
+            break;
+
+          case 'stream_done': {
+            const fullText = event.content || contentBuffer.join('');
+            ws.send(
+              JSON.stringify({
+                type: 'stream_done',
+                data: { traceId: eventTraceId, fullText },
+              })
+            );
+            ws.send(
+              JSON.stringify({
+                type: 'response_ready',
+                data: {
+                  response: fullText,
+                  traceId: eventTraceId,
+                  success: true,
+                },
+              })
+            );
+            break;
+          }
+
+          case 'thinking':
+          case 'tool_start':
+          case 'tool_end':
+          case 'progress':
+            ws.send(
+              JSON.stringify({
+                type: event.type,
+                data: {
+                  traceId: eventTraceId,
+                  content: event.content,
+                  toolName: event.tool_name,
+                  toolArgs: event.tool_args,
+                  success: event.success,
+                  resultSummary: event.result_summary,
+                  durationMs: event.duration_ms,
+                  phase: event.phase,
+                  stepsCompleted: event.steps_completed,
+                  stepsTotal: event.steps_total,
+                  message: event.message,
+                },
+              })
+            );
+            break;
+
+          case 'error':
+            ws.send(
+              JSON.stringify({
+                type: 'response_ready',
+                data: {
+                  response: event.content || '处理失败',
+                  traceId: eventTraceId,
+                  success: false,
+                  error: event.raw_error || event.content,
+                },
+              })
+            );
+            break;
+
+          case 'task_cancelled':
+            ws.send(
+              JSON.stringify({
+                type: 'response_ready',
+                data: {
+                  response: event.content || '任务已取消',
+                  traceId: eventTraceId,
+                  success: false,
+                  cancelled: true,
+                },
+              })
+            );
+            break;
+        }
+      }
 
       clearTimeout(timeoutId);
 
@@ -539,19 +778,26 @@ async function processInputOnce(
       const policyEngine = SecurityPolicyEngine.getInstance();
       policyEngine.getCircuitBreaker('llm_processing').recordSuccess();
 
-      if (ws.readyState === 1) {
-        Logger.info(
-          `[Python] 处理完成, traceId: ${result.traceId || traceId}`,
-          'WebSocket'
-        );
-      }
+      Logger.info(`[Python] 流式处理完成, traceId: ${traceId}`, 'WebSocket');
     } catch (error) {
       clearTimeout(timeoutId);
       Logger.error(
-        '[Python] processInputOnce 执行失败',
+        '[Python] processInputOnce 流式执行失败',
         error as Error,
         'WebSocket'
       );
+      if (ws.readyState === 1 && !taskHandle.aborted) {
+        ws.send(
+          JSON.stringify({
+            type: 'response_ready',
+            data: {
+              response: `处理失败: ${(error as Error).message}`,
+              traceId,
+              success: false,
+            },
+          })
+        );
+      }
       throw error;
     }
     return;

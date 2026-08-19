@@ -70,7 +70,7 @@ export function sendConnectedMessage(ws: WebSocket): void {
         type: 'connected',
         data: {
           message: '💖 已连接到家百星智能助手',
-          model: process.env.LLM_MODEL || 'deepseek-chat',
+          model: process.env.LLM_MODEL || 'deepseek-v4-flash',
           status: 'running',
           timestamp: new Date().toISOString(),
         },

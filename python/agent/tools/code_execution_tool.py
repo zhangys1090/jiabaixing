@@ -7,6 +7,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from agent.core.logger import log_ignored
+
 from agent.tools.registry import (
     ToolCategory,
     ToolDefinition,
@@ -218,6 +220,14 @@ CODE_EXECUTION_DEF = ToolDefinition(
 
 _executor_instance = CodeExecutor()
 
+_safety_net: Any | None = None
+
+
+def set_safety_net(safety_net: Any) -> None:
+    """注入 SafetyNet 实例，用于代码执行审计。"""
+    global _safety_net
+    _safety_net = safety_net
+
 
 async def execute_code_executor(params: dict[str, Any]) -> ToolResult:
     """execute_code 工具执行器。
@@ -247,7 +257,29 @@ async def execute_code_executor(params: dict[str, Any]) -> ToolResult:
             duration=time.time() - start,
         )
 
+    if _safety_net:
+        try:
+            _safety_net.record_audit(
+                tool_name="execute_code",
+                params={"code_length": len(code), "timeout": timeout, "language": language},
+                risk_level="high",
+                result="executing",
+            )
+        except Exception as _exc:
+            log_ignored(None, "code_execution_tool.execute_code.audit_executing", _exc)
+
     result = await _executor_instance.execute(code, timeout=timeout)
+
+    if _safety_net:
+        try:
+            _safety_net.record_audit(
+                tool_name="execute_code",
+                params={"code_length": len(code), "timeout": timeout},
+                risk_level="high",
+                result="success" if result.exit_code == 0 else "failed",
+            )
+        except Exception as _exc:
+            log_ignored(None, "code_execution_tool.execute_code.audit_result", _exc)
 
     output_parts: list[str] = []
     if result.stdout:

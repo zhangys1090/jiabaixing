@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
 from agent.lsp.transport import LspTransport
 from agent.lsp.types import (
     BUILTIN_SERVERS,
@@ -188,8 +189,8 @@ class LspClientManager:
         try:
             await managed.transport.send_request("shutdown", None)
             managed.transport.send_notification("exit", None)
-        except Exception:
-            pass
+        except Exception as _exc:
+            log_ignored(log, "client_manager.LspClientManager.disconnect_server", _exc)
 
         await managed.transport.stop()
         self._servers.pop(server_id, None)

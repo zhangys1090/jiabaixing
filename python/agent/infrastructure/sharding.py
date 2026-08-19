@@ -25,6 +25,7 @@ import time
 from typing import Any
 
 from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
 from agent.infrastructure.distributed_lock import create_lock
 
 log = StructuredLogger("sharding")
@@ -138,8 +139,8 @@ class LeaderElection:
                         self._is_leader = False
                         log.warning("丢失 leader 身份，重新竞选", service=self._service)
                 await asyncio.sleep(self._refresh_ms / 1000.0)
-        except asyncio.CancelledError:
-            pass
+        except asyncio.CancelledError as _exc:
+            log_ignored(log, "sharding.LeaderElection._campaign", _exc)
 
     async def _try_acquire(self) -> bool:
         try:
@@ -158,11 +159,11 @@ class LeaderElection:
             self._task.cancel()
             try:
                 await self._task
-            except (asyncio.CancelledError, Exception):
-                pass
+            except (asyncio.CancelledError, Exception) as _exc:
+                log_ignored(log, "sharding.LeaderElection.stop", _exc)
             self._task = None
         try:
             await self._lock.release()
-        except Exception:
-            pass
+        except Exception as _exc:
+            log_ignored(log, "sharding.LeaderElection.stop", _exc)
         self._is_leader = False

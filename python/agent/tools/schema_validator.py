@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
 
 log = StructuredLogger("schema_validator")
 
@@ -142,8 +143,8 @@ class SchemaValidator:
                 try:
                     float(value)
                     return None
-                except ValueError:
-                    pass
+                except ValueError as _exc:
+                    log_ignored(log, "schema_validator.SchemaValidator._validate_type", _exc)
 
             if param_def.type == "boolean" and isinstance(value, str):
                 if value in ("true", "false"):

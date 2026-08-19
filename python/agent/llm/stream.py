@@ -9,6 +9,7 @@ from typing import Any, AsyncIterator, Callable
 import httpx
 
 from agent.llm.transports import BaseTransport
+from agent.core.logger import log_ignored
 
 
 CHUNK_SIZE = 6
@@ -59,8 +60,8 @@ class StreamResponseService:
         for cb in self._callbacks:
             try:
                 cb(event)
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(None, "stream.StreamResponseService._emit", _exc)
 
     async def stream(self, full_text: str, trace_id: str) -> None:
         self._active_streams[trace_id] = True
@@ -305,8 +306,8 @@ async def stream_via_litellm(
                     "input_tokens": int(input_tokens),
                     "output_tokens": int(output_tokens),
                 }
-            except Exception:
-                pass
+            except Exception as _exc:
+                log_ignored(None, "stream.stream_via_litellm", _exc)
         yield data
         if chunk.choices[0].finish_reason:
             data["done"] = True
