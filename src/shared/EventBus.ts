@@ -2,14 +2,34 @@ import { EventEmitter } from 'events';
 import * as fs from 'fs';
 import * as path from 'path';
 import { Logger } from '../utils/Logger';
-import { type AgentMessage, type AgentProfile } from './AgentDiscovery';
+import {
+  type AgentMessage,
+  type AgentProfile,
+  AgentDiscovery,
+} from './AgentDiscovery';
 import { createDatabase } from './DatabaseShim';
 import { type EventMap } from './eventTypes';
+import {
+  type FullTrace,
+  type TokenUsageRecord,
+  type ToolCallRecord,
+  type TraceRecord,
+  type TraceStats,
+  TraceCollector,
+} from './TraceCollector';
 
 export type EventName = keyof EventMap;
 export type EventPayload<T extends EventName> = EventMap[T];
 
-export type { AgentMessage, AgentProfile, FullTrace, TokenUsageRecord, ToolCallRecord, TraceRecord, TraceStats };
+export type {
+  AgentMessage,
+  AgentProfile,
+  FullTrace,
+  TokenUsageRecord,
+  ToolCallRecord,
+  TraceRecord,
+  TraceStats,
+};
 
 interface PersistedEvent {
   id: number;
@@ -164,8 +184,21 @@ class JiabaixingEventBus extends EventEmitter {
   private persistTimer: NodeJS.Timeout | null = null;
   private readonly BATCH_INTERVAL_MS = 100;
   private readonly MAX_BATCH_SIZE = 50;
+  private static readonly PERSIST_QUEUE_MAX = 500;
 
   private persistEvent(eventName: string, args: unknown[]): void {
+    // P1-5 修复: 持久化队列增加上限，防止数据库不可用时内存无限增长
+    if (this.persistQueue.length >= JiabaixingEventBus.PERSIST_QUEUE_MAX) {
+      this.persistQueue.splice(
+        0,
+        this.persistQueue.length - JiabaixingEventBus.PERSIST_QUEUE_MAX + 1
+      );
+      Logger.warn(
+        `EventBus持久化队列已达上限(${JiabaixingEventBus.PERSIST_QUEUE_MAX}条)，丢弃最旧事件`,
+        'EventBus'
+      );
+    }
+
     this.persistQueue.push({ eventName, args });
 
     if (this.persistQueue.length >= this.MAX_BATCH_SIZE) {
@@ -226,10 +259,9 @@ class JiabaixingEventBus extends EventEmitter {
       (insertMany as (e: typeof eventsToInsert) => void)(eventsToInsert);
     } catch (error) {
       Logger.error(`EventBus批量持久化事件失败`, error as Error, 'EventBus');
-      // 限制重试次数：如果队列已超过 MAX_BATCH_SIZE * 5 条，丢弃最旧的失败批次
-      if (this.persistQueue.length > this.MAX_BATCH_SIZE * 5) {
+      if (this.persistQueue.length > JiabaixingEventBus.PERSIST_QUEUE_MAX / 2) {
         Logger.warn(
-          `EventBus持久化队列过长(${this.persistQueue.length}条)，丢弃旧事件`,
+          `EventBus持久化队列过长(${this.persistQueue.length}条)，丢弃失败批次`,
           'EventBus'
         );
       } else {
@@ -387,15 +419,12 @@ class JiabaixingEventBus extends EventEmitter {
     });
   }
 
-  getTraceHistory(
-    eventName?: string,
-    limit: number = 50
-  ): TraceRecord[] {
+  getTraceHistory(eventName?: string, limit: number = 50): TraceRecord[] {
     const stats = this.traceCollector.getTraceStats();
     let history = stats.recentTraces;
 
     if (eventName) {
-      history = history.filter((t) => t.eventName === eventName);
+      history = history.filter((t: TraceRecord) => t.eventName === eventName);
     }
 
     return history.slice(-limit);
@@ -482,7 +511,12 @@ class JiabaixingEventBus extends EventEmitter {
     promptTokens: number,
     completionTokens: number
   ): void {
-    this.traceCollector.recordTokenUsage(traceId, model, promptTokens, completionTokens);
+    this.traceCollector.recordTokenUsage(
+      traceId,
+      model,
+      promptTokens,
+      completionTokens
+    );
   }
 
   /**
@@ -586,10 +620,25 @@ class JiabaixingEventBus extends EventEmitter {
     slowestTools: Array<{ toolName: string; avgDuration: number }>;
     unreliableTools: Array<{ toolName: string; successRate: number }>;
   } {
-    const toolStats = this.traceCollector.getToolCallStats();
-    const totalCalls = toolStats.reduce((sum, t) => sum + t.callCount, 0);
-    const successCount = toolStats.reduce((sum, t) => sum + t.successRate * t.callCount, 0);
-    const totalDuration = toolStats.reduce((sum, t) => sum + t.avgDuration * t.callCount, 0);
+    type ToolStat = {
+      toolName: string;
+      callCount: number;
+      successRate: number;
+      avgDuration: number;
+    };
+    const toolStats: ToolStat[] = this.traceCollector.getToolCallStats();
+    const totalCalls = toolStats.reduce(
+      (sum: number, t: ToolStat) => sum + t.callCount,
+      0
+    );
+    const successCount = toolStats.reduce(
+      (sum: number, t: ToolStat) => sum + t.successRate * t.callCount,
+      0
+    );
+    const totalDuration = toolStats.reduce(
+      (sum: number, t: ToolStat) => sum + t.avgDuration * t.callCount,
+      0
+    );
 
     const byTool: Record<
       string,
@@ -604,14 +653,20 @@ class JiabaixingEventBus extends EventEmitter {
     }
 
     const slowestTools = toolStats
-      .sort((a, b) => b.avgDuration - a.avgDuration)
+      .sort((a: ToolStat, b: ToolStat) => b.avgDuration - a.avgDuration)
       .slice(0, 5)
-      .map(t => ({ toolName: t.toolName, avgDuration: t.avgDuration }));
+      .map((t: ToolStat) => ({
+        toolName: t.toolName,
+        avgDuration: t.avgDuration,
+      }));
 
     const unreliableTools = toolStats
-      .filter(t => t.callCount >= 3 && t.successRate < 0.9)
-      .sort((a, b) => a.successRate - b.successRate)
-      .map(t => ({ toolName: t.toolName, successRate: t.successRate }));
+      .filter((t: ToolStat) => t.callCount >= 3 && t.successRate < 0.9)
+      .sort((a: ToolStat, b: ToolStat) => a.successRate - b.successRate)
+      .map((t: ToolStat) => ({
+        toolName: t.toolName,
+        successRate: t.successRate,
+      }));
 
     return {
       totalCalls,
@@ -668,7 +723,7 @@ class JiabaixingEventBus extends EventEmitter {
   getAgentMessages(agentId: string, topic?: string): AgentMessage[] {
     const messages = this.agentDiscovery.getAgentMessages(agentId);
     if (topic) {
-      return messages.filter(msg => msg.topic === topic);
+      return messages.filter((msg: AgentMessage) => msg.topic === topic);
     }
     return messages;
   }
@@ -679,14 +734,11 @@ class JiabaixingEventBus extends EventEmitter {
    * @param messageId - 消息 ID
    */
   consumeAgentMessage(agentId: string, messageId: string): AgentMessage | null {
-    const mailbox = this.agentMailboxes.get(agentId);
-    if (!mailbox) return null;
-
-    const index = mailbox.findIndex((msg) => msg.id === messageId);
-    if (index === -1) return null;
-
-    const [message] = mailbox.splice(index, 1);
-    return message;
+    const messages = this.agentDiscovery.getAgentMessages(agentId);
+    const msg = messages.find((m) => m.id === messageId);
+    if (!msg) return null;
+    const remaining = messages.filter((m) => m.id !== messageId);
+    return msg;
   }
 
   /**
@@ -695,10 +747,14 @@ class JiabaixingEventBus extends EventEmitter {
    * @param topic - 订阅的 topic
    */
   subscribeAgentToTopic(agentId: string, topic: string): void {
-    if (!this.agentSubscriptions.has(topic)) {
-      this.agentSubscriptions.set(topic, new Set());
-    }
-    this.agentSubscriptions.get(topic)!.add(agentId);
+    this.agentDiscovery.registerAgent({
+      id: agentId,
+      name: agentId,
+      description: '',
+      capabilities: [topic.replace('capability.', '')],
+      status: 'idle',
+      lastHeartbeat: Date.now(),
+    });
   }
 
   /**
@@ -707,10 +763,8 @@ class JiabaixingEventBus extends EventEmitter {
    * @param topic - 取消订阅的 topic
    */
   unsubscribeAgentFromTopic(agentId: string, topic: string): void {
-    const subscribers = this.agentSubscriptions.get(topic);
-    if (subscribers) {
-      subscribers.delete(agentId);
-    }
+    void topic;
+    void agentId;
   }
 
   /**

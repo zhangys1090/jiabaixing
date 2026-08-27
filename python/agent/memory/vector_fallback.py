@@ -23,8 +23,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("vector_fallback")
+
 
 
 def _tokenize(text: str) -> list[str]:
@@ -172,6 +172,7 @@ class VectorSearchFallback:
         self._vectors: dict[str, list[float]] = {}
         self._fitted = False
         self._cache = LRUSearchCache(max_size=cache_max_size, ttl_seconds=cache_ttl_seconds)
+        self._MAX_DOCUMENTS = 50000
 
     @classmethod
     def get_instance(cls) -> VectorSearchFallback:
@@ -200,6 +201,12 @@ class VectorSearchFallback:
             if metadatas and i < len(metadatas):
                 self._metadatas[doc_id] = metadatas[i]
             added += 1
+            if len(self._documents) > self._MAX_DOCUMENTS:
+                oldest_ids = list(self._documents.keys())[: len(self._documents) - (self._MAX_DOCUMENTS * 3 // 4)]
+                for oid in oldest_ids:
+                    self._documents.pop(oid, None)
+                    self._metadatas.pop(oid, None)
+                    self._vectors.pop(oid, None)
 
         if added > 0:
             self._refit()

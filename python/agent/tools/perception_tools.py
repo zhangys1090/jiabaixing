@@ -28,8 +28,8 @@ from agent.tools.registry import (
 
 from agent.core.logger import StructuredLogger
 from agent.core.logger import log_ignored
-
 log = StructuredLogger("perception_tools")
+
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -216,6 +216,7 @@ async def screen_parse_executor(params: dict[str, Any]) -> ToolResult:
         return await _parse_desktop(annotate, start)
 
     except Exception as e:
+        log.debug("perception_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"屏幕解析失败: {e}", duration=time.time() - start)
 
 
@@ -311,6 +312,7 @@ async def _parse_browser(annotate: bool, start: float) -> ToolResult:
             duration=time.time() - start,
         )
     except Exception as e:
+        log.debug("perception_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"浏览器DOM解析失败: {e}", duration=time.time() - start)
 
 
@@ -356,6 +358,7 @@ def _try_macos_a11y() -> list[dict[str, Any]]:
         _walk_macos_a11y(system_wide, elements, depth=0, max_depth=4)
         return elements
     except Exception as _exc:
+        log.debug("perception_tools 异常处理", error=str(_exc))
         log_ignored(log, "perception_tools._try_macos_a11y", _exc)
         return []
 
@@ -411,6 +414,7 @@ def _walk_macos_a11y(element: Any, result: list[dict[str, Any]], depth: int, max
                 _walk_macos_a11y(child, result, depth + 1, max_depth)
 
     except Exception as _exc:
+        log.debug("perception_tools 异常处理", error=str(_exc))
         log_ignored(log, "perception_tools._walk_macos_a11y", _exc)
 
 
@@ -436,6 +440,7 @@ def _try_win32_uia() -> list[dict[str, Any]]:
         _walk_uia_tree(root, elements, depth=0, max_depth=4)
         return elements
     except Exception as _exc:
+        log.debug("perception_tools 异常处理", error=str(_exc))
         log_ignored(log, "perception_tools._try_win32_uia", _exc)
         return []
 
@@ -480,6 +485,7 @@ def _walk_uia_tree(element: Any, result: list[dict[str, Any]], depth: int, max_d
                 _walk_uia_tree(child, result, depth + 1, max_depth)
 
     except Exception as _exc:
+        log.debug("perception_tools 异常处理", error=str(_exc))
         log_ignored(log, "perception_tools._walk_uia_tree", _exc)
 
 
@@ -515,6 +521,7 @@ async def _try_ocr_elements() -> list[dict[str, Any]]:
             return []
 
     except Exception as _exc:
+        log.debug("perception_tools 异常处理", error=str(_exc))
         log_ignored(log, "perception_tools._try_ocr_elements", _exc)
         return []
 
@@ -549,6 +556,7 @@ async def _extract_browser_dom_elements(
         elements = await page.evaluate(js)
         return elements or []
     except Exception as _exc:
+        log.debug("perception_tools 异常处理", error=str(_exc))
         log_ignored(log, "perception_tools._extract_browser_dom_elements", _exc)
         return []
 
@@ -589,6 +597,7 @@ async def _render_set_of_mark(elements: list[dict[str, Any]]) -> str:
         return str(save_path)
 
     except Exception as _exc:
+        log.debug("perception_tools 异常处理", error=str(_exc))
         log_ignored(log, "perception_tools._render_set_of_mark", _exc)
         return ""
 
@@ -673,6 +682,7 @@ async def action_verify_executor(params: dict[str, Any]) -> ToolResult:
         return ToolResult(success=False, error=f"未知验证策略: {strategy}", duration=time.time() - start)
 
     except Exception as e:
+        log.debug("perception_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"操作验证失败: {e}", duration=time.time() - start)
 
 
@@ -737,6 +747,7 @@ async def _verify_by_ocr(pre_path: str, post_path: str, target_region: str = "")
             "summary": "操作验证[OCR]：pytesseract 未安装，无法执行OCR对比。请运行: pip install pytesseract",
         }
     except Exception as e:
+        log.debug("perception_tools 异常处理", error=str(e))
         return {
             "changed": None,
             "method": "ocr",
@@ -806,6 +817,7 @@ async def _verify_by_vlm(pre_path: str, post_path: str, question: str = "") -> d
             "dual_image": False,
         }
     except Exception as e:
+        log.debug("perception_tools 异常处理", error=str(e))
         return {
             "changed": None,
             "method": "vlm",
@@ -862,6 +874,7 @@ def _compute_pixel_diff(pre_path: str, post_path: str, target_region: str = "") 
     except ImportError:
         return _compute_pixel_diff_pure(pre_path, post_path)
     except Exception as _exc:
+        log.debug("perception_tools 异常处理", error=str(_exc))
         log_ignored(log, "perception_tools._compute_pixel_diff_numpy", _exc)
         return 0.5
 
@@ -887,6 +900,7 @@ def _compute_pixel_diff_pure(pre_path: str, post_path: str) -> float:
         return changed / total
 
     except Exception as _exc:
+        log.debug("perception_tools 异常处理", error=str(_exc))
         log_ignored(log, "perception_tools._compute_pixel_diff_pure", _exc)
         return 0.5
 
@@ -966,6 +980,7 @@ async def smart_wait_executor(params: dict[str, Any]) -> ToolResult:
         return ToolResult(success=False, error=f"未知等待模式: {mode}", duration=time.time() - start)
 
     except Exception as e:
+        log.debug("perception_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"智能等待失败: {e}", duration=time.time() - start)
 
 
@@ -984,7 +999,8 @@ async def _wait_for_selector(selector: str, timeout: float, start: float) -> Too
                 output=f"元素 {selector} 已出现（等待了{time.time() - start:.1f}秒，复用已有会话）",
                 duration=time.time() - start,
             )
-        except Exception:
+        except Exception as _exc:
+            log.debug("perception_tools 异常处理", error=str(_exc))
             return ToolResult(
                 success=False,
                 error=f"等待超时（{timeout}秒），元素 {selector} 未出现",
@@ -1006,7 +1022,8 @@ async def _wait_for_selector(selector: str, timeout: float, start: float) -> Too
                     output=f"元素 {selector} 已出现（等待了{time.time() - start:.1f}秒）",
                     duration=time.time() - start,
                 )
-            except Exception:
+            except Exception as _exc:
+                log.debug("perception_tools 异常处理", error=str(_exc))
                 return ToolResult(
                     success=False,
                     error=f"等待超时（{timeout}秒），元素 {selector} 未出现",
@@ -1033,6 +1050,7 @@ async def _get_active_browser_page() -> Any | None:
             page = await browser._get_or_create_page(first_session_id)
             return page
     except Exception as _exc:
+        log.debug("perception_tools 异常处理", error=str(_exc))
         log_ignored(log, "perception_tools._get_active_browser_page", _exc)
 
     try:
@@ -1041,6 +1059,7 @@ async def _get_active_browser_page() -> Any | None:
         if active and hasattr(active, 'page'):
             return active.page
     except Exception as _exc:
+        log.debug("perception_tools 异常处理", error=str(_exc))
         log_ignored(log, "perception_tools._get_active_browser_page", _exc)
 
     return None
@@ -1157,6 +1176,7 @@ async def speech_transcribe_executor(params: dict[str, Any]) -> ToolResult:
         )
 
     except Exception as e:
+        log.debug("perception_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"语音识别失败: {e}", duration=time.time() - start)
 
 
@@ -1240,6 +1260,7 @@ async def perception_fuse_executor(params: dict[str, Any]) -> ToolResult:
             },
         )
     except Exception as e:
+        log.debug("perception_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"感知融合失败: {e}", duration=time.time() - start)
 
 
@@ -1294,4 +1315,5 @@ async def environment_sense_executor(params: dict[str, Any]) -> ToolResult:
             metadata={"device_count": len(devices)},
         )
     except Exception as e:
+        log.debug("perception_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"环境感查询失败: {e}", duration=time.time() - start)

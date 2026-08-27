@@ -11,8 +11,22 @@ import type { ToolContext, ToolDefinition, ToolResult } from '../../types';
 import { Permission, ToolCategory } from '../../types';
 
 // screenshot-desktop 是 CommonJS 模块，使用动态导入兼容 ESM
-let screenshotDesktop: (options?: { format?: string; screen?: number }) => Promise<Buffer>;
-import('screenshot-desktop').then((mod) => { screenshotDesktop = mod.default || mod; }).catch(() => {});
+let screenshotDesktop: (options?: {
+  format?: string;
+  screen?: number;
+  filename?: string;
+}) => Promise<Buffer>;
+import('screenshot-desktop')
+  .then((mod) => {
+    screenshotDesktop = mod.default || mod;
+  })
+  .catch((err) => {
+    Logger.warn(
+      'desktop_screenshot 动态导入失败，功能将不可用',
+      'DesktopScreenshot',
+      err
+    );
+  });
 
 export const DESKTOP_SCREENSHOT_DEF: ToolDefinition = {
   name: 'desktop_screenshot',

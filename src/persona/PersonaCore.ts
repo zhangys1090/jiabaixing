@@ -332,10 +332,13 @@ ${p.boundaryRules.map((r) => `- ${r}`).join('\n')}`;
       greeting: '当前是问候场景，简短、温暖、不啰嗦。',
       briefing: '当前是汇报场景，条理清晰、重点突出。',
       idle: '当前是空闲场景，保持安静，不主动打扰。',
+      leisure: '当前是休闲场景，语气轻松自然。',
+      driving: '当前用户可能在开车，回复极简，不分散注意力。',
+      meeting: '当前是会议场景，回复简洁专业，不打断节奏。',
     };
 
     return `${toneDescriptions[scene] || toneDescriptions.daily}
-语气参数：温度=${tone.temperature} 正式度=${tone.formality} 简洁度=${1 - tone.verbosity} 主动=${tone.proactive}`;
+语气参数：温度=${tone.temperature} 正式度=${tone.formality} 简洁度=${(1 - tone.verbosity).toFixed(1)} 主动=${tone.proactive}`;
   }
 
   /**

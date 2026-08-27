@@ -398,6 +398,98 @@ try {
 }
 ```
 
+### 3. V6.0 主循环错误处理规范
+
+#### W2: 工具超时控制
+
+所有工具执行必须受超时保护，禁止无超时的 `await`：
+
+```python
+# ✅ 正确 — 声明式超时
+tool_timeout = self._get_tool_timeout(tool_name)
+result = await asyncio.wait_for(
+    self._tool_registry.execute(tool_name, params),
+    timeout=tool_timeout,
+)
+
+# ❌ 错误 — 无超时，工具卡死将阻塞整个对话
+result = await self._tool_registry.execute(tool_name, params)
+```
+
+#### W3: 错误重试分类
+
+使用 `ErrorClassifier` 语义化分类，禁止简单字符串匹配：
+
+```python
+# ✅ 正确 — ErrorClassifier分类
+classified = self._error_classifier.classify(error)
+if not classified.is_retryable:
+    return {"should_retry": False, "reason": classified.category.value}
+
+# ❌ 错误 — 字符串匹配无法区分临时/永久错误
+if "timeout" in error.lower():
+    return {"should_retry": True}
+```
+
+#### W5: CancellationToken检查
+
+长时间运行的循环必须在每次迭代检查取消令牌：
+
+```python
+# ✅ 正确 — 协作式取消
+while not budget.is_exhausted:
+    if cancellation_token is not None and cancellation_token.is_cancelled:
+        finish_reason = "cancelled"
+        break
+    # ... 执行逻辑
+
+# ❌ 错误 — 无法从外部中断
+while not budget.is_exhausted:
+    # ... 执行逻辑（无法中断）
+```
+
+#### W6: TraceLog完整记录
+
+所有关键事件必须记录轨迹，禁止静默跳过：
+
+```python
+# ✅ 正确 — 记录LLM请求/响应/错误
+self._trace_log.record(trace_id, session_id, TraceEventType.LLM_CALL, {...})
+self._trace_log.record(trace_id, session_id, TraceEventType.LLM_RESPONSE, {...})
+self._trace_log.record(trace_id, session_id, TraceEventType.ERROR, {...})
+
+# ❌ 错误 — 仅记录3种事件，LLM请求/审批/检查点等缺失
+```
+
+#### W4: 并行工具依赖声明
+
+同轮多工具调用必须声明依赖关系，防止读写冲突：
+
+```python
+# ✅ 正确 — 声明依赖，file_write依赖同路径file_read
+items = [
+    ToolCallItem(id=tc.id, name=tc.name, arguments=params,
+                 depends_on=self._resolve_tool_dependencies(tc, all_calls))
+    for tc in round_calls
+]
+
+# ❌ 错误 — 所有工具depends_on=[]，file_read和file_write可能并行→读写冲突
+items = [ToolCallItem(id=tc.id, name=tc.name, arguments=params) for tc in round_calls]
+```
+
+#### W8: 流式中间结果
+
+run_stream必须发出中间进度事件，用户等待时有反馈：
+
+```python
+# ✅ 正确 — 发出llm_request/tool_progress/checkpoint等中间事件
+yield {"type": "llm_request", "content": "", "metadata": {"round": round_idx + 1}}
+yield {"type": "tool_progress", "content": f"Executing {tc.name}...", "metadata": {...}}
+yield {"type": "checkpoint", "content": "", "metadata": {"round": round_idx + 1}}
+
+# ❌ 错误 — 仅stream_start/stream_done，用户等待时无任何反馈
+```
+
 ---
 
 ## 代码风格规则

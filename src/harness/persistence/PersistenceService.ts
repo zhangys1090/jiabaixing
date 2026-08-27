@@ -542,6 +542,15 @@ export class PersistenceService {
     this.initialized = false;
   }
 
+  /** P1-6 修复: 支持显式资源清理 (Disposable 模式) */
+  [Symbol.dispose](): void {
+    if (this.flushTimer) {
+      clearInterval(this.flushTimer);
+      this.flushTimer = null;
+    }
+    this.initialized = false;
+  }
+
   // ============ 文件持久化 ============
 
   /**

@@ -30,8 +30,8 @@ from agent.tools.constitution_guard import (
     Violation,
 )
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("constitution_learning")
+
 
 
 class LearningSource(str, Enum):

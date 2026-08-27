@@ -6,6 +6,7 @@
  */
 
 import { exec, execSync } from 'child_process';
+import { isShellCommandDangerous } from '../harness/tools/system/shell_exec';
 import { Logger } from '../utils/Logger';
 import { DesktopUIInspector } from './DesktopUIInspector';
 import { DesktopObservation, DesktopVisionEngine } from './DesktopVisionEngine';
@@ -614,6 +615,28 @@ $hwnd = [IntPtr]::new(${window.handle})
     action: DesktopAction
   ): Promise<DesktopActionResult> {
     const command = action.params.command as string;
+
+    if (!command || typeof command !== 'string') {
+      return {
+        success: false,
+        action,
+        error: 'shell 命令不能为空',
+      };
+    }
+
+    const dangerCheck = isShellCommandDangerous(command);
+    if (dangerCheck.blocked) {
+      Logger.warn(
+        `🛡️ Desktop shell 命令被安全策略拦截: ${dangerCheck.reason}`,
+        'DesktopActionExecutor'
+      );
+      return {
+        success: false,
+        action,
+        error: `命令被安全策略拦截: ${dangerCheck.reason}`,
+      };
+    }
+
     try {
       const output = await new Promise<string>((resolve, reject) => {
         exec(

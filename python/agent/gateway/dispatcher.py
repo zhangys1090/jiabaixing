@@ -122,7 +122,7 @@ class MessageDispatcher:
             except RuntimeError as _exc:
                 log_ignored(log, "dispatcher.MessageDispatcher.register_adapter", _exc)
         self._adapters[name] = adapter
-        log.info("适配器已注册", name=name, adapter_type=type(adapter).__name__)
+        log.debug("适配器已注册", name=name, adapter_type=type(adapter).__name__)
 
     def unregister_adapter(self, name: str) -> None:
         """注销平台适配器。
@@ -248,6 +248,7 @@ class MessageDispatcher:
                         try:
                             await adapter.send_message(message.chat_id, result)
                         except Exception as _exc:
+                            log.debug("dispatcher 异常处理", error=str(_exc))
                             log_ignored(log, "dispatcher.MessageDispatcher._consume_adapter", _exc)
                 except Exception as exc:
                     log.error("消费循环处理消息失败", adapter=name, error=str(exc))

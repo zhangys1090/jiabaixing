@@ -127,7 +127,7 @@ class EvolutionTrigger:
 
         self._is_running = True
         self._monitor_task = asyncio.create_task(self._monitor_loop())
-        log.info("EvolutionTrigger started")
+        log.debug("EvolutionTrigger started")
 
     def stop(self) -> None:
         """停止自动进化监听。"""

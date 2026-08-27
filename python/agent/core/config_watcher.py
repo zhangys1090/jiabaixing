@@ -26,6 +26,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 from agent.core.logger import log_ignored
+import logging
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -46,6 +48,7 @@ class ConfigWatcher:
         self._callbacks: list[Callable[[ConfigSnapshot, ConfigSnapshot], None]] = []
         self._lock = threading.Lock()
         self._running = False
+        self._MAX_CALLBACKS = 50
         self._task: asyncio.Task | None = None
         self._version = 0
 
@@ -65,6 +68,8 @@ class ConfigWatcher:
         self._load_env(prefix)
 
     def on_change(self, callback: Callable[[ConfigSnapshot, ConfigSnapshot], None]) -> None:
+        if len(self._callbacks) >= self._MAX_CALLBACKS:
+            self._callbacks = self._callbacks[-(self._MAX_CALLBACKS * 3 // 4):]
         self._callbacks.append(callback)
 
     async def start(self) -> None:
@@ -89,6 +94,7 @@ class ConfigWatcher:
             try:
                 self._check_changes()
             except Exception as _exc:
+                logger.warning("config_watcher 异常处理", error=str(_exc))
                 log_ignored(None, "config_watcher.ConfigWatcher._poll_loop", _exc)
 
     def _check_changes(self) -> None:
@@ -129,6 +135,7 @@ class ConfigWatcher:
             if len(self._history) > 50:
                 self._history = self._history[-30:]
         except Exception as _exc:
+            logger.warning("config_watcher 异常处理", error=str(_exc))
             log_ignored(None, "config_watcher.ConfigWatcher._load_file", _exc)
 
     def _load_env(self, prefix: str) -> None:
@@ -151,6 +158,7 @@ class ConfigWatcher:
             try:
                 cb(old, new)
             except Exception as _exc:
+                logger.warning("config_watcher 异常处理", error=str(_exc))
                 log_ignored(None, "config_watcher.ConfigWatcher._notify", _exc)
 
     @staticmethod

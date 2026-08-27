@@ -22,8 +22,8 @@ from typing import Any
 
 from agent.llm.token_budget_manager import TokenBudgetManager, SessionBudget
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("budget_aware_scheduler")
+
 
 
 class BudgetAction(str, Enum):
@@ -151,6 +151,7 @@ class BudgetAwareScheduler:
         self._sub_agent_allocations: dict[str, int] = {}
         self._sub_agent_consumed: dict[str, int] = {}
         self._max_history = 500
+        self._MAX_SUB_AGENTS = 500
 
     @classmethod
     def get_instance(cls) -> BudgetAwareScheduler:
@@ -288,6 +289,7 @@ class BudgetAwareScheduler:
         self._sub_agent_allocations[request.sub_agent_id] = (
             self._sub_agent_allocations.get(request.sub_agent_id, 0) + allocated
         )
+        self._trim_sub_agents()
 
         return TaskBudgetDecision(
             action=BudgetAction.ALLOW,
@@ -318,6 +320,7 @@ class BudgetAwareScheduler:
         self._sub_agent_allocations[request.sub_agent_id] = (
             self._sub_agent_allocations.get(request.sub_agent_id, 0) + allocated
         )
+        self._trim_sub_agents()
 
         return TaskBudgetDecision(
             action=BudgetAction.DOWNGRADE_MODEL,
@@ -333,3 +336,11 @@ class BudgetAwareScheduler:
             return 500.0
         recent = self._consumption_history[-50:]
         return sum(r.consumed_tokens for r in recent) / len(recent)
+
+    def _trim_sub_agents(self) -> None:
+        if len(self._sub_agent_allocations) > self._MAX_SUB_AGENTS:
+            sorted_agents = sorted(self._sub_agent_allocations.items(), key=lambda x: x[1])
+            to_remove = sorted_agents[: len(self._sub_agent_allocations) - (self._MAX_SUB_AGENTS * 3 // 4)]
+            for aid, _ in to_remove:
+                self._sub_agent_allocations.pop(aid, None)
+                self._sub_agent_consumed.pop(aid, None)

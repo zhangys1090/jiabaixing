@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass
 from typing import Any
 
@@ -34,7 +35,7 @@ class SLOCollector:
     def __init__(self, max_samples: int = 1000) -> None:
         self._max = max_samples
         self._lock = threading.Lock()
-        self._latencies: list[float] = []
+        self._latencies: deque[float] = deque(maxlen=max_samples)
         self._errors: int = 0
         self._total: int = 0
         self._start = time.time()
@@ -42,8 +43,6 @@ class SLOCollector:
     def record(self, latency_ms: float, is_error: bool = False) -> None:
         """记录一次请求结果。"""
         with self._lock:
-            if len(self._latencies) >= self._max:
-                self._latencies.pop(0)
             self._latencies.append(float(latency_ms))
             self._total += 1
             if is_error:

@@ -20,12 +20,15 @@ from __future__ import annotations
 import os
 import time
 import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
 from agent.config import DATA_ROOT
 from agent.core.logger import log_ignored
+import logging
+logger = logging.getLogger(__name__)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -124,21 +127,21 @@ class DesktopController:
 
     def _check_pillow(self) -> bool:
         try:
-            from PIL import ImageGrab  # noqa: F401
+            from PIL import ImageGrab
             return True
         except ImportError:
             return False
 
     def _check_pyautogui(self) -> bool:
         try:
-            import pyautogui  # noqa: F401
+            import pyautogui
             return True
         except ImportError:
             return False
 
     def _check_pywin32(self) -> bool:
         try:
-            import win32gui  # noqa: F401
+            import win32gui
             return True
         except ImportError:
             return False
@@ -158,6 +161,102 @@ class DesktopController:
             self._win32gui = win32gui
             self._win32con = win32con
         return self._win32gui, self._win32con
+
+    # ─────────────────────────────────────────────────────────
+    # D5: Windows 特殊路径解析
+    # ─────────────────────────────────────────────────────────
+
+    @staticmethod
+    def resolve_special_path(name: str) -> str:
+        """解析 Windows 特殊文件夹路径。
+
+        支持的名称（不区分大小写）：
+        - desktop / 桌面
+        - documents / 文档
+        - downloads / 下载
+        - appdata / roaming
+        - local_appdata / localappdata
+        - temp / 临时
+        - home / 用户目录
+        - program_files / program_files_x86
+        - system_root / windows
+
+        Args:
+            name: 特殊文件夹名称
+
+        Returns:
+            解析后的绝对路径，无法解析时返回空字符串
+        """
+        key = name.strip().lower().replace(" ", "_")
+
+        if key in ("home", "用户目录", "userprofile"):
+            return str(Path.home())
+
+        if key in ("desktop", "桌面"):
+            return str(Path.home() / "Desktop")
+
+        if key in ("documents", "文档", "my_documents"):
+            if os.name == "nt":
+                try:
+                    import ctypes
+                    buf = ctypes.create_unicode_buffer(260)
+                    ctypes.windll.shell32.SHGetFolderPathW(0, 5, 0, 0, buf)
+                    return buf.value
+                except Exception:
+                    pass
+            return str(Path.home() / "Documents")
+
+        if key in ("downloads", "下载"):
+            return str(Path.home() / "Downloads")
+
+        if key in ("appdata", "roaming", "应用数据"):
+            val = os.environ.get("APPDATA", "")
+            if val:
+                return val
+            return str(Path.home() / "AppData" / "Roaming")
+
+        if key in ("local_appdata", "localappdata", "本地应用数据"):
+            val = os.environ.get("LOCALAPPDATA", "")
+            if val:
+                return val
+            return str(Path.home() / "AppData" / "Local")
+
+        if key in ("temp", "临时", "tmp"):
+            return tempfile.gettempdir()
+
+        if key in ("program_files", "程序文件"):
+            val = os.environ.get("ProgramFiles", "")
+            return val if val else r"C:\Program Files"
+
+        if key in ("program_files_x86", "程序文件x86"):
+            val = os.environ.get("ProgramFiles(x86)", "")
+            return val if val else r"C:\Program Files (x86)"
+
+        if key in ("system_root", "windows", "系统目录"):
+            val = os.environ.get("SystemRoot", "")
+            return val if val else r"C:\Windows"
+
+        return ""
+
+    @staticmethod
+    def expand_path(path: str) -> str:
+        """扩展路径中的环境变量和特殊标记。
+
+        支持：
+        - %VAR% Windows 环境变量
+        - ~ 用户主目录
+        - $VAR Unix 环境变量
+
+        Args:
+            path: 可能包含特殊标记的路径
+
+        Returns:
+            展开后的绝对路径
+        """
+        if not path:
+            return ""
+        result = os.path.expandvars(os.path.expanduser(path))
+        return result
 
     @property
     def capabilities(self) -> dict[str, bool]:
@@ -199,6 +298,7 @@ class DesktopController:
                     duration=time.time() - start,
                 )
         except Exception as e:
+            logger.warning("desktop_controller 异常处理", error=str(e))
             return ActionResult(
                 success=False,
                 action="click",
@@ -230,6 +330,7 @@ class DesktopController:
                     duration=time.time() - start,
                 )
         except Exception as e:
+            logger.warning("desktop_controller 异常处理", error=str(e))
             return ActionResult(
                 success=False,
                 action="right_click",
@@ -261,6 +362,7 @@ class DesktopController:
                     duration=time.time() - start,
                 )
         except Exception as e:
+            logger.warning("desktop_controller 异常处理", error=str(e))
             return ActionResult(
                 success=False,
                 action="double_click",
@@ -289,6 +391,7 @@ class DesktopController:
                     duration=time.time() - start,
                 )
         except Exception as e:
+            logger.warning("desktop_controller 异常处理", error=str(e))
             return ActionResult(
                 success=False,
                 action="move_mouse",
@@ -318,6 +421,7 @@ class DesktopController:
                     duration=time.time() - start,
                 )
         except Exception as e:
+            logger.warning("desktop_controller 异常处理", error=str(e))
             return ActionResult(
                 success=False,
                 action="drag",
@@ -346,6 +450,7 @@ class DesktopController:
                     duration=time.time() - start,
                 )
         except Exception as e:
+            logger.warning("desktop_controller 异常处理", error=str(e))
             return ActionResult(
                 success=False,
                 action="scroll",
@@ -365,31 +470,89 @@ class DesktopController:
     # 键盘操作
     # ─────────────────────────────────────────────────────────
 
-    def type_text(self, text: str, interval: float = 0.0) -> ActionResult:
-        """输入文字"""
+    def type_text(self, text: str, interval: float = 0.0, use_clipboard: bool | None = None) -> ActionResult:
+        """输入文字。
+
+        D3: 中文输入法兼容 — pyautogui.write() 仅支持ASCII，
+        含非ASCII字符时自动切换为剪贴板粘贴策略（Ctrl+V），
+        避免中文输入法下的乱码问题。
+
+        Args:
+            text: 待输入文字。
+            interval: 按键间隔（仅ASCII模式有效）。
+            use_clipboard: 强制使用剪贴板模式。None=自动检测。
+        """
         start = time.time()
         try:
+            has_non_ascii = any(ord(c) > 127 for c in text)
+            should_use_clipboard = use_clipboard if use_clipboard is not None else has_non_ascii
+
+            if should_use_clipboard:
+                return self._type_via_clipboard(text)
+
             if self._has_pyautogui:
                 pg = self._get_pyautogui()
                 pg.write(text, interval=interval)
                 return ActionResult(
                     success=True,
                     action="type_text",
-                    output=f'输入文字: "{text[:50]}{"..." if len(text) > 50 else ""}"',
+                    output=f'输入文字(ascii): "{text[:50]}{"..." if len(text) > 50 else ""}"',
                     duration=time.time() - start,
                 )
             else:
-                return ActionResult(
-                    success=False,
-                    action="type_text",
-                    error="需要 pyautogui 支持键盘操作",
-                    duration=time.time() - start,
-                )
+                return self._type_via_clipboard(text)
         except Exception as e:
+            logger.warning("desktop_controller 异常处理", error=str(e))
             return ActionResult(
                 success=False,
                 action="type_text",
                 error=str(e),
+                duration=time.time() - start,
+            )
+
+    def _type_via_clipboard(self, text: str) -> ActionResult:
+        """D3: 通过剪贴板粘贴输入文字（支持中文等非ASCII字符）。"""
+        start = time.time()
+        try:
+            saved_clipboard = ""
+            try:
+                saved_clipboard = self.read_clipboard()
+            except Exception:
+                pass
+
+            self.write_clipboard(text)
+
+            if self._has_pyautogui:
+                pg = self._get_pyautogui()
+                if self._is_windows:
+                    pg.hotkey("ctrl", "v")
+                else:
+                    pg.hotkey("command", "v")
+                time.sleep(0.1)
+            elif self._is_windows:
+                import ctypes
+                ctypes.windll.user32.keybd_event(0x11, 0, 0, 0)
+                ctypes.windll.user32.keybd_event(0x56, 0, 0, 0)
+                ctypes.windll.user32.keybd_event(0x56, 0, 2, 0)
+                ctypes.windll.user32.keybd_event(0x11, 0, 2, 0)
+                time.sleep(0.1)
+
+            try:
+                self.write_clipboard(saved_clipboard)
+            except Exception:
+                pass
+
+            return ActionResult(
+                success=True,
+                action="type_text",
+                output=f'输入文字(clipboard): "{text[:50]}{"..." if len(text) > 50 else ""}"',
+                duration=time.time() - start,
+            )
+        except Exception as e:
+            return ActionResult(
+                success=False,
+                action="type_text",
+                error=f"剪贴板输入失败: {e}",
                 duration=time.time() - start,
             )
 
@@ -414,6 +577,7 @@ class DesktopController:
                     duration=time.time() - start,
                 )
         except Exception as e:
+            logger.warning("desktop_controller 异常处理", error=str(e))
             return ActionResult(
                 success=False,
                 action="press_key",
@@ -442,6 +606,7 @@ class DesktopController:
                     duration=time.time() - start,
                 )
         except Exception as e:
+            logger.warning("desktop_controller 异常处理", error=str(e))
             return ActionResult(
                 success=False,
                 action="key_combo",
@@ -485,6 +650,128 @@ class DesktopController:
                 image_data=image_data,
             )
         except Exception as e:
+            logger.warning("desktop_controller 异常处理", error=str(e))
+            return ScreenshotResult(success=False, error=str(e))
+
+    # ─────────────────────────────────────────────────────────
+    # D11: 多显示器支持
+    # ─────────────────────────────────────────────────────────
+
+    def list_monitors(self) -> list[dict[str, Any]]:
+        """列出所有显示器信息。
+
+        Returns:
+            显示器列表，每个元素包含:
+            - index: 显示器索引（0=主显示器）
+            - x, y: 左上角坐标
+            - width, height: 分辨率
+            - is_primary: 是否为主显示器
+        """
+        monitors: list[dict[str, Any]] = []
+        try:
+            if self._has_pywin32 and self._is_windows:
+                import ctypes
+                user32 = ctypes.windll.user32
+                monitor_count = user32.GetSystemMetrics(80)  # SM_CMONITORS
+                if monitor_count <= 0:
+                    monitor_count = 1
+
+                MONITORENUMPROC = ctypes.WINFUNCTYPE(
+                    ctypes.c_int,
+                    ctypes.c_void_p,
+                    ctypes.c_void_p,
+                    ctypes.POINTER(ctypes.c_rect),
+                    ctypes.c_double,
+                )
+
+                def _callback(hmon, hdc, lprect, lparam):
+                    r = lprect.contents
+                    monitors.append({
+                        "index": len(monitors),
+                        "x": r.left,
+                        "y": r.top,
+                        "width": r.right - r.left,
+                        "height": r.bottom - r.top,
+                        "is_primary": r.left == 0 and r.top == 0,
+                    })
+                    return 1
+
+                user32.EnumDisplayMonitors(None, None, MONITORENUMPROC(_callback), 0)
+            elif self._has_pillow:
+                from PIL import ImageGrab
+                try:
+                    mlist = ImageGrab.grab().size
+                    monitors = [{
+                        "index": 0,
+                        "x": 0,
+                        "y": 0,
+                        "width": mlist[0],
+                        "height": mlist[1],
+                        "is_primary": True,
+                    }]
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.debug("desktop_controller 异常处理", error=str(e))
+
+        if not monitors:
+            monitors = [{
+                "index": 0,
+                "x": 0,
+                "y": 0,
+                "width": 1920,
+                "height": 1080,
+                "is_primary": True,
+            }]
+        return monitors
+
+    def screenshot_monitor(self, monitor_index: int = 0, save: bool = True) -> ScreenshotResult:
+        """截取指定显示器的屏幕。
+
+        Args:
+            monitor_index: 显示器索引（0=主显示器）
+            save: 是否保存到文件
+
+        Returns:
+            ScreenshotResult
+        """
+        try:
+            if not self._has_pillow:
+                return ScreenshotResult(success=False, error="需要 Pillow 支持截图")
+
+            from PIL import ImageGrab
+
+            monitors = self.list_monitors()
+            if monitor_index < 0 or monitor_index >= len(monitors):
+                return ScreenshotResult(success=False, error=f"显示器索引 {monitor_index} 超出范围（共 {len(monitors)} 个）")
+
+            mon = monitors[monitor_index]
+            bbox = (mon["x"], mon["y"], mon["x"] + mon["width"], mon["y"] + mon["height"])
+            img = ImageGrab.grab(bbox)
+            width, height = img.size
+
+            image_path = ""
+            image_data = b""
+
+            if save:
+                timestamp = time.strftime("%Y%m%d_%H%M%S")
+                image_path = str(self._screenshot_dir / f"monitor{monitor_index}_{timestamp}.png")
+                img.save(image_path)
+            else:
+                import io
+                buf = io.BytesIO()
+                img.save(buf, format="PNG")
+                image_data = buf.getvalue()
+
+            return ScreenshotResult(
+                success=True,
+                image_path=image_path,
+                width=width,
+                height=height,
+                image_data=image_data,
+            )
+        except Exception as e:
+            logger.warning("desktop_controller 异常处理", error=str(e))
             return ScreenshotResult(success=False, error=str(e))
 
     def screenshot_region(self, x: int, y: int, width: int, height: int, save: bool = True) -> ScreenshotResult:
@@ -519,6 +806,7 @@ class DesktopController:
                 image_data=image_data,
             )
         except Exception as e:
+            logger.warning("desktop_controller 异常处理", error=str(e))
             return ScreenshotResult(success=False, error=str(e))
 
     def screenshot_window(self, window_title: str, save: bool = True) -> ScreenshotResult:
@@ -536,6 +824,7 @@ class DesktopController:
                 save=save,
             )
         except Exception as e:
+            logger.warning("desktop_controller 异常处理", error=str(e))
             return ScreenshotResult(success=False, error=str(e))
 
     # ─────────────────────────────────────────────────────────
@@ -564,6 +853,7 @@ class DesktopController:
                                 is_minimized=is_minimized,
                             ))
                         except Exception as _exc:
+                            logger.warning("desktop_controller 异常处理", error=str(_exc))
                             log_ignored(None, "desktop_controller.DesktopController.list_windows.enum_callback", _exc)
 
             win32gui.EnumWindows(enum_callback, None)
@@ -598,6 +888,7 @@ class DesktopController:
 
                 user32.EnumWindows(WNDENUMPROC(enum_callback), 0)
             except Exception as _exc:
+                logger.warning("desktop_controller 异常处理", error=str(_exc))
                 log_ignored(None, "desktop_controller.DesktopController.list_windows", _exc)
 
         return windows
@@ -664,6 +955,7 @@ class DesktopController:
                     duration=time.time() - start,
                 )
         except Exception as e:
+            logger.warning("desktop_controller 异常处理", error=str(e))
             return ActionResult(
                 success=False,
                 action="activate_window",
@@ -712,6 +1004,7 @@ class DesktopController:
                     duration=time.time() - start,
                 )
         except Exception as e:
+            logger.warning("desktop_controller 异常处理", error=str(e))
             return ActionResult(
                 success=False,
                 action="close_window",
@@ -760,6 +1053,7 @@ class DesktopController:
                     duration=time.time() - start,
                 )
         except Exception as e:
+            logger.warning("desktop_controller 异常处理", error=str(e))
             return ActionResult(
                 success=False,
                 action="maximize_window",
@@ -808,6 +1102,7 @@ class DesktopController:
                     duration=time.time() - start,
                 )
         except Exception as e:
+            logger.warning("desktop_controller 异常处理", error=str(e))
             return ActionResult(
                 success=False,
                 action="minimize_window",
@@ -847,6 +1142,7 @@ class DesktopController:
                     duration=time.time() - start,
                 )
         except Exception as e:
+            logger.warning("desktop_controller 异常处理", error=str(e))
             return ActionResult(
                 success=False,
                 action="clipboard_read",
@@ -880,6 +1176,7 @@ class DesktopController:
                     duration=time.time() - start,
                 )
         except Exception as e:
+            logger.warning("desktop_controller 异常处理", error=str(e))
             return ActionResult(
                 success=False,
                 action="clipboard_write",
@@ -956,6 +1253,7 @@ class DesktopController:
                 duration=time.time() - start,
             )
         except Exception as e:
+            logger.warning("desktop_controller 异常处理", error=str(e))
             return ActionResult(
                 success=False,
                 action="shell_exec",
@@ -984,6 +1282,7 @@ class DesktopController:
                     duration=time.time() - start,
                 )
         except Exception as e:
+            logger.warning("desktop_controller 异常处理", error=str(e))
             return ActionResult(
                 success=False,
                 action="open_app",

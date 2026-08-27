@@ -3,8 +3,8 @@
  */
 
 import WebSocket from 'ws';
-import { Logger } from '../../../utils/Logger';
 import { EventBus } from '../../../shared/EventBus';
+import { Logger } from '../../../utils/Logger';
 import { WsTaskManager } from '../WsTaskManager';
 
 /**
@@ -17,6 +17,11 @@ export function handleCancelTask(
 ): void {
   if (!traceId) {
     Logger.info('🛑 取消任务缺少 traceId', 'WsHandler');
+    return;
+  }
+
+  if (traceId.length > 256) {
+    Logger.info('🛑 取消任务 traceId 过长', 'WsHandler');
     return;
   }
 

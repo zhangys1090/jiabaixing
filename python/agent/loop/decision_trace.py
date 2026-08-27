@@ -35,8 +35,8 @@ from pathlib import Path
 from typing import Any
 
 from agent.core.logger import StructuredLogger, log_ignored
-
 log = StructuredLogger("decision_trace")
+
 
 
 class DecisionType(str, Enum):
@@ -287,4 +287,5 @@ class DecisionTracer:
             with open(str(path), "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception as e:
+            log.debug("decision_trace 异常处理", error=str(e))
             log_ignored(log, "decision_tracer._persist_trace", e)

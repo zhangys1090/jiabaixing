@@ -7,10 +7,10 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, TypeVar
 
 from agent.core.logger import StructuredLogger
+log = StructuredLogger("resilience")
 
 T = TypeVar("T")
 
-logger = StructuredLogger("resilience")
 
 
 @dataclass
@@ -67,7 +67,7 @@ class CircuitState:
             self.failure_count = 0
             if self.state == "half-open":
                 self.state = "closed"
-                logger.info("Circuit closed", circuit=self.name)
+                log.info("Circuit closed", circuit=self.name)
 
     def record_failure(self) -> None:
         """记录失败调用，达到阈值时切换到 open 状态。
@@ -79,11 +79,11 @@ class CircuitState:
             self.last_failure_time = time.monotonic()
             if self.state == "half-open":
                 self.state = "open"
-                logger.warning("Circuit re-opened from half-open", circuit=self.name, failures=self.failure_count)
+                log.warning("Circuit re-opened from half-open", circuit=self.name, failures=self.failure_count)
             elif self.failure_count >= self.failure_threshold:
                 if self.state != "open":
                     self.state = "open"
-                    logger.warning("Circuit opened", circuit=self.name, failures=self.failure_count)
+                    log.warning("Circuit opened", circuit=self.name, failures=self.failure_count)
 
     def allow_request(self) -> bool:
         """判断是否允许请求通过。
@@ -101,7 +101,7 @@ class CircuitState:
                 elapsed = time.monotonic() - self.last_failure_time
                 if elapsed >= self.recovery_timeout:
                     self.state = "half-open"
-                    logger.info("Circuit half-open", circuit=self.name)
+                    log.info("Circuit half-open", circuit=self.name)
                     return True
                 return False
             return True
@@ -109,19 +109,22 @@ class CircuitState:
 
 _circuits: dict[str, CircuitState] = {}
 _circuits_lock = threading.Lock()
+_MAX_CIRCUITS = 500
+_TRIM_CIRCUITS_TO = 300
+_circuit_access: dict[str, float] = {}
+
+
+def _trim_circuits() -> None:
+    if len(_circuits) <= _MAX_CIRCUITS:
+        return
+    sorted_circuits = sorted(_circuit_access.items(), key=lambda x: x[1])
+    to_remove = sorted_circuits[: len(_circuits) - _TRIM_CIRCUITS_TO]
+    for cname, _ in to_remove:
+        _circuits.pop(cname, None)
+        _circuit_access.pop(cname, None)
 
 
 def get_circuit(name: str, failure_threshold: int = 5, recovery_timeout: float = 30.0) -> CircuitState:
-    """获取或创建命名熔断器。
-
-    Args:
-        name: 熔断器名称。
-        failure_threshold: 触发熔断的失败次数阈值。
-        recovery_timeout: 熔断恢复超时（秒）。
-
-    Returns:
-        CircuitState: 熔断器状态实例。
-    """
     with _circuits_lock:
         if name not in _circuits:
             _circuits[name] = CircuitState(
@@ -129,6 +132,8 @@ def get_circuit(name: str, failure_threshold: int = 5, recovery_timeout: float =
                 failure_threshold=failure_threshold,
                 recovery_timeout=recovery_timeout,
             )
+        _circuit_access[name] = time.monotonic()
+        _trim_circuits()
         return _circuits[name]
 
 
@@ -159,7 +164,7 @@ async def with_retry(
             last_error = e
             if attempt < cfg.max_retries:
                 delay = min(cfg.base_delay * (cfg.exponential_base ** attempt), cfg.max_delay)
-                logger.warning(
+                log.warning(
                     "Retry attempt",
                     operation=operation,
                     attempt=attempt + 1,
@@ -169,13 +174,13 @@ async def with_retry(
                 )
                 await asyncio.sleep(delay)
             else:
-                logger.error(
+                log.error(
                     "Retry exhausted",
                     operation=operation,
                     attempts=cfg.max_retries + 1,
                     error=str(e),
                 )
-    raise last_error  # type: ignore[misc]
+    raise last_error
 
 
 _NO_FALLBACK = object()
@@ -203,7 +208,7 @@ async def with_circuit_breaker(
     """
     circuit = get_circuit(circuit_name)
     if not circuit.allow_request():
-        logger.warning("Circuit open, request rejected", circuit=circuit_name)
+        log.warning("Circuit open, request rejected", circuit=circuit_name)
         if fallback is not _NO_FALLBACK:
             return fallback
         raise ConnectionError(f"Circuit '{circuit_name}' is open")
@@ -212,6 +217,7 @@ async def with_circuit_breaker(
         circuit.record_success()
         return result
     except Exception as e:
+        log.debug("resilience 异常处理", error=str(e))
         circuit.record_failure()
         raise
 

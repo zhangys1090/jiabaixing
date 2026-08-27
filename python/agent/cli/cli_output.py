@@ -33,10 +33,11 @@ import time
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
-
 from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("cli_output")
+
+
 
 
 class ColorMode(str, Enum):

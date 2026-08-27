@@ -385,7 +385,7 @@ SAFE_MUST_PASS = [
 @pytest.mark.parametrize("command", DANGEROUS_MUST_BLOCK)
 def test_d9_dangerous_commands_are_blocked(command):
     """危险命令必须被拦截 —— 任何一条放行都是 fail-open 回归。"""
-    from agent.core.security import SecurityGuard
+    from agent.core.command_guard import SecurityGuard
 
     result = SecurityGuard().check_command(command)
     assert result.allowed is False, f"危险命令未被拦截（fail-open）: {command!r}"
@@ -396,7 +396,7 @@ def test_d9_dangerous_commands_are_blocked(command):
 @pytest.mark.parametrize("command", SAFE_MUST_PASS)
 def test_d9_safe_commands_are_not_blocked(command):
     """常规命令不得误杀 —— 过度拦截会逼使用者关掉守卫。"""
-    from agent.core.security import SecurityGuard
+    from agent.core.command_guard import SecurityGuard
 
     result = SecurityGuard().check_command(command)
     assert result.allowed is True, f"安全命令被误拦截: {command!r}"
@@ -404,7 +404,7 @@ def test_d9_safe_commands_are_not_blocked(command):
 
 def test_d9_blocked_reasons_are_deduplicated():
     """同一危险语义被多条正则命中时，原因列表不得重复刷屏。"""
-    from agent.core.security import SecurityGuard
+    from agent.core.command_guard import SecurityGuard
 
     result = SecurityGuard().check_command("shutdown -h now")
     assert result.allowed is False
@@ -415,7 +415,7 @@ def test_d9_blocked_reasons_are_deduplicated():
 
 def test_d9_check_output_defaults_to_fail_closed():
     """输出敏感信息检查默认 fail-closed（此前被降级为仅警告）。"""
-    from agent.core.security import SecurityGuard
+    from agent.core.command_guard import SecurityGuard
 
     guard = SecurityGuard()
     assert guard.check_output("正常输出").allowed is True
@@ -428,7 +428,7 @@ def test_d9_check_output_defaults_to_fail_closed():
 
 def test_d9_check_output_warn_mode_is_opt_in():
     """警告模式必须由调用方显式选择，不能是默认行为。"""
-    from agent.core.security import SecurityGuard
+    from agent.core.command_guard import SecurityGuard
 
     warned = SecurityGuard().check_output("password=secret123", block_on_sensitive=False)
     assert warned.allowed is True
@@ -438,7 +438,7 @@ def test_d9_check_output_warn_mode_is_opt_in():
 
 def test_d9_verification_code_pattern_does_not_match_any_six_digits():
     r"""验证码正则曾是裸 \b\d{6}\b，会把任意 6 位数字（如订单号/端口）误判为泄露。"""
-    from agent.core.security import SecurityGuard
+    from agent.core.command_guard import SecurityGuard
 
     guard = SecurityGuard()
     assert guard.check_output("订单号 123456 已创建").allowed is True, "6 位数字被误判为验证码泄露"

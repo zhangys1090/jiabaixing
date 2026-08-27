@@ -22,8 +22,8 @@ from enum import Enum
 from typing import Any, Callable, Awaitable
 
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("actuation_perception_bridge")
+
 
 
 class VerificationStrategy(str, Enum):
@@ -220,6 +220,7 @@ class ActuationPerceptionBridge:
                 "status": result.status.value if hasattr(result.status, "value") else str(result.status),
             }
         except Exception as e:
+            log.debug("actuation_perception_bridge 异常处理", error=str(e))
             return {"success": False, "detail": f"执行异常: {e}"}
 
     async def _verify_action(
@@ -275,6 +276,7 @@ class ActuationPerceptionBridge:
                 "evidence": verify_result.evidence[:200] if verify_result.evidence else "",
             }
         except Exception as e:
+            log.debug("actuation_perception_bridge 异常处理", error=str(e))
             return {"success": False, "confidence": 0.0, "method": "visual_error", "error": str(e)}
 
     def _verify_proprioception(self, context: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -290,8 +292,8 @@ class ActuationPerceptionBridge:
                     "confidence": confidence,
                     "method": "proprioception",
                 }
-        except Exception:
-            pass
+        except Exception as _exc:
+            log.warning("本体感知检测异常，降级到默认值", error=str(_exc))
 
         return {"success": True, "confidence": 0.5, "method": "proprioception_fallback"}
 

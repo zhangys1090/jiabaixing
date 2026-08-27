@@ -95,15 +95,33 @@ export class EncryptionManager {
     );
 
     try {
-      // 尝试加载现有密钥
       if (fs.existsSync(keyPath)) {
         const keyData = fs.readFileSync(keyPath, 'utf8');
-        const { key } = JSON.parse(keyData);
+        const parsed = JSON.parse(keyData);
 
-        // 使用盐和密钥派生
-        this.encryptionKey = Buffer.from(key, 'hex');
+        if (parsed.wrapped && parsed.encrypted_key && parsed.iv) {
+          const wrappingKey = this.deriveMachineWrappingKey();
+          const iv = Buffer.from(parsed.iv, 'hex');
+          const encryptedKey = Buffer.from(parsed.encrypted_key, 'hex');
+          const decipher = crypto.createDecipheriv(
+            'aes-256-cbc',
+            wrappingKey,
+            iv
+          );
+          this.encryptionKey = Buffer.concat([
+            decipher.update(encryptedKey),
+            decipher.final(),
+          ]);
+          Logger.info('🔑 已加载加密包装的密钥文件');
+        } else if (parsed.key) {
+          this.encryptionKey = Buffer.from(parsed.key, 'hex');
+          Logger.warn(
+            '⚠️ 密钥文件为明文格式，将在下次生成时自动升级为加密包装格式'
+          );
+        } else {
+          throw new Error('密钥文件格式无法识别');
+        }
       } else {
-        // 生成新密钥
         await this.generateEncryptionKey();
       }
     } catch (error) {
@@ -116,18 +134,15 @@ export class EncryptionManager {
    * 生成加密密钥
    */
   private async generateEncryptionKey(): Promise<void> {
-    // 从环境变量获取密钥
     const envKey = EnvironmentManager.getInstance().get('ENCRYPTION_KEY');
     let key: Buffer;
     let salt: Buffer;
 
     if (envKey && envKey !== 'default_encryption_key') {
-      // 使用环境变量中的密钥
       salt = crypto.randomBytes(16);
       key = crypto.scryptSync(envKey, salt, this.config.aes.keySize / 8);
       Logger.info('🔑 使用环境变量中的加密密钥');
     } else {
-      // 生成随机密钥（仅用于开发环境）
       salt = crypto.randomBytes(16);
       key = crypto.scryptSync(
         `jiabaixing_secure_key_${Date.now()}`,
@@ -141,20 +156,49 @@ export class EncryptionManager {
 
     this.encryptionKey = key;
 
-    // 保存密钥到文件（生产环境应使用更安全的存储方式）
     const keyPath = path.join(
       this.config.keyManagement.keyStorePath,
       'encryption.key'
     );
+
+    const wrappingKey = this.deriveMachineWrappingKey();
+    const iv = crypto.randomBytes(16);
+    const cipher = crypto.createCipheriv('aes-256-cbc', wrappingKey, iv);
+    const encryptedKey = Buffer.concat([cipher.update(key), cipher.final()]);
+
     const keyData = JSON.stringify({
-      key: key.toString('hex'),
+      encrypted_key: encryptedKey.toString('hex'),
+      iv: iv.toString('hex'),
       salt: salt.toString('hex'),
       generatedAt: new Date().toISOString(),
       algorithm: this.config.aes.algorithm,
+      wrapped: true,
     });
 
     fs.writeFileSync(keyPath, keyData, { mode: 0o600 });
-    this.logAudit('system', 'key.generated', { keyPath });
+    this.logAudit('system', 'key.generated', { keyPath, wrapped: true });
+  }
+
+  private deriveMachineWrappingKey(): Buffer {
+    const hostname =
+      typeof require !== 'undefined'
+        ? (() => {
+            try {
+              return require('os').hostname();
+            } catch {
+              return 'localhost';
+            }
+          })()
+        : 'localhost';
+    // P0-5 修复: 移除 process.pid 依赖。PID 在进程重启后变化，
+    // 导致密钥包装密钥改变、无法解密已有数据。
+    // 改用 ENCRYPTION_WRAP_KEY 环境变量或 hostname 作为稳定标识。
+    const envWrapKey = process.env.ENCRYPTION_WRAP_KEY;
+    const seed = envWrapKey
+      ? `jiabaixing_wrap_${envWrapKey}_${hostname}`
+      : `jiabaixing_wrap_${hostname}_stable`;
+    const salt = `jiabaixing_key_wrap_${hostname}_v3`;
+    return crypto.scryptSync(seed, salt, 32);
   }
 
   /**
@@ -355,15 +399,35 @@ export class EncryptionManager {
     }
   }
 
+  private static readonly SCRYPT_KEYLEN = 64;
+  private static readonly SCRYPT_COST = 16384;
+  private static readonly SCRYPT_BLOCK_SIZE = 8;
+  private static readonly SCRYPT_PARALLELIZATION = 1;
+
   /**
-   * 生成带盐的哈希值
+   * 生成带盐的哈希值（使用 scrypt，适用于密码存储）
    */
   public async hashWithSalt(
     data: string
   ): Promise<{ hash: string; salt: string }> {
     try {
       const salt = crypto.randomBytes(16).toString('hex');
-      const hash = this.hash(data + salt);
+      const hash = await new Promise<string>((resolve, reject) => {
+        crypto.scrypt(
+          data,
+          salt,
+          EncryptionManager.SCRYPT_KEYLEN,
+          {
+            cost: EncryptionManager.SCRYPT_COST,
+            blockSize: EncryptionManager.SCRYPT_BLOCK_SIZE,
+            parallelization: EncryptionManager.SCRYPT_PARALLELIZATION,
+          },
+          (err, derivedKey) => {
+            if (err) reject(err);
+            else resolve(derivedKey.toString('hex'));
+          }
+        );
+      });
 
       return { hash, salt };
     } catch (error) {
@@ -373,19 +437,28 @@ export class EncryptionManager {
   }
 
   /**
-   * 同步生成带盐的哈希值（用于密码哈希）
+   * 同步生成带盐的哈希值（使用 scrypt，适用于密码哈希）
    */
   public hashWithSaltSync(data: string, salt: string): string {
-    return this.hash(data + salt);
+    return crypto
+      .scryptSync(data, salt, EncryptionManager.SCRYPT_KEYLEN, {
+        cost: EncryptionManager.SCRYPT_COST,
+        blockSize: EncryptionManager.SCRYPT_BLOCK_SIZE,
+        parallelization: EncryptionManager.SCRYPT_PARALLELIZATION,
+      })
+      .toString('hex');
   }
 
   /**
-   * 验证带盐的哈希值
+   * 验证带盐的哈希值（使用 scrypt）
    */
   public verifyHashWithSalt(data: string, hash: string, salt: string): boolean {
     try {
-      const computedHash = this.hash(data + salt);
-      return computedHash === hash;
+      const computedHash = this.hashWithSaltSync(data, salt);
+      return crypto.timingSafeEqual(
+        Buffer.from(computedHash, 'hex'),
+        Buffer.from(hash, 'hex')
+      );
     } catch (error) {
       Logger.error('❌ 验证哈希值失败:', error as Error);
       return false;

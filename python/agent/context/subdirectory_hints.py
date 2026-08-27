@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from agent.core.logger import log_ignored
+import logging
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -34,7 +36,7 @@ class SubdirectoryHints:
     Usage:
         hints_provider = SubdirectoryHints()
         hints = hints_provider.get_hints("/path/to/project")
-        print(hints.recommended_tools, hints.warnings)
+        logger.info(hints.recommended_tools, hints.warnings)
     """
 
     # 特征目录 → (推荐工具, 约束)

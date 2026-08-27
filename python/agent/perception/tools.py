@@ -186,6 +186,7 @@ async def emotion_perceive_executor(params: dict[str, Any]) -> ToolResult:
         )
 
     except Exception as e:
+        log.debug("tools 异常处理", error=str(e))
         fallback = _emotion_rule_fallback(text)
         fallback["method"] = "rule_fallback_error"
         return ToolResult(
@@ -284,6 +285,7 @@ async def scene_perceive_executor(params: dict[str, Any]) -> ToolResult:
         )
 
     except Exception as e:
+        log.debug("tools 异常处理", error=str(e))
         fallback = _scene_rule_fallback(text)
         fallback["method"] = "rule_fallback_error"
         return ToolResult(
@@ -365,6 +367,7 @@ async def environment_sense_v2_executor(params: dict[str, Any]) -> ToolResult:
                 if result.returncode == 0:
                     active_window = result.stdout.strip()
         except Exception as _exc:
+            log.debug("tools 异常处理", error=str(_exc))
             log_ignored(log, "tools.environment_sense_v2_executor", _exc)
 
         network_status = "unknown"
@@ -373,7 +376,8 @@ async def environment_sense_v2_executor(params: dict[str, Any]) -> ToolResult:
                 import socket
                 socket.create_connection(("8.8.8.8", 53), timeout=2)
                 network_status = "online"
-            except Exception:
+            except Exception as _exc:
+                log.debug("tools 异常处理", error=str(_exc))
                 network_status = "offline"
 
         screen_resolution = ""
@@ -383,6 +387,7 @@ async def environment_sense_v2_executor(params: dict[str, Any]) -> ToolResult:
                 user32 = ctypes.windll.user32
                 screen_resolution = f"{user32.GetSystemMetrics(0)}x{user32.GetSystemMetrics(1)}"
         except Exception as _exc:
+            log.debug("tools 异常处理", error=str(_exc))
             log_ignored(log, "tools.environment_sense_v2_executor", _exc)
 
         processes: list[str] = []
@@ -407,6 +412,7 @@ async def environment_sense_v2_executor(params: dict[str, Any]) -> ToolResult:
                         if len(parts) >= 11:
                             processes.append(parts[10][:50])
             except Exception as _exc:
+                log.debug("tools 异常处理", error=str(_exc))
                 log_ignored(log, "tools.environment_sense_v2_executor", _exc)
 
         data = {
@@ -428,6 +434,7 @@ async def environment_sense_v2_executor(params: dict[str, Any]) -> ToolResult:
         )
 
     except Exception as e:
+        log.debug("tools 异常处理", error=str(e))
         return ToolResult(
             success=False,
             error=f"环境感知失败: {e}",
@@ -446,4 +453,4 @@ def register_perception_tools(registry: Any) -> None:
     for definition, executor in TOOL_DEFINITIONS:
         if not registry.has(definition.name):
             registry.register(definition, executor)
-            log.info(f"Perception tool registered: {definition.name}")
+            log.debug(f"Perception tool registered: {definition.name}")

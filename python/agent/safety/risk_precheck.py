@@ -11,8 +11,8 @@ from agent.tools.risk_level import (
     requires_approval,
 )
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("risk_precheck")
+
 
 
 class RiskPrecheck:

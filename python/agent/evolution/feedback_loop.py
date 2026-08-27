@@ -43,6 +43,7 @@ Usage:
     for suggestion in rt.check_and_evolve():
         rt.apply_plan(suggestion)
 """
+
 from __future__ import annotations
 
 import time
@@ -51,10 +52,11 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Optional
-
 from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("feedback_loop")
+
+
 
 __all__ = [
     # --- 会话层：用户反馈 → 进化引擎 ---
@@ -646,7 +648,8 @@ class FeedbackLoop:
             })
             return True
 
-        except Exception:
+        except Exception as _exc:
+            log.warning("异常降级处理", error=str(_exc))
             return False
 
     def get_stats(self) -> FeedbackLoopStats:

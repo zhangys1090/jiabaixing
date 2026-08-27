@@ -16,11 +16,11 @@ from agent.tools.registry import (
     ToolParameterDef,
     ToolResult,
 )
+log = StructuredLogger("delegate_tool")
 
 if TYPE_CHECKING:  # 仅供类型注解使用
     from agent.tools.registry import ToolRegistry
 
-log = StructuredLogger("delegate_tool")
 
 # ─── 审计 P2-6：子 Agent 工具下放白名单（双轨：元数据派生 + 显式拒绝集）───
 # 设计原则（详见 docs/P2-6_SUBAGENT_SANDBOX_DESIGN.md）：
@@ -349,6 +349,7 @@ class SubAgentDelegator:
                 result.result_text = f"子 Agent 任务超时（{timeout}秒）"
                 result.duration_ms = elapsed
             except Exception as exc:
+                log.debug("delegate_tool 异常处理", error=str(exc))
                 elapsed = (time.monotonic() - start) * 1000
                 result.status = DelegateStatus.FAILED
                 result.result_text = f"子 Agent 执行失败: {exc}"
@@ -381,6 +382,7 @@ class SubAgentDelegator:
                 result.result_text = f"子 Agent 任务超时（{timeout}秒）"
                 result.duration_ms = elapsed
             except Exception as exc:
+                log.debug("delegate_tool 异常处理", error=str(exc))
                 elapsed = (time.monotonic() - start) * 1000
                 result.status = DelegateStatus.FAILED
                 result.result_text = f"子 Agent 执行失败: {exc}"

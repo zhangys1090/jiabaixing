@@ -1,6 +1,6 @@
+import { SkillRegistry } from '../../../skills/SkillRegistry';
 import type { ToolContext, ToolDefinition, ToolResult } from '../../types';
 import { Permission, ToolCategory } from '../../types';
-import { SkillRegistry } from '../../../skills/SkillRegistry';
 
 export const SKILL_CREATE_DEF: ToolDefinition = {
   name: 'skill_create',
@@ -387,7 +387,7 @@ export function createSkillCreateExecutor(deps: SkillCreateDeps) {
           }
 
           if (deps.llm && (rating < 5 || feedback)) {
-            const improvementPrompt = `你是一个技能优化助手。以下是一个用户自定义技能，用户反馈它需要改进。
+            const improvementPrompt = `你是家百星的技能优化模块。以下是一个用户自定义技能，用户反馈它需要改进。
 
 技能名称: ${skill.name}
 技能描述: ${skill.description}

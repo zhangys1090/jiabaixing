@@ -5,8 +5,8 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Awaitable
 
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("hooks")
+
 
 HookEvent = str
 
@@ -54,7 +54,7 @@ class HookManager:
         manager = HookManager()
 
         async def my_logger(ctx):
-            print(f"Tool called: {ctx.get('tool_name')}")
+            logger.info("Tool called: {ctx.get('tool_name')}")
 
         manager.on("beforeToolCall", my_logger, hook_type="gateway")
         await manager.trigger("beforeToolCall", tool_name="search")
@@ -62,6 +62,7 @@ class HookManager:
 
     def __init__(self) -> None:
         self._registrations: list[HookRegistration] = []
+        self._MAX_REGISTRATIONS = 500
 
     def on(
         self,
@@ -89,6 +90,8 @@ class HookManager:
                 label=label or callback.__name__,
             )
         )
+        if len(self._registrations) > self._MAX_REGISTRATIONS:
+            self._registrations = self._registrations[-(self._MAX_REGISTRATIONS * 3 // 4):]
         self._registrations.sort(key=lambda r: (r.priority, r.label))
 
     def off(self, event: HookEvent, callback: HookCallback) -> bool:
@@ -141,8 +144,8 @@ class HookManager:
                 result = reg.callback(**kwargs)
                 if asyncio.iscoroutine(result):
                     await result
-            except Exception:
-                log.warning(f"钩子执行失败: {reg.label} ({reg.hook_type})")
+            except Exception as e:
+                log.warning(f"钩子执行失败: {reg.label} ({reg.hook_type})", error=str(e))
 
     def get_registrations(self) -> list[HookRegistration]:
         """获取所有注册的钩子。

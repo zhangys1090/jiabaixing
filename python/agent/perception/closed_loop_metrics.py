@@ -96,6 +96,7 @@ class ClosedLoopMetricCollector:
     def __init__(self, trace_id: str | None = None) -> None:
         self._trace_id = trace_id or new_trace_id()
         self._attempts: list[ClosedLoopAttempt] = []
+        self._MAX_ATTEMPTS = 1000
 
     @property
     def trace_id(self) -> str:
@@ -140,6 +141,8 @@ class ClosedLoopMetricCollector:
             trace_id=trace_id or self._trace_id,
         )
         self._attempts.append(attempt)
+        if len(self._attempts) > self._MAX_ATTEMPTS:
+            self._attempts = self._attempts[-self._MAX_ATTEMPTS * 3 // 4:]
         return attempt
 
     def snapshot(self) -> ClosedLoopMetrics:

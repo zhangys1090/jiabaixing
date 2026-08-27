@@ -109,3 +109,26 @@ tmp/
 /.patch1.txt
 /.full_errors.txt
 /loop-test-err.txt
+
+# Temporary/debug files
+_*.txt
+_*.json
+_*.log
+dbg_*.txt
+debug*.log
+desktop-*.log
+server_*.log
+python_backend*.log
+ts_gateway_run.log
+harness-test-output.txt
+jest_*.txt
+test-*.txt
+tmp_*.py
+_*.py
+*.egg-info/
+__pycache__/
+*.pyc
+process.env[k]
+
+# IDE workbuddy cache
+.workbuddy/removed/

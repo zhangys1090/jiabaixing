@@ -19,10 +19,11 @@ import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
-
 from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("kanban_swarm")
+
+
 
 
 class KanbanColumn(str, Enum):
@@ -94,7 +95,7 @@ class KanbanSwarm:
 
     def register_agent(self, agent_id: str, name: str = "", role: str = "leaf") -> None:
         self._agents[agent_id] = KanbanAgent(id=agent_id, name=name or agent_id, role=role)
-        log.info("Agent 已注册到看板", agent_id=agent_id, name=name)
+        log.debug("Agent 已注册到看板", agent_id=agent_id, name=name)
 
     def unregister_agent(self, agent_id: str) -> None:
         self._agents.pop(agent_id, None)

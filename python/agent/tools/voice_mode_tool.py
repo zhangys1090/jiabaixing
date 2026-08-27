@@ -10,6 +10,8 @@ Python 端负责状态协调和 TTS 合成。
 
 Usage:
     from agent.tools.voice_mode_tool import register_voice_mode_tool
+import logging
+logger = logging.getLogger(__name__)
     register_voice_mode_tool(registry)
 """
 from __future__ import annotations
@@ -168,6 +170,7 @@ class VoiceModeManager:
             self._last_audio_path = path
             return path
         except Exception as _exc:
+            logger.warning("voice_mode_tool 异常处理", error=str(_exc))
             log_ignored(None, "voice_mode_tool.VoiceModeManager.speak.edge", _exc)
 
         try:
@@ -176,6 +179,7 @@ class VoiceModeManager:
             self._last_audio_path = None
             return None
         except Exception as _exc:
+            logger.warning("voice_mode_tool 异常处理", error=str(_exc))
             log_ignored(None, "voice_mode_tool.VoiceModeManager.speak.system", _exc)
 
         # 降级：无 TTS 引擎可用，仅更新状态
@@ -214,25 +218,27 @@ class VoiceModeManager:
             audio_path = tf.name
         try:
             try:
-                import faster_whisper  # type: ignore
+                import faster_whisper
 
                 model = faster_whisper.WhisperModel("base")
-                segments, _ = model.transcribe(audio_path)  # type: ignore[arg-type]
+                segments, _ = model.transcribe(audio_path)
                 return "".join(getattr(s, "text", "") for s in segments).strip()
             except ImportError as _exc:
                 log_ignored(None, "voice_mode_tool.VoiceModeManager.transcribe", _exc)
             except Exception as _exc:
+                logger.warning("voice_mode_tool 异常处理", error=str(_exc))
                 log_ignored(None, "voice_mode_tool.VoiceModeManager.transcribe.faster", _exc)
 
             try:
-                import whisper  # type: ignore
+                import whisper
 
-                model = whisper.load_model("base")  # type: ignore[attr-defined]
-                result = model.transcribe(audio_path)  # type: ignore[arg-type]
+                model = whisper.load_model("base")
+                result = model.transcribe(audio_path)
                 return (result.get("text") if isinstance(result, dict) else "") or None
             except ImportError as _exc:
                 log_ignored(None, "voice_mode_tool.VoiceModeManager.transcribe", _exc)
             except Exception as _exc:
+                logger.warning("voice_mode_tool 异常处理", error=str(_exc))
                 log_ignored(None, "voice_mode_tool.VoiceModeManager.transcribe.whisper", _exc)
         finally:
             try:
@@ -319,7 +325,7 @@ class VoiceModeManager:
             bool: 至少有一个 TTS 引擎可用时返回 True。
         """
         try:
-            import edge_tts  # noqa: F401
+            import edge_tts
             return True
         except ImportError as _exc:
             log_ignored(None, "voice_mode_tool.VoiceModeManager.is_available", _exc)
@@ -334,11 +340,12 @@ class VoiceModeManager:
                 )
                 return True
             except Exception as _exc:
+                logger.warning("voice_mode_tool 异常处理", error=str(_exc))
                 log_ignored(None, "voice_mode_tool.VoiceModeManager.is_available", _exc)
 
         if system == "windows":
             try:
-                import pyttsx3  # noqa: F401
+                import pyttsx3
                 return True
             except ImportError as _exc:
                 log_ignored(None, "voice_mode_tool.VoiceModeManager.is_available", _exc)
@@ -380,7 +387,7 @@ class VoiceModeManager:
             ImportError: edge-tts 未安装。
             Exception: 合成过程中出错。
         """
-        import edge_tts  # noqa: F401 — 延迟导入
+        import edge_tts
         from pathlib import Path
 
         voice_name = self._config.voice_name
@@ -422,7 +429,7 @@ class VoiceModeManager:
             return
 
         if system == "windows":
-            import pyttsx3  # noqa: F401 — 延迟导入
+            import pyttsx3
             engine = pyttsx3.init()
             engine.say(text)
             engine.runAndWait()
@@ -592,6 +599,7 @@ async def voice_mode_executor(params: dict[str, Any]) -> ToolResult:
                 metadata=metadata,
             )
         except Exception as e:
+            logger.warning("voice_mode_tool 异常处理", error=str(e))
             return ToolResult(
                 success=False,
                 error=f"语音合成失败: {e}",

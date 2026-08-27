@@ -12,6 +12,8 @@
  * - 支持思维链（CoT）标注
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
 import { Logger } from '../../utils/Logger';
 import type { EventStore, EventStoreEvent } from '../persistence/EventStore';
 import type { AnnotatedTrajectory, QualityAnnotator } from './QualityAnnotator';
@@ -118,7 +120,10 @@ export class DistillationPipeline {
   private eventStore: EventStore | null;
   private seenHashes: Set<string> = new Set();
 
-  constructor(eventStore: EventStore | null, config: Partial<DistillationConfig> = {}) {
+  constructor(
+    eventStore: EventStore | null,
+    config: Partial<DistillationConfig> = {}
+  ) {
     this.eventStore = eventStore;
     this.config = { ...DEFAULT_CONFIG, ...config };
   }
@@ -180,7 +185,10 @@ export class DistillationPipeline {
       ? this.config.qualityAnnotator.annotate(events)
       : this.fallbackAnnotate(events);
 
-    if (annotated.quality < this.config.minQuality || annotated.quality > this.config.maxQuality) {
+    if (
+      annotated.quality < this.config.minQuality ||
+      annotated.quality > this.config.maxQuality
+    ) {
       return [];
     }
 
@@ -218,7 +226,10 @@ export class DistillationPipeline {
     );
   }
 
-  private convertToFormat(annotated: AnnotatedTrajectory, sessionId: string): DistilledEntry | null {
+  private convertToFormat(
+    annotated: AnnotatedTrajectory,
+    sessionId: string
+  ): DistilledEntry | null {
     const events = annotated.events;
     const quality = annotated.quality;
 
@@ -238,7 +249,11 @@ export class DistillationPipeline {
     }
   }
 
-  private convertToSFT(events: EventStoreEvent[], sessionId: string, quality: number): DistilledEntry {
+  private convertToSFT(
+    events: EventStoreEvent[],
+    sessionId: string,
+    quality: number
+  ): DistilledEntry {
     const messages: SFTEntry['messages'] = [];
     let toolCallCount = 0;
     let toolCallIdCounter = 0;
@@ -258,7 +273,9 @@ export class DistillationPipeline {
           if (this.config.includeThinking) {
             messages.push({
               role: 'assistant',
-              content: String(event.payload.thinking ?? event.payload.content ?? ''),
+              content: String(
+                event.payload.thinking ?? event.payload.content ?? ''
+              ),
             });
           }
           break;
@@ -288,7 +305,9 @@ export class DistillationPipeline {
           if (this.config.includeToolCalls) {
             messages.push({
               role: 'tool',
-              content: String(event.payload.output ?? event.payload.result ?? ''),
+              content: String(
+                event.payload.output ?? event.payload.result ?? ''
+              ),
               tool_call_id: `call_${toolCallIdCounter}`,
             });
           }
@@ -330,18 +349,26 @@ export class DistillationPipeline {
     };
   }
 
-  private convertToDPO(events: EventStoreEvent[], sessionId: string, quality: number): DistilledEntry {
+  private convertToDPO(
+    events: EventStoreEvent[],
+    sessionId: string,
+    quality: number
+  ): DistilledEntry {
     const chosen: Array<{ role: string; content: string }> = [];
     const rejected: Array<{ role: string; content: string }> = [];
     const errorEvents = events.filter((e) => e.eventType === 'error_occurred');
 
     for (const event of events) {
       if (event.eventType === 'user_input') {
-        const content = String(event.payload.content ?? event.payload.input ?? '');
+        const content = String(
+          event.payload.content ?? event.payload.input ?? ''
+        );
         chosen.push({ role: 'user', content });
         rejected.push({ role: 'user', content });
       } else if (event.eventType === 'agent_thinking') {
-        const content = String(event.payload.thinking ?? event.payload.content ?? '');
+        const content = String(
+          event.payload.thinking ?? event.payload.content ?? ''
+        );
         chosen.push({ role: 'assistant', content });
       }
     }
@@ -381,7 +408,11 @@ export class DistillationPipeline {
     };
   }
 
-  private convertToRLHF(events: EventStoreEvent[], sessionId: string, quality: number): DistilledEntry {
+  private convertToRLHF(
+    events: EventStoreEvent[],
+    sessionId: string,
+    quality: number
+  ): DistilledEntry {
     const prompt: Array<{ role: string; content: string }> = [];
     const completion: Array<{ role: string; content: string }> = [];
 
@@ -399,7 +430,9 @@ export class DistillationPipeline {
       if (foundFirstAssistant && event.eventType === 'agent_thinking') {
         completion.push({
           role: 'assistant',
-          content: String(event.payload.thinking ?? event.payload.content ?? ''),
+          content: String(
+            event.payload.thinking ?? event.payload.content ?? ''
+          ),
         });
       }
     }
@@ -425,8 +458,15 @@ export class DistillationPipeline {
     };
   }
 
-  private convertToShareGPT(events: EventStoreEvent[], sessionId: string, quality: number): DistilledEntry {
-    const conversations: Array<{ from: 'human' | 'gpt' | 'system'; value: string }> = [];
+  private convertToShareGPT(
+    events: EventStoreEvent[],
+    sessionId: string,
+    quality: number
+  ): DistilledEntry {
+    const conversations: Array<{
+      from: 'human' | 'gpt' | 'system';
+      value: string;
+    }> = [];
 
     for (const event of events) {
       if (event.eventType === 'user_input') {
@@ -457,7 +497,11 @@ export class DistillationPipeline {
     };
   }
 
-  private convertToJSONL(events: EventStoreEvent[], sessionId: string, quality: number): DistilledEntry {
+  private convertToJSONL(
+    events: EventStoreEvent[],
+    sessionId: string,
+    quality: number
+  ): DistilledEntry {
     return {
       id: `jsonl_${sessionId}_${Date.now()}`,
       format: 'jsonl',
@@ -504,25 +548,34 @@ export class DistillationPipeline {
 
   private fallbackAnnotate(events: EventStoreEvent[]): AnnotatedTrajectory {
     const userEvents = events.filter((e) => e.eventType === 'user_input');
-    const toolResultEvents = events.filter((e) => e.eventType === 'tool_result');
+    const toolResultEvents = events.filter(
+      (e) => e.eventType === 'tool_result'
+    );
     const errorEvents = events.filter((e) => e.eventType === 'error_occurred');
-    const successTools = toolResultEvents.filter((e) => Boolean(e.payload.success));
+    const successTools = toolResultEvents.filter((e) =>
+      Boolean(e.payload.success)
+    );
 
-    const toolSuccessRate = toolResultEvents.length > 0
-      ? successTools.length / toolResultEvents.length
-      : 1.0;
+    const toolSuccessRate =
+      toolResultEvents.length > 0
+        ? successTools.length / toolResultEvents.length
+        : 1.0;
 
     const errorPenalty = Math.min(0.3, errorEvents.length * 0.1);
-    const quality = Math.max(0, Math.min(1, toolSuccessRate - errorPenalty + 0.2));
+    const quality = Math.max(
+      0,
+      Math.min(1, toolSuccessRate - errorPenalty + 0.2)
+    );
 
     return {
       events,
       quality,
       labels: {
         taskCompletion: toolSuccessRate,
-        toolEfficiency: toolResultEvents.length > 0
-          ? successTools.length / toolResultEvents.length
-          : 0.5,
+        toolEfficiency:
+          toolResultEvents.length > 0
+            ? successTools.length / toolResultEvents.length
+            : 0.5,
         errorRate: errorEvents.length / Math.max(1, events.length),
         coherence: 0.7,
         usefulness: quality,
@@ -544,10 +597,16 @@ export class DistillationPipeline {
     for (const entry of entries) {
       byFormat[entry.format] = (byFormat[entry.format] ?? 0) + 1;
 
-      const qRange = entry.quality >= 0.8 ? 'high' : entry.quality >= 0.5 ? 'medium' : 'low';
+      const qRange =
+        entry.quality >= 0.8 ? 'high' : entry.quality >= 0.5 ? 'medium' : 'low';
       byQualityRange[qRange] = (byQualityRange[qRange] ?? 0) + 1;
 
-      const tRange = entry.metadata.toolCallCount > 5 ? 'many' : entry.metadata.toolCallCount > 0 ? 'some' : 'none';
+      const tRange =
+        entry.metadata.toolCallCount > 5
+          ? 'many'
+          : entry.metadata.toolCallCount > 0
+            ? 'some'
+            : 'none';
       byToolCount[tRange] = (byToolCount[tRange] ?? 0) + 1;
     }
 

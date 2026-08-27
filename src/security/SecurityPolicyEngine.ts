@@ -1,5 +1,6 @@
 import { Logger } from '../utils/Logger';
 import type { RiskAssessment, RiskLevel, User } from './types';
+type SecurityRiskLevel = Exclude<RiskLevel, 'none'>;
 
 export type CircuitState = 'closed' | 'open' | 'half_open';
 
@@ -63,8 +64,8 @@ export class CircuitBreaker {
           'CircuitBreaker'
         );
       }
-    } else {
-      this.failureCount = Math.max(0, this.failureCount - 1);
+    } else if (this.state === 'closed') {
+      this.failureCount = 0;
     }
   }
 
@@ -121,10 +122,43 @@ export class SlidingWindowRateLimiter {
   private windows: Map<string, SlidingWindowEntry[]> = new Map();
   private readonly limit: number;
   private readonly windowMs: number;
+  private lastCleanup: number = Date.now();
+  private static readonly CLEANUP_INTERVAL_MS = 120000;
+  private static readonly MAX_KEYS = 10000;
 
   constructor(limit: number = 60, windowMs: number = 60000) {
     this.limit = limit;
     this.windowMs = windowMs;
+  }
+
+  private maybeCleanup(): void {
+    const now = Date.now();
+    if (now - this.lastCleanup < SlidingWindowRateLimiter.CLEANUP_INTERVAL_MS)
+      return;
+    this.lastCleanup = now;
+
+    const cutoff = now - this.windowMs;
+    for (const [key, entries] of this.windows) {
+      const active = entries.filter((e) => e.timestamp > cutoff);
+      if (active.length === 0) {
+        this.windows.delete(key);
+      } else if (active.length !== entries.length) {
+        this.windows.set(key, active);
+      }
+    }
+
+    if (this.windows.size > SlidingWindowRateLimiter.MAX_KEYS) {
+      const keys = [...this.windows.keys()].sort((a, b) => {
+        const aLast = this.windows.get(a)!.at(-1)?.timestamp ?? 0;
+        const bLast = this.windows.get(b)!.at(-1)?.timestamp ?? 0;
+        return aLast - bLast;
+      });
+      const toDelete = keys.slice(
+        0,
+        this.windows.size - SlidingWindowRateLimiter.MAX_KEYS
+      );
+      for (const k of toDelete) this.windows.delete(k);
+    }
   }
 
   check(key: string): { allowed: boolean; remaining: number; resetIn: number } {
@@ -140,11 +174,13 @@ export class SlidingWindowRateLimiter {
         ? oldestInWindow.timestamp + this.windowMs - now
         : this.windowMs;
       this.windows.set(key, entries);
+      this.maybeCleanup();
       return { allowed: false, remaining: 0, resetIn: Math.max(0, resetIn) };
     }
 
     entries.push({ timestamp: now });
     this.windows.set(key, entries);
+    this.maybeCleanup();
     return {
       allowed: true,
       remaining: this.limit - entries.length,
@@ -175,6 +211,8 @@ export class SecurityPolicyEngine {
   private rateLimits: Map<string, { count: number; lastReset: number }> =
     new Map();
   private slidingWindowLimiter: SlidingWindowRateLimiter;
+  private customSlidingWindowLimiters: Map<string, SlidingWindowRateLimiter> =
+    new Map();
   private circuitBreakers: Map<string, CircuitBreaker> = new Map();
 
   private promptInjectionPatterns: RegExp[] = [
@@ -261,11 +299,11 @@ export class SecurityPolicyEngine {
 
   detectPromptInjection(input: string): {
     detected: boolean;
-    riskLevel: 'low' | 'medium' | 'high';
+    riskLevel: SecurityRiskLevel;
     reasons: string[];
   } {
     const reasons: string[] = [];
-    let riskLevel: 'low' | 'medium' | 'high' = 'low';
+    let riskLevel: SecurityRiskLevel = 'low';
     for (const pattern of this.promptInjectionPatterns) {
       if (pattern.test(input)) {
         reasons.push(`检测到潜在的Prompt注入模式: ${pattern.source}`);
@@ -277,12 +315,12 @@ export class SecurityPolicyEngine {
 
   filterHarmfulContent(input: string): {
     filtered: boolean;
-    riskLevel: 'low' | 'medium' | 'high';
+    riskLevel: SecurityRiskLevel;
     reasons: string[];
     safeContent: string;
   } {
     const reasons: string[] = [];
-    let riskLevel: 'low' | 'medium' | 'high' = 'low';
+    let riskLevel: SecurityRiskLevel = 'low';
     let safeContent = input;
     for (const pattern of this.forbiddenContentPatterns) {
       if (pattern.test(input)) {
@@ -304,8 +342,22 @@ export class SecurityPolicyEngine {
       errors.push(`输入长度不能超过 ${maxLength} 个字符`);
     if (/<script[^>]*>.*?<\/script>/i.test(input))
       errors.push('输入不能包含脚本标签');
-    if (/('|"|\b(union|select|insert|update|delete|drop|alter)\b)/i.test(input))
-      errors.push('输入可能包含SQL注入攻击');
+    const sqlInjectionPatterns = [
+      /(\bunion\s+(all\s+)?select\b[\s\S]{0,80}\bfrom\b)/i,
+      /(\binsert\s+into\b[\s\S]{0,40}\bvalues\b)/i,
+      /(\bupdate\s+\w+\s+set\b[\s\S]{0,40}=)/i,
+      /(\bdelete\s+from\b[\s\S]{0,20}\bwhere\b)/i,
+      /(\bdrop\s+table\b)/i,
+      /(\balter\s+table\b)/i,
+      /('\s*or\s+'[^']*'\s*=\s*')/i,
+      /('\s*;\s*(drop|delete|update|insert|select)\b)/i,
+    ];
+    for (const pattern of sqlInjectionPatterns) {
+      if (pattern.test(input)) {
+        errors.push('输入可能包含SQL注入攻击');
+        break;
+      }
+    }
     return { valid: errors.length === 0, errors };
   }
 
@@ -441,7 +493,12 @@ export class SecurityPolicyEngine {
     windowMs?: number
   ): { allowed: boolean; remaining: number; resetIn: number } {
     if (limit && windowMs && (limit !== 60 || windowMs !== 60000)) {
-      const limiter = new SlidingWindowRateLimiter(limit, windowMs);
+      const cacheKey = `${limit}:${windowMs}`;
+      let limiter = this.customSlidingWindowLimiters.get(cacheKey);
+      if (!limiter) {
+        limiter = new SlidingWindowRateLimiter(limit, windowMs);
+        this.customSlidingWindowLimiters.set(cacheKey, limiter);
+      }
       return limiter.check(key);
     }
     return this.slidingWindowLimiter.check(key);

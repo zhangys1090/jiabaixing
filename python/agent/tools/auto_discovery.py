@@ -23,13 +23,14 @@ import os
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
-
 from agent.core.logger import StructuredLogger
+
 
 if TYPE_CHECKING:
     from agent.tools.registry import ToolRegistry
 
 log = StructuredLogger("auto_discovery")
+
 
 EXCLUDE_FILES: set[str] = {
     "__init__.py",
@@ -131,6 +132,7 @@ class ToolAutoDiscovery:
                 else:
                     self._skipped.append(py_file.stem)
             except Exception as exc:
+                log.debug("auto_discovery 异常处理", error=str(exc))
                 self._errors.append((py_file.name, str(exc)))
                 log.warning(
                     "工具自动发现失败",

@@ -23,8 +23,8 @@ from typing import Any
 
 from agent.core.logger import StructuredLogger
 from agent.core.logger import log_ignored
-
 log = StructuredLogger("strategy_adapter")
+
 
 
 @dataclass
@@ -201,6 +201,8 @@ class StrategyAdapter:
         self._signal_scores: dict[str, float] = {}
         self._current_model_family: str = "generic"
         self._prompt_registry: Any = None
+        self._MAX_TASK_STRATEGIES = 200
+        self._MAX_SIGNAL_SCORES = 500
 
         log.info(
             "StrategyAdapter initialized",
@@ -227,6 +229,10 @@ class StrategyAdapter:
                 task_type=task_type,
                 exploration_rate=self._default_exploration,
             )
+            if len(self._task_strategies) > self._MAX_TASK_STRATEGIES:
+                oldest_types = list(self._task_strategies.keys())[: len(self._task_strategies) - (self._MAX_TASK_STRATEGIES * 3 // 4)]
+                for t in oldest_types:
+                    del self._task_strategies[t]
 
         task_strategy = self._task_strategies[task_type]
 
@@ -559,6 +565,10 @@ class StrategyAdapter:
 
         current = self._signal_scores.get(signal_type, 0.0)
         self._signal_scores[signal_type] = current * 0.7 + value * 0.3
+        if len(self._signal_scores) > self._MAX_SIGNAL_SCORES:
+            oldest_signals = list(self._signal_scores.keys())[: len(self._signal_scores) - (self._MAX_SIGNAL_SCORES * 3 // 4)]
+            for s in oldest_signals:
+                del self._signal_scores[s]
 
         if len(self._signal_buffer) >= 5:
             self._apply_signal_micro_adaptation()
@@ -612,7 +622,8 @@ class StrategyAdapter:
                 self._current_model_family, category
             )
             return template.render(**kwargs)
-        except Exception:
+        except Exception as _exc:
+            log.debug("strategy_adapter 异常处理", error=str(_exc))
             return kwargs.get("user_input", "")
 
     def get_metrics(self) -> StrategyAdapterMetrics:
@@ -717,6 +728,7 @@ class StrategyAdapter:
             try:
                 self._callbacks["on_strategy_adapted"](config)
             except Exception as _exc:
+                log.debug("strategy_adapter 异常处理", error=str(_exc))
                 log_ignored(log, "strategy_adapter.StrategyAdapter.adapt", _exc)
 
         return config

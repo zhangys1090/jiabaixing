@@ -13,6 +13,7 @@ tool_duration_histogram / set_active_sessions），新增业务侧缺失的指�
 
 Usage:
     from agent.core.production_metrics import get_production_metrics_collector
+logger = logging.getLogger(__name__)
 
     collector = get_production_metrics_collector()
     collector.record_request(user_id="u1", intent="chat", status="success", duration_ms=120.0)
@@ -22,6 +23,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Optional
 
 from opentelemetry import metrics
@@ -34,11 +36,11 @@ from agent.core.otel_metrics import (
     tool_duration_histogram,
 )
 
-logger = logging.getLogger(__name__)
 
 # 全局采集器单例
 _collector_instance: Optional["ProductionMetricsCollector"] = None
 """全局 ProductionMetricsCollector 单例，由 get_production_metrics_collector 设置。"""
+_instance_lock = threading.Lock()
 
 # 预定义业务指标缓存
 _request_counter: Optional[metrics.Counter] = None
@@ -46,6 +48,7 @@ _request_duration_histogram: Optional[metrics.Histogram] = None
 _llm_cost_counter: Optional[metrics.Counter] = None
 _user_satisfaction_counter: Optional[metrics.Counter] = None
 _error_counter: Optional[metrics.Counter] = None
+_metrics_lock = threading.Lock()
 
 
 def _reset_collector_for_testing() -> None:
@@ -75,10 +78,12 @@ def _request_total_counter() -> metrics.Counter:
     """
     global _request_counter
     if _request_counter is None:
-        _request_counter = metrics.get_meter(__name__).create_counter(
-            name="agent_request_total",
-            description="请求总数（按 user_id/intent/status 标签）",
-        )
+        with _metrics_lock:
+            if _request_counter is None:
+                _request_counter = metrics.get_meter(__name__).create_counter(
+                    name="agent_request_total",
+                    description="请求总数（按 user_id/intent/status 标签）",
+                )
     return _request_counter
 
 
@@ -93,10 +98,12 @@ def _request_duration_histogram() -> metrics.Histogram:
     """
     global _request_duration_histogram
     if _request_duration_histogram is None:
-        _request_duration_histogram = metrics.get_meter(__name__).create_histogram(
-            name="agent_request_duration",
-            description="请求耗时直方图（毫秒）",
-        )
+        with _metrics_lock:
+            if _request_duration_histogram is None:
+                _request_duration_histogram = metrics.get_meter(__name__).create_histogram(
+                    name="agent_request_duration",
+                    description="请求耗时直方图（毫秒）",
+                )
     return _request_duration_histogram
 
 
@@ -111,10 +118,12 @@ def _llm_cost_counter() -> metrics.Counter:
     """
     global _llm_cost_counter
     if _llm_cost_counter is None:
-        _llm_cost_counter = metrics.get_meter(__name__).create_counter(
-            name="agent_llm_cost_total",
-            description="LLM 调用成本累计（美元）",
-        )
+        with _metrics_lock:
+            if _llm_cost_counter is None:
+                _llm_cost_counter = metrics.get_meter(__name__).create_counter(
+                    name="agent_llm_cost_total",
+                    description="LLM 调用成本累计（美元）",
+                )
     return _llm_cost_counter
 
 
@@ -129,10 +138,12 @@ def _user_satisfaction_counter() -> metrics.Counter:
     """
     global _user_satisfaction_counter
     if _user_satisfaction_counter is None:
-        _user_satisfaction_counter = metrics.get_meter(__name__).create_counter(
-            name="agent_user_satisfaction",
-            description="用户满意度反馈（点赞/点踩）",
-        )
+        with _metrics_lock:
+            if _user_satisfaction_counter is None:
+                _user_satisfaction_counter = metrics.get_meter(__name__).create_counter(
+                    name="agent_user_satisfaction",
+                    description="用户满意度反馈（点赞/点踩）",
+                )
     return _user_satisfaction_counter
 
 
@@ -147,10 +158,12 @@ def _error_total_counter() -> metrics.Counter:
     """
     global _error_counter
     if _error_counter is None:
-        _error_counter = metrics.get_meter(__name__).create_counter(
-            name="agent_error_total",
-            description="错误总数（按 error_type 标签）",
-        )
+        with _metrics_lock:
+            if _error_counter is None:
+                _error_counter = metrics.get_meter(__name__).create_counter(
+                    name="agent_error_total",
+                    description="错误总数（按 error_type 标签）",
+                )
     return _error_counter
 
 
@@ -326,5 +339,7 @@ def get_production_metrics_collector() -> ProductionMetricsCollector:
     """
     global _collector_instance
     if _collector_instance is None:
-        _collector_instance = ProductionMetricsCollector()
+        with _instance_lock:
+            if _collector_instance is None:
+                _collector_instance = ProductionMetricsCollector()
     return _collector_instance

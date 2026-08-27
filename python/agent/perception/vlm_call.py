@@ -13,18 +13,20 @@ Usage:
     from agent.perception.vlm_call import vlmc
     result = await vlmc.analyze(image_base64="...", question="描述图片内容")
     if result.success:
-        print(result.text)
+        logger.info(result.text)
 """
 from __future__ import annotations
 
 import base64
+import asyncio
 import os
 from dataclasses import dataclass, field
 from typing import Any
-
 from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("vlm_call")
+
+
 
 
 @dataclass
@@ -62,10 +64,93 @@ class VLMCaller:
     def __init__(self, default_model: str = "") -> None:
         self._default_model = default_model or os.getenv("VISION_MODEL", "gpt-4o")
         self._providers: dict[str, Any] = {}
+        self._local_models: list[str] | None = None
 
     @property
     def default_model(self) -> str:
         return self._default_model
+
+    @property
+    def is_local_model(self) -> bool:
+        """当前默认模型是否为本地模型（Ollama/vLLM/llama.cpp）。"""
+        local_prefixes = ("ollama/", "openai/local", "hosted_vllm/", "llamacpp")
+        return any(self._default_model.startswith(p) for p in local_prefixes)
+
+    async def detect_local_models(self) -> list[str]:
+        """检测本地可用的视觉模型。
+
+        检测顺序：
+        1. Ollama: 通过 `ollama list` 获取已拉取模型
+        2. 环境变量 VISION_LOCAL_MODELS（逗号分隔）
+
+        Returns:
+            本地可用模型名列表
+        """
+        if self._local_models is not None:
+            return self._local_models
+
+        models: list[str] = []
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "ollama", "list",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5.0)
+            if proc.returncode == 0:
+                for line in stdout.decode("utf-8", errors="ignore").splitlines()[1:]:
+                    name = line.split()[0] if line.strip() else ""
+                    if name and any(kw in name.lower() for kw in ("vision", "llava", "bakllava", "minicpm", "qwen2-vl", "cogvlm", "internvl")):
+                        models.append(f"ollama/{name}")
+        except Exception:
+            pass
+
+        env_models = os.getenv("VISION_LOCAL_MODELS", "")
+        if env_models:
+            for m in env_models.split(","):
+                m = m.strip()
+                if m and m not in models:
+                    models.append(m)
+
+        self._local_models = models
+        return models
+
+    async def analyze_local(
+        self,
+        image_path: str,
+        question: str = "",
+        system_prompt: str = "",
+        temperature: float = 0.3,
+        max_tokens: int = 4000,
+    ) -> VLMResult:
+        """使用本地视觉模型分析图片（无需外部API）。
+
+        自动选择第一个可用的本地模型，无可用模型时返回错误。
+
+        Args:
+            image_path: 本地图片文件路径
+            question: 问题/指令
+            system_prompt: 系统提示词
+            temperature: 采样温度
+            max_tokens: 最大输出 token 数
+
+        Returns:
+            VLMResult: 调用结果
+        """
+        local_models = await self.detect_local_models()
+        if not local_models:
+            return VLMResult(success=False, error="无可用本地视觉模型，请安装 Ollama 并拉取视觉模型")
+
+        model = local_models[0]
+        return await self.analyze(
+            image_path=image_path,
+            question=question,
+            system_prompt=system_prompt,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
 
     async def analyze(
         self,
@@ -152,6 +237,7 @@ class VLMCaller:
                 model=model,
             )
         except Exception as e:
+            log.debug("vlm_call 异常处理", error=str(e))
             return VLMResult(
                 success=False,
                 error=f"VLM 调用失败: {e}",

@@ -6,6 +6,8 @@ WriteApprovalManager 可独立使用，不依赖 AgentEngine。
 
 Usage:
     from agent.tools.write_approval_tool import register_write_approval_tool
+import logging
+logger = logging.getLogger(__name__)
     register_write_approval_tool(registry)
 """
 from __future__ import annotations
@@ -402,6 +404,7 @@ async def write_approval_executor(params: dict[str, Any]) -> ToolResult:
                     result="auto_approved" if req.status == "approved" else "pending_approval",
                 )
             except Exception as _exc:
+                logger.warning("write_approval_tool 异常处理", error=str(_exc))
                 log_ignored(None, "write_approval_tool._auto_approve.audit", _exc)
 
         if req.status == "approved":

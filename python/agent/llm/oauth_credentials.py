@@ -27,6 +27,8 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Callable
 from agent.core.logger import log_ignored
+import logging
+logger = logging.getLogger(__name__)
 
 # ── 通用 OAuth2 配置 ──
 
@@ -220,7 +222,8 @@ class OAuthTokenStore:
         try:
             with open(path, encoding="utf-8") as f:
                 return json.load(f)
-        except Exception:
+        except Exception as e:
+            logger.warning("oauth_credentials.load OAuth凭据加载失败", error=str(e))
             return None
 
     def clear(self, provider: str) -> None:
@@ -388,12 +391,13 @@ def resolve_vertex_credentials(
                 result["access_token_expires_at"] = refreshed.get("expires_at")
                 return result
             except Exception as e:
+                logger.warning("oauth_credentials 异常处理", error=str(e))
                 result["reason"] = f"Vertex OAuth 刷新失败，回退 ADC: {e}"
                 # 继续走 ADC 分支
 
     # 2) ADC / 服务账号文件
     try:
-        import google.auth  # type: ignore
+        import google.auth
 
         creds, proj = google.auth.default()
         del creds
@@ -401,7 +405,8 @@ def resolve_vertex_credentials(
         result["adc_available"] = True
         if project is None and proj:
             result["project"] = proj
-    except Exception:
+    except Exception as e:
+        logger.warning("oauth_credentials._detect_google_adc Google ADC检测失败", error=str(e))
         if sa_path and os.path.exists(sa_path):
             result["source"] = "service_account_file"
             result["adc_available"] = True
@@ -464,11 +469,12 @@ def resolve_bedrock_credentials(
                 result["access_token_expires_at"] = refreshed.get("expires_at")
                 return result
             except Exception as e:
+                logger.warning("oauth_credentials 异常处理", error=str(e))
                 result["reason"] = f"Bedrock SSO OAuth 刷新失败，回退 IAM: {e}"
 
     # 2) IAM 会话 / 环境变量
     try:
-        import botocore.session  # type: ignore
+        import botocore.session
 
         sess = botocore.session.get_session()
         creds = sess.get_credentials()
@@ -479,7 +485,8 @@ def resolve_bedrock_credentials(
         else:
             result["degraded"] = True
             result["reason"] = "botocore 已安装但未发现可用 IAM 凭证"
-    except Exception:
+    except Exception as e:
+        logger.warning("oauth_credentials._detect_aws_credentials AWS凭据检测失败", error=str(e))
         if ak:
             result["source"] = "env_static"
             result["has_access_key"] = True

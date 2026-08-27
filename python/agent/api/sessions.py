@@ -4,6 +4,8 @@ import threading
 
 from agent.persistence.session_store import SessionStore
 from agent.core.logger import log_ignored
+import logging
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -50,10 +52,25 @@ class CreateSessionRequest(BaseModel):
     user_id: str = "default"
     title: str = ""
 
+    def model_post_init(self, __ctx: object) -> None:
+        if len(self.user_id) > 128:
+            raise ValueError("user_id too long (max 128 chars)")
+        if len(self.title) > 500:
+            raise ValueError("title too long (max 500 chars)")
+
 
 class AddMessageRequest(BaseModel):
     role: str
     content: str
+
+    def model_post_init(self, __ctx: object) -> None:
+        _VALID_ROLES = {"user", "assistant", "system", "tool"}
+        if self.role not in _VALID_ROLES:
+            raise ValueError(f"Invalid role: {self.role}. Must be one of {_VALID_ROLES}")
+        if not self.content or not self.content.strip():
+            raise ValueError("content is required")
+        if len(self.content) > 100_000:
+            raise ValueError("content too long (max 100000 chars)")
 
 
 class SearchRequest(BaseModel):
@@ -62,17 +79,45 @@ class SearchRequest(BaseModel):
     session_id: str | None = None
     role_filter: str | None = None
 
+    def model_post_init(self, __ctx: object) -> None:
+        if not self.query or not self.query.strip():
+            raise ValueError("query is required")
+        if len(self.query) > 2000:
+            raise ValueError("query too long (max 2000 chars)")
+        if self.limit < 1 or self.limit > 200:
+            raise ValueError("limit must be between 1 and 200")
+
 
 class BookmarkRequest(BaseModel):
     session_id: str
     note: str = ""
     label: str = ""
 
+    def model_post_init(self, __ctx: object) -> None:
+        if len(self.note) > 2000:
+            raise ValueError("note too long (max 2000 chars)")
+        if len(self.label) > 100:
+            raise ValueError("label too long (max 100 chars)")
+
 
 # P2-3: 会话书签 — 委托 SessionStore 持久化
 _bookmarks: dict[str, list[dict]] = {}
 _bookmark_lock = threading.Lock()
 _BOOKMARK_PERSIST_KEY = "__bookmarks__"
+_MAX_BOOKMARK_USERS = 5000
+_MAX_BOOKMARKS_PER_USER = 100
+_TRIM_BOOKMARK_USERS_TO = 3000
+_bookmark_access: dict[str, float] = {}
+
+
+def _trim_bookmarks() -> None:
+    if len(_bookmarks) <= _MAX_BOOKMARK_USERS:
+        return
+    sorted_users = sorted(_bookmark_access.items(), key=lambda x: x[1])
+    to_remove = sorted_users[: len(_bookmarks) - _TRIM_BOOKMARK_USERS_TO]
+    for uid, _ in to_remove:
+        _bookmarks.pop(uid, None)
+        _bookmark_access.pop(uid, None)
 
 
 def _load_bookmarks_from_store() -> None:
@@ -85,6 +130,7 @@ def _load_bookmarks_from_store() -> None:
             if data and isinstance(data, dict):
                 _bookmarks = data
         except Exception as _exc:
+            logger.warning("sessions 异常处理", error=str(_exc))
             log_ignored(None, "sessions._load_bookmarks_from_store", _exc)
 
 
@@ -95,6 +141,7 @@ def _save_bookmarks_to_store() -> None:
             store = _get_store()
             store.set_metadata(_BOOKMARK_PERSIST_KEY, _bookmarks)
         except Exception as _exc:
+            logger.warning("sessions 异常处理", error=str(_exc))
             log_ignored(None, "sessions._save_bookmarks_to_store", _exc)
 
 
@@ -216,8 +263,12 @@ async def add_bookmark(req: BookmarkRequest):
     with _bookmark_lock:
         if user_id not in _bookmarks:
             _bookmarks[user_id] = []
+        _bookmark_access[user_id] = time.time()
         _bookmarks[user_id] = [b for b in _bookmarks[user_id] if b["session_id"] != req.session_id]
         _bookmarks[user_id].append(bookmark)
+        if len(_bookmarks[user_id]) > _MAX_BOOKMARKS_PER_USER:
+            _bookmarks[user_id] = _bookmarks[user_id][-_MAX_BOOKMARKS_PER_USER:]
+        _trim_bookmarks()
     _save_bookmarks_to_store()
     return {"success": True, "bookmark": bookmark}
 
@@ -287,6 +338,20 @@ import time as _time
 _checkpoints: dict[str, dict] = {}
 _checkpoint_lock = threading.Lock()
 _CHECKPOINT_PERSIST_KEY = "__checkpoints__"
+_MAX_CHECKPOINTS = 500
+_TRIM_CHECKPOINTS_TO = 300
+_checkpoint_access: dict[str, float] = {}
+_MAX_CHECKPOINT_MESSAGES = 200
+
+
+def _trim_checkpoints() -> None:
+    if len(_checkpoints) <= _MAX_CHECKPOINTS:
+        return
+    sorted_cps = sorted(_checkpoint_access.items(), key=lambda x: x[1])
+    to_remove = sorted_cps[: len(_checkpoints) - _TRIM_CHECKPOINTS_TO]
+    for sid, _ in to_remove:
+        _checkpoints.pop(sid, None)
+        _checkpoint_access.pop(sid, None)
 
 
 def _load_checkpoints_from_store() -> None:
@@ -299,6 +364,7 @@ def _load_checkpoints_from_store() -> None:
             if data and isinstance(data, dict):
                 _checkpoints = data
         except Exception as _exc:
+            logger.warning("sessions 异常处理", error=str(_exc))
             log_ignored(None, "sessions._load_checkpoints_from_store", _exc)
 
 
@@ -309,6 +375,7 @@ def _save_checkpoints_to_store() -> None:
             store = _get_store()
             store.set_metadata(_CHECKPOINT_PERSIST_KEY, _checkpoints)
         except Exception as _exc:
+            logger.warning("sessions 异常处理", error=str(_exc))
             log_ignored(None, "sessions._save_checkpoints_to_store", _exc)
 
 
@@ -336,19 +403,24 @@ async def save_checkpoint(session_id: str):
         return {"error": "session not found", "session_id": session_id}
 
     messages = store.get_messages(session_id)
+    all_msgs = [
+        {"role": m.role, "content": m.content, "timestamp": m.timestamp}
+        for m in messages
+    ]
+    if len(all_msgs) > _MAX_CHECKPOINT_MESSAGES:
+        all_msgs = all_msgs[-_MAX_CHECKPOINT_MESSAGES:]
     checkpoint = {
         "session_id": session_id,
         "timestamp": _time.time(),
         "message_count": len(messages),
         "last_message": messages[-1].content[:200] if messages else "",
         "last_role": messages[-1].role if messages else "",
-        "messages": [
-            {"role": m.role, "content": m.content, "timestamp": m.timestamp}
-            for m in messages
-        ],
+        "messages": all_msgs,
     }
     with _checkpoint_lock:
         _checkpoints[session_id] = checkpoint
+        _checkpoint_access[session_id] = _time.time()
+        _trim_checkpoints()
     _save_checkpoints_to_store()
     return {
         "success": True,

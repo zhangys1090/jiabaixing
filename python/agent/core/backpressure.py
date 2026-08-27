@@ -89,6 +89,7 @@ class BackpressureController:
         self._accepted = 0
         self._rejected = 0
         self._wait_times: deque[float] = deque(maxlen=100)
+        self._wait_sum: float = 0.0
         self._degradation_level = 0
         self._last_load_check = time.monotonic()
         self._current_load = LoadLevel.NORMAL
@@ -103,7 +104,7 @@ class BackpressureController:
 
     @property
     def stats(self) -> BackpressureStats:
-        avg_wait = sum(self._wait_times) / max(len(self._wait_times), 1) * 1000
+        avg_wait = (self._wait_sum / max(len(self._wait_times), 1)) * 1000
         return BackpressureStats(
             total_requests=self._total_requests,
             accepted=self._accepted,
@@ -158,7 +159,11 @@ class BackpressureController:
                     self._queue_depth -= 1
 
                 wait_time = (time.monotonic() - start_time) * 1000
+                if len(self._wait_times) >= self._wait_times.maxlen:
+                    evicted = self._wait_times[0] if self._wait_times else 0.0
+                    self._wait_sum -= evicted
                 self._wait_times.append(wait_time)
+                self._wait_sum += wait_time
                 self._accepted += 1
 
                 try:

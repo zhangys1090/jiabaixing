@@ -147,6 +147,9 @@ class LoopObserver:
 
     def __init__(self) -> None:
         # 是否启用
+        self._MAX_TRACE_HISTORY = 5000
+        self._MAX_PHASE_COUNTS = 200
+        self._MAX_PHASE_TOTAL_DURATIONS = 200
         self._enabled = False
 
         # 是否输出详细调试信息
@@ -207,7 +210,7 @@ class LoopObserver:
             self._enabled = True
             self._verbose = os.environ.get(ENV_OBSERVER_VERBOSE, "").lower() == "true"
 
-        log.info(f"🔍 循环观察者已初始化 ({'已启用' if self._enabled else '已禁用'})")
+        log.debug(f"循环观察者已初始化 ({'已启用' if self._enabled else '已禁用'})")
 
     @classmethod
     def get_instance(cls) -> LoopObserver:
@@ -583,7 +586,8 @@ class LoopObserver:
 
             extra = f"...(+{len(keys) - PARAMS_SUMMARY_MAX_KEYS})" if len(keys) > PARAMS_SUMMARY_MAX_KEYS else ""
             return ", ".join(summary_parts) + extra
-        except Exception:
+        except Exception as _exc:
+            log.debug("observer 异常处理", error=str(_exc))
             return "[params]"
 
     def generate_trace_report(self, trace: LoopTrace) -> str:

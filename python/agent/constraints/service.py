@@ -7,12 +7,43 @@ from enum import Enum
 from typing import Any, Protocol
 
 from agent.core.logger import StructuredLogger
-from agent.security.sensitive_detector import (
-    CheckScene,
-    RiskLevel,
-    check_dangerous_command,
-    check_sensitive_info,
-)
+from agent.core.types import Permission as CorePermission, RiskLevel as CoreRiskLevel
+
+
+class SecurityChecker(Protocol):
+    """安全检测协议 — 解耦 constraints → security 的跨层依赖。"""
+
+    def check_dangerous_command(self, action: str) -> Any: ...
+    def check_sensitive_info(self, text: str, scene: str) -> Any: ...
+    @property
+    def CheckScene(self) -> Any: ...
+
+
+class DefaultSecurityChecker:
+    """默认安全检测实现 — 委托给 security.sensitive_detector。"""
+
+    def __init__(self) -> None:
+        from agent.security.sensitive_detector import (
+            CheckScene as _CheckScene,
+            check_dangerous_command as _check_dangerous_command,
+            check_sensitive_info as _check_sensitive_info,
+        )
+        self._check_dangerous_command = _check_dangerous_command
+        self._check_sensitive_info = _check_sensitive_info
+        self._CheckScene = _CheckScene
+
+    def check_dangerous_command(self, action: str) -> Any:
+        return self._check_dangerous_command(action)
+
+    def check_sensitive_info(self, text: str, scene: str) -> Any:
+        cs = self._CheckScene(scene)
+        return self._check_sensitive_info(text, cs)
+
+    @property
+    def CheckScene(self) -> Any:
+        return self._CheckScene
+
+RiskLevel = CoreRiskLevel
 
 log = StructuredLogger("constraints")
 
@@ -35,19 +66,16 @@ class LifecycleEvent(str, Enum):
     ON_STEP_COMPLETED = "on_step_completed"
 
 
-@dataclass
-class Permission:
-    name: str
+Permission = CorePermission
 
-
-PERMISSION_MEMORY_READ = Permission("memory:read")
-PERMISSION_MEMORY_WRITE = Permission("memory:write")
-PERMISSION_FILE_READ = Permission("file:read")
-PERMISSION_FILE_WRITE = Permission("file:write")
-PERMISSION_DESKTOP_CONTROL = Permission("desktop:control")
-PERMISSION_NETWORK_ACCESS = Permission("network:access")
-PERMISSION_CODE_EXECUTE = Permission("code:execute")
-PERMISSION_SYSTEM_ADMIN = Permission("system:admin")
+PERMISSION_MEMORY_READ = CorePermission.MEMORY_READ
+PERMISSION_MEMORY_WRITE = CorePermission.MEMORY_WRITE
+PERMISSION_FILE_READ = CorePermission.FILE_READ
+PERMISSION_FILE_WRITE = CorePermission.FILE_WRITE
+PERMISSION_DESKTOP_CONTROL = CorePermission.DESKTOP_CONTROL
+PERMISSION_NETWORK_ACCESS = CorePermission.NETWORK_ACCESS
+PERMISSION_CODE_EXECUTE = CorePermission.CODE_EXECUTE
+PERMISSION_SYSTEM_ADMIN = CorePermission.SYSTEM_ADMIN
 
 
 @dataclass
@@ -174,6 +202,7 @@ LifecycleHook = object
 @dataclass
 class ConstraintsServiceDeps:
     permission_guard: PermissionGuardProtocol | None = None
+    security_checker: SecurityChecker | None = None
 
 
 _CONSTRAINT_DEFINITIONS: list[ConstraintDefinition] = [
@@ -200,6 +229,8 @@ _LIFECYCLE_TO_HOOK_EVENT: dict[str, str | None] = {
 class ConstraintsService:
     def __init__(self, deps: ConstraintsServiceDeps | None = None) -> None:
         self.deps = deps or ConstraintsServiceDeps()
+        if self.deps.security_checker is None:
+            self.deps.security_checker = DefaultSecurityChecker()
         self._hooks: dict[LifecycleEvent, list] = {}
         self._adaptive_budget: AdaptiveBudgetConfig | None = None
         self._creative_config: CreativeExplorationConfig | None = None
@@ -264,7 +295,7 @@ class ConstraintsService:
         if len(input_text) > 10000:
             return {"allowed": False, "reason": "输入过长，可能存在注入攻击"}
 
-        cmd_check = check_dangerous_command(action)
+        cmd_check = self.deps.security_checker.check_dangerous_command(action)
         if cmd_check.dangerous:
             return {"allowed": False, "reason": cmd_check.reason or "禁止执行危险操作"}
 
@@ -285,8 +316,8 @@ class ConstraintsService:
                 if result.modified_params and context.params is not None:
                     context.params.update(result.modified_params)
             except Exception as exc:
+                log.debug("service 异常处理", error=str(exc))
                 from agent.core.logger import StructuredLogger
-                log = StructuredLogger("constraints")
                 log.error(
                     "钩子执行异常，拒绝继续",
                     event=event.value if hasattr(event, "value") else str(event),
@@ -330,7 +361,7 @@ class ConstraintsService:
             output = (ctx.get("result") or {}).get("output") if isinstance(ctx, dict) else None
             if output:
                 output_str = output if isinstance(output, str) else str(output)
-                result = check_sensitive_info(output_str, CheckScene.OUTPUT)
+                result = self.deps.security_checker.check_sensitive_info(output_str, "output")
                 if not result.safe:
                     top_violation = result.violations[0] if result.violations else None
                     display_name = top_violation.name if top_violation else "未知"
@@ -344,7 +375,7 @@ class ConstraintsService:
                 all_values = " ".join(str(v) for v in params.values())
                 content = str(params.get("content", params.get("text", ""))) + " " + all_values
                 if content.strip():
-                    result = check_sensitive_info(content, CheckScene.STORAGE)
+                    result = self.deps.security_checker.check_sensitive_info(content, "storage")
                     if not result.safe:
                         specific_names = [
                             "API密钥", "AWS密钥", "GitHub令牌", "GitHub OAuth令牌",
@@ -367,7 +398,7 @@ class ConstraintsService:
             params = ctx.get("params", {}) if isinstance(ctx, dict) else {}
             cmd = params.get("command", params.get("script", ""))
             if cmd:
-                result = check_dangerous_command(str(cmd))
+                result = self.deps.security_checker.check_dangerous_command(str(cmd))
                 if result.dangerous:
                     return {"compliant": False, "violation": result.reason or f"检测到危险命令: {str(cmd)[:50]}"}
             return {"compliant": True}

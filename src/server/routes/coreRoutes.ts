@@ -3,14 +3,48 @@
  */
 
 import Busboy from 'busboy';
+import * as crypto from 'crypto';
 import express from 'express';
 import * as fs from 'fs';
 import * as path from 'path';
 
 import { JiabaixingCore, ProcessInputResult } from '../../core/JiabaixingCore';
+import { getActivePythonBridge } from '../../ide/bridgeRegistry';
 import { EventBus } from '../../shared/EventBus';
 import { Logger } from '../../utils/Logger';
 import { getPythonBridge, isPythonBackend } from '../bootstrap';
+
+function requireAdmin(req: express.Request, res: express.Response): boolean {
+  const adminToken = process.env.ADMIN_TOKEN;
+  if (!adminToken) {
+    res.status(503).json({
+      success: false,
+      error: '管理员认证未配置，请联系系统管理员设置 ADMIN_TOKEN',
+    });
+    return false;
+  }
+  const authHeader = req.headers['authorization'];
+  const token = authHeader?.startsWith('Bearer ')
+    ? authHeader.slice(7)
+    : ((req.query?.token as string | undefined) ?? req.body?.token);
+  if (!token) {
+    res.status(401).json({
+      success: false,
+      error: '缺少管理员认证令牌',
+    });
+    return false;
+  }
+  const a = Buffer.from(String(token), 'utf8');
+  const b = Buffer.from(String(adminToken), 'utf8');
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+    res.status(403).json({
+      success: false,
+      error: '管理员认证失败',
+    });
+    return false;
+  }
+  return true;
+}
 
 export function registerCoreRoutes(
   app: express.Application,
@@ -151,6 +185,8 @@ export function registerCoreRoutes(
     express.json({ limit: '1mb' }),
     async (req, res) => {
       try {
+        if (!requireAdmin(req, res)) return;
+
         const { targetModel, reason } = req.body as {
           targetModel?: string;
           reason?: string;
@@ -201,6 +237,13 @@ export function registerCoreRoutes(
     '/api/process',
     express.json({ limit: '50mb' }),
     async (req, res) => {
+      const processTimeout = setTimeout(() => {
+        if (!res.headersSent) {
+          res
+            .status(504)
+            .json({ success: false, error: '请求处理超时，请稍后重试' });
+        }
+      }, 60000);
       try {
         const { input: rawInput, images } = req.body as {
           input?: string;
@@ -239,7 +282,14 @@ export function registerCoreRoutes(
           );
           res.json({
             success: true,
-            data: { response: result.response },
+            data: {
+              response: result.response,
+              finishReason: result.finishReason,
+              qualityScore: result.qualityScore,
+              toolCallsMade: result.toolCallsMade,
+              roundsUsed: result.roundsUsed,
+              duration: result.duration,
+            },
             traceId: result.traceId || traceId,
             intent: result.intent || 'chat',
             backend: 'python',
@@ -268,11 +318,12 @@ export function registerCoreRoutes(
           intent: result.intent,
         });
       } catch (error) {
-        const errMsg = error instanceof Error ? error.message : '未知错误';
         Logger.error('⚠️ /api/process 处理失败', error as Error, 'Main');
         res.status(500).json({
-          error: `处理失败: ${errMsg}`,
+          error: '处理失败，请稍后重试。',
         });
+      } finally {
+        clearTimeout(processTimeout);
       }
     }
   );

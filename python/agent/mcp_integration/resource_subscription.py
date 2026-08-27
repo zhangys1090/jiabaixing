@@ -21,10 +21,11 @@ import asyncio
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Awaitable
-
 from agent.core.logger import StructuredLogger, log_ignored
 
 log = StructuredLogger("resource_subscription")
+
+
 
 
 @dataclass
@@ -207,6 +208,7 @@ class ResourceSubscriptionManager:
                 }
                 await self._client._send_request(entry.server_name, request)
             except Exception as _exc:
+                log.debug("resource_subscription 异常处理", error=str(_exc))
                 log_ignored(log, "resource_subscription.unsubscribe_all", _exc)
 
         self._subscriptions.clear()
@@ -325,6 +327,7 @@ class ResourceSubscriptionManager:
         except ImportError:
             pass
         except Exception as _exc:
+            log.debug("resource_subscription 异常处理", error=str(_exc))
             log_ignored(log, "resource_subscription._dispatch_event.eventbus", _exc)
 
         log.debug(

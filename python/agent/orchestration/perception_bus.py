@@ -83,9 +83,16 @@ class PerceptionBusEntry:
 class SharedPerceptionBus:
     """共享感知总线：跨子 Agent 汇聚 SenseSample，按 trace_id 聚合融合。"""
 
+    MAX_ENTRIES = 5000
+    TRIM_TO = 4000
+
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._entries: list[PerceptionBusEntry] = []
+
+    def _trim_if_needed(self) -> None:
+        if len(self._entries) > self.MAX_ENTRIES:
+            self._entries = self._entries[-self.TRIM_TO:]
 
     def ingest(
         self,
@@ -102,6 +109,7 @@ class SharedPerceptionBus:
                     agent_id=agent_id, sample=sample, trace_id=trace_id, task_id=task_id
                 )
             )
+            self._trim_if_needed()
         return trace_id
 
     def for_trace(self, trace_id: str) -> list[SenseSample]:

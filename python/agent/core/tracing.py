@@ -10,6 +10,7 @@ opentelemetry为可选依赖，缺失时graceful降级为空操作（零性能�
 
 Usage:
     from agent.core.tracing import get_tracing_manager
+logger = logging.getLogger(__name__)
 
     mgr = get_tracing_manager()
     span = mgr.start_span("llm.chat", {"model": "gpt-4"})
@@ -27,7 +28,6 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-logger = logging.getLogger(__name__)
 
 
 def new_trace_id() -> str:

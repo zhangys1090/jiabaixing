@@ -23,6 +23,7 @@
 
 Usage:
     from agent.core.otel_metrics import loop_iterations_counter, loop_duration_histogram
+logger = logging.getLogger(__name__)
 
     loop_iterations_counter().add(1, {"status": "success"})
     loop_duration_histogram().record(1.23)
@@ -36,7 +37,6 @@ from typing import Iterable, Optional
 from opentelemetry import metrics
 from opentelemetry.metrics import CallbackOptions, Meter, MeterProvider, Observation
 
-logger = logging.getLogger(__name__)
 
 # 模块常量
 OTEL_ENABLED_DEFAULT: bool = False
@@ -169,7 +169,7 @@ def get_meter() -> Meter:
     global _meter_instance
     if _meter_instance is None:
         init_metrics()
-    return _meter_instance  # type: ignore[return-value]
+    return _meter_instance
 
 
 def _reset_metrics_cache() -> None:

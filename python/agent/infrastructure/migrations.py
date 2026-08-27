@@ -39,7 +39,7 @@ def run_migrations(db_path: str | None = None) -> bool:
             cwd=str(root),
             env=env,
         )
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         _log.warning("迁移执行异常", error=str(e))
         return False
 

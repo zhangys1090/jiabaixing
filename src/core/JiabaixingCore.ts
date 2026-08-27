@@ -702,10 +702,22 @@ export class JiabaixingCore {
       }
 
       // ═══════════════════════════════════════════════════════════════
-      // 降级：如果 Harness 不可用
+      // 降级：如果 Harness 不可用，尝试直接 LLM 调用
       // ═══════════════════════════════════════════════════════════════
-      Logger.warn('⚠️ Harness 不可用，使用简单回复', 'JiabaixingCore');
-      const fallbackResponse = `抱歉，当前系统配置不完整，请检查环境变量设置。`;
+      Logger.warn('⚠️ Harness 不可用，尝试直接LLM调用', 'JiabaixingCore');
+      let fallbackResponse = '';
+      try {
+        const llm = this.getLLM();
+        if (llm && llm.isServiceAvailable()) {
+          fallbackResponse = await llm.chat(input);
+          Logger.info('✅ 直接LLM调用成功', 'JiabaixingCore');
+        }
+      } catch (llmErr) {
+        Logger.warn('⚠️ 直接LLM调用也失败，使用硬编码降级', 'JiabaixingCore');
+      }
+      if (!fallbackResponse.trim()) {
+        fallbackResponse = '抱歉，当前系统配置不完整，请检查环境变量设置。';
+      }
 
       this.conversationHistoryManager.addUserMessage(input);
       this.conversationHistoryManager.addAssistantMessage(fallbackResponse);
@@ -727,7 +739,7 @@ export class JiabaixingCore {
       };
     } catch (error) {
       Logger.error('❌ 处理用户输入失败', error as Error, 'JiabaixingCore');
-      const fallbackResponse = `抱歉，处理过程中出现了问题：${(error as Error).message}`;
+      const fallbackResponse = '抱歉，处理过程中出现了问题，请稍后重试。';
 
       this.conversationHistoryManager.addUserMessage(input);
       this.conversationHistoryManager.addAssistantMessage(fallbackResponse);
@@ -841,6 +853,7 @@ export class JiabaixingCore {
 - 保持自然、温暖、简洁
 - 不超过50字
 - 不要用"主人"称呼
+- 不编造不存在的信息或事件
 - ${guidance}`;
 
       const userPrompt = context.context

@@ -14,13 +14,13 @@ from typing import Any, Optional
 
 import redis.asyncio as aioredis
 from redis.exceptions import RedisError
+logger = logging.getLogger(__name__)
 
 # 模块级常量
 REDIS_ENABLED_DEFAULT: bool = False
 REDIS_URL_DEFAULT: str = "redis://localhost:6379/0"
 REDIS_POOL_SIZE_DEFAULT: int = 10
 
-logger = logging.getLogger(__name__)
 
 
 class RedisCache:

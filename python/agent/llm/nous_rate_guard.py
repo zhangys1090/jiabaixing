@@ -24,7 +24,7 @@
 
     allowed = guard.check(RateTier.USER, user_id="user-123")
     if not allowed:
-        print("速率超限，请稍后重试")
+        logger.info("速率超限，请稍后重试")
 """
 
 from __future__ import annotations
@@ -34,10 +34,11 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
-
 from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("nous_rate_guard")
+
+
 
 
 class RateTier(str, Enum):
@@ -218,6 +219,8 @@ class NousRateGuard:
         self._quotas: dict[str, QuotaUsage] = {}
         self._audit: list[dict[str, Any]] = []
         self._max_audit = 500
+        self._MAX_BUCKETS = 5000
+        self._MAX_QUOTAS = 5000
 
     def set_limit(
         self,
@@ -241,6 +244,12 @@ class NousRateGuard:
             max_tokens=max_rps * burst / max_rps + burst,
             refill_rate=max_rps,
         )
+        if len(self._buckets) > self._MAX_BUCKETS:
+            sorted_buckets = sorted(self._buckets.items(), key=lambda x: x[1].last_refill)
+            to_remove = sorted_buckets[: len(self._buckets) - (self._MAX_BUCKETS * 3 // 4)]
+            for k, _ in to_remove:
+                self._buckets.pop(k, None)
+                self._specs.pop(k, None)
         self._specs[bucket_key] = RateLimitSpec(
             tier=tier,
             max_rps=max_rps,
@@ -267,6 +276,11 @@ class NousRateGuard:
             limit=limit,
             window_seconds=window_seconds,
         )
+        if len(self._quotas) > self._MAX_QUOTAS:
+            sorted_quotas = sorted(self._quotas.items(), key=lambda x: x[1].window_start)
+            to_remove = sorted_quotas[: len(self._quotas) - (self._MAX_QUOTAS * 3 // 4)]
+            for k, _ in to_remove:
+                del self._quotas[k]
 
     def check(
         self,

@@ -4,8 +4,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("plan_quality_checker")
+
 
 
 @dataclass

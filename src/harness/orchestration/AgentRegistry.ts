@@ -6,6 +6,8 @@
  * P10增强：健康检查、能力评分排序、心跳检测
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
 import { Logger } from '../../utils/Logger';
 
 /** Agent能力声明 */
@@ -106,6 +108,11 @@ export interface NegotiationMessage {
 }
 
 export class AgentRegistry {
+  private static readonly KNOWLEDGE_MAX_ENTRIES = 5000;
+  private static readonly KNOWLEDGE_TRIM_TO = 4000;
+  private static readonly NEGOTIATION_MAX_SESSIONS = 200;
+  private static readonly NEGOTIATION_TRIM_TO = 150;
+
   private agents: Map<string, AgentRegistration> = new Map();
   private healthMap: Map<string, AgentHealth> = new Map();
 
@@ -402,6 +409,23 @@ export class AgentRegistry {
     };
     this.knowledgeEntries.set(id, entry);
 
+    if (this.knowledgeEntries.size > AgentRegistry.KNOWLEDGE_MAX_ENTRIES) {
+      const sorted = Array.from(this.knowledgeEntries.entries()).sort(
+        ([, a], [, b]) => a.createdAt - b.createdAt
+      );
+      const toRemove = sorted.slice(
+        0,
+        this.knowledgeEntries.size - AgentRegistry.KNOWLEDGE_TRIM_TO
+      );
+      for (const [removeId] of toRemove) {
+        this.knowledgeEntries.delete(removeId);
+      }
+      Logger.info(
+        `💾 P1-5: 知识库已裁剪 ${toRemove.length} 条旧条目 (当前=${this.knowledgeEntries.size})`,
+        'AgentRegistry'
+      );
+    }
+
     // P1-7: 知识共享持久化 — 发布时同步写入文件系统
     this.persistKnowledgeEntry(entry);
 
@@ -535,15 +559,9 @@ export class AgentRegistry {
   private persistKnowledgeEntry(entry: SharedKnowledgeEntry): void {
     if (!this.knowledgePersistDir) return;
     try {
-      const filePath = path.join(
-        this.knowledgePersistDir,
-        `${entry.id}.json`
-      );
+      const filePath = path.join(this.knowledgePersistDir, `${entry.id}.json`);
       fs.writeFileSync(filePath, JSON.stringify(entry, null, 2), 'utf-8');
-      Logger.debug(
-        `💾 P1-7: 知识条目已持久化: ${entry.id}`,
-        'AgentRegistry'
-      );
+      Logger.debug(`💾 P1-7: 知识条目已持久化: ${entry.id}`, 'AgentRegistry');
     } catch (err) {
       Logger.warn(
         `💾 P1-7: 知识条目持久化失败: ${(err as Error).message}`,
@@ -701,6 +719,21 @@ export class AgentRegistry {
       status: 'open' as const,
     };
     this.negotiationSessions.set(id, session);
+
+    if (
+      this.negotiationSessions.size > AgentRegistry.NEGOTIATION_MAX_SESSIONS
+    ) {
+      const completedOrFailed = Array.from(this.negotiationSessions.entries())
+        .filter(([, s]) => s.status !== 'open')
+        .sort(([, a], [, b]) => (a.id > b.id ? 1 : -1));
+      const toRemove = completedOrFailed.slice(
+        0,
+        this.negotiationSessions.size - AgentRegistry.NEGOTIATION_TRIM_TO
+      );
+      for (const [sessionId] of toRemove) {
+        this.negotiationSessions.delete(sessionId);
+      }
+    }
     return {
       id,
       initiatorId,
@@ -1073,13 +1106,13 @@ export class A2AProtocolManager {
    */
   setPythonBridge(
     client: import('../../a2a/A2AClient').A2AClient,
-    preferPython = true,
+    preferPython = true
   ): void {
     this.pythonBridge = client;
     this.preferPython = preferPython;
     Logger.info(
       `🔗 A2AProtocolManager: Python 桥接已注入 (preferPython=${preferPython})`,
-      'A2AProtocol',
+      'A2AProtocol'
     );
   }
 
@@ -1090,7 +1123,7 @@ export class A2AProtocolManager {
     this.agentCards.set(card.id, card);
     Logger.info(
       `📇 A2A Agent Card 发布: ${card.name} (${card.id})`,
-      'A2AProtocol',
+      'A2AProtocol'
     );
 
     // P1-4: 同步到 Python 后端
@@ -1104,7 +1137,7 @@ export class A2AProtocolManager {
       } catch (e) {
         Logger.warn(
           `⚠️ A2A Agent Card 同步到 Python 失败: ${(e as Error).message}`,
-          'A2AProtocol',
+          'A2AProtocol'
         );
       }
     }
@@ -1156,13 +1189,13 @@ export class A2AProtocolManager {
         });
         Logger.info(
           `📋 A2A Task 创建(Python): ${remoteTask.id} (${input.fromAgentId} → ${input.toAgentId})`,
-          'A2AProtocol',
+          'A2AProtocol'
         );
         return remoteTask;
       } catch (e) {
         Logger.warn(
           `⚠️ Python A2A Task 创建失败，降级到本地: ${(e as Error).message}`,
-          'A2AProtocol',
+          'A2AProtocol'
         );
       }
     }
@@ -1187,7 +1220,7 @@ export class A2AProtocolManager {
 
     Logger.info(
       `📋 A2A Task 创建(本地): ${task.id} (${input.fromAgentId} → ${input.toAgentId})`,
-      'A2AProtocol',
+      'A2AProtocol'
     );
 
     this.emitTaskEvent(task.id, {

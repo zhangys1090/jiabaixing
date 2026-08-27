@@ -30,8 +30,8 @@ from typing import Any
 
 from agent.core.logger import StructuredLogger, log_ignored
 from agent.core.logger import log_ignored
-
 log = StructuredLogger("tool_self_healing")
+
 
 
 class HealStrategy(str, Enum):
@@ -204,6 +204,7 @@ class ToolSelfHealing:
                     attempt.success = True
                     return attempt
             except Exception as e:
+                log.debug("tool_self_healing 异常处理", error=str(e))
                 attempt.error = str(e)
 
         attempt.error = "Fixed params still failed"
@@ -238,6 +239,7 @@ class ToolSelfHealing:
                         attempt.success = True
                         return attempt
                 except Exception as e:
+                    log.debug("tool_self_healing 异常处理", error=str(e))
                     attempt.error = f"{alt_tool}: {e}"
                     continue
 
@@ -273,6 +275,7 @@ class ToolSelfHealing:
                         attempt.success = True
                         return attempt
                 except Exception as e:
+                    log.debug("tool_self_healing 异常处理", error=str(e))
                     attempt.error = f"{fallback_tool}: {e}"
                     continue
 

@@ -18,10 +18,11 @@ from __future__ import annotations
 import platform
 from abc import ABC, abstractmethod
 from typing import Any
-
 from agent.core.logger import StructuredLogger, log_ignored
 
 log = StructuredLogger("platform_adapter")
+
+
 
 
 class PlatformAdapter(ABC):
@@ -95,6 +96,7 @@ class Win32UIAAdapter(PlatformAdapter):
                 for child in children:
                     self._walk(child, result, depth + 1, max_depth)
         except Exception as _exc:
+            log.debug("platform_adapter 异常处理", error=str(_exc))
             log_ignored(log, "platform_adapter.Win32UIAAdapter._walk", _exc)
 
 
@@ -177,6 +179,7 @@ class MacOSA11yAdapter(PlatformAdapter):
                 for child in children_val:
                     self._walk(child, result, depth + 1, max_depth)
         except Exception as _exc:
+            log.debug("platform_adapter 异常处理", error=str(_exc))
             log_ignored(log, "platform_adapter.MacOSA11yAdapter._walk", _exc)
 
 
@@ -260,7 +263,8 @@ class AtSpiAdapter(PlatformAdapter):
             try:
                 ext = node.get_extents(0)
                 bounds = f"({ext.x},{ext.y},{ext.x + ext.width},{ext.y + ext.height})"
-            except Exception:
+            except Exception as _exc:
+                log.debug("platform_adapter 异常处理", error=str(_exc))
                 bounds = ""
 
             is_interactive = role.lower() in interactive_roles
@@ -280,6 +284,7 @@ class AtSpiAdapter(PlatformAdapter):
                 if child:
                     self._walk(child, result, depth + 1, max_depth)
         except Exception as _exc:
+            log.debug("platform_adapter 异常处理", error=str(_exc))
             log_ignored(log, "platform_adapter.AtSpiAdapter._walk", _exc)
 
 
@@ -298,19 +303,19 @@ def create_platform_adapter(
 
     if system == "windows":
         adapter = Win32UIAAdapter()
-        log.info("平台适配器选择", platform="Windows UIA")
+        log.debug("平台适配器选择", platform="Windows UIA")
         return adapter
 
     if system == "darwin" or system == "macos":
         adapter = MacOSA11yAdapter()
-        log.info("平台适配器选择", platform="macOS Accessibility")
+        log.debug("平台适配器选择", platform="macOS Accessibility")
         return adapter
 
     if system == "linux":
         adapter = AtSpiAdapter()
-        log.info("平台适配器选择", platform="Linux AT-SPI")
+        log.debug("平台适配器选择", platform="Linux AT-SPI")
         return adapter
 
     adapter = OcrFallbackAdapter()
-    log.info("平台适配器选择", platform="OCR fallback")
+    log.debug("平台适配器选择", platform="OCR fallback")
     return adapter

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 from agent.core.logger import StructuredLogger
 from agent.tools.registry import (ToolCategory, ToolDefinition, ToolParameterDef, ToolResult)
+log = StructuredLogger("refactor_tools")
 
 _log = StructuredLogger("tools.refactor")
 
@@ -468,7 +469,8 @@ async def refactor_depgraph_executor(params: dict[str, Any]) -> ToolResult:
             node = _module_path(fp, _find_project_root(fp))
             try:
                 code = fp.read_text(encoding="utf-8", errors="replace")
-            except Exception:
+            except Exception as _exc:
+                log.warning("refactor_tools 异常被捕获", error=str(_exc))
                 parse_failures += 1
                 continue
             deps = _py_imports(code, node)
@@ -476,7 +478,8 @@ async def refactor_depgraph_executor(params: dict[str, Any]) -> ToolResult:
             node = fp.stem
             try:
                 text = fp.read_text(encoding="utf-8", errors="replace")
-            except Exception:
+            except Exception as _exc:
+                log.warning("refactor_tools 异常被捕获", error=str(_exc))
                 parse_failures += 1
                 continue
             deps = _ts_imports(text)

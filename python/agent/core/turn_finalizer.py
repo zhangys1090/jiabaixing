@@ -23,7 +23,7 @@
         tool_results=[{"name": "search", "result": "..."}],
         metadata={"model": "gpt-4o", "tokens": 150},
     )
-    print(result.final_response)
+    logger.info(result.final_response)
 """
 
 from __future__ import annotations
@@ -32,10 +32,11 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Coroutine
-
 from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("turn_finalizer")
+
+
 
 
 class TurnStatus(str, Enum):
@@ -126,6 +127,7 @@ class TurnFinalizer:
     def __init__(self) -> None:
         self._post_hooks: list[Callable[..., Coroutine[Any, Any, None]]] = []
         self._finalize_count: int = 0
+        self._MAX_POST_HOOKS = 50
 
     def add_post_hook(
         self, hook: Callable[..., Coroutine[Any, Any, None]]
@@ -135,6 +137,8 @@ class TurnFinalizer:
         Args:
             hook: 异步回调，接收 FinalizedTurn 参数。
         """
+        if len(self._post_hooks) >= self._MAX_POST_HOOKS:
+            self._post_hooks = self._post_hooks[-(self._MAX_POST_HOOKS * 3 // 4):]
         self._post_hooks.append(hook)
 
     async def finalize(

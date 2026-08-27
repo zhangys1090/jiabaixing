@@ -3,16 +3,18 @@
 > **目的**：降低文档熵。本仓库 `docs/` 下有 100+ 份 Markdown，散落于根目录与多个子目录，
 > 且存在大量历史重复件。本索引按「用途」重新归类，并标注哪些是**当前主线**、哪些是**过期归档**。
 >
-> **最后维护**：2026-08-06（三项增强落地轮）。如发现新文档未归类，请补充对应小节。
+> **最后维护**：2026-08-24（P0/P1/P2 内核提升+P2 战略能力全量集成）。如发现新文档未归类，请补充对应小节。
 
 ---
 
 ## 0. 阅读顺序建议（新人 / 审计追溯）
 
-1. `Agent_Comprehensive_Audit_2026-08-01.md` —— 综合审计主报告（能力矩阵 + 差距 + 路线图）。
-2. `Agent_Audit_Dimensions_Addendum_2026-08-02.md` —— 四维深化续章（安全 / 性能 / 代码质量 / 可维护性）。
-3. `E2E_VERIFICATION_2026-08-02.md` —— 端到端验证与历轮收口记录。
-4. 专项设计稿（见下表「一、审计与整改」）。
+1. `ARCHITECTURE_AUDIT_V6.md` —— **V6.1 架构审计主报告**（P0/P1/P2 内核提升+集成矩阵+测试结果）。
+2. `Agent_Comprehensive_Audit_2026-08-01.md` —— 综合审计主报告（能力矩阵 + 差距 + 路线图）。
+3. `Agent_Audit_Dimensions_Addendum_2026-08-02.md` —— 四维深化续章（安全 / 性能 / 代码质量 / 可维护性）。
+4. `E2E_VERIFICATION_2026-08-02.md` —— 端到端验证与历轮收口记录。
+5. `EXECUTION_AGENT_ROADMAP.md` —— **V1.1 执行Agent路线图**（含P0/P1/P2落地记录+主循环集成架构）。
+6. 专项设计稿（见下表「一、审计与整改」）。
 
 ---
 
@@ -30,6 +32,8 @@
 | `jiabaixing-llm-base-agent-senses.md`           | 文档2/3：LLM 底座 / Agent 执行 / 手脚五感 完善方案                          |
 | `jiabaixing-unique-capability-enhancement.md`   | 文档3/3：独有能力（U1-U5）增强方案                                          |
 | `jiabaixing-enhancement-delivery-2026-08-06.md` | **落地报告**：三方案本轮已落地代码增强 + 验证结果 + 后续推进项              |
+| `ARCHITECTURE_AUDIT_V6.md`                      | **V6.1 架构审计**：P0/P1/P2 内核提升+集成矩阵+15个API端点+14/14测试通过     |
+| `EXECUTION_AGENT_ROADMAP.md`                    | **V1.1 路线图**：三项战略能力落地+主循环集成架构图+上下游适配矩阵           |
 
 ## 二、架构与技术设计
 

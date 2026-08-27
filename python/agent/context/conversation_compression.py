@@ -19,7 +19,7 @@
 
     comp = ConversationCompression(strategy="balanced")
     result = await comp.compress(messages, max_tokens=4000)
-    print(f"压缩比: {result.compression_ratio:.1%}")
+    logger.info("压缩比: {result.compression_ratio:.1%}")
 """
 
 from __future__ import annotations
@@ -28,10 +28,11 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
-
 from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("conversation_compression")
+
+
 
 
 class CompressionStrategy(str, Enum):
@@ -290,10 +291,21 @@ class ConversationCompression:
 
         return f"之前讨论了: {'; '.join(selected)}"
 
-    def _estimate_tokens(self, messages: list[dict[str, Any]]) -> int:
-        """估算 token 数。"""
+    @staticmethod
+    def _estimate_tokens(messages: list[dict[str, Any]]) -> int:
         total = 0
         for msg in messages:
             content = msg.get("content", "")
-            total += len(content) // 4 + 1
-        return total
+            cn_chars = 0
+            other_chars = 0
+            for ch in content:
+                cp = ord(ch)
+                if (0x4E00 <= cp <= 0x9FFF or 0x3400 <= cp <= 0x4DBF
+                        or 0x20000 <= cp <= 0x2A6DF
+                        or 0x3040 <= cp <= 0x309F or 0x30A0 <= cp <= 0x30FF
+                        or 0xAC00 <= cp <= 0xD7AF):
+                    cn_chars += 1
+                else:
+                    other_chars += 1
+            total += int(cn_chars * 1.5) + max(1, other_chars // 4)
+        return max(1, total)

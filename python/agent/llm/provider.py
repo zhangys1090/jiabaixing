@@ -33,7 +33,8 @@ from agent.llm.transports import (
     TransportResponse,
     TransportType,
 )
-from agent.core.logger import log_ignored
+from agent.core.logger import StructuredLogger, log_ignored
+log = StructuredLogger("provider")
 
 
 def _record_llm_tokens(model: str, usage: dict[str, Any] | None) -> None:
@@ -67,6 +68,7 @@ def _record_llm_tokens(model: str, usage: dict[str, Any] | None) -> None:
             cost=cost,
         )
     except Exception as _exc:
+        log.debug("provider 异常处理", error=str(_exc))
         # OTel 记录失败不影响 LLM 主流程
         log_ignored(None, "provider._record_llm_tokens", _exc)
 
@@ -205,6 +207,7 @@ class LLMProvider:
                     model_override = assignment.canary_version
                     canary_active = True
             except Exception as _exc:
+                log.debug("provider 异常处理", error=str(_exc))
                 log_ignored(None, "provider.LLMProvider.chat", _exc)
 
         # 能力驱动选型：当指定 task_type 且未触发灰度覆盖时，
@@ -218,6 +221,7 @@ class LLMProvider:
                 if scored is not None and scored.capabilities and scored.capabilities.model_name:
                     model_override = self._normalize_model(scored.capabilities.model_name)
             except Exception as _exc:
+                log.debug("provider 异常处理", error=str(_exc))
                 log_ignored(None, "provider.LLMProvider.chat.capability_router", _exc)
 
         effective_model = model_override or self.model
@@ -229,7 +233,6 @@ class LLMProvider:
         )
         if not self.cost_guard.check_budget(estimated_cost):
             from agent.core.logger import StructuredLogger
-            log = StructuredLogger("llm_provider")
             log.warning(
                 "LLM 请求因预算超限被拦截",
                 model=effective_model,
@@ -238,7 +241,7 @@ class LLMProvider:
                 daily_budget=self.cost_guard._daily_budget,
             )
             return {
-                "content": "",
+                "content": "抱歉，当前AI服务预算已达上限，暂时无法处理更多请求。请稍后重试，或联系管理员调整预算配置。",
                 "role": "assistant",
                 "finish_reason": "budget_exceeded",
                 "error": "成本预算超限，请求被拦截",
@@ -316,7 +319,8 @@ class LLMProvider:
                 return await self._do_chat_via_transport(
                     transport, messages, tools, tool_choice, system_prompt=system_prompt
                 )
-            except Exception as e:  # noqa: BLE001 - transport 失败回退到 litellm 路径
+            except Exception as e:
+                log.debug("provider 异常处理", error=str(e))
                 # P0-2：transport 路径旧实现异常直接 raise，无 failover。
                 # 此处回退到 litellm 路径（其自带多厂商故障转移 + 退避重试）。
                 log_ignored(None, "provider.chat.transport_fallback", e)
@@ -415,6 +419,7 @@ class LLMProvider:
             elapsed = time.time() - start_time
             await self.rate_limiter.record_result(True)
         except Exception as e:
+            log.debug("provider 异常处理", error=str(e))
             elapsed = time.time() - start_time
             await self.rate_limiter.record_result(False)
             raise
@@ -530,7 +535,8 @@ class LLMProvider:
                 if self.credential_pool and api_key:
                     self.credential_pool.report_success(api_key)
                 break  # 成功，跳出候选链
-            except Exception as e:  # noqa: BLE001 - 故障转移需要捕获所有异常
+            except Exception as e:
+                log.debug("provider 异常处理", error=str(e))
                 last_exc = e
                 await self.rate_limiter.record_result(False)
                 if self.credential_pool and prov.api_key:
@@ -680,6 +686,7 @@ class LLMProvider:
                 if assignment.is_canary:
                     canary_active = True
             except Exception as _exc:
+                log.debug("provider 异常处理", error=str(_exc))
                 log_ignored(None, "provider.LLMProvider.chat_stream", _exc)
 
         # 非灰度场景优先使用 transport
@@ -723,6 +730,7 @@ class LLMProvider:
             if isinstance(embedding, list):
                 return embedding
         except Exception as _exc:
+            log.debug("provider 异常处理", error=str(_exc))
             log_ignored(None, "provider.LLMProvider.embed", _exc)
         return None
 
@@ -743,7 +751,8 @@ class LLMProvider:
                 timeout=5.0,
             )
             self._available = True
-        except Exception:
+        except Exception as _exc:
+            log.debug("provider 异常处理", error=str(_exc))
             self._available = False
         return self._available
 
@@ -780,7 +789,6 @@ class LLMProvider:
             dict: 含 prompt_cache 原有键 + ``prompt_cache`` / ``response_cache`` 两个明细段。
         """
         from agent.core.logger import StructuredLogger
-        log = StructuredLogger("llm_provider")
 
         prompt_stats = self.prompt_cache.get_stats()
         try:
@@ -806,8 +814,6 @@ class LLMProvider:
         Returns:
             dict: 各缓存的清理结果，单项失败不影响其余项。
         """
-        from agent.core.logger import StructuredLogger
-        log = StructuredLogger("llm_provider")
 
         cleared: dict[str, Any] = {}
 

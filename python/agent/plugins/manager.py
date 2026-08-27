@@ -16,6 +16,7 @@ from typing import Any
 from agent.a2a.protocol import TrustLevel
 from agent.core.logger import get_logger
 from agent.plugins.base import Plugin, PluginInfo, PluginState
+import logging
 from agent.plugins.trust import (
     ContextScope,
     PluginTrustError,
@@ -24,6 +25,7 @@ from agent.plugins.trust import (
     can_call_llm,
     can_call_tool,
 )
+logger = logging.getLogger(__name__)
 
 logger = get_logger("plugins.manager")
 
@@ -132,6 +134,42 @@ class PluginManager:
         """插件获取上下文前的信任 gate；返回允许范围，UNTRUSTED 抛 PluginTrustError。"""
         return self._trust.guard_context(name)
 
+    async def validate_tool_in_sandbox(
+        self,
+        plugin_name: str,
+        tool_name: str,
+        tool_code: str,
+        test_inputs: list[dict[str, Any]] | None = None,
+        timeout_ms: int = 5000,
+    ) -> dict[str, Any]:
+        """工具自创造沙箱验证 — 在隔离环境中执行工具代码，验证安全性和正确性。
+
+        Returns:
+            dict: {"valid": bool, "errors": list[str], "test_results": list, "risk": str}
+        """
+        from agent.sandbox.executor import SandboxExecutor, SandboxConfig
+        errors: list[str] = []
+        test_results: list[dict[str, Any]] = []
+        try:
+            self.guard_plugin_tool(plugin_name, tool_name, "high")
+        except Exception as exc:
+            return {"valid": False, "errors": [f"信任策略拒绝: {exc}"], "test_results": [], "risk": "critical"}
+        try:
+            config = SandboxConfig(timeout_ms=timeout_ms, max_memory_mb=64)
+            executor = SandboxExecutor(config)
+            if test_inputs:
+                for i, inp in enumerate(test_inputs):
+                    try:
+                        result = await executor.execute(tool_code, inp)
+                        test_results.append({"input_index": i, "success": True, "output": result})
+                    except Exception as exc:
+                        test_results.append({"input_index": i, "success": False, "error": str(exc)})
+                        errors.append(f"测试输入{i}执行失败: {exc}")
+        except Exception as exc:
+            errors.append(f"沙箱初始化失败: {exc}")
+        is_valid = len(errors) == 0
+        return {"valid": is_valid, "errors": errors, "test_results": test_results, "risk": "high" if errors else "low"}
+
     def unregister_plugin(self, name: str) -> bool:
         """注销插件，将其从管理器中移除。
 
@@ -173,6 +211,7 @@ class PluginManager:
             logger.info(f"Plugin loaded: {name}")
             return True
         except Exception as exc:
+            logger.debug("manager 异常处理", error=str(exc))
             self._states[name] = PluginState.ERROR
             logger.error(f"Failed to load plugin {name}: {exc}")
             return False
@@ -202,6 +241,7 @@ class PluginManager:
             logger.info(f"Plugin unloaded: {name}")
             return True
         except Exception as exc:
+            logger.debug("manager 异常处理", error=str(exc))
             self._states[name] = PluginState.ERROR
             logger.error(f"Failed to unload plugin {name}: {exc}")
             return False
@@ -231,6 +271,7 @@ class PluginManager:
             logger.info(f"Plugin enabled: {name}")
             return True
         except Exception as exc:
+            logger.debug("manager 异常处理", error=str(exc))
             self._states[name] = PluginState.ERROR
             logger.error(f"Failed to enable plugin {name}: {exc}")
             return False
@@ -259,6 +300,7 @@ class PluginManager:
             logger.info(f"Plugin disabled: {name}")
             return True
         except Exception as exc:
+            logger.debug("manager 异常处理", error=str(exc))
             self._states[name] = PluginState.ERROR
             logger.error(f"Failed to disable plugin {name}: {exc}")
             return False

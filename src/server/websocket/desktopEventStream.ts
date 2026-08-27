@@ -17,6 +17,7 @@ import { Logger } from '../../utils/Logger';
 export function setupDesktopEventWebSocket(wss: WebSocket.Server): () => void {
   const eventStream = DesktopEventStream.getInstance();
   const clients = new Set<WebSocket>();
+  const MAX_DESKTOP_WS_CLIENTS = 20;
 
   // 订阅事件流
   const unsubscribe = eventStream.subscribe((event) => {
@@ -29,6 +30,14 @@ export function setupDesktopEventWebSocket(wss: WebSocket.Server): () => void {
   });
 
   wss.on('connection', (ws) => {
+    if (clients.size >= MAX_DESKTOP_WS_CLIENTS) {
+      Logger.warn(
+        `⚠️ 桌面监控面板连接数超限 (${clients.size}/${MAX_DESKTOP_WS_CLIENTS})`,
+        'DesktopWS'
+      );
+      ws.close(1013, 'Max desktop monitoring connections reached');
+      return;
+    }
     Logger.info('🖥️  桌面监控面板已连接', 'DesktopWS');
     clients.add(ws);
 

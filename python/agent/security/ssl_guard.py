@@ -10,6 +10,8 @@ import ssl
 import socket
 from datetime import datetime, timezone
 from typing import ClassVar
+import logging
+logger = logging.getLogger(__name__)
 
 
 class SSLValidationError(Exception):
@@ -41,7 +43,7 @@ class SSLGuard:
         guard = SSLGuard()
         info = guard.validate_ssl_cert("example.com")
         if guard.is_cert_valid("example.com"):
-            print("证书有效")
+            logger.info("证书有效")
     """
 
     DEFAULT_TIMEOUT: ClassVar[int] = 10

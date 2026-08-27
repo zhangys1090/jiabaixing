@@ -12,7 +12,7 @@
     from agent.gateway.platforms.slack_adapter import SlackAdapter
 
     mgr = PlatformManager()
-    mgr.register("slack", SlackAdapter(bot_token="xoxb-..."))
+    mgr.register("slack", SlackAdapter(bot_token=os.environ["SLACK_BOT_TOKEN"]))
     await mgr.start_all()
 """
 
@@ -50,7 +50,7 @@ class PlatformManager:
     def register(self, name: str, adapter: PlatformAdapter) -> None:
         self._adapters[name] = adapter
         self._statuses[name] = PlatformStatus(name=name)
-        log.info("Platform adapter registered", platform=name)
+        log.debug("Platform adapter registered", platform=name)
 
     def unregister(self, name: str) -> None:
         self._adapters.pop(name, None)
@@ -77,9 +77,10 @@ class PlatformManager:
             if adapter.simulated:
                 log.warning("Platform started in SIMULATED mode (not connected)", platform=name)
             else:
-                log.info("Platform started", platform=name)
+、                log.debug("Platform started", platform=name)
             return True
         except Exception as e:
+            log.debug("platform_manager 异常处理", error=str(e))
             self._statuses[name].last_error = str(e)
             self._statuses[name].error_count += 1
             log.warning("Platform start failed", platform=name, error=str(e))
@@ -130,6 +131,7 @@ class PlatformManager:
                 )
             return ok
         except Exception as e:
+            log.debug("platform_manager 异常处理", error=str(e))
             self._statuses[platform].error_count += 1
             self._statuses[platform].last_error = str(e)
             log.warning("Send message failed", platform=platform, error=str(e))

@@ -35,6 +35,7 @@ from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("profile_manager")
 
+
 _PROFILES_DIR = DATA_ROOT / "profiles"
 
 

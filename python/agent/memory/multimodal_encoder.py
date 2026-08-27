@@ -23,8 +23,8 @@ from pathlib import Path
 from typing import Any
 
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("multimodal_encoder")
+
 
 # ─── 模块级常量 ───
 _DEFAULT_MODEL = "clip-ViT-B-32"  # 默认多模态模型
@@ -111,6 +111,7 @@ class MultimodalEncoder:
         self._model_loaded: bool = False
         self._mode: str = "unknown"  # "clip" / "text_fallback" / "hash"
         self._cache: dict[tuple[str, ModalityType], EncodedVector] = {}
+        self._MAX_CACHE = 10000
         # 若配置强制降级，直接标记为 hash 模式，跳过模型加载
         if self._config.model_name.lower() == _FALLBACK_MODEL_NAME:
             self._mode = "hash"
@@ -159,6 +160,10 @@ class MultimodalEncoder:
         )
         if self._config.cache_enabled:
             self._cache[cache_key] = result
+            if len(self._cache) > self._MAX_CACHE:
+                oldest_keys = list(self._cache.keys())[: len(self._cache) - (self._MAX_CACHE * 3 // 4)]
+                for k in oldest_keys:
+                    del self._cache[k]
         return result
 
     def encode_image(self, image_path_or_url: str) -> EncodedVector:
@@ -189,7 +194,7 @@ class MultimodalEncoder:
         if self._mode == "clip" and self._model is not None:
             # CLIP 模式：使用 PIL 加载图像后编码
             try:
-                from PIL import Image  # type: ignore[import-untyped]
+                from PIL import Image
 
                 path = self._resolve_image_path(image_path_or_url)
                 img = Image.open(path)
@@ -213,6 +218,10 @@ class MultimodalEncoder:
         )
         if self._config.cache_enabled:
             self._cache[cache_key] = result
+            if len(self._cache) > self._MAX_CACHE:
+                oldest_keys = list(self._cache.keys())[: len(self._cache) - (self._MAX_CACHE * 3 // 4)]
+                for k in oldest_keys:
+                    del self._cache[k]
         return result
 
     def encode_batch(
@@ -339,7 +348,7 @@ class MultimodalEncoder:
 
         # 尝试加载 CLIP 多模态模型
         try:
-            from sentence_transformers import SentenceTransformer  # type: ignore[import-untyped]
+            from sentence_transformers import SentenceTransformer
 
             log.info("加载多模态模型", model=self._config.model_name)
             self._model = SentenceTransformer(self._config.model_name)
@@ -351,7 +360,7 @@ class MultimodalEncoder:
                 return
             # 尝试加载纯文本模型
             try:
-                from sentence_transformers import SentenceTransformer  # type: ignore[import-untyped]
+                from sentence_transformers import SentenceTransformer
 
                 self._model = SentenceTransformer(_FALLBACK_TEXT_MODEL)
                 self._mode = "text_fallback"
@@ -397,7 +406,7 @@ class MultimodalEncoder:
         """
         path = self._resolve_image_path(image_path_or_url)
         try:
-            from PIL import Image  # type: ignore[import-untyped]
+            from PIL import Image
 
             img = Image.open(path).convert("RGB").resize((32, 32))
             # 颜色直方图（64 维）
@@ -440,7 +449,8 @@ class MultimodalEncoder:
         try:
             with open(path, "rb") as f:
                 data = f.read()
-        except Exception:
+        except Exception as _exc:
+            log.debug("multimodal_encoder 异常处理", error=str(_exc))
             data = path.encode("utf-8")
         vector = [0.0] * _HASH_VECTOR_SIZE
         # 最多取前 1KB，避免大文件性能问题

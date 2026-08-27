@@ -12,29 +12,13 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 from agent.core.logger import StructuredLogger, log_ignored
-from agent.core.logger import log_ignored
+from agent.core.types import RiskLevel, PermissionCheckResult
 from agent.sandbox.windows_hard import (
     WindowsHardSandbox,
     hard_windows_enabled,
 )
 
 log = StructuredLogger("sandbox.executor")
-
-
-class SecurityLevel(str, Enum):
-    """安全等级枚举。
-
-    Attributes:
-        LOW: 低安全级别，允许大部分操作。
-        MEDIUM: 中等安全级别，限制危险操作。
-        HIGH: 高安全级别，严格限制。
-        CRITICAL: 严重安全级别，仅允许只读操作。
-    """
-
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-    CRITICAL = "critical"
 
 
 @dataclass
@@ -83,21 +67,6 @@ class SandboxExecutionResult:
     exit_code: int | None = None
 
 
-@dataclass
-class PermissionCheckResult:
-    """权限检查结果。
-
-    Attributes:
-        allowed: 是否允许。
-        reason: 拒绝原因。
-        risk_level: 风险等级。
-    """
-
-    allowed: bool
-    reason: str | None = None
-    risk_level: SecurityLevel = SecurityLevel.LOW
-
-
 _HIGH_RISK_TOOLS = [
     "delete_file", "execute_command", "modify_system",
     "shell_exec", "system_command",
@@ -138,6 +107,60 @@ _JS_DANGEROUS_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 ]
 
 
+class SandboxTier(str, Enum):
+    KERNEL = "kernel"
+    CONTAINER = "container"
+    PROCESS = "process"
+    LOGICAL = "logical"
+
+@dataclass
+class SandboxTierInfo:
+    tier: SandboxTier
+    available: bool
+    reason: str = ""
+
+_SANDBOX_TIER_ORDER: list[SandboxTier] = [
+    SandboxTier.KERNEL,
+    SandboxTier.CONTAINER,
+    SandboxTier.PROCESS,
+    SandboxTier.LOGICAL,
+]
+
+async def resolve_sandbox_tier(
+    requested: SandboxTier = SandboxTier.CONTAINER,
+    docker_sandbox: "DockerSandbox | None" = None,
+) -> SandboxTierInfo:
+    if requested == SandboxTier.KERNEL:
+        try:
+            from agent.sandbox.kernel_isolation import KernelIsolationProvider
+            if await KernelIsolationProvider.is_available():
+                return SandboxTierInfo(SandboxTier.KERNEL, True, "gVisor/Firecracker/WinSandbox")
+        except Exception:
+            pass
+        log.info("Kernel isolation unavailable, degrading to container")
+    if requested in (SandboxTier.KERNEL, SandboxTier.CONTAINER):
+        if docker_sandbox is not None and await docker_sandbox.is_available():
+            return SandboxTierInfo(SandboxTier.CONTAINER, True, "Docker")
+        if sys.platform == "linux":
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "docker", "info",
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                await asyncio.wait_for(proc.wait(), timeout=3.0)
+                if proc.returncode == 0:
+                    return SandboxTierInfo(SandboxTier.CONTAINER, True, "Docker")
+            except Exception:
+                pass
+        log.info("Container isolation unavailable, degrading to process-level")
+    if requested in (SandboxTier.KERNEL, SandboxTier.CONTAINER, SandboxTier.PROCESS):
+        if hard_windows_enabled() and WindowsHardSandbox.is_available():
+            return SandboxTierInfo(SandboxTier.PROCESS, True, "WindowsHardSandbox(JobObject+RestrictedToken)")
+        log.info("Process-level isolation unavailable, degrading to logical")
+    return SandboxTierInfo(SandboxTier.LOGICAL, True, "SandboxGuard(path-whitelist+network-deny)")
+
+
 class SandboxExecutor:
     """沙箱执行器——安全执行代码和命令。
 
@@ -152,7 +175,7 @@ class SandboxExecutor:
         executor = SandboxExecutor(config)
         result = await executor.execute_code("print('hello')", "python")
         if not result.success:
-            print(result.error)
+            logger.info(result.error)
     """
     def __init__(self, config: SandboxConfig | None = None) -> None:
         self.config = config or SandboxConfig()
@@ -164,6 +187,7 @@ class SandboxExecutor:
         code: str,
         language: str = "python",
         timeout_ms: int | None = None,
+        sandbox_tier: SandboxTier | None = None,
     ) -> SandboxExecutionResult:
         start = time.time()
         self._logs = []
@@ -180,6 +204,12 @@ class SandboxExecutor:
 
         actual_timeout = timeout_ms or self.config.timeout_ms
         timeout_sec = min(actual_timeout / 1000, 120)
+
+        if sandbox_tier == SandboxTier.KERNEL:
+            kernel_result = await self._execute_kernel(code, language, timeout_sec, start)
+            if kernel_result is not None:
+                return kernel_result
+            log.info("Kernel isolation failed, falling back to process-level")
 
         if language == "python":
             return await self._execute_python(code, timeout_sec, start)
@@ -308,6 +338,7 @@ class SandboxExecutor:
                 except (ProcessLookupError, PermissionError):
                     os.kill(pid, _signal.SIGKILL)
         except Exception as _exc:
+            log.debug("executor 异常处理", error=str(_exc))
             log_ignored(log, "executor.SandboxExecutor._kill_process_tree", _exc)
         # 兜底：直接杀死直接子进程（已退出时会抛 ProcessLookupError，忽略）。
         try:
@@ -332,10 +363,18 @@ class SandboxExecutor:
             handle = getattr(getattr(proc, "_proc", None), "_handle", None)
             if handle is None:
                 return
-            sandbox = WindowsHardSandbox()
+            force_restricted = getattr(self, "_current_tool_high_risk", False)
+            sandbox = WindowsHardSandbox(enable_restricted_token=force_restricted)
             sandbox.assign(int(handle))
-            log.info("子进程已纳入 Windows Job Object 硬隔离", pid=proc.pid)
+            if force_restricted:
+                try:
+                    sandbox.apply_restricted_token(int(handle))
+                    log.info("高危工具: 受限令牌已应用", pid=proc.pid)
+                except Exception as _exc:
+                    log.debug("受限令牌应用失败，继续Job Object隔离", error=str(_exc))
+            log.info("子进程已纳入 Windows Job Object 硬隔离", pid=proc.pid, restricted=force_restricted)
         except Exception as _exc:
+            log.debug("executor 异常处理", error=str(_exc))
             log_ignored(log, "executor.SandboxExecutor._harden_windows", _exc)
 
     async def _monitor_resources(self, proc: asyncio.subprocess.Process, timeout_sec: float) -> tuple[bytes, bytes] | None:
@@ -391,6 +430,48 @@ class SandboxExecutor:
         if memory_exceeded:
             return None
         return stdout, stderr
+
+    async def _execute_kernel(
+        self, code: str, language: str, timeout_sec: float, start: float
+    ) -> SandboxExecutionResult | None:
+        try:
+            from agent.sandbox.kernel_isolation import (
+                KernelIsolationProvider,
+                KernelSandboxConfig,
+                KernelSandboxResult,
+            )
+
+            config = KernelSandboxConfig(
+                memory_mb=self.config.max_memory_mb,
+                cpu_count=self.config.max_cpu_percent / 100.0,
+                timeout_sec=timeout_sec,
+                network="none" if self.config.network_policy == "deny" else "default",
+            )
+
+            result = await KernelIsolationProvider.spawn(code, language, config)
+
+            if result.success:
+                return SandboxExecutionResult(
+                    success=True,
+                    output=result.output,
+                    duration_ms=result.duration_ms,
+                    logs=self._logs.copy(),
+                    security_violations=self._security_violations.copy(),
+                    exit_code=result.exit_code or 0,
+                )
+            if result.error and "not available" in result.error.lower():
+                return None
+            return SandboxExecutionResult(
+                success=False,
+                error=result.error,
+                duration_ms=result.duration_ms,
+                logs=self._logs.copy(),
+                security_violations=self._security_violations.copy(),
+                exit_code=result.exit_code or -1,
+            )
+        except Exception as exc:
+            log.debug("Kernel isolation execution failed, falling back", error=str(exc))
+            return None
 
     async def _execute_python(
         self, code: str, timeout_sec: float, start: float
@@ -460,6 +541,7 @@ class SandboxExecutor:
             )
 
         except Exception as e:
+            log.debug("executor 异常处理", error=str(e))
             return SandboxExecutionResult(
                 success=False,
                 error=f"执行失败: {e}",
@@ -469,6 +551,7 @@ class SandboxExecutor:
             try:
                 Path(tmp).unlink()
             except Exception as _exc:
+                log.debug("executor 异常处理", error=str(_exc))
                 log_ignored(None, "executor.SandboxExecutor._execute_python", _exc)
             # Windows proactor：显式关闭子进程管道传输层，避免残留状态污染下一个
             # 子进程（表现为相邻用例 stdout/stderr 变空或挂起）。关闭已关闭的管道为无操作。
@@ -479,6 +562,7 @@ class SandboxExecutor:
                         try:
                             _pipe.close()
                         except Exception as _exc:
+                            log.debug("executor 异常处理", error=str(_exc))
                             # 关闭已关闭的管道会抛 ValueError/OSError，属无害残留；
                             # 但仍须记账而非裸 pass，避免掩盖真实管道关闭故障。
                             log_ignored(None, "executor.SandboxExecutor._execute_python.pipe_close", _exc)
@@ -552,6 +636,7 @@ class SandboxExecutor:
                 duration_ms=int((time.time() - start) * 1000),
             )
         except Exception as e:
+            log.debug("executor 异常处理", error=str(e))
             return SandboxExecutionResult(
                 success=False,
                 error=f"执行失败: {e}",
@@ -561,6 +646,7 @@ class SandboxExecutor:
             try:
                 Path(tmp).unlink()
             except Exception as _exc:
+                log.debug("executor 异常处理", error=str(_exc))
                 log_ignored(None, "executor.SandboxExecutor._execute_javascript", _exc)
 
     async def _execute_shell(
@@ -622,8 +708,197 @@ class SandboxExecutor:
             )
 
         except Exception as e:
+            log.debug("executor 异常处理", error=str(e))
             return SandboxExecutionResult(
                 success=False,
                 error=f"执行失败: {e}",
                 duration_ms=int((time.time() - start) * 1000),
             )
+
+
+class DockerSandbox:
+    """Docker 容器级沙箱 — Phase2 容器隔离。
+
+    每个子任务 spawn 临时容器，只读挂载工作目录 + tmpfs 写层，
+    资源限制通过 Docker --memory/--cpus/--pids-limit 实现。
+
+    降级策略：
+    - Docker 不可用 → WindowsHardSandbox（Windows）或逻辑沙箱（其他）
+    - 容器启动失败 → SandboxExecutor 软沙箱
+
+    Usage:
+        sandbox = DockerSandbox()
+        result = await sandbox.execute(
+            code="print('hello')",
+            language="python",
+            work_dir="/path/to/project",
+            memory_mb=256,
+            cpu_limit=0.5,
+        )
+    """
+
+    def __init__(self) -> None:
+        self._docker_available: bool | None = None
+
+    async def is_available(self) -> bool:
+        if self._docker_available is not None:
+            return self._docker_available
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "docker", "info",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await asyncio.wait_for(proc.wait(), timeout=5.0)
+            self._docker_available = proc.returncode == 0
+        except Exception:
+            self._docker_available = False
+        return self._docker_available
+
+    async def execute(
+        self,
+        code: str,
+        language: str = "python",
+        work_dir: str | None = None,
+        memory_mb: int = 256,
+        cpu_limit: float = 0.5,
+        timeout_sec: float = 30.0,
+        network: str = "none",
+    ) -> SandboxExecutionResult:
+        start = time.time()
+
+        if not await self.is_available():
+            return await self._fallback_execute(code, language, timeout_sec, start)
+
+        image = self._get_image(language)
+        if image is None:
+            return SandboxExecutionResult(
+                success=False,
+                error=f"Docker 沙箱不支持语言: {language}",
+                duration_ms=int((time.time() - start) * 1000),
+            )
+
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=self._get_suffix(language), delete=False, encoding="utf-8",
+        ) as f:
+            f.write(code)
+            tmp_code = f.name
+
+        try:
+            cmd = [
+                "docker", "run", "--rm",
+                f"--memory={memory_mb}m",
+                f"--cpus={cpu_limit}",
+                "--pids-limit=100",
+                f"--network={network}",
+                "--read-only",
+            ]
+
+            if work_dir:
+                cmd.extend([
+                    "-v", f"{work_dir}:/workspace:ro",
+                    "--tmpfs", "/workspace-write:size=64m",
+                    "-w", "/workspace",
+                ])
+
+            cmd.extend([
+                "--tmpfs", "/tmp:size=32m",
+                image,
+            ])
+
+            if language == "python":
+                cmd.extend(["python", "/tmp/code.py"])
+            elif language in ("javascript", "js"):
+                cmd.extend(["node", "/tmp/code.js"])
+            elif language == "shell":
+                cmd.extend(["/bin/sh", "/tmp/code.sh"])
+
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    proc.communicate(), timeout=timeout_sec,
+                )
+            except asyncio.TimeoutError:
+                await self._kill_container(proc)
+                return SandboxExecutionResult(
+                    success=False,
+                    error=f"执行超时 ({timeout_sec}s)",
+                    duration_ms=int((time.time() - start) * 1000),
+                    exit_code=-1,
+                )
+
+            output = stdout.decode("utf-8", errors="replace")
+            error_output = stderr.decode("utf-8", errors="replace")
+            success = proc.returncode == 0
+
+            return SandboxExecutionResult(
+                success=success,
+                output=output,
+                error=error_output if not success else None,
+                duration_ms=int((time.time() - start) * 1000),
+                exit_code=proc.returncode,
+            )
+
+        except Exception as e:
+            log.debug("docker_sandbox 异常处理", error=str(e))
+            return await self._fallback_execute(code, language, timeout_sec, start)
+        finally:
+            try:
+                Path(tmp_code).unlink()
+            except Exception:
+                pass
+
+    async def _kill_container(self, proc: asyncio.subprocess.Process) -> None:
+        try:
+            if proc.pid:
+                subprocess.run(
+                    ["docker", "kill", str(proc.pid)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=5.0,
+                )
+        except Exception:
+            pass
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
+    async def _fallback_execute(
+        self,
+        code: str,
+        language: str,
+        timeout_sec: float,
+        start: float,
+    ) -> SandboxExecutionResult:
+        log.info("Docker unavailable, falling back to SandboxExecutor")
+        executor = SandboxExecutor(SandboxConfig(
+            timeout_ms=int(timeout_sec * 1000),
+            network_policy="deny",
+        ))
+        return await executor.execute_code(code, language)
+
+    @staticmethod
+    def _get_image(language: str) -> str | None:
+        images = {
+            "python": "python:3.12-slim",
+            "javascript": "node:20-slim",
+            "js": "node:20-slim",
+            "shell": "alpine:3.19",
+        }
+        return images.get(language)
+
+    @staticmethod
+    def _get_suffix(language: str) -> str:
+        suffixes = {
+            "python": ".py",
+            "javascript": ".js",
+            "js": ".js",
+            "shell": ".sh",
+        }
+        return suffixes.get(language, ".txt")

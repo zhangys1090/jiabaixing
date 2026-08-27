@@ -249,6 +249,7 @@ class UnifiedContextOrchestrator:
         try:
             result = await component.execute(request, context)
         except Exception as e:
+            log.debug("unified_orchestrator 异常处理", error=str(e))
             # 兜底错误处理
             error_info = ErrorInfo(
                 error_type=type(e).__name__,
@@ -557,7 +558,7 @@ class UnifiedContextOrchestrator:
             component: 要注册的组件
         """
         self._registry.register(component)
-        self._logger.info(
+        self._logger.debug(
             "Component registered",
             component=component.name,
             priority=component.priority,

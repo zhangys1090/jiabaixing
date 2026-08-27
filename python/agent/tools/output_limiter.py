@@ -17,6 +17,8 @@ import json
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
+from agent.core.logger import StructuredLogger
+log = StructuredLogger("output_limiter")
 
 
 class TruncationStrategy(str, Enum):

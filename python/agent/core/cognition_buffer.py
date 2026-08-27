@@ -13,21 +13,36 @@ PythonAgentBridge 把 cognition_result 转发到 Python ``POST /v1/cognition/sig
 """
 from __future__ import annotations
 
+import time
 from typing import Any
 
-# 会话级认知信号缓冲: session_id -> 最近信号列表 (进程内, 非持久)。
 _COGNITION_BUFFERS: dict[str, list[dict[str, Any]]] = {}
 _MAX_PER_SESSION = 10
+_MAX_SESSIONS = 5000
+_TRIM_TO = 3000
+
+_SESSION_ACCESS: dict[str, float] = {}
+
+
+def _trim_buffers() -> None:
+    if len(_COGNITION_BUFFERS) <= _MAX_SESSIONS:
+        return
+    sorted_sessions = sorted(_SESSION_ACCESS.items(), key=lambda x: x[1])
+    to_remove = sorted_sessions[: len(_COGNITION_BUFFERS) - _TRIM_TO]
+    for sid, _ in to_remove:
+        _COGNITION_BUFFERS.pop(sid, None)
+        _SESSION_ACCESS.pop(sid, None)
 
 
 def store_cognition_signal(session_id: str, signal: dict[str, Any]) -> None:
-    """存储一条认知信号到会话缓冲 (滚动保留最近 _MAX_PER_SESSION 条)。"""
     if not session_id:
         return
     buf = _COGNITION_BUFFERS.setdefault(session_id, [])
     buf.append(signal)
     if len(buf) > _MAX_PER_SESSION:
         del buf[: len(buf) - _MAX_PER_SESSION]
+    _SESSION_ACCESS[session_id] = time.time()
+    _trim_buffers()
 
 
 def _peek_signals(session_id: str) -> list[dict[str, Any]]:

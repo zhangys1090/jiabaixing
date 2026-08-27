@@ -1,5 +1,7 @@
+import * as crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { perf } from '../monitoring/PerformanceMonitor';
+import { ApiKeyManager } from './ApiKeyManager';
 import { AuditLogger } from './AuditLogger';
 import { AuthenticationManager } from './AuthenticationManager';
 import { EncryptionManager } from './EncryptionManager';
@@ -20,7 +22,7 @@ export type {
   RiskAssessment,
   RiskLevel,
   SecurityIncidentEvent as SecurityEvent,
-  User
+  User,
 } from './types';
 
 interface AuditLogEntry {
@@ -272,9 +274,46 @@ export class SecurityManager {
     return secret;
   }
 
-  public verifyMFA(): boolean {
+  public verifyMFA(userId: string, code: string): boolean {
     this.ensureInitialized();
-    return true;
+    const user = this.userStore.get(userId);
+    if (!user || !user.mfaEnabled || !user.mfaSecret) return false;
+    if (!code || !/^\d{4,8}$/.test(code)) return false;
+
+    const secret = user.mfaSecret;
+    const timeSlice = Math.floor(Date.now() / 30000);
+
+    for (let offset = -1; offset <= 1; offset++) {
+      const expectedCode = this.generateTOTP(secret, timeSlice + offset);
+      if (
+        crypto.timingSafeEqual(Buffer.from(code), Buffer.from(expectedCode))
+      ) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private generateTOTP(secret: string, timeSlice: number): string {
+    const buf = Buffer.alloc(8);
+    const hex = timeSlice.toString(16).padStart(16, '0');
+    for (let i = 0; i < 8; i++) {
+      buf[i] = parseInt(hex.substring(i * 2, i * 2 + 2), 16);
+    }
+
+    const key = Buffer.from(secret, 'utf8');
+    const hmac = crypto.createHmac('sha1', key).update(buf).digest();
+
+    const offset = hmac[hmac.length - 1] & 0x0f;
+    const binary =
+      ((hmac[offset] & 0x7f) << 24) |
+      ((hmac[offset + 1] & 0xff) << 16) |
+      ((hmac[offset + 2] & 0xff) << 8) |
+      (hmac[offset + 3] & 0xff);
+
+    const otp = binary % 1000000;
+    return otp.toString().padStart(6, '0');
   }
 
   public disableMFA(userId: string): boolean {
@@ -490,7 +529,7 @@ export class SecurityManager {
 
   public detectPromptInjection(input: string): {
     detected: boolean;
-    riskLevel: 'low' | 'medium' | 'high';
+    riskLevel: 'low' | 'medium' | 'high' | 'critical';
     reasons: string[];
   } {
     this.ensureInitialized();
@@ -499,7 +538,7 @@ export class SecurityManager {
 
   public filterHarmfulContent(input: string): {
     filtered: boolean;
-    riskLevel: 'low' | 'medium' | 'high';
+    riskLevel: 'low' | 'medium' | 'high' | 'critical';
     reasons: string[];
     safeContent: string;
   } {

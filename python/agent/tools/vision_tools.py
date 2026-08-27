@@ -18,8 +18,8 @@ from agent.tools.registry import (
     ToolParameterDef,
     ToolResult,
 )
-
 log = StructuredLogger("vision_tools")
+
 
 try:
     import aiohttp
@@ -113,6 +113,7 @@ async def vision_understand_executor(params: dict[str, Any]) -> ToolResult:
         try:
             image_data = base64.b64decode(image_base64)
         except Exception as e:
+            log.debug("vision_tools 异常处理", error=str(e))
             return ToolResult(success=False, error=f"Base64解码失败: {e}")
     else:
         return ToolResult(success=False, error="需要提供图片URL、路径或Base64数据")
@@ -144,13 +145,14 @@ async def vision_understand_executor(params: dict[str, Any]) -> ToolResult:
             metadata={"model": model, "image_size": len(image_data)}
         )
     except Exception as e:
+        log.debug("vision_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"Vision模型调用失败: {e}")
 
 
 async def _download_image(url: str) -> bytes | None:
     """下载图片数据，失败返回 None"""
     try:
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
                 if resp.status != 200:
                     log.warning("图片下载失败: HTTP %d", resp.status, url=url)

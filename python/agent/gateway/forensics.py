@@ -270,14 +270,14 @@ class ShutdownForensics:
                         else signal.SIGINT
                     )
                     self.record(reason, {"signal": signum})
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    log.warning("关机信号记录失败", error=str(_exc))
                 cb = self._shutdown_callback
                 if cb is not None:
                     try:
                         cb()
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        log.warning("关机回调执行失败", error=str(_exc))
 
         try:
             signal.signal(signal.SIGTERM, _sig_handler)
@@ -287,7 +287,7 @@ class ShutdownForensics:
             )
             reader.start()
             self._registered_signals = True
-            log.info("关闭信号处理器已注册（自管道模式，异步信号安全）")
+            log.debug("关闭信号处理器已注册（自管道模式，异步信号安全）")
         except (OSError, ValueError) as e:
             log.warning("信号处理器注册失败", error=str(e))
 

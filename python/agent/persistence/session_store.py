@@ -13,6 +13,8 @@ from agent.config import DATA_DIR
 from agent.persistence.database import get_sync_connection
 from agent.core.logger import log_ignored
 from agent.infrastructure.safe_json import safe_json_loads
+import logging
+logger = logging.getLogger(__name__)
 
 # P1 修复：FTS5 中文分词 — jieba 可选加载，失败则回退空格分词
 _jieba_available = False
@@ -159,7 +161,8 @@ class SessionSearchEngine:
         try:
             with self._lock:
                 rows = self._conn.execute(sql, params).fetchall()
-        except Exception:
+        except Exception as e:
+            logger.warning("session_store.search 会话搜索失败", error=str(e))
             return []
 
         results = []
@@ -259,8 +262,8 @@ class SessionSearchEngine:
     def __del__(self) -> None:
         try:
             self.close()
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("session_store __del__ close 失败", exc_info=_exc)
 
     @staticmethod
     def _build_fts_query(query: str) -> str:
@@ -308,6 +311,7 @@ class SessionStore:
         self._search_engine: SessionSearchEngine | None = None
         self._search_index: Any = None
         self._lock = threading.Lock()
+        self._MAX_SESSIONS = 50000
         self._load()
 
     def _load(self) -> None:
@@ -342,6 +346,7 @@ class SessionStore:
                         metadata=sdata.get("metadata", {}),
                     )
             except Exception as _exc:
+                logger.warning("session_store 异常处理", error=str(_exc))
                 log_ignored(None, "session_store.SessionStore._load", _exc)
 
     def _save(self) -> None:
@@ -374,6 +379,10 @@ class SessionStore:
             updated_at=now,
         )
         self._sessions[sid] = session
+        if len(self._sessions) > self._MAX_SESSIONS:
+            oldest_sids = sorted(self._sessions.items(), key=lambda x: x[1].updated_at)[: len(self._sessions) - (self._MAX_SESSIONS * 3 // 4)]
+            for old_sid, _ in oldest_sids:
+                del self._sessions[old_sid]
         with self._lock:
             self._save()
         return session
@@ -500,5 +509,5 @@ class SessionStore:
     def __del__(self) -> None:
         try:
             self.close()
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("session_store __del__ close 失败", exc_info=_exc)

@@ -182,10 +182,10 @@ export class MemoryLeakGuard {
       healthy = false;
     }
 
-    if (stats.heapUsedMB / stats.heapTotalMB > 0.9) {
-      warnings.push(
-        `堆内存使用率过高: ${((stats.heapUsedMB / stats.heapTotalMB) * 100).toFixed(1)}%`
-      );
+    const heapUsageRatio = stats.heapUsedMB / stats.heapTotalMB;
+    const heapUsageThreshold = stats.heapTotalMB < 256 ? 0.98 : 0.9;
+    if (heapUsageRatio > heapUsageThreshold) {
+      warnings.push(`堆内存使用率过高: ${(heapUsageRatio * 100).toFixed(1)}%`);
       healthy = false;
     }
 

@@ -9,6 +9,8 @@ from typing import Any, Callable
 
 from agent.config import DATA_DIR
 from agent.core.logger import log_ignored
+import logging
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -174,6 +176,7 @@ class Skill:
                     return result
                 return SkillResult(success=True, output=str(result))
             except Exception as e:
+                logger.warning("registry 异常处理", error=str(e))
                 return SkillResult(success=False, error=str(e))
 
         return SkillResult(
@@ -548,9 +551,11 @@ class SkillSync:
                 from urllib.request import urlopen
                 with urlopen(url, timeout=15) as resp:
                     data = json.loads(resp.read().decode())
-            except Exception:
+            except Exception as e:
+                logger.warning("registry.fetch_hub_skills urllib获取失败", url=url, error=str(e))
                 return []
-        except Exception:
+        except Exception as e:
+            logger.warning("registry.fetch_hub_skills httpx获取失败", url=url, error=str(e))
             return []
 
         if not isinstance(data, list):
@@ -563,6 +568,7 @@ class SkillSync:
                 entry.hub_url = url
                 entries.append(entry)
             except Exception as e:
+                logger.warning("registry 异常处理", error=str(e))
                 log_ignored(None, "registry.SkillHub._parse_index", e)
                 continue
         return entries

@@ -110,7 +110,8 @@ async def health():
         client = await _get_ts_client()
         resp = await client.get(f"{_ts_backend_url()}/api/health", timeout=3.0)
         ts_healthy = resp.status_code == 200
-    except Exception:
+    except Exception as _exc:
+        log.debug("compat 异常处理", error=str(_exc))
         ts_healthy = False
     memory_ok = eng.memory is not None if eng else False
     tools_count = len(eng.tool_registry.get_all_definitions()) if eng and eng.tool_registry else 0
@@ -153,6 +154,7 @@ async def health_detail():
         resp = await client.get(f"{_ts_backend_url()}/api/health", timeout=3.0)
         components["ts_backend"] = {"available": resp.status_code == 200, "status_code": resp.status_code}
     except Exception as e:
+        log.debug("compat 异常处理", error=str(e))
         components["ts_backend"] = {"available": False, "error": str(e)}
     from agent.core.resilience import _circuits
     components["circuits"] = {
@@ -174,15 +176,27 @@ async def health_detail():
 async def process(req: ProcessRequest):
     eng = _get_engine()
     if not eng:
-        return {"response": "", "trace_id": "", "intent": "unknown", "error": _engine_unavailable()}
-    result = await eng.process_input(
-        message=req.input or "",
-        session_id="api_process",
-    )
+        return {"response": "系统暂未就绪，请稍后重试。", "trace_id": "", "intent": "unknown", "error": _engine_unavailable()}
+    try:
+        result = await eng.process_input(
+            message=req.input or "",
+            session_id="api_process",
+        )
+    except Exception as e:
+        log.error("process端点异常", error=str(e))
+        return {"response": "抱歉，处理请求时出现异常，请稍后重试。", "trace_id": "", "intent": "error", "finish_reason": "error"}
+    content = result.get("content", "") or ""
+    finish_reason = result.get("finish_reason", "")
+    if not content.strip():
+        if finish_reason == "budget_exceeded":
+            content = "抱歉，当前AI服务预算已达上限，暂时无法处理更多请求。请稍后重试。"
+        else:
+            content = "抱歉，未能生成有效回复，请稍后重试。"
     return {
-        "response": result.get("content", ""),
+        "response": content,
         "trace_id": result.get("trace_id", ""),
         "intent": result.get("intent", "chat"),
+        "finish_reason": finish_reason,
     }
 
 
@@ -190,15 +204,27 @@ async def process(req: ProcessRequest):
 async def chat(req: ChatCompatRequest):
     eng = _get_engine()
     if not eng:
-        return {"content": "", "session_id": "", "trace_id": "", "error": _engine_unavailable()}
-    result = await eng.process_input(
-        message=req.message,
-        session_id=req.conversation_id or "api_chat",
-    )
+        return {"content": "系统暂未就绪，请稍后重试。", "session_id": "", "trace_id": "", "error": _engine_unavailable()}
+    try:
+        result = await eng.process_input(
+            message=req.message,
+            session_id=req.conversation_id or "api_chat",
+        )
+    except Exception as e:
+        log.error("chat端点异常", error=str(e))
+        return {"content": "抱歉，处理请求时出现异常，请稍后重试。", "session_id": "", "trace_id": "", "finish_reason": "error"}
+    content = result.get("content", "") or ""
+    finish_reason = result.get("finish_reason", "")
+    if not content.strip():
+        if finish_reason == "budget_exceeded":
+            content = "抱歉，当前AI服务预算已达上限，暂时无法处理更多请求。请稍后重试。"
+        else:
+            content = "抱歉，未能生成有效回复，请稍后重试。"
     return {
-        "content": result.get("content", ""),
+        "content": content,
         "session_id": result.get("session_id", req.conversation_id or "api_chat"),
         "trace_id": result.get("trace_id", ""),
+        "finish_reason": finish_reason,
     }
 
 
@@ -597,15 +623,27 @@ async def correct(req: dict):
 async def ide_chat(req: IdeChatRequest):
     eng = _get_engine()
     if not eng:
-        return {"content": "", "session_id": "", "trace_id": "", "error": _engine_unavailable()}
-    result = await eng.process_input(
-        message=req.message,
-        session_id=req.session_id or "ide_chat",
-    )
+        return {"content": "系统暂未就绪，请稍后重试。", "session_id": "", "trace_id": "", "error": _engine_unavailable()}
+    try:
+        result = await eng.process_input(
+            message=req.message,
+            session_id=req.session_id or "ide_chat",
+        )
+    except Exception as e:
+        log.error("ide/chat端点异常", error=str(e))
+        return {"content": "抱歉，处理请求时出现异常，请稍后重试。", "session_id": "", "trace_id": "", "finish_reason": "error"}
+    content = result.get("content", "") or ""
+    finish_reason = result.get("finish_reason", "")
+    if not content.strip():
+        if finish_reason == "budget_exceeded":
+            content = "抱歉，当前AI服务预算已达上限，暂时无法处理更多请求。请稍后重试。"
+        else:
+            content = "抱歉，未能生成有效回复，请稍后重试。"
     return {
-        "content": result.get("content", ""),
+        "content": content,
         "session_id": result.get("session_id", req.session_id or "ide_chat"),
         "trace_id": result.get("trace_id", ""),
+        "finish_reason": finish_reason,
     }
 
 
@@ -648,6 +686,7 @@ async def tools_execute(req: dict):
             "metadata": result.metadata,
         }
     except Exception as e:
+        log.debug("compat 异常处理", error=str(e))
         return {"success": False, "error": str(e)}
 
 
@@ -664,6 +703,7 @@ async def tools_list():
         from agent.main import app
         request = Request({})
     except Exception as _exc:
+        log.debug("compat 异常处理", error=str(_exc))
         log_ignored(log, "compat.tools_list", _exc)
 
     tools = []
@@ -757,11 +797,15 @@ async def orchestrate(req: dict):
     eng = _get_engine()
     if not eng:
         return {"error": _engine_unavailable()}
-    result = await eng.process_input(
-        message=req.get("goal", ""),
-        session_id="orchestrate",
-    )
-    return {"content": result.get("content", ""), "trace_id": result.get("trace_id", "")}
+    try:
+        result = await eng.process_input(
+            message=req.get("goal", ""),
+            session_id="orchestrate",
+        )
+    except Exception as e:
+        log.error("orchestrate端点异常", error=str(e))
+        return {"content": "抱歉，处理请求时出现异常，请稍后重试。", "trace_id": "", "finish_reason": "error"}
+    return {"content": result.get("content", ""), "trace_id": result.get("trace_id", ""), "finish_reason": result.get("finish_reason", "stop")}
 
 
 @router.post("/evaluate")
@@ -840,7 +884,8 @@ async def mcp_server_detail(name: str):
             retry_config=_MCP_RETRY,
             circuit_name="ts_mcp",
         )
-    except Exception:
+    except Exception as _exc:
+        log.debug("compat 异常处理", error=str(_exc))
         return {"name": name, "status": "unknown", "running": False}
 
 
@@ -895,7 +940,8 @@ async def mcp_server_tools(name: str):
             retry_config=_MCP_RETRY,
             circuit_name="ts_mcp",
         )
-    except Exception:
+    except Exception as _exc:
+        log.debug("compat 异常处理", error=str(_exc))
         return {"tools": []}
 
 
@@ -994,7 +1040,9 @@ async def ws_endpoint(websocket: WebSocket):
     except WebSocketDisconnect as _exc:
         log_ignored(log, "compat.ws_endpoint", _exc)
     except Exception as e:
+        log.debug("compat 异常处理", error=str(e))
         try:
-            await websocket.send_json({"type": "error", "content": str(e), "done": True})
+            await websocket.send_json({"type": "error", "content": "处理请求时发生错误，请稍后重试。", "done": True})
         except Exception as _exc:
+            log.debug("compat 异常处理", error=str(_exc))
             log_ignored(log, "compat.ws_endpoint", _exc)

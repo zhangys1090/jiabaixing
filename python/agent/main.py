@@ -19,6 +19,7 @@ from agent.api.memory import router as memory_router
 from agent.api.mcp import router as mcp_router
 from agent.api.openai_compat import router as openai_compat_router
 from agent.api.plan import router as plan_router
+from agent.api.long_task import router as long_task_router
 from agent.api.sessions import router as sessions_router
 from agent.api.skills import router as skills_router
 from agent.api.admin import router as admin_router
@@ -30,6 +31,8 @@ from agent.api.slo import router as slo_router
 from agent.api.devices import devices_router
 from agent.api.action_verify import router as action_verify_router
 from agent.api.cognition import router as cognition_router
+from agent.api.eval import router as eval_router
+from agent.api.reasoning import router as reasoning_router
 from agent.api.health import create_health_router
 from agent.config import AGENT_HOST, AGENT_PORT
 from agent.infrastructure.slo_collector import get_slo_collector
@@ -47,9 +50,11 @@ _request_metrics: dict[str, Any] = {
     "endpoint_counts": {},
     "start_time": time.time(),
 }
+_MAX_ENDPOINT_COUNTS = 200
 
 # P1: 全局任务取消令牌映射: session_id -> asyncio.Event
 _cancel_tokens: dict[str, asyncio.Event] = {}
+_MAX_CANCEL_TOKENS = 1000
 
 
 class MetricsMiddleware:
@@ -83,6 +88,11 @@ class MetricsMiddleware:
                 _request_metrics["endpoint_counts"][endpoint_key] = (
                     _request_metrics["endpoint_counts"].get(endpoint_key, 0) + 1
                 )
+                if len(_request_metrics["endpoint_counts"]) > _MAX_ENDPOINT_COUNTS:
+                    sorted_eps = sorted(_request_metrics["endpoint_counts"].items(), key=lambda x: x[1])
+                    to_remove = sorted_eps[: len(_request_metrics["endpoint_counts"]) - (_MAX_ENDPOINT_COUNTS * 3 // 4)]
+                    for k, _ in to_remove:
+                        del _request_metrics["endpoint_counts"][k]
                 if status >= 400:
                     _request_metrics["total_errors"] += 1
                 duration = (time.monotonic() - start) * 1000
@@ -112,7 +122,7 @@ async def lifespan(app: FastAPI):
             from agent.infrastructure.migrations import run_migrations
 
             run_migrations()
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             log.warning("启动期迁移失败", error=str(e))
     engine = AgentEngine()
     await engine.initialize_v2()
@@ -154,7 +164,6 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         log.warning("A2A routes mount failed", error=str(e))
 
-    log.info("Python Agent ready", host=AGENT_HOST, port=AGENT_PORT)
     from agent.core.engine_extensions import init_extensions
     init_extensions(engine)
     app.include_router(create_health_router())
@@ -198,7 +207,8 @@ class APIErrorLoggingMiddleware(BaseHTTPMiddleware):
                         path=request.url.path,
                         body=text[:500],
                     )
-        except Exception:
+        except Exception as _exc:
+            log.warning("异常被静默捕获", error=str(_exc))
             # 日志中间件自身绝不可影响主流程
             pass
         return response
@@ -275,6 +285,7 @@ app.include_router(openai_compat_router, prefix="/v1")
 app.include_router(llm_router, prefix="/v1/llm/providers")
 app.include_router(llm_core_router, prefix="/v1/llm")
 app.include_router(plan_router, prefix="/v1")
+app.include_router(long_task_router, prefix="/v1/long-task")
 app.include_router(memory_router, prefix="/v1/memory")
 app.include_router(multimodal_router, prefix="/v1/memory")
 app.include_router(skills_router, prefix="/v1/skills")
@@ -291,6 +302,8 @@ app.include_router(slo_router, prefix="/v1")
 app.include_router(devices_router, prefix="/v1")
 app.include_router(action_verify_router, prefix="/v1/perception")
 app.include_router(cognition_router, prefix="/v1")
+app.include_router(eval_router)
+app.include_router(reasoning_router, prefix="/v1")
 
 
 @app.get("/v1/metrics")
@@ -309,6 +322,7 @@ async def get_metrics():
                 if refl and hasattr(refl, 'get_metrics'):
                     llm_metrics = refl.get_metrics().__dict__ if hasattr(refl.get_metrics(), '__dict__') else {}
         except Exception as _exc:
+            log.debug("main 异常处理", error=str(_exc))
             log_ignored(log, "main.get_metrics", _exc)
         try:
             if hasattr(engine, 'tool_registry') and engine.tool_registry:
@@ -317,6 +331,7 @@ async def get_metrics():
                     "toolsets": len(engine.tool_registry.get_all_definitions() or []),
                 }
         except Exception as _exc:
+            log.debug("main 异常处理", error=str(_exc))
             log_ignored(log, "main.get_metrics", _exc)
 
     return {
@@ -365,16 +380,23 @@ async def get_metrics_dashboard():
     return dashboard
 
 _event_clients: set = set()
+_MAX_EVENT_CLIENTS = 500
 
 
-def broadcast_event(event: str, payload: dict) -> int:
+async def broadcast_event(event: str, payload: dict) -> int:
     sent = 0
+    to_remove = []
     for client in list(_event_clients):
         try:
             asyncio.get_event_loop().create_task(client.send_json({"event": event, "payload": payload}))
             sent += 1
-        except Exception:
-            _event_clients.discard(client)
+        except Exception as _exc:
+            log.debug("main 异常处理", error=str(_exc))
+            to_remove.append(client)
+    for client in to_remove:
+        _event_clients.discard(client)
+    if len(_event_clients) > _MAX_EVENT_CLIENTS:
+        _event_clients.clear()
     return sent
 
 
@@ -462,6 +484,14 @@ async def ws_root(websocket: WebSocket):
             # P1: 创建取消令牌
             cancel_token = asyncio.Event()
             _cancel_tokens[session_id] = cancel_token
+            if len(_cancel_tokens) > _MAX_CANCEL_TOKENS:
+                stale = [k for k, v in _cancel_tokens.items() if v.is_set()]
+                for k in stale:
+                    _cancel_tokens.pop(k, None)
+                if len(_cancel_tokens) > _MAX_CANCEL_TOKENS:
+                    oldest_keys = list(_cancel_tokens.keys())[: len(_cancel_tokens) - _MAX_CANCEL_TOKENS + 100]
+                    for k in oldest_keys:
+                        _cancel_tokens.pop(k, None)
 
             # P1: 意图分析 — 低置信度时触发澄清
             intent_confidence = data.get("intent_confidence", 1.0)
@@ -597,6 +627,7 @@ async def ws_root(websocket: WebSocket):
                     "content": "任务已被用户取消",
                 })
             except Exception as e:
+                log.debug("main 异常处理", error=str(e))
                 humanized = _humanize_error(str(e))
                 await websocket.send_json({
                     "type": "error",
@@ -612,9 +643,11 @@ async def ws_root(websocket: WebSocket):
     except WebSocketDisconnect as _exc:
         log_ignored(log, "main.ws_root", _exc)
     except Exception as e:
+        log.debug("main 异常处理", error=str(e))
         try:
             await websocket.send_json({"type": "error", "content": _humanize_error(str(e)), "done": True})
         except Exception as _exc:
+            log.debug("main 异常处理", error=str(_exc))
             log_ignored(log, "main.ws_root", _exc)
 
 
@@ -704,6 +737,7 @@ async def _stream_process(
         }
 
     except Exception as e:
+        log.debug("main 异常处理", error=str(e))
         yield {"type": "error", "content": str(e), "quality_score": 0.0, "finish_reason": "error"}
 
 
@@ -728,11 +762,13 @@ async def ws_events(websocket: WebSocket):
                     if client != websocket:
                         try:
                             await client.send_json({"event": event, "payload": payload})
-                        except Exception:
+                        except Exception as _exc:
+                            log.debug("main 异常处理", error=str(_exc))
                             _event_clients.discard(client)
     except WebSocketDisconnect:
         _event_clients.discard(websocket)
-    except Exception:
+    except Exception as _exc:
+        log.debug("main 异常处理", error=str(_exc))
         _event_clients.discard(websocket)
 
 

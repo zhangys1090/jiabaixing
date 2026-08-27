@@ -43,6 +43,7 @@ export class SslGuard {
     timestamp: number;
     errors: string[];
   }> = [];
+  private static readonly MAX_VIOLATION_LOG = 500;
 
   private constructor(config?: Partial<SslGuardConfig>) {
     this.config = { ...DEFAULT_SSL_CONFIG, ...config };
@@ -290,8 +291,10 @@ export class SslGuard {
       errors,
     });
 
-    if (this.violationLog.length > 100) {
-      this.violationLog = this.violationLog.slice(-50);
+    if (this.violationLog.length > SslGuard.MAX_VIOLATION_LOG) {
+      this.violationLog = this.violationLog.slice(
+        -Math.floor(SslGuard.MAX_VIOLATION_LOG / 2)
+      );
     }
 
     Logger.warn(`🚫 SSL守卫：${hostname} - ${errors.join(', ')}`, 'SslGuard');

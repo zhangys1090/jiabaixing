@@ -26,8 +26,8 @@ from typing import Any
 
 from agent.core.logger import StructuredLogger
 from agent.loop.reflection_knowledge_base import ReflectionKnowledgeBase, ReflectionExperience, ExperienceType
-
 log = StructuredLogger("fewshot_generalizer")
+
 
 
 @dataclass
@@ -95,6 +95,7 @@ class FewShotGeneralizer:
             similarity_threshold: 相似度阈值。
             enabled: 是否启用。
         """
+        self._MAX_METRICS = 500
         self._kb = knowledge_base
         self._min_experiences = min_experiences_for_generalization
         self._similarity_threshold = similarity_threshold

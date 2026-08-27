@@ -22,8 +22,8 @@ from enum import Enum
 from typing import Any
 
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("memory_governor")
+
 
 
 class MemoryTier(str, Enum):
@@ -141,12 +141,21 @@ class MemoryGovernor:
 
     def register_entry(self, entry: MemoryEntry) -> None:
         self._entries[entry.entry_id] = entry
+        if len(self._entries) > self._max_entries:
+            self._evict_low_weight()
 
     def remove_entry(self, entry_id: str) -> None:
         self._entries.pop(entry_id, None)
 
     def get_entry(self, entry_id: str) -> MemoryEntry | None:
         return self._entries.get(entry_id)
+
+    def _evict_low_weight(self) -> None:
+        trim_to = self._max_entries * 3 // 4
+        sorted_entries = sorted(self._entries.items(), key=lambda x: x[1].decay_weight)
+        to_remove = sorted_entries[: len(self._entries) - trim_to]
+        for eid, _ in to_remove:
+            self._entries.pop(eid, None)
 
     def compute_decay_weight(self, entry: MemoryEntry, now: float | None = None) -> float:
         now = now or time.time()
@@ -488,3 +497,196 @@ class MemoryGovernor:
                 summaries.append(f"[{entry.entry_id[:8]}] {content}")
 
         return "\n".join(summaries)
+
+    # ─── M3: 记忆遗忘机制 ───
+
+    def detect_conflicts(self) -> list[tuple[str, str, str]]:
+        """检测记忆中的冲突条目（语义相近但结论矛盾）.
+
+        Returns:
+            list of (entry_id_a, entry_id_b, conflict_reason)
+        """
+        _CONTRADICTION_PAIRS = [
+            ("是", "不是"), ("有", "没有"), ("可以", "不可以"),
+            ("正确", "错误"), ("成功", "失败"), ("需要", "不需要"),
+            ("应该", "不应该"), ("支持", "不支持"),
+        ]
+        conflicts: list[tuple[str, str, str]] = []
+        entries = list(self._entries.values())
+        for i, ea in enumerate(entries):
+            for eb in entries[i + 1:]:
+                sim = self._compute_similarity(ea, eb)
+                if sim < 0.6:
+                    continue
+                ca = ea.content.lower()
+                cb = eb.content.lower()
+                for pos, neg in _CONTRADICTION_PAIRS:
+                    if (pos in ca and neg in cb) or (neg in ca and pos in cb):
+                        conflicts.append((ea.entry_id, eb.entry_id, f"'{pos}' vs '{neg}'"))
+                        break
+        return conflicts
+
+    def resolve_conflicts(self, strategy: str = "keep_recent") -> int:
+        """自动解决冲突记忆.
+
+        Args:
+            strategy: "keep_recent"保留较新的, "keep_important"保留更重要的, "demote_both"两者都降权
+
+        Returns:
+            解决的冲突数
+        """
+        conflicts = self.detect_conflicts()
+        resolved = 0
+        for eid_a, eid_b, reason in conflicts:
+            ea = self._entries.get(eid_a)
+            eb = self._entries.get(eid_b)
+            if not ea or not eb:
+                continue
+            if strategy == "keep_recent":
+                loser = ea if ea.created_at < eb.created_at else eb
+                loser.decay_weight *= 0.5
+                loser.metadata["conflict_resolved"] = reason
+                resolved += 1
+            elif strategy == "keep_important":
+                loser = ea if ea.importance < eb.importance else eb
+                loser.decay_weight *= 0.5
+                loser.metadata["conflict_resolved"] = reason
+                resolved += 1
+            elif strategy == "demote_both":
+                ea.decay_weight *= 0.7
+                eb.decay_weight *= 0.7
+                ea.metadata["conflict_demoted"] = reason
+                eb.metadata["conflict_demoted"] = reason
+                resolved += 1
+        if resolved:
+            log.info("M3: memory conflicts resolved", count=resolved, strategy=strategy)
+        return resolved
+
+    def auto_forget(self, now: float | None = None) -> dict[str, int]:
+        """M3: 自动遗忘 — 执行衰减+冲突解决+归档过期.
+
+        Returns:
+            dict with decayed, conflicts_resolved, archived, deleted counts
+        """
+        now = now or time.time()
+        decay_result = self.apply_decay(now)
+        conflicts_resolved = self.resolve_conflicts(strategy="keep_recent")
+        to_archive = [
+            eid for eid, e in self._entries.items()
+            if e.decay_weight < self._archive_threshold and e.tier != MemoryTier.ARCHIVED
+        ]
+        for eid in to_archive:
+            self._entries[eid].tier = MemoryTier.ARCHIVED
+        to_delete = [
+            eid for eid, e in self._entries.items()
+            if e.decay_weight < self._delete_threshold
+        ]
+        for eid in to_delete:
+            self._entries.pop(eid, None)
+        result = {
+            "decayed": decay_result.entries_decayed,
+            "conflicts_resolved": conflicts_resolved,
+            "archived": len(to_archive),
+            "deleted": len(to_delete),
+        }
+        # M4: 遗忘后自动合并相似记忆
+        _merge_result = self.merge_similar(similarity_threshold=0.75)
+        result["merged"] = _merge_result.get("merged_count", 0)
+        log.info("M3+M4: auto-forget + merge completed", **result)
+        return result
+
+    # ─── M4: 记忆压缩合并 ───
+
+    def merge_similar(
+        self,
+        similarity_threshold: float = 0.75,
+        max_merge_size: int = 5,
+    ) -> dict[str, Any]:
+        """M4: 合并语义相似的记忆条目，减少冗余提升检索效率.
+
+        与deduplicate不同，merge_similar处理的是语义相近但不完全重复的条目，
+        将它们合并为一条更丰富的记忆，保留所有关键信息。
+
+        Args:
+            similarity_threshold: 合并相似度阈值（默认0.75，比去重的0.92更宽松）
+            max_merge_size: 单次合并最多合并的条目数
+
+        Returns:
+            dict with merged_count, space_saved, details
+        """
+        entries = list(self._entries.values())
+        merged_groups: list[list[str]] = []
+        checked: set[str] = set()
+
+        for i, ea in enumerate(entries):
+            if ea.entry_id in checked or ea.tier == MemoryTier.ARCHIVED:
+                continue
+            group = [ea.entry_id]
+            checked.add(ea.entry_id)
+
+            for j in range(i + 1, len(entries)):
+                eb = entries[j]
+                if eb.entry_id in checked or eb.tier == MemoryTier.ARCHIVED:
+                    continue
+                if len(group) >= max_merge_size:
+                    break
+                sim = self._compute_similarity(ea, eb)
+                if sim >= similarity_threshold:
+                    same_scene = ea.metadata.get("scene") == eb.metadata.get("scene")
+                    if same_scene or sim >= 0.85:
+                        group.append(eb.entry_id)
+                        checked.add(eb.entry_id)
+
+            if len(group) > 1:
+                merged_groups.append(group)
+
+        merged_count = 0
+        space_saved = 0
+        details: list[dict[str, Any]] = []
+
+        for group in merged_groups:
+            group_entries = [self._entries[eid] for eid in group if eid in self._entries]
+            if len(group_entries) < 2:
+                continue
+
+            original_size = sum(len(e.content.encode("utf-8")) for e in group_entries)
+            keeper = max(group_entries, key=lambda e: e.importance * e.decay_weight)
+            other_contents = [e.content for e in group_entries if e.entry_id != keeper.entry_id]
+
+            merged_content = keeper.content
+            for oc in other_contents:
+                if oc not in merged_content:
+                    unique_part = oc
+                    for sentence in oc.split("。"):
+                        sentence = sentence.strip()
+                        if sentence and sentence not in merged_content:
+                            unique_part = sentence
+                            break
+                    if unique_part and unique_part != oc:
+                        merged_content += f"；{unique_part}"
+                    elif len(oc) < 100:
+                        merged_content += f"；{oc}"
+
+            keeper.content = merged_content
+            keeper.compressed_from = [eid for eid in group if eid != keeper.entry_id]
+            keeper.compression_reason = f"M4合并 {len(group)} 条相似记忆 (sim>={similarity_threshold})"
+            keeper.importance = max(e.importance for e in group_entries)
+            keeper.access_count = sum(e.access_count for e in group_entries)
+
+            for eid in group:
+                if eid != keeper.entry_id:
+                    removed = self._entries.pop(eid, None)
+                    if removed:
+                        space_saved += len(removed.content.encode("utf-8"))
+
+            merged_count += len(group) - 1
+            details.append({
+                "keeper": keeper.entry_id,
+                "merged_from": [eid for eid in group if eid != keeper.entry_id],
+                "original_size": original_size,
+                "merged_size": len(merged_content.encode("utf-8")),
+            })
+
+        if merged_count:
+            log.info("M4: similar memories merged", merged_count=merged_count, space_saved=space_saved)
+        return {"merged_count": merged_count, "space_saved": space_saved, "details": details}

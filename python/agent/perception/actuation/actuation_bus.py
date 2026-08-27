@@ -31,8 +31,8 @@ from typing import Any, Callable, Awaitable
 
 from agent.core.logger import StructuredLogger
 from agent.perception.device_sense import get_proprioception_channel
-
 log = StructuredLogger("actuation_bus")
+
 
 
 class ActuationType(str, Enum):
@@ -181,11 +181,13 @@ class ActuationBus:
                 result.success = False
                 result.error = f"执行超时 ({command.timeout_ms}ms)"
             except Exception as e:
+                log.debug("actuation_bus 异常处理", error=str(e))
                 result.status = ActuationStatus.FAILED
                 result.success = False
                 result.error = str(e)
 
         except Exception as e:
+            log.debug("actuation_bus 异常处理", error=str(e))
             result.status = ActuationStatus.FAILED
             result.success = False
             result.error = f"总线异常: {e}"
@@ -213,7 +215,8 @@ class ActuationBus:
 
     async def execute_parallel(self, commands: list[ActuationCommand]) -> list[ActuationResult]:
         tasks = [self.execute(cmd) for cmd in commands]
-        return await asyncio.gather(*tasks, return_exceptions=False)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        return [r if isinstance(r, ActuationResult) else ActuationResult(command_id="error", status=ActuationStatus.FAILED, error=str(r)) for r in results]
 
     def _resolve_executor(
         self, action_type: ActuationType

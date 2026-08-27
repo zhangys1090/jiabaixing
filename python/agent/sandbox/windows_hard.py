@@ -12,11 +12,18 @@
 设计原则 —— 全部「尽最大努力 + 安全降级」：
 - pywin32 缺失、非 Windows、受限令牌创建失败、或子进程已处于不可脱离的父作业，
   都只记录日志并退回软沙箱，绝不抛错中断执行。
-- 由环境变量 ``SANDBOX_HARD_WINDOWS`` 控制是否启用（默认关闭），避免影响现有行为。
+- 由环境变量 ``SANDBOX_HARD_WINDOWS`` 控制是否启用（默认 auto，即 pywin32 可用时自动启用）。
 
-典型生产启用（Windows + 已 ``pip install pywin32``）：
+典型配置（Windows + 已 ``pip install pywin32``）：
 
+    # 默认 auto：pywin32 可用时自动启用硬隔离
+    set SANDBOX_HARD_WINDOWS=auto
+
+    # 强制启用（pywin32 不可用时降级为软沙箱+告警）
     set SANDBOX_HARD_WINDOWS=true
+
+    # 显式关闭（仅使用逻辑级沙箱）
+    set SANDBOX_HARD_WINDOWS=false
 """
 from __future__ import annotations
 
@@ -24,9 +31,9 @@ import logging
 import os
 import sys
 from typing import Any
-from agent.core.logger import log_ignored
+from agent.core.logger import log_ignored, StructuredLogger
 
-log = logging.getLogger("sandbox.windows_hard")
+log = StructuredLogger("windows_hard")
 
 
 class HardIsolationUnavailable(Exception):
@@ -36,11 +43,11 @@ class HardIsolationUnavailable(Exception):
 def hard_windows_enabled() -> bool:
     """解析 SANDBOX_HARD_WINDOWS 开关。
 
-    - ``false``（默认）/ ``0`` / ``no`` / ``off`` → 关闭。
-    - ``true`` / ``1`` / ``yes`` / ``on`` → 启用（pywin32 不可用时自动降级）。
-    - ``auto`` → 仅当 pywin32 可用时启用。
+    - ``auto``（默认）→ 仅当 pywin32 可用时启用（推荐生产配置）。
+    - ``true`` / ``1`` / ``yes`` / ``on`` → 强制启用（pywin32 不可用时自动降级）。
+    - ``false`` / ``0`` / ``no`` / ``off`` → 关闭。
     """
-    val = os.environ.get("SANDBOX_HARD_WINDOWS", "false").strip().lower()
+    val = os.environ.get("SANDBOX_HARD_WINDOWS", "auto").strip().lower()
     if val in ("false", "0", "no", "off", ""):
         return False
     if val in ("true", "1", "yes", "on"):
@@ -52,13 +59,14 @@ def hard_windows_enabled() -> bool:
 
 def _pywin32_available() -> bool:
     try:
-        import win32job  # noqa: F401
-        import win32api  # noqa: F401
-        import win32security  # noqa: F401
-        import win32process  # noqa: F401
-        import win32con  # noqa: F401
+        import win32job
+        import win32api
+        import win32security
+        import win32process
+        import win32con
         return True
-    except Exception:
+    except Exception as _exc:
+        log.warning("异常降级处理", error=str(_exc))
         return False
 
 
@@ -163,4 +171,5 @@ def log_ignored_hard(_exc: Exception) -> None:
     try:
         log.debug("windows_hard close ignored", exc_info=_exc)
     except Exception as _exc:
+        log.debug("windows_hard 异常处理", error=str(_exc))
         log_ignored(log, "windows_hard.log_ignored_hard", _exc)

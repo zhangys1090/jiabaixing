@@ -78,7 +78,7 @@ export async function processInputOnce(
         JSON.stringify({
           type: 'response_ready',
           data: {
-            response: `抱歉，LLM 服务暂时不可用。\n\n请检查以下配置：\n1. 确认 .env 文件中的 DEEPSEEK_API_KEY 或 OPENAI_API_KEY 已正确设置\n2. 如果使用本地模型，请确认 Ollama 服务已启动\n3. 检查网络连接是否正常\n\n配置文件路径: c:\\zy\\jiabaixing\\.env`,
+            response: `抱歉，LLM 服务暂时不可用。\n\n请检查以下配置：\n1. 确认 .env 文件中的 DEEPSEEK_API_KEY 或 OPENAI_API_KEY 已正确设置\n2. 如果使用本地模型，请确认 Ollama 服务已启动\n3. 检查网络连接是否正常`,
             traceId,
           },
         })
@@ -144,6 +144,20 @@ export async function processInputOnce(
           `✅ 处理完成, traceId: ${result.traceId}（Python 后端模式：响应由 EventBus WS 通道推送，跳过 response_ready）`,
           'WsProcessor'
         );
+        setTimeout(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(
+              JSON.stringify({
+                type: 'response_ready_ack',
+                data: {
+                  traceId: result.traceId || traceId,
+                  success: true,
+                  source: 'python_bridge',
+                },
+              })
+            );
+          }
+        }, 50);
       } else {
         Logger.info(
           `✅ 处理完成, traceId: ${result.traceId}（TS 本地模式：发送 response_ready 兜底）`,
@@ -166,7 +180,7 @@ export async function processInputOnce(
               })
             );
           }
-        }, 500);
+        }, 100);
       }
 
       // 记录交互数据到进化引擎（python 模式经 PythonAgentBridge 委派；local 模式用 TS 编排器）
@@ -181,14 +195,15 @@ export async function processInputOnce(
               response: result.response,
               success: true,
               qualityScore:
-                ((result as unknown as Record<string, unknown>).quality as number) || 0.7,
+                ((result as unknown as Record<string, unknown>)
+                  .quality as number) || 0.7,
               executionDuration: 0,
               toolCalls: [],
               scene: 'websocket',
               userId,
             })
-            .catch((err) =>
-              Logger.warn('记录交互到进化引擎失败', err as Error, 'WsProcessor')
+            .catch((err: unknown) =>
+              Logger.warn('记录交互到进化引擎失败', 'WsProcessor', err)
             );
         } else {
           const orchestrator = EvolutionOrchestrator.getInstance();
@@ -198,7 +213,8 @@ export async function processInputOnce(
             response: result.response,
             success: true,
             qualityScore:
-              ((result as unknown as Record<string, unknown>).quality as number) || 0.7,
+              ((result as unknown as Record<string, unknown>)
+                .quality as number) || 0.7,
             executionDuration: 0,
             toolCalls: [],
             scene: 'websocket',
@@ -223,7 +239,6 @@ export async function processInputOnce(
             response: userFriendlyMessage,
             traceId,
             success: false,
-            error: errorMsg,
           },
         })
       );
@@ -250,5 +265,5 @@ function friendlyErrorMessage(errorMsg: string): string {
   ) {
     return `抱歉，API 认证失败。\n\n请检查 .env 文件中的 API Key 配置是否正确。`;
   }
-  return `抱歉，处理过程中出现了错误：${errorMsg}`;
+  return '抱歉，处理过程中出现了错误，请稍后重试。';
 }

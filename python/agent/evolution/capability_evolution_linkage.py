@@ -181,7 +181,7 @@ def evolution_rollback_handlers(
     def get_latest() -> str | None:
         fn = getattr(engine, "latest_checkpoint_id", None)
         if callable(fn):
-            return fn()  # type: ignore[no-any-return]
+            return fn()
         rb = getattr(engine, "_rollback", None)
         cps = getattr(rb, "_checkpoints", None)
         if isinstance(cps, dict) and cps:

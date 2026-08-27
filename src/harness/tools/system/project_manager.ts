@@ -1,3 +1,5 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import type { ToolContext, ToolDefinition, ToolResult } from '../../types';
 import { Permission, ToolCategory } from '../../types';
 
@@ -190,10 +192,7 @@ export function createProjectManagerExecutor() {
         let contextResult = null;
         if (params.autoLoadContext !== false && project.contextFile) {
           try {
-            const ctxPath = path.join(
-              project.path,
-              project.contextFile
-            );
+            const ctxPath = path.join(project.path, project.contextFile);
             if (fs.existsSync(ctxPath)) {
               contextResult = fs.readFileSync(ctxPath, 'utf-8');
             }

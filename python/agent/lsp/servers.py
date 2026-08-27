@@ -143,6 +143,7 @@ class LspServerManager:
             log.warning("LSP initialize failed", server=config.id)
             return None
         except Exception as e:
+            log.debug("servers 异常处理", error=str(e))
             managed.status = "failed"
             log.warning("LSP server connect error", server=config.id, error=str(e))
             return None
@@ -157,14 +158,17 @@ class LspServerManager:
             exit_notif = self._protocol.build_notification("exit", None)
             await self._send(server_id, exit_notif)
         except Exception as _exc:
+            log.debug("servers 异常处理", error=str(_exc))
             log_ignored(log, "servers.LspServerManager.disconnect", _exc)
         try:
             managed.process.terminate()
             await asyncio.wait_for(managed.process.wait(), timeout=5.0)
-        except Exception:
+        except Exception as _exc:
+            log.debug("servers 异常处理", error=str(_exc))
             try:
                 managed.process.kill()
             except Exception as _exc:
+                log.debug("servers 异常处理", error=str(_exc))
                 log_ignored(log, "servers.LspServerManager.disconnect", _exc)
         log.info("LSP server disconnected", server=server_id)
 

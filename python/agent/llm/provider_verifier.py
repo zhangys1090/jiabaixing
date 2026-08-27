@@ -23,8 +23,8 @@ from enum import Enum
 from typing import Any
 
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("provider_verifier")
+
 
 
 class VerificationStatus(str, Enum):
@@ -301,7 +301,8 @@ class ProviderVerifier:
                 timeout=self._probe_timeout + 1,
             )
             return True
-        except Exception:
+        except Exception as _exc:
+            log.warning("异常降级处理", error=str(_exc))
             return False
 
     async def _verify_oauth(self, provider_id: str, spec: Any) -> bool:

@@ -21,10 +21,11 @@ import sqlite3
 import time
 from dataclasses import dataclass, field
 from typing import Any
-
 from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("knowledge_graph")
+
+
 
 
 @dataclass
@@ -161,7 +162,7 @@ class KnowledgeGraph:
         else:
             return
         self._create_tables()
-        log.info("KnowledgeGraph 初始化完成")
+        log.debug("KnowledgeGraph 初始化完成")
 
     async def close(self) -> None:
         """关闭图谱数据库。"""

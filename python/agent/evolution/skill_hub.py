@@ -38,6 +38,7 @@ from agent.core.logger import StructuredLogger
 log = StructuredLogger("skill_hub")
 
 
+
 class SkillStatus(str, Enum):
     AVAILABLE = "available"
     INSTALLED = "installed"
@@ -359,7 +360,7 @@ class SkillHub:
 
     def publish(self, entry: SkillEntry) -> None:
         self._registry[entry.id] = entry
-        log.info("技能已发布", id=entry.id, name=entry.name)
+        log.debug("技能已发布", id=entry.id, name=entry.name)
 
     def add_rating(self, skill_id: str, rating: float) -> None:
         entry = self._registry.get(skill_id)

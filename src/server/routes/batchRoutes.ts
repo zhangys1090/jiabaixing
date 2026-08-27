@@ -42,8 +42,37 @@ export function registerBatchRoutes(
           return;
         }
 
+        if (body.prompts.length > 100) {
+          res
+            .status(400)
+            .json({ success: false, error: '单次批处理最多100条prompt' });
+          return;
+        }
+
+        for (const p of body.prompts) {
+          if (
+            !p.text ||
+            typeof p.text !== 'string' ||
+            p.text.trim().length === 0
+          ) {
+            res
+              .status(400)
+              .json({
+                success: false,
+                error: '每条prompt必须包含非空text字段',
+              });
+            return;
+          }
+          if (p.text.length > 50000) {
+            res
+              .status(400)
+              .json({ success: false, error: '单条prompt不能超过50000字' });
+            return;
+          }
+        }
+
         const config: BatchConfig = {
-          concurrency: body.config?.concurrency ?? 3,
+          concurrency: Math.min(body.config?.concurrency ?? 3, 10),
           timeout: body.config?.timeout ?? 60000,
           outputFormat: body.outputFormat ?? body.config?.outputFormat ?? 'raw',
           continueOnError: body.config?.continueOnError ?? true,

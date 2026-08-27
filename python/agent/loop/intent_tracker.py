@@ -16,7 +16,7 @@ Usage:
     tracker.set_initial_intent("帮我修复登录页面的bug")
     drift = tracker.check_drift("顺便看看注册页面")
     if drift.is_drifted:
-        print(drift.recommendation)
+        logger.info(drift.recommendation)
 """
 
 from __future__ import annotations
@@ -28,8 +28,8 @@ from enum import Enum
 from typing import Any
 
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("intent_tracker")
+
 
 
 class IntentType(str, Enum):

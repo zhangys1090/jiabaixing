@@ -82,15 +82,21 @@ class FusedPerception:
 class SensoryFusion:
     def __init__(self, weights: dict[str, float] | None = None) -> None:
         self._weights = dict(DEFAULT_SENSE_WEIGHTS)
+        self._MAX_WEIGHTS = 200
         if weights:
             self._weights.update(weights)
         self._samples: list[SenseSample] = []
+        self._MAX_SAMPLES = 5000
 
     def add(self, sample: SenseSample) -> None:
         self._samples.append(sample)
+        if len(self._samples) > self._MAX_SAMPLES:
+            self._samples = self._samples[-self._MAX_SAMPLES * 3 // 4:]
 
     def add_many(self, samples: list[SenseSample]) -> None:
         self._samples.extend(samples)
+        if len(self._samples) > self._MAX_SAMPLES:
+            self._samples = self._samples[-self._MAX_SAMPLES * 3 // 4:]
 
     def clear(self) -> None:
         self._samples.clear()

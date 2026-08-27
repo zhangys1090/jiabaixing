@@ -16,7 +16,11 @@ from agent.tools.registry import (
 )
 from agent.core.logger import StructuredLogger
 from agent.core.logger import log_ignored
+from agent.security.path_security import PathSecurityGuard
+log = StructuredLogger("file_tools")
 _log = StructuredLogger("tools.file")
+
+_path_guard = PathSecurityGuard()
 
 # P2-7（审计 §3.3）：read-before-edit 安全约束。
 # 记录本进程内已通过 file_read 读取过的文件绝对路径；编辑工具在写入前校验，
@@ -182,18 +186,18 @@ MULTI_FILE_EDIT_DEF = ToolDefinition(
 
 
 def _resolve_path(raw_path: str) -> Path:
+    if _path_guard.is_path_traversal(raw_path):
+        raise ValueError(f"路径包含非法遍历字符: {raw_path}")
     p = Path(raw_path).expanduser()
     if not p.is_absolute():
-        # 尝试多种候选根目录，解决 TS 项目相对路径与 Python 进程 CWD 不一致的问题
         project_root = Path(os.environ.get("PROJECT_ROOT", Path(__file__).resolve().parent.parent.parent))
         python_root = project_root / "python"
-        cwd = Path(os.getcwd()).parent.parent  # 从 python/ 往上两级到项目根
+        cwd = Path(os.getcwd()).parent.parent
         cwd_project = cwd if cwd != python_root else project_root
         for base in [cwd_project, project_root, python_root, Path(os.getcwd())]:
             candidate = base / p
             if candidate.exists():
                 return candidate.resolve()
-        # 都没有找到就 fallback
         p = Path(os.getcwd()) / p
     return p.resolve()
 
@@ -223,6 +227,7 @@ async def file_read_executor(params: dict[str, Any]) -> ToolResult:
     try:
         content = file_path.read_text(encoding=encoding, errors="replace")
     except Exception as e:
+        log.debug("file_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"读取失败: {e}")
 
     lines = content.splitlines(keepends=True)
@@ -398,6 +403,7 @@ def _py_grep(pattern, search_path, file_pattern, case_insensitive, before, after
         try:
             content = fp.read_text(encoding="utf-8", errors="ignore")
         except Exception as e:
+            log.debug("file_tools 异常处理", error=str(e))
             log_ignored(_log, "file_tools._grep_read", e)
             continue
         flines = content.splitlines()
@@ -443,6 +449,7 @@ async def _ast_grep(pattern, search_path, language, max_results, start):
         try:
             tree = _ast.parse(fp.read_text(encoding="utf-8", errors="replace"))
         except Exception as e:
+            log.debug("file_tools 异常处理", error=str(e))
             log_ignored(_log, "file_tools._symbol_scan_parse", e)
             continue
         for node in _ast.walk(tree):
@@ -566,7 +573,6 @@ def _suggest_closest_files(
 
 async def file_search_executor(params: dict[str, Any]) -> ToolResult:
     import json
-    import logging
     from pathlib import Path
     start = time.time()
     # 兼容 TS 前端的 "query"/"filePattern" 参数名
@@ -662,6 +668,7 @@ async def file_edit_executor(params: dict[str, Any]) -> ToolResult:
     try:
         content = file_path.read_text(encoding="utf-8")
     except Exception as e:
+        log.debug("file_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"读取失败: {e}")
 
     count = content.count(old_text)
@@ -682,6 +689,7 @@ async def file_edit_executor(params: dict[str, Any]) -> ToolResult:
     try:
         file_path.write_text(new_content, encoding="utf-8")
     except Exception as e:
+        log.debug("file_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"写入失败: {e}")
 
     replaced = count if replace_all else 1
@@ -763,6 +771,7 @@ async def incremental_edit_executor(params: dict[str, Any]) -> ToolResult:
     try:
         content = file_path.read_text(encoding="utf-8") if file_exists else ""
     except Exception as e:
+        log.debug("file_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"读取失败: {e}")
 
     original_content = content
@@ -835,6 +844,7 @@ async def incremental_edit_executor(params: dict[str, Any]) -> ToolResult:
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(content, encoding="utf-8")
     except Exception as e:
+        log.debug("file_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"写入失败: {e}")
 
     found_edits = [a for a in applied if a["found"]]
@@ -910,6 +920,7 @@ async def multi_file_edit_executor(params: dict[str, Any]) -> ToolResult:
                 results.append({"path": str(file_path), "success": False, "applied_count": 0, "error": "未找到任何匹配的代码片段"})
 
         except Exception as e:
+            log.debug("file_tools 异常处理", error=str(e))
             results.append({"path": str(file_path), "success": False, "applied_count": 0, "error": str(e)})
 
     failures = [r for r in results if not r["success"]]
@@ -919,6 +930,7 @@ async def multi_file_edit_executor(params: dict[str, Any]) -> ToolResult:
             try:
                 file_path.write_text(original_content, encoding="utf-8")
             except Exception as _exc:
+                log.debug("file_tools 异常处理", error=str(_exc))
                 log_ignored(_log, "file_tools.multi_file_edit_executor", _exc)
 
         failure_details = "\n".join(f'{r["path"]}: {r["error"]}' for r in failures)

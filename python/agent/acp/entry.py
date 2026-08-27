@@ -148,6 +148,7 @@ class ACPEntry:
                 response = await self._engine.chat(message, session_id=session_id)
                 return {"content": str(response), "sessionId": session_id}
             except Exception as e:
+                log.debug("entry 异常处理", error=str(e))
                 return {"content": "", "error": str(e)}
         return {"content": message, "sessionId": session_id}
 
@@ -164,6 +165,7 @@ class ACPEntry:
                 content = f.read()
             return {"content": content, "path": path}
         except Exception as e:
+            log.debug("entry 异常处理", error=str(e))
             return {"content": "", "error": str(e)}
 
     async def _handle_file_diffs(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -176,6 +178,7 @@ class ACPEntry:
                 tools = self._engine.tool_registry.list_tools()
                 return {"tools": [t if isinstance(t, dict) else {"name": str(t)} for t in tools]}
             except Exception as _exc:
+                log.debug("entry 异常处理", error=str(_exc))
                 log_ignored(log, "entry.ACPEntry._handle_tools_list", _exc)
         return {"tools": []}
 

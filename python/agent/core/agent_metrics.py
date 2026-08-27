@@ -124,12 +124,38 @@ class AgentMetricsDashboard:
     纯内存存储，高效查询，支持按Agent/场景/时间窗口过滤。
     """
 
+    _MAX_AGENTS = 500
+    _MAX_SCENES = 200
+    _TRIM_AGENTS_TO = 350
+    _TRIM_SCENES_TO = 150
+
     def __init__(self, max_history: int = 10000) -> None:
         self._max_history = max_history
         self._agents: dict[str, AgentMetrics] = {}
         self._scenes: dict[str, AgentMetrics] = {}
+        self._agent_access: dict[str, float] = {}
+        self._scene_access: dict[str, float] = {}
         self._latency_samples: dict[str, list[float]] = defaultdict(list)
         self._request_log: list[dict] = []
+
+    def _trim_agents(self) -> None:
+        if len(self._agents) <= self._MAX_AGENTS:
+            return
+        sorted_agents = sorted(self._agent_access.items(), key=lambda x: x[1])
+        to_remove = sorted_agents[: len(self._agents) - self._TRIM_AGENTS_TO]
+        for name, _ in to_remove:
+            self._agents.pop(name, None)
+            self._agent_access.pop(name, None)
+            self._latency_samples.pop(name, None)
+
+    def _trim_scenes(self) -> None:
+        if len(self._scenes) <= self._MAX_SCENES:
+            return
+        sorted_scenes = sorted(self._scene_access.items(), key=lambda x: x[1])
+        to_remove = sorted_scenes[: len(self._scenes) - self._TRIM_SCENES_TO]
+        for name, _ in to_remove:
+            self._scenes.pop(name, None)
+            self._scene_access.pop(name, None)
 
     def record(
         self,
@@ -159,6 +185,7 @@ class AgentMetricsDashboard:
         if agent_name not in self._agents:
             self._agents[agent_name] = AgentMetrics(agent_name=agent_name)
         agent = self._agents[agent_name]
+        self._agent_access[agent_name] = now
 
         agent.total_requests += 1
         if success:
@@ -184,6 +211,7 @@ class AgentMetricsDashboard:
         if scene not in self._scenes:
             self._scenes[scene] = AgentMetrics(agent_name=f"scene:{scene}")
         scene_metrics = self._scenes[scene]
+        self._scene_access[scene] = now
         scene_metrics.total_requests += 1
         if success:
             scene_metrics.success_count += 1
@@ -208,6 +236,8 @@ class AgentMetricsDashboard:
         if len(self._request_log) > self._max_history:
             self._request_log = self._request_log[-self._max_history:]
 
+        self._trim_agents()
+        self._trim_scenes()
         self._compute_percentiles(agent_name)
 
     def get_agent_stats(self, agent_name: str) -> AgentMetrics | None:
@@ -262,6 +292,8 @@ class AgentMetricsDashboard:
     def reset(self) -> None:
         self._agents.clear()
         self._scenes.clear()
+        self._agent_access.clear()
+        self._scene_access.clear()
         self._latency_samples.clear()
         self._request_log.clear()
 

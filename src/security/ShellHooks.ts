@@ -31,6 +31,8 @@ export interface ShellHookEntry {
 
 export class ShellHooks {
   private static instance: ShellHooks | null = null;
+  private static readonly EXEC_LOG_MAX = 500;
+  private static readonly EXEC_LOG_TRIM_TO = 400;
   private hooks: ShellHookEntry[] = [];
   private executionLog: Array<{
     hookName: string;
@@ -197,8 +199,8 @@ export class ShellHooks {
       timestamp: Date.now(),
     });
 
-    if (this.executionLog.length > 500) {
-      this.executionLog = this.executionLog.slice(-250);
+    if (this.executionLog.length > ShellHooks.EXEC_LOG_MAX) {
+      this.executionLog = this.executionLog.slice(-ShellHooks.EXEC_LOG_TRIM_TO);
     }
   }
 }

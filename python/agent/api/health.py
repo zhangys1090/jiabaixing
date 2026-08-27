@@ -28,6 +28,8 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
+import logging
+logger = logging.getLogger(__name__)
 
 
 class ComponentStatus(BaseModel):
@@ -97,6 +99,7 @@ class HealthChecker:
                 message="Health check timed out", last_checked=time.time(),
             )
         except Exception as e:
+            logger.warning("health 异常处理", error=str(e))
             return ComponentStatus(
                 name=name, status="unhealthy",
                 latency_ms=(time.time() - start) * 1000,
@@ -114,7 +117,8 @@ class HealthChecker:
         for name, task in tasks.items():
             try:
                 results.append(await task)
-            except Exception:
+            except Exception as e:
+                logger.warning("health.check_all 组件检查失败", component=name, error=str(e))
                 results.append(ComponentStatus(
                     name=name, status="unhealthy",
                     message="Check failed unexpectedly",
@@ -196,7 +200,8 @@ class HealthChecker:
                  "total_successes": s.total_successes}
                 for n, s in stats.items()
             ]
-        except Exception:
+        except Exception as e:
+            logger.warning("health._get_circuit_breaker_stats 失败", error=str(e))
             return []
 
     def _get_cache_stats(self) -> dict[str, Any]:
@@ -210,7 +215,8 @@ class HealthChecker:
             if tc is None:
                 return {"l1_size": getattr(provider.cache, "size", 0)}
             return tc.stats()
-        except Exception:
+        except Exception as e:
+            logger.warning("health._get_cache_stats 失败", error=str(e))
             return {}
 
     def _get_rate_limiter_stats(self) -> dict[str, Any]:
@@ -224,7 +230,8 @@ class HealthChecker:
             if rl is None:
                 return {}
             return rl.stats()
-        except Exception:
+        except Exception as e:
+            logger.warning("health._get_rate_limiter_stats 失败", error=str(e))
             return {}
 
     def _get_backpressure_stats(self) -> dict[str, Any]:
@@ -241,7 +248,8 @@ class HealthChecker:
                 "accepted": bp._accepted,
                 "rejected": bp._rejected,
             }
-        except Exception:
+        except Exception as e:
+            logger.warning("health._get_backpressure_stats 失败", error=str(e))
             return {}
 
     def _get_connection_pool_stats(self) -> list[dict[str, Any]]:
@@ -256,7 +264,8 @@ class HealthChecker:
                 return []
             stats = pm.all_stats()
             return [{"base_url": url, **s.__dict__} for url, s in stats.items()]
-        except Exception:
+        except Exception as e:
+            logger.warning("health._get_connection_pool_stats 失败", error=str(e))
             return []
 
 
@@ -318,6 +327,7 @@ def register_default_checks(engine: Any) -> None:
                 "extra": {"model": getattr(provider, "model", "unknown")},
             }
         except Exception as e:
+            logger.warning("health 异常处理", error=str(e))
             return {"status": "unhealthy", "message": str(e)}
 
     async def check_memory() -> dict[str, Any]:
@@ -361,6 +371,7 @@ def ignored_exceptions_health() -> dict[str, Any]:
     try:
         stats = get_ignored_exception_stats()
     except Exception as e:
+        logger.warning("health 异常处理", error=str(e))
         return {"status": "healthy", "message": f"忽略异常统计不可用: {e}"}
 
     top = stats.get("top_sites") or []
@@ -389,6 +400,7 @@ async def subsystems_health(engine: Any) -> dict[str, Any]:
     try:
         report = get_report()
     except Exception as e:
+        logger.warning("health 异常处理", error=str(e))
         return {"status": "degraded", "message": f"读取降级报告异常: {e}"}
     critical = report.get("critical_degraded", []) or []
     degraded = report.get("degraded_subsystems", {}) or {}

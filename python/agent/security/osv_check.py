@@ -7,10 +7,11 @@ OSV API 文档: https://osv.dev/docs/#tag/api
 
 Usage:
     import asyncio
+logger = logging.getLogger(__name__)
     checker = OSVChecker()
     reports = asyncio.run(checker.check_package("requests", "2.28.0"))
     for r in reports:
-        print(f"{r.package}@{r.version}: {r.severity.value} - {r.summary}")
+        logger.info("{r.package}@{r.version}: {r.severity.value} - {r.summary}")
 """
 
 from __future__ import annotations
@@ -23,7 +24,6 @@ from pathlib import Path
 
 import httpx
 
-logger = logging.getLogger(__name__)
 
 _OSV_API_URL = "https://api.osv.dev/v1/query"
 _OSV_TIMEOUT = 10.0

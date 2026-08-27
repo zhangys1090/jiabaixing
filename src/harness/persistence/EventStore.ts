@@ -10,7 +10,10 @@
 
 import fs from 'fs';
 import path from 'path';
-import { createDatabase, type DatabaseAdapter } from '../../shared/DatabaseShim';
+import {
+  createDatabase,
+  type DatabaseAdapter,
+} from '../../shared/DatabaseShim';
 import { Logger } from '../../utils/Logger';
 
 export type EventStoreEventType =
@@ -113,14 +116,18 @@ export class EventStore {
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly FLUSH_INTERVAL_MS = 50;
   private readonly MAX_BUFFER_SIZE = 100;
+  private readonly MAX_SEQUENCE_COUNTERS = 500;
   private initialized = false;
 
   constructor(options?: EventStoreOptions) {
     this.dbPath = options?.dbPath ?? DEFAULT_DB_PATH;
-    this.maxEventsPerSession = options?.maxEventsPerSession ?? DEFAULT_MAX_EVENTS;
-    this.snapshotInterval = options?.snapshotInterval ?? DEFAULT_SNAPSHOT_INTERVAL;
+    this.maxEventsPerSession =
+      options?.maxEventsPerSession ?? DEFAULT_MAX_EVENTS;
+    this.snapshotInterval =
+      options?.snapshotInterval ?? DEFAULT_SNAPSHOT_INTERVAL;
     this.enableCompaction = options?.enableCompaction ?? true;
-    this.compactionAgeMs = options?.compactionAgeMs ?? DEFAULT_COMPACTION_AGE_MS;
+    this.compactionAgeMs =
+      options?.compactionAgeMs ?? DEFAULT_COMPACTION_AGE_MS;
   }
 
   initialize(): void {
@@ -134,12 +141,19 @@ export class EventStore {
 
       this.db = createDatabase(this.dbPath);
       if (this.db) {
-        try { this.db.pragma('journal_mode = WAL'); } catch { /* ignore */ }
+        try {
+          this.db.pragma('journal_mode = WAL');
+        } catch {
+          /* ignore */
+        }
         this.initializeSchema();
         this.loadSequenceCounters();
         Logger.info(`📦 EventStore 初始化: ${this.dbPath}`, 'EventStore');
       } else {
-        Logger.warn('EventStore: 降级为内存模式，事件不会被持久化', 'EventStore');
+        Logger.warn(
+          'EventStore: 降级为内存模式，事件不会被持久化',
+          'EventStore'
+        );
       }
     } catch (error) {
       Logger.error('EventStore 初始化失败', error as Error, 'EventStore');
@@ -206,10 +220,22 @@ export class EventStore {
     const current = this.sequenceCounters.get(sessionId) ?? 0;
     const next = current + 1;
     this.sequenceCounters.set(sessionId, next);
+    if (this.sequenceCounters.size > this.MAX_SEQUENCE_COUNTERS) {
+      const keys = Array.from(this.sequenceCounters.keys());
+      const toRemove = keys.slice(
+        0,
+        this.sequenceCounters.size - this.MAX_SEQUENCE_COUNTERS
+      );
+      for (const k of toRemove) {
+        this.sequenceCounters.delete(k);
+      }
+    }
     return next;
   }
 
-  append(event: Omit<EventStoreEvent, 'sequenceNum' | 'timestamp'>): EventStoreEvent {
+  append(
+    event: Omit<EventStoreEvent, 'sequenceNum' | 'timestamp'>
+  ): EventStoreEvent {
     const fullEvent: EventStoreEvent = {
       ...event,
       sequenceNum: this.getNextSequence(event.sessionId),
@@ -231,7 +257,9 @@ export class EventStore {
     return fullEvent;
   }
 
-  appendBatch(events: Array<Omit<EventStoreEvent, 'sequenceNum' | 'timestamp'>>): EventStoreEvent[] {
+  appendBatch(
+    events: Array<Omit<EventStoreEvent, 'sequenceNum' | 'timestamp'>>
+  ): EventStoreEvent[] {
     const fullEvents: EventStoreEvent[] = [];
 
     for (const event of events) {
@@ -438,81 +466,98 @@ export class EventStore {
 
     return {
       state,
-      lastSequenceNum: events.length > 0 ? events[events.length - 1].sequenceNum : startSeq - 1,
+      lastSequenceNum:
+        events.length > 0
+          ? events[events.length - 1].sequenceNum
+          : startSeq - 1,
       eventCount,
       timestamp: Date.now(),
     };
   }
 
-  projectConversationState(
-    sessionId: string
-  ): ProjectionResult<{
+  projectConversationState(sessionId: string): ProjectionResult<{
     messages: Array<{ role: string; content: string; timestamp: number }>;
     toolCalls: Array<{ toolName: string; success: boolean; duration: number }>;
     dynamicTools: string[];
     context: Record<string, unknown>;
   }> {
     const initialState = {
-      messages: [] as Array<{ role: string; content: string; timestamp: number }>,
-      toolCalls: [] as Array<{ toolName: string; success: boolean; duration: number }>,
+      messages: [] as Array<{
+        role: string;
+        content: string;
+        timestamp: number;
+      }>,
+      toolCalls: [] as Array<{
+        toolName: string;
+        success: boolean;
+        duration: number;
+      }>,
       dynamicTools: [] as string[],
       context: {} as Record<string, unknown>,
     };
 
-    return this.project(sessionId, (state, event) => {
-      switch (event.eventType) {
-        case 'user_input':
-          state.messages.push({
-            role: 'user',
-            content: String(event.payload.content ?? event.payload.input ?? ''),
-            timestamp: event.timestamp,
-          });
-          break;
+    return this.project(
+      sessionId,
+      (state, event) => {
+        switch (event.eventType) {
+          case 'user_input':
+            state.messages.push({
+              role: 'user',
+              content: String(
+                event.payload.content ?? event.payload.input ?? ''
+              ),
+              timestamp: event.timestamp,
+            });
+            break;
 
-        case 'agent_thinking':
-          state.messages.push({
-            role: 'assistant',
-            content: String(event.payload.thinking ?? event.payload.content ?? ''),
-            timestamp: event.timestamp,
-          });
-          break;
+          case 'agent_thinking':
+            state.messages.push({
+              role: 'assistant',
+              content: String(
+                event.payload.thinking ?? event.payload.content ?? ''
+              ),
+              timestamp: event.timestamp,
+            });
+            break;
 
-        case 'tool_call':
-          break;
+          case 'tool_call':
+            break;
 
-        case 'tool_result': {
-          const toolName = String(event.payload.toolName ?? 'unknown');
-          const success = Boolean(event.payload.success);
-          const duration = Number(event.payload.duration ?? 0);
-          state.toolCalls.push({ toolName, success, duration });
-          break;
-        }
-
-        case 'dynamic_tool_defined': {
-          const name = String(event.payload.name ?? '');
-          if (name && !state.dynamicTools.includes(name)) {
-            state.dynamicTools.push(name);
+          case 'tool_result': {
+            const toolName = String(event.payload.toolName ?? 'unknown');
+            const success = Boolean(event.payload.success);
+            const duration = Number(event.payload.duration ?? 0);
+            state.toolCalls.push({ toolName, success, duration });
+            break;
           }
-          break;
+
+          case 'dynamic_tool_defined': {
+            const name = String(event.payload.name ?? '');
+            if (name && !state.dynamicTools.includes(name)) {
+              state.dynamicTools.push(name);
+            }
+            break;
+          }
+
+          case 'dynamic_tool_undefined': {
+            const name = String(event.payload.name ?? '');
+            state.dynamicTools = state.dynamicTools.filter((t) => t !== name);
+            break;
+          }
+
+          case 'context_update':
+            state.context = { ...state.context, ...event.payload };
+            break;
+
+          case 'state_transition':
+            state.context._currentState = event.payload.toState;
+            break;
         }
 
-        case 'dynamic_tool_undefined': {
-          const name = String(event.payload.name ?? '');
-          state.dynamicTools = state.dynamicTools.filter((t) => t !== name);
-          break;
-        }
-
-        case 'context_update':
-          state.context = { ...state.context, ...event.payload };
-          break;
-
-        case 'state_transition':
-          state.context._currentState = event.payload.toState;
-          break;
-      }
-
-      return state;
-    }, initialState);
+        return state;
+      },
+      initialState
+    );
   }
 
   saveSnapshot(sessionId: string, state: unknown, eventCount: number): void {
@@ -570,8 +615,16 @@ export class EventStore {
 
     if (options.onStateUpdate) {
       const initialState = {
-        messages: [] as Array<{ role: string; content: string; timestamp: number }>,
-        toolCalls: [] as Array<{ toolName: string; success: boolean; duration: number }>,
+        messages: [] as Array<{
+          role: string;
+          content: string;
+          timestamp: number;
+        }>,
+        toolCalls: [] as Array<{
+          toolName: string;
+          success: boolean;
+          duration: number;
+        }>,
         dynamicTools: [] as string[],
         context: {} as Record<string, unknown>,
       };
@@ -582,14 +635,18 @@ export class EventStore {
           case 'user_input':
             state.messages.push({
               role: 'user',
-              content: String(event.payload.content ?? event.payload.input ?? ''),
+              content: String(
+                event.payload.content ?? event.payload.input ?? ''
+              ),
               timestamp: event.timestamp,
             });
             break;
           case 'agent_thinking':
             state.messages.push({
               role: 'assistant',
-              content: String(event.payload.thinking ?? event.payload.content ?? ''),
+              content: String(
+                event.payload.thinking ?? event.payload.content ?? ''
+              ),
               timestamp: event.timestamp,
             });
             break;
@@ -659,7 +716,12 @@ export class EventStore {
         const stmt = this.db.prepare(
           'DELETE FROM events WHERE session_id = ? AND timestamp < ? AND sequence_num < (SELECT MAX(sequence_num) - ? FROM events WHERE session_id = ?)'
         );
-        const result = stmt.run(sessionId, cutoff, this.snapshotInterval, sessionId);
+        const result = stmt.run(
+          sessionId,
+          cutoff,
+          this.snapshotInterval,
+          sessionId
+        );
         Logger.info(
           `EventStore 压缩: ${sessionId}, 删除 ${result.changes} 条旧事件`,
           'EventStore'
@@ -692,8 +754,12 @@ export class EventStore {
     if (!this.db) return false;
 
     try {
-      const deleteEvents = this.db.prepare('DELETE FROM events WHERE session_id = ?');
-      const deleteSnapshots = this.db.prepare('DELETE FROM snapshots WHERE session_id = ?');
+      const deleteEvents = this.db.prepare(
+        'DELETE FROM events WHERE session_id = ?'
+      );
+      const deleteSnapshots = this.db.prepare(
+        'DELETE FROM snapshots WHERE session_id = ?'
+      );
 
       const txn = this.db.transaction(() => {
         deleteEvents.run(sessionId);
@@ -719,7 +785,11 @@ export class EventStore {
     }
 
     if (this.db) {
-      try { this.db.close(); } catch { /* ignore */ }
+      try {
+        this.db.close();
+      } catch {
+        /* ignore */
+      }
       this.db = null;
     }
 

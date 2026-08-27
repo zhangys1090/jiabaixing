@@ -46,6 +46,7 @@ export class LspTransport extends EventEmitter {
   >();
   private buffer = '';
   private readonly requestTimeout: number;
+  private static readonly MAX_BUFFER_SIZE = 10 * 1024 * 1024;
 
   constructor(requestTimeout = 30000) {
     super();
@@ -155,6 +156,16 @@ export class LspTransport extends EventEmitter {
 
   private handleData(data: string): void {
     this.buffer += data;
+
+    if (this.buffer.length > LspTransport.MAX_BUFFER_SIZE) {
+      Logger.warn(
+        'LspTransport',
+        `缓冲区超过 ${LspTransport.MAX_BUFFER_SIZE} 字节，截断`
+      );
+      this.buffer = this.buffer.substring(
+        this.buffer.length - Math.floor(LspTransport.MAX_BUFFER_SIZE / 2)
+      );
+    }
 
     while (this.buffer.length > 0) {
       const headerEnd = this.buffer.indexOf('\r\n\r\n');

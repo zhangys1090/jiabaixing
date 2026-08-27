@@ -17,8 +17,8 @@ from agent.tools.registry import ToolRegistry
 from agent.tools.risk_level import classify_risk, requires_approval
 from agent.loop.tot_planner import TreeOfThoughtsPlanner, TotConfig
 from agent.loop.incremental_planner import IncrementalPlanner
-
 log = StructuredLogger("planner")
+
 
 
 class Planner:
@@ -68,6 +68,7 @@ class Planner:
                 from agent.tools.scene_tool_selector import SceneToolSelector
                 self._scene_tool_selector = SceneToolSelector(registry)
             except Exception as _exc:
+                log.debug("planner 异常处理", error=str(_exc))
                 log_ignored(log, "planner.Planner.set_tool_registry", _exc)
 
     def inject_reflection_insight(self, insight: str) -> None:
@@ -120,7 +121,8 @@ class Planner:
             elif "moderate" in content:
                 return "moderate"
             return "simple"
-        except Exception:
+        except Exception as _exc:
+            log.debug("planner 异常处理", error=str(_exc))
             return self._analyze_complexity(text)
 
     def _keyword_complexity_score(self, text: str) -> int:

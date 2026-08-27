@@ -517,8 +517,8 @@ export enum Permission {
   SYSTEM_ADMIN = 'system:admin',
 }
 
-/** 风险等级 */
-export type RiskLevel = 'low' | 'medium' | 'high' | 'critical';
+/** 风险等级 — 与 Python core.types.RiskLevel 对齐 */
+export type RiskLevel = 'none' | 'low' | 'medium' | 'high' | 'critical';
 
 /** 工具定义 — 声明式 */
 export interface ToolDefinition {
@@ -722,7 +722,9 @@ export function isOk<T>(result: Result<T>): result is { ok: true; value: T } {
   return result.ok === true;
 }
 
-export function isErr<T>(result: Result<T>): result is { ok: false; error: string; code?: string } {
+export function isErr<T>(
+  result: Result<T>
+): result is { ok: false; error: string; code?: string } {
   return result.ok === false;
 }
 
@@ -961,10 +963,10 @@ export function unifiedTaskNodeToPlanStep(node: UnifiedTaskNode): PlanStep {
 /**
  * 将UnifiedTaskNode转换为DAGTask的TaskNode
  */
-let _DAGTask: typeof import('../core/DAGTask') | null = null;
+let _DAGTask: typeof import('../core/DAGTask') | undefined = undefined;
 function getDAGTask(): typeof import('../core/DAGTask') {
   if (!_DAGTask) _DAGTask = require('../core/DAGTask');
-  return _DAGTask;
+  return _DAGTask!;
 }
 
 export function unifiedTaskNodeToDagTaskNode(

@@ -189,6 +189,10 @@ export class TaskComplexityAnalyzer {
   /** LLM 依赖 */
   private llmDeps: ComplexityLLMDeps | null = null;
 
+  private static readonly HISTORY_MAX_PER_TASK = 50;
+  private static readonly PREDICTION_RECORDS_MAX = 500;
+  private static readonly HISTORY_MAX_KEYS = 200;
+
   /**
    * 分析任务复杂度
    */
@@ -546,17 +550,10 @@ export class TaskComplexityAnalyzer {
   ): string[] {
     const dependencies: string[] = [];
 
-    // 检查是否有依赖关系
     for (const task of existingTasks) {
-      // 如果当前任务提到之前任务的内容，可能存在依赖
       if (currentPart.includes(task.description.substring(0, 10))) {
         dependencies.push(task.id);
       }
-    }
-
-    // 如果没有找到依赖，默认依赖前一个任务
-    if (dependencies.length === 0 && existingTasks.length > 0) {
-      dependencies.push(existingTasks[existingTasks.length - 1].id);
     }
 
     return dependencies;
@@ -657,17 +654,38 @@ export class TaskComplexityAnalyzer {
     if (!this.actualRoundsHistory.has(task)) {
       this.actualRoundsHistory.set(task, []);
     }
-    this.actualRoundsHistory.get(task)!.push({ estimated, actual });
+    const arr = this.actualRoundsHistory.get(task)!;
+    arr.push({ estimated, actual });
+    if (arr.length > TaskComplexityAnalyzer.HISTORY_MAX_PER_TASK) {
+      arr.splice(0, arr.length - TaskComplexityAnalyzer.HISTORY_MAX_PER_TASK);
+    }
+    this._trimHistoryKeys(this.actualRoundsHistory);
   }
 
-  /**
-   * 记录实际执行时长并校准预估
-   */
   recordActualDuration(task: string, estimated: number, actual: number): void {
     if (!this.actualDurationHistory.has(task)) {
       this.actualDurationHistory.set(task, []);
     }
-    this.actualDurationHistory.get(task)!.push({ estimated, actual });
+    const arr = this.actualDurationHistory.get(task)!;
+    arr.push({ estimated, actual });
+    if (arr.length > TaskComplexityAnalyzer.HISTORY_MAX_PER_TASK) {
+      arr.splice(0, arr.length - TaskComplexityAnalyzer.HISTORY_MAX_PER_TASK);
+    }
+    this._trimHistoryKeys(this.actualDurationHistory);
+  }
+
+  private _trimHistoryKeys(
+    map: Map<string, Array<{ estimated: number; actual: number }>>
+  ): void {
+    if (map.size <= TaskComplexityAnalyzer.HISTORY_MAX_KEYS) return;
+    const keys = Array.from(map.keys());
+    const toRemove = keys.slice(
+      0,
+      map.size - TaskComplexityAnalyzer.HISTORY_MAX_KEYS
+    );
+    for (const k of toRemove) {
+      map.delete(k);
+    }
   }
 
   /**
@@ -708,6 +726,16 @@ export class TaskComplexityAnalyzer {
     actual: string
   ): void {
     this.predictionRecords.push({ task, predicted, actual });
+    if (
+      this.predictionRecords.length >
+      TaskComplexityAnalyzer.PREDICTION_RECORDS_MAX
+    ) {
+      this.predictionRecords.splice(
+        0,
+        this.predictionRecords.length -
+          TaskComplexityAnalyzer.PREDICTION_RECORDS_MAX
+      );
+    }
   }
 
   /**
@@ -895,26 +923,31 @@ export class TaskComplexityAnalyzer {
       const response = await this.llmDeps.chat(prompt);
       const parsed = JSON.parse(response);
 
+      const validComplexities = ['simple', 'medium', 'complex', 'very_complex'];
       const confidence =
-        typeof parsed.confidence === 'number' ? parsed.confidence : 0.5;
-      const complexity = parsed.complexity as
-        | 'simple'
-        | 'medium'
-        | 'complex'
-        | 'very_complex';
+        typeof parsed.confidence === 'number'
+          ? Math.max(0, Math.min(1, parsed.confidence))
+          : 0.5;
+      const complexity = validComplexities.includes(parsed.complexity)
+        ? parsed.complexity
+        : baseResult.complexity;
       const estimatedSteps =
-        typeof parsed.estimatedSteps === 'number' ? parsed.estimatedSteps : 0;
+        typeof parsed.estimatedSteps === 'number' &&
+        parsed.estimatedSteps >= 1 &&
+        parsed.estimatedSteps <= 100
+          ? Math.round(parsed.estimatedSteps)
+          : baseResult.estimatedSteps;
 
       baseResult.llmConfidence = confidence;
       baseResult.llmAssistedComplexity = {
-        complexity,
+        complexity: complexity as TaskComplexityResult['complexity'],
         confidence,
         estimatedSteps,
       };
 
-      // 高置信度时覆盖基础复杂度
       if (confidence >= 0.7 && complexity) {
-        baseResult.complexity = complexity;
+        baseResult.complexity =
+          complexity as TaskComplexityResult['complexity'];
         baseResult.estimatedSteps = estimatedSteps;
       }
     } catch {

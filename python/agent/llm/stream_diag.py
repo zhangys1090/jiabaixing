@@ -22,7 +22,7 @@
     diag.mark_first_token("trace-123")
     # ... 流结束 ...
     report = diag.mark_stream_end("trace-123")
-    print(f"TTFT: {report.ttft_ms}ms, 吞吐: {report.tokens_per_sec} tok/s")
+    logger.info("TTFT: {report.ttft_ms}ms, 吞吐: {report.tokens_per_sec} tok/s")
 """
 
 from __future__ import annotations
@@ -31,10 +31,11 @@ import statistics
 import time
 from dataclasses import dataclass, field
 from typing import Any
-
 from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("stream_diag")
+
+
 
 
 @dataclass
@@ -147,6 +148,7 @@ class StreamDiagnostics:
         self._reports: list[StreamDiagReport] = []
         self._stall_threshold_ms = stall_threshold_ms
         self._max_reports = 1000
+        self._MAX_STATES = 5000
 
     def mark_request_start(
         self, trace_id: str, provider: str = "", model: str = ""
@@ -163,6 +165,11 @@ class StreamDiagnostics:
             provider=provider,
             model=model,
         )
+        if len(self._states) > self._MAX_STATES:
+            sorted_states = sorted(self._states.items(), key=lambda x: x[1].request_start)
+            to_remove = sorted_states[: len(self._states) - (self._MAX_STATES * 3 // 4)]
+            for k, _ in to_remove:
+                del self._states[k]
 
     def mark_first_token(self, trace_id: str, token_count: int = 1) -> None:
         """标记收到第一个 token。

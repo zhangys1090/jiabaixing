@@ -699,6 +699,7 @@ export const WS_EVENTS = {
   SERVER: {
     CONNECTED: 'connected',
     RESPONSE_READY: 'response_ready',
+    RESPONSE_READY_ACK: 'response_ready_ack',
     RESPONSE: 'response',
     ERROR: 'error',
     STATUS: 'status',
@@ -881,7 +882,7 @@ export interface WsExecutionPreviewData {
     type: 'file' | 'command' | 'api';
     target: string;
     action: string;
-    risk: 'low' | 'medium' | 'high';
+    risk: 'none' | 'low' | 'medium' | 'high' | 'critical';
     preview?: string;
   }>;
   estimatedTime?: number;

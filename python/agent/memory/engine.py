@@ -95,7 +95,7 @@ class MemoryEngine:
 
     async def initialize(self) -> None:
         stats = self._store.get_stats()
-        log.info("Memory Engine initialized", **stats)
+        log.debug("Memory Engine initialized", **stats)
 
     async def store(
         self,
@@ -127,6 +127,8 @@ class MemoryEngine:
                 "metadata": metadata,
                 "submitted_at": time.time(),
             })
+            if len(self._pending_writes) > self._MAX_PENDING_WRITES:
+                self._pending_writes = self._pending_writes[-self._MAX_PENDING_WRITES * 3 // 4:]
             log.info("记忆写入已暂存待审批", write_id=write_id, memory_type=memory_type)
             return write_id
 
@@ -395,6 +397,7 @@ class MemoryEngine:
                     time_weight=episodic_time_weight,
                 )
             except Exception as _exc:
+                log.debug("engine 异常处理", error=str(_exc))
                 log_ignored(log, "engine.MemoryEngine.search_with_context", _exc)
 
         # P2-3: 同时查询 EpisodicMemoryStore (情景记忆)
@@ -417,6 +420,7 @@ class MemoryEngine:
                         "source": "episodic_store",
                     })
             except Exception as _exc:
+                log.debug("engine 异常处理", error=str(_exc))
                 log_ignored(log, "engine.MemoryEngine.search_with_context", _exc)
 
         merged: dict[str, dict[str, Any]] = {}
@@ -496,6 +500,34 @@ class MemoryEngine:
             # 按调整后的分数重新排序
             results = sorted(results, key=lambda x: x["relevance_score"], reverse=True)
 
+        # M2: 记忆分层加权 — 短期记忆时效性高权重，长期记忆稳定性高权重，情景记忆情境相关性高权重
+        _TIER_WEIGHTS = {
+            "instant": {"recency": 1.5, "stability": 0.5, "contextuality": 0.8},
+            "short_term": {"recency": 1.3, "stability": 0.7, "contextuality": 0.9},
+            "episodic": {"recency": 0.8, "stability": 0.6, "contextuality": 1.4},
+            "long_term": {"recency": 0.5, "stability": 1.3, "contextuality": 1.0},
+            "knowledge": {"recency": 0.3, "stability": 1.5, "contextuality": 0.8},
+        }
+        for r in results:
+            _mt = r.get("memory_type", "long_term")
+            _tier_w = _TIER_WEIGHTS.get(_mt, _TIER_WEIGHTS["long_term"])
+            _recency_factor = 1.0
+            _ts = r.get("timestamp", 0)
+            if _ts:
+                _age_hours = (time.time() - _ts) / 3600
+                _recency_factor = max(0.5, 1.0 - _age_hours / 168)
+            _scene_match = 1.0
+            if scene and r.get("scene"):
+                _scene_match = 1.3 if scene == r.get("scene") else 0.9
+            _layered_score = r["relevance_score"] * (
+                _tier_w["recency"] * _recency_factor
+                + _tier_w["stability"] * (1.0 - _recency_factor * 0.3)
+                + _tier_w["contextuality"] * (_scene_match - 0.7)
+            ) / 2.0
+            r["relevance_score"] = min(_layered_score, 1.0)
+            r["tier_weight_applied"] = True
+        results = sorted(results, key=lambda x: x["relevance_score"], reverse=True)
+
         # P1-3: 知识图谱增强 — 展开关联记忆
         if use_knowledge_graph and results:
             try:
@@ -511,6 +543,7 @@ class MemoryEngine:
                         kg_entry["source"] = "knowledge_graph"
                         results.append(kg_entry)
             except Exception as _exc:
+                log.debug("engine 异常处理", error=str(_exc))
                 log_ignored(log, "engine.MemoryEngine.search_with_context", _exc)
 
         for r in results[:limit]:
@@ -695,6 +728,7 @@ class MemoryEngine:
                 episodic_stats = self._episodic_store.get_stats()
                 stats["episodic"] = episodic_stats
             except Exception as _exc:
+                log.debug("engine 异常处理", error=str(_exc))
                 log_ignored(log, "engine.MemoryEngine.get_stats", _exc)
         return stats
 
@@ -708,6 +742,7 @@ class MemoryEngine:
     # ─── 审计 P0-2：记忆写入审批门 ───
     _write_gate_enabled: bool = False
     _pending_writes: list[dict[str, Any]] = []
+    _MAX_PENDING_WRITES: int = 1000
 
     @classmethod
     def enable_write_gate(cls) -> None:
@@ -810,12 +845,14 @@ class MemoryEngine:
                 ids.append(mem_id)
             log.info("批量记忆写入成功", count=len(ids))
             return ids
-        except Exception:
+        except Exception as _exc:
+            log.debug("engine 异常处理", error=str(_exc))
             # 删除已写入的条目
             for mid in ids:
                 try:
                     self._store.delete_by_id(mid)
                 except Exception as _exc:
+                    log.debug("engine 异常处理", error=str(_exc))
                     log_ignored(log, "engine.MemoryEngine.store_batch", _exc)
             raise
 
@@ -1175,6 +1212,7 @@ class MemoryEngine:
                     await self.store_long_term(r.get("content", ""), r.get("scene", ""), r.get("emotion", "neutral"))
                     consolidated += 1
                 except Exception as _exc:
+                    log.debug("engine 异常处理", error=str(_exc))
                     log_ignored(log, "engine.MemoryEngine._dream_consolidation", _exc)
         return consolidated
 

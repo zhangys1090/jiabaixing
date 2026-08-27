@@ -18,8 +18,8 @@ import logging
 from typing import Any, Optional
 
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("otel_setup")
+
 
 _otel_initialized: bool = False
 _tracer: Any = None
@@ -51,7 +51,7 @@ def setup_otel() -> bool:
         return True
 
     if not is_otel_enabled():
-        log.info("OTel disabled (set OTEL_ENABLED=true to enable)")
+        log.debug("OTel disabled (set OTEL_ENABLED=true to enable)")
         return False
 
     try:
@@ -99,7 +99,7 @@ def setup_otel() -> bool:
         _meter = metrics.get_meter(service_name, "5.0.0")
 
         _otel_initialized = True
-        log.info("OpenTelemetry initialized", service=service_name)
+        log.debug("OpenTelemetry initialized", service=service_name)
         return True
 
     except ImportError as exc:
@@ -251,6 +251,7 @@ def traced(name: str | None = None):
                     span.set_attribute("function.result", "ok")
                     return result
                 except Exception as exc:
+                    log.debug("otel_setup 异常处理", error=str(exc))
                     span.set_attribute("function.result", "error")
                     span.set_attribute("error.type", type(exc).__name__)
                     span.record_exception(exc)
@@ -267,6 +268,7 @@ def traced(name: str | None = None):
                     span.set_attribute("function.result", "ok")
                     return result
                 except Exception as exc:
+                    log.debug("otel_setup 异常处理", error=str(exc))
                     span.set_attribute("function.result", "error")
                     span.set_attribute("error.type", type(exc).__name__)
                     span.record_exception(exc)

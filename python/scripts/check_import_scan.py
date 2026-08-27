@@ -76,8 +76,8 @@ CRITICAL_INSTANCES: list[tuple[str, str]] = [
 def main() -> int:
     _bootstrap_path()
     try:
-        import agent  # noqa: F401
-    except Exception as e:  # noqa: BLE001
+        import agent
+    except Exception as e:
         print(f"[FAIL] 无法导入 agent 根包: {type(e).__name__}: {e}")
         traceback.print_exc()
         return 1
@@ -96,7 +96,7 @@ def main() -> int:
         # 必须捕获 BaseException：模块级 sys.exit() 抛 SystemExit，
         # 若只 except Exception 会让扫描自身静默中断并误报 exit 0（真实事故，
         # 见 agent/core/_check_syntax.py 遗留调试脚本）。
-        except BaseException as e:  # noqa: BLE001
+        except BaseException as e:
             if _is_code_defect(e):
                 defects.append((name, f"{type(e).__name__}: {str(e)[:160]}"))
             else:
@@ -111,7 +111,7 @@ def main() -> int:
             cls()  # 无参安全构造
         except KeyboardInterrupt:
             raise
-        except BaseException as e:  # noqa: BLE001
+        except BaseException as e:
             instance_defects.append(
                 (f"{mod_name}.{cls_name}", f"{type(e).__name__}: {str(e)[:160]}")
             )

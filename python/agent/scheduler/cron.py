@@ -20,8 +20,8 @@ from agent.infrastructure.message_queue import (
 )
 from agent.infrastructure.distributed_lock import create_lock
 from agent.infrastructure.sharding import LeaderElection, get_shard_count
-
 log = StructuredLogger("cron")
+
 
 
 @dataclass
@@ -265,7 +265,6 @@ class CronJobScheduler:
         interval = _parse_interval(job.schedule)
         if interval is None:
             # 不支持的调度规则：明确告警，避免 next_run=None 导致任务静默永不执行（审计 S-01）
-            import logging
             logging.getLogger(__name__).warning(
                 "不支持的调度规则，任务将不会自动执行", schedule=job.schedule
             )
@@ -329,12 +328,14 @@ class CronJobScheduler:
                 try:
                     asyncio.run(self._leader.stop())
                 except Exception as _exc:
+                    log.debug("cron 异常处理", error=str(_exc))
                     log_ignored(log, "cron.CronJobScheduler.stop.leader", _exc)
                 self._leader = None
             if self._mq is not None:
                 try:
                     asyncio.run(self._mq.stop())
                 except Exception as _exc:
+                    log.debug("cron 异常处理", error=str(_exc))
                     log_ignored(log, "cron.CronJobScheduler.stop.mq", _exc)
                 self._mq = None
 
@@ -344,6 +345,7 @@ class CronJobScheduler:
             try:
                 await self._tick()
             except Exception as _exc:
+                log.debug("cron 异常处理", error=str(_exc))
                 log_ignored(log, "cron.CronJobScheduler._tick_loop", _exc)
             await asyncio.sleep(self._tick_interval)
 
@@ -376,6 +378,7 @@ class CronJobScheduler:
                 self._save()
                 await self.dispatch(job)
             except Exception as _exc:
+                log.debug("cron 异常处理", error=str(_exc))
                 # 派发失败：回滚 running 状态，允许后续 tick 按 next_run 重试
                 job.status = "idle"
                 self._save()
@@ -479,6 +482,7 @@ class CronJobScheduler:
                 success=success,
             )
         except Exception as e:
+            log.debug("cron 异常处理", error=str(e))
             job.status = "failed"
             self._save()
             return CronJobResult(

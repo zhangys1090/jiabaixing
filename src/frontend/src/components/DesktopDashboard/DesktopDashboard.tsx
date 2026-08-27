@@ -176,7 +176,7 @@ export const DesktopDashboard: React.FC<DesktopDashboardProps> = ({ onNavigate }
         setHealthStatus(healthResult.value.data);
       }
       if (skillResult.status === 'fulfilled' && skillResult.value.success && skillResult.value.data) {
-        const skills = skillResult.value.data as {
+        const skills = skillResult.value.data as unknown as {
           skills?: Array<{ name: string; description: string; category: string }>;
         };
         setSkillList(skills.skills ?? []);
@@ -626,29 +626,42 @@ ${
 
         const result = await apiService.processMessage(userInput);
         if (result.success && result.data) {
+          let responseContent = result.data.response || '';
+          if (!responseContent.trim()) {
+            if (result.data.finishReason === 'budget_exceeded') {
+              responseContent = '抱歉，当前AI服务预算已达上限，暂时无法处理更多请求。请稍后重试。';
+            } else if (result.data.finishReason === 'fallback') {
+              responseContent = await simulateAIResponse(userInput);
+            } else {
+              responseContent = '抱歉，未能生成有效响应，请稍后重试。';
+            }
+          }
           const assistantMessage: Message = {
             id: Date.now() + 1,
             type: 'assistant',
-            content: result.data.response || '收到',
+            content: responseContent,
             timestamp: new Date(),
           };
           setMessages((prev) => [...prev, assistantMessage]);
         } else {
-          const response = await simulateAIResponse(userInput);
+          const errorContent = result.error ? `请求失败：${result.error}` : await simulateAIResponse(userInput);
           const assistantMessage: Message = {
             id: Date.now() + 1,
             type: 'assistant',
-            content: response,
+            content: errorContent,
             timestamp: new Date(),
           };
           setMessages((prev) => [...prev, assistantMessage]);
         }
-      } catch {
-        const response = await simulateAIResponse(userInput);
+      } catch (err) {
+        console.error('[DesktopDashboard] processMessage failed:', err);
+        const errMsg = err instanceof Error ? err.message : String(err);
+        const isTimeout = errMsg.includes('超时') || errMsg.includes('timeout');
+        const fallbackContent = isTimeout ? '抱歉，请求超时，请稍后重试。' : await simulateAIResponse(userInput);
         const assistantMessage: Message = {
           id: Date.now() + 1,
           type: 'assistant',
-          content: response,
+          content: fallbackContent,
           timestamp: new Date(),
         };
         setMessages((prev) => [...prev, assistantMessage]);
@@ -1357,19 +1370,17 @@ async function simulateAIResponse(input: string): Promise<string> {
     return `❓ 未知命令: \`${input}\`\n\n输入 \`/help\` 查看可用命令`;
   }
 
+  const greetingKeywords = ['你好', '您好', 'hi', 'hello', '嗨', 'hey'];
+  if (greetingKeywords.some((kw) => lowerInput === kw || lowerInput === kw + '？' || lowerInput === kw + '?')) {
+    return `你好！我是家百星，您的智能AI助手。我拥有丰富的工具和能力，可以帮助您完成各种任务。请问有什么可以帮您的吗？`;
+  }
+
+  const identityKeywords = ['你是', '你叫', '什么名字', 'who are you', '你是谁', '介绍一下'];
+  if (identityKeywords.some((kw) => lowerInput.includes(kw))) {
+    return `我是家百星（Jiabaixing），一个智能AI助手。我拥有丰富的工具和能力，包括对话交互、工具执行、记忆检索、批量处理等。有什么需要我帮忙的吗？`;
+  }
+
   const responses = [
-    `收到您的消息："${input}"
-
-我理解您想要了解这个话题。让我为您详细说明...
-
-这是一个很好的问题！基于我的知识库和分析能力，我可以为您提供以下见解：
-
-1. **核心要点**: 这个问题涉及多个层面的考量
-2. **最佳实践**: 建议采用系统化的方法来处理
-3. **实施建议**: 可以分步骤进行优化和改进
-
-您希望我深入探讨哪个方面呢？`,
-
     `关于"${input}"，我的分析如下：
 
 **现状评估**

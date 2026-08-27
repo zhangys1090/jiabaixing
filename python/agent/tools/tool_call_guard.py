@@ -8,8 +8,8 @@ from typing import Any
 from agent.core.logger import StructuredLogger
 from agent.perception.sensory_fusion import FusedPerception
 from agent.tools.constitution_guard import ConstitutionGuard
-
 log = StructuredLogger("tool_call_guard")
+
 
 
 @dataclass
@@ -80,6 +80,7 @@ class ToolCallGuard:
     def __init__(self) -> None:
         self._result_cache: dict[str, CachedResult] = {}
         self._call_history: list[ToolCallRecord] = []
+        self._MAX_CALL_HISTORY = 5000
         self._per_tool_counts: dict[str, int] = {}
         # 宪法/人格约束守卫（U4 第2项）：前置到动作执行闸门
         self._constitution_guard: ConstitutionGuard | None = None
@@ -198,8 +199,8 @@ class ToolCallGuard:
         now_ms = time.time() * 1000
 
         self._call_history.append(ToolCallRecord(tool_name=tool_name, args_hash=args_hash, timestamp=now_ms))
-        if len(self._call_history) > self._MAX_HISTORY:
-            self._call_history = self._call_history[-self._MAX_HISTORY:]
+        if len(self._call_history) > self._MAX_CALL_HISTORY:
+            self._call_history = self._call_history[-self._MAX_CALL_HISTORY * 3 // 4:]
 
         self._per_tool_counts[tool_name] = self._per_tool_counts.get(tool_name, 0) + 1
 

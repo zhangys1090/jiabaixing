@@ -29,10 +29,11 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
-
 from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("streaming_scrubber")
+
+
 
 
 class SensitiveType(str, Enum):
@@ -138,6 +139,8 @@ class StreamingScrubber:
         self._reverse_mapping: dict[str, str] = {}
         self._enabled: bool = True
         self._stats = {"total_scrubbed": 0, "total_restored": 0, "by_type": {}}
+        self._MAX_STATS = 500
+        self._MAX_MAPPING_SIZE = 10000
 
     def enable(self) -> None:
         self._enabled = True
@@ -210,9 +213,19 @@ class StreamingScrubber:
 
         duration = (time.monotonic() - start) * 1000
         self._stats["total_scrubbed"] += 1
+        if len(self._mapping) > self._MAX_MAPPING_SIZE:
+            oldest_keys = list(self._mapping.keys())[: self._MAX_MAPPING_SIZE // 2]
+            for k in oldest_keys:
+                orig = self._mapping.pop(k, None)
+                if orig:
+                    self._reverse_mapping.pop(orig, None)
         for rec in records:
             key = rec.sensitive_type.value
             self._stats["by_type"][key] = self._stats["by_type"].get(key, 0) + 1
+            if len(self._stats) > self._MAX_STATS:
+                oldest_keys = list(self._stats.keys())[: len(self._stats) - (self._MAX_STATS * 3 // 4)]
+                for k in oldest_keys:
+                    del self._stats[k]
 
         if records:
             log.debug(

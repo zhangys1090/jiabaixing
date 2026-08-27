@@ -186,7 +186,7 @@ export class OrchestratorAgent {
           );
           // P0-4: 将角色分配结果写入 TaskNode，影响后续执行路径
           for (const assignment of roleAssignments) {
-            const task = tasks.find(t => t.id === assignment.taskId);
+            const task = tasks.find((t) => t.id === assignment.taskId);
             if (task) {
               task.assignedTo = assignment.agentId;
               task.metadata = {
@@ -280,8 +280,12 @@ export class OrchestratorAgent {
               `🔄 P1-8: 动态重规划产出新任务图，重新执行...`,
               'OrchestratorAgent'
             );
-            const replanResults = await this.dispatcher.dispatch(replannedTasks);
-            const replanAggregated = this.aggregator.aggregate(replanResults, replannedTasks);
+            const replanResults =
+              await this.dispatcher.dispatch(replannedTasks);
+            const replanAggregated = this.aggregator.aggregate(
+              replanResults,
+              replannedTasks
+            );
             if (replanAggregated.success) {
               const replanDuration = Date.now() - startTime;
               return {
@@ -305,9 +309,41 @@ export class OrchestratorAgent {
           ).length;
           if (rebalancedCount > 0) {
             Logger.info(
-              `🔄 重平衡: ${rebalancedCount} 个任务已重新分配`,
+              `🔄 重平衡: ${rebalancedCount} 个任务已重新分配，重新执行失败任务...`,
               'OrchestratorAgent'
             );
+
+            const retryTasks: TaskNode[] = [];
+            for (const assignment of rebalanced) {
+              const task = tasks.find((t) => t.id === assignment.taskId);
+              if (task && task.status === 'failed') {
+                retryTasks.push({
+                  ...task,
+                  assignedTo: assignment.agentId,
+                  status: 'pending',
+                  error: undefined,
+                });
+              }
+            }
+
+            const retryFailedTasks = retryTasks;
+            if (retryFailedTasks.length > 0) {
+              const retryResults =
+                await this.dispatcher.dispatch(retryFailedTasks);
+              for (const [taskId, result] of retryResults) {
+                results.set(taskId, result);
+                const originalTask = tasks.find((t) => t.id === taskId);
+                if (originalTask) {
+                  const retried = retryFailedTasks.find((t) => t.id === taskId);
+                  if (retried) {
+                    originalTask.status = retried.status;
+                    originalTask.result = retried.result;
+                    originalTask.error = retried.error;
+                    originalTask.assignedTo = retried.assignedTo;
+                  }
+                }
+              }
+            }
           }
         } catch (rebalanceError) {
           Logger.warn(
@@ -387,7 +423,7 @@ export class OrchestratorAgent {
         );
         const agentResult = await agent.execute(userGoal, context || '');
         const duration = Date.now() - startTime;
-        return {
+        const result: AggregatedResult = {
           success: true,
           summary: `✅ 任务完成(Agent): ${userGoal.substring(0, 60)}`,
           details: new Map([
@@ -405,6 +441,27 @@ export class OrchestratorAgent {
           failedTasks: 0,
           duration,
         };
+
+        const qualityScore = this.evaluateExecution(
+          [
+            {
+              id: 'agent',
+              goal: userGoal,
+              context: context || '',
+              dependencies: [],
+              priority: 5,
+              status: 'completed',
+              result: agentResult,
+            },
+          ] as TaskNode[],
+          result,
+          userGoal,
+          duration
+        );
+        result.qualityScore = qualityScore;
+        this.recordToEvolution(userGoal, result, duration);
+
+        return result;
       }
     } catch (agentError) {
       Logger.warn(
@@ -427,13 +484,24 @@ export class OrchestratorAgent {
     const aggregated = this.aggregator.aggregate(results, [singleTask]);
 
     const duration = Date.now() - startTime;
-    return {
+    const result: AggregatedResult = {
       ...aggregated,
       duration,
       summary: aggregated.success
         ? `✅ 任务完成: ${userGoal.substring(0, 60)}`
         : `❌ 任务失败: ${userGoal.substring(0, 60)}`,
     };
+
+    const qualityScore = this.evaluateExecution(
+      [singleTask],
+      result,
+      userGoal,
+      duration
+    );
+    result.qualityScore = qualityScore;
+    this.recordToEvolution(userGoal, result, duration);
+
+    return result;
   }
 
   /**
@@ -615,21 +683,50 @@ export class OrchestratorAgent {
       const requiredTools = task.tools || [];
       if (requiredTools.length === 0) continue;
 
-      const bestAgent = this.registry.findBestAgent(requiredTools[0]);
-      if (!bestAgent) continue;
+      let bestAgent: import('./AgentRegistry').AgentRegistration | null = null;
+      let bestScore = -1;
+      let bestCapName = 'execution';
 
-      const matchingCap = bestAgent.capabilities.find((c) =>
-        requiredTools.some((t) => c.tools.includes(t))
-      );
-      const role = this.inferRoleFromCapability(
-        matchingCap?.name || 'execution'
-      );
+      const idleAgents = this.registry.getIdleAgents();
+      for (const agent of idleAgents) {
+        let matchedTools = 0;
+        let matchedCapName = 'execution';
+        for (const cap of agent.capabilities) {
+          const capMatchCount = requiredTools.filter((t) =>
+            cap.tools.includes(t)
+          ).length;
+          if (capMatchCount > matchedTools) {
+            matchedTools = capMatchCount;
+            matchedCapName = cap.name;
+          }
+        }
+        const health = this.registry.getHealthStatus(agent.id);
+        const healthBonus = health ? health.successRate * 10 : 0;
+        const score = matchedTools * 10 + healthBonus;
+        if (score > bestScore) {
+          bestScore = score;
+          bestAgent = agent;
+          bestCapName = matchedCapName;
+        }
+      }
+
+      if (!bestAgent) {
+        const fallbackAgent = this.registry.findBestAgent(requiredTools[0]);
+        if (!fallbackAgent) continue;
+        bestAgent = fallbackAgent;
+        const matchingCap = bestAgent.capabilities.find((c) =>
+          requiredTools.some((t) => c.tools.includes(t))
+        );
+        bestCapName = matchingCap?.name || 'execution';
+      }
+
+      const role = this.inferRoleFromCapability(bestCapName);
 
       assignments.push({
         agentId: bestAgent.id,
         role,
         taskId: task.id,
-        capability: matchingCap?.name || 'execution',
+        capability: bestCapName,
       });
     }
 
@@ -778,12 +875,19 @@ export class OrchestratorAgent {
                 };
               }
             ),
-              scene: 'orchestration',
+            scene: 'orchestration',
           })
-          .catch((err) =>
-            Logger.warn('记录编排执行结果到进化引擎失败', err as Error, 'OrchestratorAgent')
+          .catch((err: unknown) =>
+            Logger.warn(
+              '记录编排执行结果到进化引擎失败',
+              'OrchestratorAgent',
+              err
+            )
           );
-        Logger.debug('已记录编排执行结果到 Python 后端进化引擎', 'OrchestratorAgent');
+        Logger.debug(
+          '已记录编排执行结果到 Python 后端进化引擎',
+          'OrchestratorAgent'
+        );
         return;
       }
       const orchestrator = EvolutionOrchestrator.getInstance();
@@ -841,24 +945,37 @@ export class OrchestratorAgent {
     try {
       const bridge = getActivePythonBridge();
       if (bridge) {
-        const replanResult = await bridge.callPython({
-          module: 'agent.orchestration.dynamic_dag_replanner',
-          function: 'replan_from_ts',
-          args: {
-            tasks: tasks.map((t) => ({
-              id: t.id,
-              goal: t.goal,
-              status: t.status,
-              assignedTo: t.assignedTo,
-            })),
-            failed_task_ids: failedTaskIds,
-            reason,
-          },
-        });
+        const replanResult = await bridge.processInput(
+          JSON.stringify({
+            module: 'agent.orchestration.dynamic_dag_replanner',
+            function: 'replan_from_ts',
+            args: {
+              tasks: tasks.map((t) => ({
+                id: t.id,
+                goal: t.goal,
+                status: t.status,
+                assignedTo: t.assignedTo,
+              })),
+              failed_task_ids: failedTaskIds,
+              reason,
+            },
+          }),
+          'replan-session',
+          'replan-trace'
+        );
 
-        if (replanResult && Array.isArray(replanResult.tasks)) {
-          const updatedTasks = replanResult.tasks.map(
-            (t: Record<string, unknown>) =>
+        let replanData: Record<string, unknown> | null = null;
+        try {
+          replanData = JSON.parse(replanResult.response);
+        } catch {
+          replanData = null;
+        }
+
+        if (replanData && Array.isArray(replanData.tasks)) {
+          const updatedTasks = (
+            replanData.tasks as Array<Record<string, unknown>>
+          ).map(
+            (t) =>
               ({
                 id: t.id,
                 goal: t.goal || t.description,
@@ -904,7 +1021,11 @@ export class OrchestratorAgent {
     const failedSet = new Set(failedTaskIds);
     return tasks.map((t) => {
       if (failedSet.has(t.id)) {
-        return { ...t, status: 'pending' as const, priority: Math.max(1, t.priority - 2) };
+        return {
+          ...t,
+          status: 'pending' as const,
+          priority: Math.max(1, t.priority - 2),
+        };
       }
       return t;
     });

@@ -39,6 +39,7 @@ class MemoryCurator:
         self._curate_interval: float = 60.0
         self._forgotten: set[str] = set()
         self._logger = log
+        self._MAX_CACHED_IDS = 10000
 
     @property
     def enabled(self) -> bool:
@@ -47,6 +48,13 @@ class MemoryCurator:
     def record_usage(self, memory_id: str) -> None:
         self._usage_counts[memory_id] = self._usage_counts.get(memory_id, 0) + 1
         self._last_access[memory_id] = time.time()
+        if len(self._usage_counts) > self._MAX_CACHED_IDS:
+            sorted_ids = sorted(self._last_access.items(), key=lambda x: x[1])
+            to_remove = sorted_ids[: len(self._usage_counts) - (self._MAX_CACHED_IDS * 3 // 4)]
+            for mid, _ in to_remove:
+                self._usage_counts.pop(mid, None)
+                self._last_access.pop(mid, None)
+                self._importance_cache.pop(mid, None)
 
     def assess_importance(
         self,
@@ -174,6 +182,7 @@ class MemoryCurator:
                     store.update_memory_type(memory_id, "long_term")
                     return True
             except Exception as _exc:
+                log.debug("curator 异常处理", error=str(_exc))
                 log_ignored(log, "curator.MemoryCurator.consolidate_memory", _exc)
         return True
 
@@ -181,6 +190,8 @@ class MemoryCurator:
         if memory_id in self._forgotten:
             return False
         self._forgotten.add(memory_id)
+        if len(self._forgotten) > self._MAX_CACHED_IDS:
+            self._forgotten = set(list(self._forgotten)[len(self._forgotten) - (self._MAX_CACHED_IDS * 3 // 4):])
         self._usage_counts.pop(memory_id, None)
         self._last_access.pop(memory_id, None)
         self._importance_cache.pop(memory_id, None)
@@ -190,6 +201,7 @@ class MemoryCurator:
                 if store and hasattr(store, "delete"):
                     store.delete(memory_id)
             except Exception as _exc:
+                log.debug("curator 异常处理", error=str(_exc))
                 log_ignored(log, "curator.MemoryCurator.forget_memory", _exc)
         return True
 

@@ -16,7 +16,7 @@
     comp.add_command("chat", description="开始对话")
     comp.add_option("chat", "--model", values=["gpt-4o", "claude-3"])
     script = comp.generate("bash")
-    print(script)
+    logger.info(script)
 """
 
 from __future__ import annotations
@@ -25,10 +25,11 @@ import sys
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
-
 from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("shell_completion")
+
+
 
 
 class ShellType(str, Enum):

@@ -11,9 +11,9 @@
     from agent.gateway.platforms.matrix_adapter import MatrixAdapter
 
     adapter = MatrixAdapter(
-        homeserver="https://matrix.org",
-        access_token="syt_...",
-        device_id="JBXBOT",
+        homeserver=os.environ.get("MATRIX_HOMESERVER", "https://matrix.org"),
+        access_token=os.environ["MATRIX_ACCESS_TOKEN"],
+        device_id=os.environ.get("MATRIX_DEVICE_ID", "JBXBOT"),
     )
     await adapter.start()
 """
@@ -114,7 +114,7 @@ class MatrixAdapter(PlatformAdapter):
 
         url = f"{self._homeserver}{path}"
         headers = {"Authorization": f"Bearer {self._access_token}"}
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.request(
                 method, url, headers=headers,
                 params=params, json=json_body, timeout=30,

@@ -17,6 +17,9 @@ from __future__ import annotations
 from typing import Any
 
 from agent.core.logger import StructuredLogger
+
+log = StructuredLogger("engine_extensions")
+
 from agent.core.backpressure import BackpressureController, BackpressureConfig
 from agent.core.config_watcher import ConfigReloader
 from agent.memory.consolidation import MemoryConsolidator, ConsolidationConfig
@@ -29,7 +32,6 @@ from agent.api.health import (
     create_health_router,
 )
 
-log = StructuredLogger("engine_extensions")
 
 __all__ = [
     "init_extensions",
@@ -39,15 +41,13 @@ __all__ = [
 
 
 def init_extensions(engine: Any) -> None:
-    log.info("Initializing engine extensions...")
-
     engine.backpressure = BackpressureController(
         BackpressureConfig(enabled=True, max_concurrent=50, max_queue_depth=200)
     )
-    log.info("BackpressureController initialized")
+    log.debug("BackpressureController initialized")
 
     engine.config_reloader = ConfigReloader(engine)
-    log.info("ConfigReloader initialized")
+    log.debug("ConfigReloader initialized")
 
     llm = getattr(engine, "llm", None)
     engine.memory_consolidator = MemoryConsolidator(
@@ -59,7 +59,7 @@ def init_extensions(engine: Any) -> None:
             enabled=True,
         ),
     )
-    log.info("MemoryConsolidator initialized")
+    log.debug("MemoryConsolidator initialized")
 
     verification = getattr(engine, "verification", None)
     engine.verification_loop = VerificationLoop(
@@ -69,18 +69,18 @@ def init_extensions(engine: Any) -> None:
         enable_guardrails=True,
         max_correction_rounds=2,
     )
-    log.info("VerificationLoop initialized")
+    log.debug("VerificationLoop initialized")
 
     engine.clarification_engine = ClarificationEngine(
         ClarificationConfig(enabled=True, auto_detect=True, max_questions=3)
     )
-    log.info("ClarificationEngine initialized")
+    log.debug("ClarificationEngine initialized")
 
     set_engine_for_health(engine)
     register_default_checks(engine)
-    log.info("HealthChecker initialized")
+    log.debug("HealthChecker initialized")
 
-    log.info("All engine extensions initialized successfully")
+    log.info("Engine extensions initialized")
 
 
 async def shutdown_extensions(engine: Any) -> None:
@@ -91,7 +91,6 @@ async def shutdown_extensions(engine: Any) -> None:
             await reloader.stop()
         except Exception as e:
             log.warning("Failed to stop ConfigReloader", error=str(e))
-    log.info("Engine extensions shutdown complete")
 
 
 def get_health_router() -> Any:

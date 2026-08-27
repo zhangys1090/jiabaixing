@@ -21,6 +21,8 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
+import logging
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -126,7 +128,7 @@ class UnifiedContextPipeline:
     Usage:
         pipeline = UnifiedContextPipeline()
         context = await pipeline.build_context(user_input="你好", user_id="user_1")
-        print(f"场景: {context.scene.type}, 情感: {context.emotion.type}")
+        logger.info("场景: {context.scene.type}, 情感: {context.emotion.type}")
     """
 
     _SCENE_KEYWORDS: dict[str, list[str]] = {
@@ -363,7 +365,8 @@ class UnifiedContextPipeline:
                 limit=8,
                 scene=scene,
             )
-        except Exception:
+        except Exception as e:
+            logger.warning("unified_context_pipeline.retrieve_memories 记忆检索失败", error=str(e))
             return []
 
     def retrieve_memories_sync(
@@ -403,6 +406,7 @@ class UnifiedContextPipeline:
             return 1.0
 
         try:
-            return self._sovereignty_pipeline.get_score()  # type: ignore[no-any-return]
-        except Exception:
+            return self._sovereignty_pipeline.get_score()
+        except Exception as e:
+            logger.warning("unified_context_pipeline.get_sovereignty_score 主权评分获取失败", error=str(e))
             return 1.0

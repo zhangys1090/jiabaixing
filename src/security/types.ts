@@ -2,6 +2,9 @@
  * 安全模块类型定义
  */
 
+import type { RiskLevel } from '../harness/types';
+export type { RiskLevel };
+
 /**
  * 认证配置
  */
@@ -228,7 +231,12 @@ export interface SecurityEvent {
   acknowledged: boolean;
 }
 
-export type ApiKeyStatus = 'active' | 'rotating' | 'deprecated' | 'revoked' | 'expired';
+export type ApiKeyStatus =
+  | 'active'
+  | 'rotating'
+  | 'deprecated'
+  | 'revoked'
+  | 'expired';
 
 export interface ApiKeyEntry {
   id: string;
@@ -238,10 +246,10 @@ export interface ApiKeyEntry {
   encryptedKey: string;
   status: ApiKeyStatus;
   createdAt: number;
-  expiresAt: number | null;
-  rotatedFrom: string | null;
-  rotatedTo: string | null;
-  lastUsedAt: number | null;
+  expiresAt: number | null | undefined;
+  rotatedFrom: string | null | undefined;
+  rotatedTo: string | null | undefined;
+  lastUsedAt: number | null | undefined;
   usageCount: number;
   metadata: Record<string, unknown>;
 }
@@ -295,8 +303,6 @@ export interface SecurityIncidentEvent {
   timestamp: Date;
   actionTaken: string;
 }
-
-export type RiskLevel = 'low' | 'medium' | 'high';
 
 export interface RiskAssessment {
   level: RiskLevel;

@@ -19,8 +19,8 @@ from typing import Any
 
 from agent.core.logger import StructuredLogger
 from agent.core.logger import log_ignored
-
 log = StructuredLogger("token_counter")
+
 
 MODEL_TO_ENCODING: dict[str, str] = {
     "gpt-4o": "o200k_base",
@@ -97,10 +97,12 @@ class TokenCounter:
                 import tiktoken
                 try:
                     self._encoding_cache[self._encoding_name] = tiktoken.get_encoding(self._encoding_name)
-                except Exception:
+                except Exception as _exc:
+                    log.debug("token_counter 异常处理", error=str(_exc))
                     try:
                         self._encoding_cache[self._encoding_name] = tiktoken.get_encoding("cl100k_base")
-                    except Exception:
+                    except Exception as _exc:
+                        log.warning("异常降级处理", error=str(_exc))
                         return None
             return self._encoding_cache[self._encoding_name]
 
@@ -112,6 +114,7 @@ class TokenCounter:
             try:
                 return len(enc.encode(text, disallowed_special=()))
             except Exception as _exc:
+                log.debug("token_counter 异常处理", error=str(_exc))
                 log_ignored(log, "token_counter.TokenCounter.count_tokens", _exc)
         return self._approximate_count(text)
 

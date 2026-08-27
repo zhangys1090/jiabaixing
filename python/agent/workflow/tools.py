@@ -338,4 +338,4 @@ def register_workflow_tools(registry: ToolRegistry, engine: Any) -> None:
         risk_level="high",
     ), _workflow_rollback)
 
-    log.info("工作流工具已注册", count=8)
+    log.debug("工作流工具已注册", count=8)

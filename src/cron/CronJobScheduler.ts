@@ -463,8 +463,13 @@ export class CronJobScheduler {
       return new Promise<CronJobResult>((resolve) => {
         let stdout = '';
         let stderr = '';
+        const args = (job.args || []).map((a) => {
+          const safe = String(a).replace(/[^a-zA-Z0-9_\-./:@]/g, '_');
+          return safe;
+        });
+        const safeCommand = `${job.command} ${args.join(' ')}`;
         const child = exec(
-          `${job.command} ${(job.args || []).join(' ')}`,
+          safeCommand,
           { timeout, cwd: process.cwd() },
           (error, stdOut, stdErr) => {
             stdout = stdOut?.toString() ?? '';

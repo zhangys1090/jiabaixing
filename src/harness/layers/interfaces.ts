@@ -27,7 +27,11 @@ export interface IToolRegistry {
   has(name: string): boolean;
   get(name: string): IToolEntryPort | null;
   list(): IToolDefinitionPort[];
-  call(name: string, params: Record<string, unknown>, context?: unknown): Promise<IToolResultPort>;
+  call(
+    name: string,
+    params: Record<string, unknown>,
+    context?: unknown
+  ): Promise<IToolResultPort>;
 }
 
 export interface IToolDefinitionPort {
@@ -50,7 +54,10 @@ export interface IParamDefPort {
 }
 
 export interface IToolExecutorPort {
-  (params: Record<string, unknown>, context?: IToolContextPort): Promise<IToolResultPort>;
+  (
+    params: Record<string, unknown>,
+    context?: IToolContextPort
+  ): Promise<IToolResultPort>;
 }
 
 export interface IToolContextPort {
@@ -78,7 +85,10 @@ export interface IPermissionGuardPort {
 }
 
 export interface ISchemaValidatorPort {
-  validate(schema: Record<string, unknown>, data: unknown): { valid: boolean; errors?: string[] };
+  validate(
+    schema: Record<string, unknown>,
+    data: unknown
+  ): { valid: boolean; errors?: string[] };
 }
 
 // ============ Layer 2: 上下文层 ============
@@ -113,11 +123,17 @@ export interface IContextOutputPort {
 }
 
 export interface IMemoryEnginePort {
-  retrieveContext(input: string, userId?: string): Promise<{
+  retrieveContext(
+    input: string,
+    userId?: string
+  ): Promise<{
     memories: Array<{ type: string; relevance: number; content: string }>;
     preferences: Record<string, string[]>;
   }>;
-  storeMemory(content: string, options?: Record<string, unknown>): Promise<string>;
+  storeMemory(
+    content: string,
+    options?: Record<string, unknown>
+  ): Promise<string>;
 }
 
 export interface IHistoryProviderPort {
@@ -151,9 +167,15 @@ export interface IPersistenceLayerDeps {
 }
 
 export interface IEventStorePort {
-  append(event: Omit<IEventStoreEventPort, 'sequenceNum' | 'timestamp'>): IEventStoreEventPort;
+  append(
+    event: Omit<IEventStoreEventPort, 'sequenceNum' | 'timestamp'>
+  ): IEventStoreEventPort;
   query(query: IEventQueryPort): IEventStoreEventPort[];
-  project<T>(sessionId: string, reducer: (state: T, event: IEventStoreEventPort) => T, initialState: T): { state: T; lastSequenceNum: number; eventCount: number };
+  project<T>(
+    sessionId: string,
+    reducer: (state: T, event: IEventStoreEventPort) => T,
+    initialState: T
+  ): { state: T; lastSequenceNum: number; eventCount: number };
   getEventCount(sessionId?: string): number;
   deleteSession(sessionId: string): boolean;
   initialize(): void;
@@ -184,7 +206,10 @@ export interface IEventQueryPort {
 export interface ISessionReplayPort {
   replaySession(sessionId: string, options?: Record<string, unknown>): unknown;
   diff(sessionId: string, seqA: number, seqB: number): unknown;
-  exportTrajectory(sessionId: string, options: Record<string, unknown>): string[];
+  exportTrajectory(
+    sessionId: string,
+    options: Record<string, unknown>
+  ): string[];
   getSessionSummary(sessionId: string): unknown;
 }
 
@@ -193,7 +218,11 @@ export interface ISessionReplayPort {
 export interface IVerificationLayer {
   readonly layerName: 'verification';
   initialize(deps: IVerificationLayerDeps): Promise<void>;
-  verify(input: string, output: string, context?: Record<string, unknown>): Promise<IVerificationResultPort>;
+  verify(
+    input: string,
+    output: string,
+    context?: Record<string, unknown>
+  ): Promise<IVerificationResultPort>;
   shutdown(): Promise<void>;
 }
 
@@ -214,7 +243,10 @@ export interface IVerificationResultPort {
 export interface IConstraintsLayer {
   readonly layerName: 'constraints';
   initialize(deps: IConstraintsLayerDeps): Promise<void>;
-  checkConstraints(input: string, context?: Record<string, unknown>): IConstraintsResultPort;
+  checkConstraints(
+    input: string,
+    context?: Record<string, unknown>
+  ): IConstraintsResultPort;
   shutdown(): Promise<void>;
 }
 
@@ -282,13 +314,23 @@ export interface ILLMPort {
     maxTokens?: number
   ): Promise<{
     content: string | null;
-    toolCalls?: Array<{ id: string; type: string; function: { name: string; arguments: string } }>;
+    toolCalls?: Array<{
+      id: string;
+      type: string;
+      function: { name: string; arguments: string };
+    }>;
   }>;
 }
 
 // ============ 层注册表 ============
 
-export type LayerName = 'tools' | 'context' | 'persistence' | 'verification' | 'constraints' | 'loop';
+export type LayerName =
+  | 'tools'
+  | 'context'
+  | 'persistence'
+  | 'verification'
+  | 'constraints'
+  | 'loop';
 
 export interface ILayerRegistry {
   registerLayer(name: LayerName, layer: ILayerPort): void;
@@ -299,6 +341,7 @@ export interface ILayerRegistry {
 
 export interface ILayerPort {
   readonly layerName: LayerName;
+  initialized: boolean;
   initialize(deps: Record<string, unknown>): Promise<void>;
   shutdown(): Promise<void>;
 }

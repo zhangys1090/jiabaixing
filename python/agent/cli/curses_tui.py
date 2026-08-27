@@ -32,10 +32,11 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable
 
+from agent.core.logger import StructuredLogger, log_ignored
 from agent.core.logger import StructuredLogger
-from agent.core.logger import log_ignored
 
 log = StructuredLogger("curses_tui")
+
 
 
 class TUIBackend(str, Enum):

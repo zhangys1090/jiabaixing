@@ -31,6 +31,7 @@ export class SessionTokenQuotaManager {
   private sessions: Map<string, SessionTokenUsage> = new Map();
   private config: TokenQuotaConfig;
   private cleanupTimerId: ReturnType<typeof setInterval> | null = null;
+  private static readonly MAX_SESSIONS = 5000;
 
   private constructor(config: Partial<TokenQuotaConfig> = {}) {
     this.config = { ...DEFAULT_QUOTA_CONFIG, ...config };
@@ -41,7 +42,9 @@ export class SessionTokenQuotaManager {
     );
   }
 
-  static create(config: Partial<TokenQuotaConfig> = {}): SessionTokenQuotaManager {
+  static create(
+    config: Partial<TokenQuotaConfig> = {}
+  ): SessionTokenQuotaManager {
     return new SessionTokenQuotaManager(config);
   }
 
@@ -232,6 +235,20 @@ export class SessionTokenQuotaManager {
     for (const [sessionId, usage] of this.sessions) {
       const inactiveTime = now - usage.lastActivityTime;
       if (inactiveTime > this.config.resetIntervalMs) {
+        this.sessions.delete(sessionId);
+        cleaned++;
+      }
+    }
+
+    if (this.sessions.size > SessionTokenQuotaManager.MAX_SESSIONS) {
+      const sorted = Array.from(this.sessions.entries()).sort(
+        ([, a], [, b]) => a.lastActivityTime - b.lastActivityTime
+      );
+      const toRemove = sorted.slice(
+        0,
+        this.sessions.size - SessionTokenQuotaManager.MAX_SESSIONS
+      );
+      for (const [sessionId] of toRemove) {
         this.sessions.delete(sessionId);
         cleaned++;
       }

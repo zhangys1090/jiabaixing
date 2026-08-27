@@ -11,8 +11,8 @@ from typing import Any, Protocol, runtime_checkable
 
 from agent.loop.types import LoopContext
 from agent.core.logger import StructuredLogger, log_ignored
-
 log = StructuredLogger("middleware")
+
 
 
 @runtime_checkable
@@ -63,6 +63,7 @@ class KnowledgeInjectMiddleware:
                     "content": f"【相关历史知识】\n{knowledge_text}",
                 })
         except Exception as _exc:
+            log.debug("middleware 异常处理", error=str(_exc))
             log_ignored(log, "middleware.KnowledgeInject.before_loop", _exc)
         return context
 
@@ -102,6 +103,7 @@ class PerceptionInjectMiddleware:
                         "content": f"【最近屏幕变化】\n{event_text}",
                     })
         except Exception as _exc:
+            log.debug("middleware 异常处理", error=str(_exc))
             log_ignored(log, "middleware.PerceptionInject.before_loop", _exc)
         return context
 
@@ -143,6 +145,7 @@ class WorkflowInjectMiddleware:
                             "content": f"【活跃工作流】\n{wf_text}",
                         })
         except Exception as _exc:
+            log.debug("middleware 异常处理", error=str(_exc))
             log_ignored(log, "middleware.WorkflowInject.before_loop", _exc)
         return context
 
@@ -180,10 +183,72 @@ class McpResourceInjectMiddleware:
                     "content": f"【MCP 资源变更】\n{res_text}",
                 })
         except Exception as _exc:
+            log.debug("middleware 异常处理", error=str(_exc))
             log_ignored(log, "middleware.McpResourceInject.before_loop", _exc)
         return context
 
     async def after_loop(self, context: LoopContext, result: Any) -> Any:
+        return result
+
+    async def before_step(self, context: LoopContext, step_index: int) -> LoopContext:
+        return context
+
+    async def after_step(self, context: LoopContext, step_index: int, step_result: Any) -> Any:
+        return step_result
+
+
+class SandboxAuditMiddleware:
+    """Phase 3+4: 沙箱审计中间件 — 将沙箱健康状态和指标注入主循环上下文。
+
+    before_loop: 执行沙箱健康检查，将结果注入 context.metadata。
+    after_loop: 采集沙箱指标快照，记录到 context.metadata。
+    """
+
+    name = "sandbox_audit"
+
+    def __init__(self, enabled: bool = True) -> None:
+        self._enabled = enabled
+        self._last_health_check: dict[str, Any] = {}
+
+    async def before_loop(self, context: LoopContext) -> LoopContext:
+        if not self._enabled:
+            return context
+        try:
+            from agent.sandbox.kernel_isolation import KernelIsolationProvider
+            health = await KernelIsolationProvider.health_check(force=False)
+            available_backends = [
+                k.value for k, v in health.items() if v.available
+            ]
+            degraded_backends = [
+                k.value for k, v in health.items()
+                if not v.available and v.consecutive_failures > 0
+            ]
+            self._last_health_check = {
+                "available": available_backends,
+                "degraded": degraded_backends,
+                "timestamp": time.time(),
+            }
+            context.metadata["sandbox_health"] = self._last_health_check
+            if degraded_backends:
+                context.messages.insert(0, {
+                    "role": "system",
+                    "content": f"【沙箱审计】后端降级: {', '.join(degraded_backends)}",
+                })
+        except Exception as _exc:
+            log.debug("middleware 异常处理", error=str(_exc))
+            log_ignored(log, "middleware.SandboxAudit.before_loop", _exc)
+        return context
+
+    async def after_loop(self, context: LoopContext, result: Any) -> Any:
+        if not self._enabled:
+            return result
+        try:
+            from agent.sandbox.kernel_isolation import KernelIsolationProvider
+            metrics = KernelIsolationProvider.get_metrics()
+            context.metadata["sandbox_metrics"] = metrics.to_dict()
+        except Exception as _exc:
+            log.debug("middleware 异常处理", error=str(_exc))
+            log_ignored(log, "middleware.SandboxAudit.after_loop", _exc)
         return result
 
     async def before_step(self, context: LoopContext, step_index: int) -> LoopContext:

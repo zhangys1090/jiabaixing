@@ -10,7 +10,10 @@
 
     from agent.gateway.platforms.slack_adapter import SlackAdapter
 
-    adapter = SlackAdapter(bot_token="xoxb-...", app_token="xapp-...")
+    adapter = SlackAdapter(
+        bot_token=os.environ["SLACK_BOT_TOKEN"],
+        app_token=os.environ["SLACK_APP_TOKEN"],
+    )
     await adapter.start()
 """
 

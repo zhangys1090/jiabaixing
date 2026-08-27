@@ -17,8 +17,8 @@ from typing import Any, Callable, Awaitable
 
 from agent.core.logger import StructuredLogger
 from agent.workflow.types import WorkflowStep, StepType
-
 log = StructuredLogger("step_executor")
+
 
 
 class StepExecutor:

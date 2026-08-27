@@ -2,10 +2,29 @@
  * 安全路由 - security logs / events / report / validate / audit
  */
 
+import crypto from 'crypto';
 import express from 'express';
 
 import { JiabaixingCore } from '../../core/JiabaixingCore';
 import { Logger } from '../../utils/Logger';
+
+const SECURITY_ADMIN_TOKEN = process.env.JBX_SECURITY_ADMIN_TOKEN || '';
+
+function validateSecurityAdmin(req: express.Request): boolean {
+  if (!SECURITY_ADMIN_TOKEN) return true;
+
+  const token = req.headers['x-admin-token'] as string | undefined;
+  if (!token) return false;
+
+  try {
+    return crypto.timingSafeEqual(
+      Buffer.from(token),
+      Buffer.from(SECURITY_ADMIN_TOKEN)
+    );
+  } catch {
+    return false;
+  }
+}
 
 interface TRAEIntegrator {
   getSystemHealth?: () => unknown;
@@ -200,7 +219,10 @@ export function registerSecurityRoutes(
     }
   });
 
-  app.get('/api/security/apikeys', async (_req, res) => {
+  app.get('/api/security/apikeys', async (req, res) => {
+    if (!validateSecurityAdmin(req)) {
+      return res.status(403).json({ success: false, error: '需要管理员权限' });
+    }
     try {
       const { ApiKeyManager } = await import('../../security/ApiKeyManager');
       const manager = ApiKeyManager.getInstance();
@@ -223,33 +245,57 @@ export function registerSecurityRoutes(
     }
   });
 
-  app.post('/api/security/apikeys/rotate', express.json({ limit: '1mb' }), async (req, res) => {
-    try {
-      const { name, newKey } = req.body as { name?: string; newKey?: string };
-      if (!name) {
-        return res.status(400).json({ success: false, error: '缺少 name 参数' });
+  app.post(
+    '/api/security/apikeys/rotate',
+    express.json({ limit: '1mb' }),
+    async (req, res) => {
+      if (!validateSecurityAdmin(req)) {
+        return res
+          .status(403)
+          .json({ success: false, error: '需要管理员权限' });
       }
-      const { ApiKeyManager } = await import('../../security/ApiKeyManager');
-      const manager = ApiKeyManager.getInstance();
-      const entry = await manager.rotateKey(name, newKey);
-      res.json({ success: true, data: { id: entry.id, name: entry.name, status: entry.status } });
-    } catch (error) {
-      res.status(500).json({ success: false, error: (error as Error).message });
+      try {
+        const { name, newKey } = req.body as { name?: string; newKey?: string };
+        if (!name) {
+          return res
+            .status(400)
+            .json({ success: false, error: '缺少 name 参数' });
+        }
+        const { ApiKeyManager } = await import('../../security/ApiKeyManager');
+        const manager = ApiKeyManager.getInstance();
+        const entry = await manager.rotateKey(name, newKey);
+        res.json({
+          success: true,
+          data: { id: entry.id, name: entry.name, status: entry.status },
+        });
+      } catch (error) {
+        res
+          .status(500)
+          .json({ success: false, error: (error as Error).message });
+      }
     }
-  });
+  );
 
-  app.post('/api/security/apikeys/revoke', express.json({ limit: '1mb' }), async (req, res) => {
-    try {
-      const { name } = req.body as { name?: string };
-      if (!name) {
-        return res.status(400).json({ success: false, error: '缺少 name 参数' });
+  app.post(
+    '/api/security/apikeys/revoke',
+    express.json({ limit: '1mb' }),
+    async (req, res) => {
+      try {
+        const { name } = req.body as { name?: string };
+        if (!name) {
+          return res
+            .status(400)
+            .json({ success: false, error: '缺少 name 参数' });
+        }
+        const { ApiKeyManager } = await import('../../security/ApiKeyManager');
+        const manager = ApiKeyManager.getInstance();
+        const revoked = manager.revokeKey(name);
+        res.json({ success: true, data: { name, revoked } });
+      } catch (error) {
+        res
+          .status(500)
+          .json({ success: false, error: (error as Error).message });
       }
-      const { ApiKeyManager } = await import('../../security/ApiKeyManager');
-      const manager = ApiKeyManager.getInstance();
-      const revoked = manager.revokeKey(name);
-      res.json({ success: true, data: { name, revoked } });
-    } catch (error) {
-      res.status(500).json({ success: false, error: (error as Error).message });
     }
-  });
+  );
 }

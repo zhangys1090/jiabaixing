@@ -19,6 +19,7 @@ Usage:
     results = await lifecycle.retrieve("agent能力")
     report = await lifecycle.run_maintenance()
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -26,13 +27,14 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from agent.core.logger import StructuredLogger, log_ignored
 from agent.knowledge.knowledge_store import KnowledgeStore, KnowledgeEntry, SearchResult
 from agent.knowledge.knowledge_extractor import KnowledgeExtractor, ExtractedKnowledge
 from agent.knowledge.knowledge_decay import KnowledgeDecay, DecayConfig, DecayResult
 from agent.knowledge.knowledge_graph import KnowledgeGraph
+from agent.core.logger import StructuredLogger, log_ignored
 
 log = StructuredLogger("knowledge_lifecycle")
+
 
 
 @dataclass
@@ -106,7 +108,7 @@ class KnowledgeLifecycle:
         await self._store.initialize()
         await self._graph.initialize()
         self._initialized = True
-        log.info("KnowledgeLifecycle 初始化完成")
+        log.debug("KnowledgeLifecycle 初始化完成")
 
     async def close(self) -> None:
         """关闭知识库，停止衰减定时任务。"""
@@ -455,6 +457,7 @@ class KnowledgeLifecycle:
             try:
                 await self._graph.add_entry(entry_id, content)
             except Exception as _exc:
+                log.debug("knowledge_lifecycle 异常处理", error=str(_exc))
                 log_ignored(log, "knowledge_lifecycle.import_session_knowledge.graph", _exc)
             imported_ids.append(entry_id)
         log.info(

@@ -8,8 +8,8 @@ from agent.core.logger import StructuredLogger
 from agent.knowledge.knowledge_extractor import KnowledgeExtractor
 from agent.knowledge.knowledge_lifecycle import KnowledgeLifecycle
 from agent.knowledge.knowledge_store import KnowledgeStore
-
 log = StructuredLogger("failure_learner")
+
 
 
 @dataclass

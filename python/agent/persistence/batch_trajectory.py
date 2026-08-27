@@ -23,7 +23,7 @@
         min_quality=0.7,
         limit=1000,
     )
-    print(f"生成 {result.count} 条轨迹")
+    logger.info("生成 {result.count} 条轨迹")
 """
 
 from __future__ import annotations
@@ -36,10 +36,11 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Coroutine
-
 from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("batch_trajectory")
+
+
 
 
 @dataclass
@@ -115,6 +116,7 @@ class BatchTrajectoryGenerator:
 
     def __init__(self) -> None:
         self._seen_hashes: set[str] = set()
+        self._MAX_SEEN_HASHES = 100000
         self._progress_callback: Callable[[int, int], Coroutine[Any, Any, None]] | None = None
 
     def set_progress_callback(
@@ -173,8 +175,11 @@ class BatchTrajectoryGenerator:
                         if h in seen:
                             return None
                         seen.add(h)
+                        if len(seen) > self._MAX_SEEN_HASHES:
+                            seen.clear()
                     return sample
                 except Exception as e:
+                    log.debug("batch_trajectory 异常处理", error=str(e))
                     if not cfg.continue_on_error:
                         raise
                     log.warning("Record processing failed", idx=idx, error=str(e))
@@ -274,7 +279,8 @@ class BatchTrajectoryGenerator:
                 session_id=uid,
                 created_at=created or int(time.time()),
             )
-        except Exception:
+        except Exception as _exc:
+            log.warning("轨迹样本解析失败", error=str(_exc))
             return None
 
     def _hash_sample(self, sample: TrajectorySample) -> str:

@@ -5,7 +5,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-from agent.core.logger import log_ignored
+from agent.core.logger import StructuredLogger, log_ignored
+log = StructuredLogger("context_pipeline")
 
 
 CONTEXT_FILE_PRIORITY = [
@@ -195,6 +196,7 @@ class ContextManager:
     def __init__(self, total_budget: int = 8000) -> None:
         self._allocator = TokenBudgetAllocator(total_budget)
         self._entries: list[ContextEntry] = []
+        self._MAX_ENTRIES = 10000
         self._reference_resolver: ContextReferenceResolver | None = None
         self._file_registry: ContextFileRegistry | None = None
 
@@ -285,6 +287,8 @@ class ContextManager:
                 id="memories", type="memory", content=truncated,
                 priority=7, source="MemoryInjector",
             ))
+            if len(self._entries) > self._MAX_ENTRIES:
+                self._entries = self._entries[-self._MAX_ENTRIES * 3 // 4:]
 
         if history:
             budget = allocation.history
@@ -302,8 +306,6 @@ class ContextManager:
             included.reverse()
             messages.extend(included)
             if len(included) < len(history):
-                from agent.core.logger import StructuredLogger
-                log = StructuredLogger("context_pipeline")
                 log.debug(
                     "历史消息受预算约束截断",
                     total=len(history),
@@ -323,6 +325,7 @@ class ContextManager:
                     else:
                         final_user_input = resolved.cleaned_input
             except Exception as _exc:
+                log.debug("context_pipeline 异常处理", error=str(_exc))
                 log_ignored(None, "context_pipeline.ContextManager.build_context", _exc)
 
         messages.append({"role": "user", "content": final_user_input})
@@ -414,11 +417,12 @@ class ContextFileRegistry:
         registry = ContextFileRegistry(project_root="/path/to/project")
         entries = registry.load_all()
         for entry in entries:
-            print(f"{entry.file_name}: {entry.char_count} chars")
+            logger.info("{entry.file_name}: {entry.char_count} chars")
     """
 
     def __init__(self, project_root: str | None = None, cache_ttl_ms: int = 300_000) -> None:
         self._cache: list[ContextFileEntry] = []
+        self._MAX_CACHE = 5000
         self._cache_timestamp: float = 0.0
         self._cache_ttl_ms = cache_ttl_ms
         self._project_root = Path(project_root) if project_root else Path.cwd()
@@ -471,6 +475,8 @@ class ContextFileRegistry:
         if not file_path.exists():
             return None
         content = self._read_and_truncate(file_path)
+        if self._scan_dangerous(content):
+            return None
         return ContextFileEntry(
             file_name=SOUL_FILE_NAME,
             content=content,
@@ -558,7 +564,7 @@ class ContextReferenceResolver:
         resolver = ContextReferenceResolver(project_root="/path/to/project")
         result = resolver.resolve("请分析 @README.md 的内容")
         if result.has_references:
-            print(result.resolved_content)
+            logger.info(result.resolved_content)
     """
 
     def __init__(self, project_root: str) -> None:

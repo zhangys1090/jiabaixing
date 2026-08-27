@@ -14,7 +14,7 @@
 Usage:
     engine = AdaptiveStrategyEngine()
     strategy = engine.resolve(perception_state, degradation_state, drift_result)
-    print(strategy.action, strategy.reason)
+    logger.info(strategy.action, strategy.reason)
 """
 
 from __future__ import annotations

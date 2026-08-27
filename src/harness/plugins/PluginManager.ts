@@ -183,9 +183,15 @@ export class PluginManager {
 
     try {
       const manifest = this.convertToManifest(installed.descriptor);
-      const lifecycle = await this.loadLifecycle(installed.installPath, installed.descriptor);
+      const lifecycle = await this.loadLifecycle(
+        installed.installPath,
+        installed.descriptor
+      );
 
-      const success = await this.registry.loadPlugin(manifest, lifecycle ?? undefined);
+      const success = await this.registry.loadPlugin(
+        manifest,
+        lifecycle ?? undefined
+      );
 
       if (success) {
         installed.status = 'active';
@@ -379,7 +385,16 @@ export class PluginManager {
     }
   }
 
-  private loadDescriptorFromPath(pluginPath: string): JiabaixingPluginDescriptor | null {
+  private loadDescriptorFromPath(
+    pluginPath: string
+  ): JiabaixingPluginDescriptor | null {
+    const resolved = path.resolve(pluginPath);
+    const projectRoot = path.resolve(process.cwd());
+    if (!resolved.startsWith(projectRoot)) {
+      Logger.warn(`插件路径超出项目范围: ${pluginPath}`, 'PluginManager');
+      return null;
+    }
+
     const manifestFiles = [
       'jiabaixing.plugin.json',
       'plugin.json',
@@ -424,16 +439,25 @@ export class PluginManager {
     return null;
   }
 
-  private saveDescriptor(descriptor: JiabaixingPluginDescriptor, installPath: string): void {
+  private saveDescriptor(
+    descriptor: JiabaixingPluginDescriptor,
+    installPath: string
+  ): void {
     if (!fs.existsSync(installPath)) {
       fs.mkdirSync(installPath, { recursive: true });
     }
 
     const manifestPath = path.join(installPath, 'jiabaixing.plugin.json');
-    fs.writeFileSync(manifestPath, JSON.stringify(descriptor, null, 2), 'utf-8');
+    fs.writeFileSync(
+      manifestPath,
+      JSON.stringify(descriptor, null, 2),
+      'utf-8'
+    );
   }
 
-  private convertToManifest(descriptor: JiabaixingPluginDescriptor): PluginManifest {
+  private convertToManifest(
+    descriptor: JiabaixingPluginDescriptor
+  ): PluginManifest {
     return {
       id: descriptor.id,
       name: descriptor.name,
@@ -449,7 +473,10 @@ export class PluginManager {
     };
   }
 
-  private async loadLifecycle(installPath: string, descriptor: JiabaixingPluginDescriptor): Promise<PluginLifecycle | null> {
+  private async loadLifecycle(
+    installPath: string,
+    descriptor: JiabaixingPluginDescriptor
+  ): Promise<PluginLifecycle | null> {
     const mainPath = path.join(installPath, descriptor.main);
     if (!fs.existsSync(mainPath)) {
       Logger.debug(`插件入口不存在: ${mainPath}`, 'PluginManager');
@@ -497,7 +524,9 @@ export class PluginManager {
 
     for (const [id, installed] of this.installed) {
       if (id === pluginId) continue;
-      if (installed.descriptor.dependencies?.some((d) => d.pluginId === pluginId)) {
+      if (
+        installed.descriptor.dependencies?.some((d) => d.pluginId === pluginId)
+      ) {
         dependents.push(id);
       }
     }

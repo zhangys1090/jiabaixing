@@ -26,9 +26,9 @@ import functools
 from typing import Any, Callable, TypeVar
 
 from agent.core.logger import StructuredLogger
+log = StructuredLogger("subsystem_guard")
 
 T = TypeVar("T")
-log = StructuredLogger("subsystem_guard")
 
 
 class SubsystemNotReadyError(RuntimeError):

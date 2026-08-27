@@ -11,13 +11,13 @@
  * 4. 支持动态启停，不影响 EventBus 的广播功能
  */
 
-import type { EventName } from '../../shared/eventTypes';
+import { type EventName, type JiabaixingEventBus } from '../../shared/EventBus';
 import { Logger } from '../../utils/Logger';
 import {
-    EventStore,
-    type EventMetadata,
-    type EventStoreEvent,
-    type EventStoreEventType,
+  EventStore,
+  type EventMetadata,
+  type EventStoreEvent,
+  type EventStoreEventType,
 } from './EventStore';
 
 export interface EventStoreBridgeOptions {
@@ -56,15 +56,18 @@ const EVENT_TYPE_MAP: Partial<Record<EventName, EventStoreEventType>> = {
 };
 
 export class EventStoreBridge {
-  private eventBus: EventBus;
+  private eventBus: JiabaixingEventBus;
   private eventStore: EventStore;
   private options: EventStoreBridgeOptions;
-  private listeners: Array<{ eventName: EventName; listener: (...args: unknown[]) => void }> = [];
+  private listeners: Array<{
+    eventName: EventName;
+    listener: (...args: unknown[]) => void;
+  }> = [];
   private active = false;
   private eventCounter = 0;
 
   constructor(
-    eventBus: EventBus,
+    eventBus: JiabaixingEventBus,
     eventStore: EventStore,
     options: EventStoreBridgeOptions
   ) {

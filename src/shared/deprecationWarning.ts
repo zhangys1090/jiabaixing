@@ -9,6 +9,8 @@
  *   emitDeprecationWarning('MemoryEngine', 'PythonAgentBridge (AGENT_BACKEND=python)', 'V6.0');
  */
 
+import { Logger } from '../utils/Logger';
+
 const emittedWarnings = new Set<string>();
 
 export interface DeprecationWarningOptions {
@@ -37,11 +39,9 @@ export function emitDeprecationWarning(
     .filter(Boolean)
     .join('\n');
 
-  if (typeof process.emitWarning === 'function') {
-    process.emitWarning(message, 'DeprecationWarning', 'JIABAIXING_DEPRECATED');
-  } else {
-    console.warn(message);
-  }
+  if (process.env.NODE_ENV === 'production') return;
+
+  Logger.debug(message, 'Deprecation');
 }
 
 export function emitDeprecationWarningOnce(

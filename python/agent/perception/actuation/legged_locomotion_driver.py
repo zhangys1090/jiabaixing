@@ -21,8 +21,8 @@ from enum import Enum
 from typing import Any
 
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("legged_locomotion_driver")
+
 
 
 class LeggedDriverType(str, Enum):
@@ -119,6 +119,7 @@ class LeggedLocomotionDriver:
             return result
 
         except Exception as e:
+            log.debug("legged_locomotion_driver 异常处理", error=str(e))
             return {
                 "success": False,
                 "error": str(e),
@@ -214,6 +215,7 @@ class LeggedLocomotionDriver:
             resp_data = json_mod.loads(response.read().decode("utf-8"))
             return {"success": resp_data.get("success", True), "detail": resp_data.get("message", "HTTP API 执行完成")}
         except Exception as e:
+            log.debug("legged_locomotion_driver 异常处理", error=str(e))
             return {"success": False, "error": f"HTTP API 调用失败: {e}"}
 
     async def _execute_ros2(self, action: Any) -> dict[str, Any]:

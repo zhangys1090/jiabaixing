@@ -23,12 +23,15 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx
 from agent.core.logger import log_ignored
+import logging
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -76,7 +79,7 @@ class LLMConnectionPool:
         self._lock = asyncio.Lock()
         self._total_requests = 0
         self._total_errors = 0
-        self._latencies: list[float] = []
+        self._latencies: deque[float] = deque(maxlen=1000)
         self._created_at = time.time()
         self._last_used = time.time()
         self._closed = False
@@ -151,8 +154,6 @@ class LLMConnectionPool:
         if not success:
             self._total_errors += 1
         self._latencies.append(latency)
-        if len(self._latencies) > 1000:
-            self._latencies = self._latencies[-500:]
 
     async def close(self) -> None:
         if self._client and not self._client.is_closed:
@@ -207,6 +208,7 @@ class ConnectionPoolManager:
         try:
             await client.head("/", timeout=5.0)
         except Exception as _exc:
+            logger.warning("connection_pool 异常处理", error=str(_exc))
             log_ignored(None, "connection_pool.ConnectionPoolManager.warmup", _exc)
 
     async def start_cleanup(self, interval: float = 60.0) -> None:

@@ -28,7 +28,9 @@ export class ApiKeyManager {
     return new ApiKeyManager(config);
   }
 
-  public static getInstance(config?: Partial<ApiKeyRotationConfig>): ApiKeyManager {
+  public static getInstance(
+    config?: Partial<ApiKeyRotationConfig>
+  ): ApiKeyManager {
     if (!ApiKeyManager.instance) {
       ApiKeyManager.instance = ApiKeyManager.create(config);
     }
@@ -49,7 +51,11 @@ export class ApiKeyManager {
       this.initialized = true;
       Logger.info('✅ ApiKeyManager 初始化完成', 'ApiKeyManager');
     } catch (error) {
-      Logger.error('❌ ApiKeyManager 初始化失败', error as Error, 'ApiKeyManager');
+      Logger.error(
+        '❌ ApiKeyManager 初始化失败',
+        error as Error,
+        'ApiKeyManager'
+      );
       throw error;
     }
   }
@@ -60,7 +66,10 @@ export class ApiKeyManager {
       this.encryptionKey = Buffer.from(envKey, 'hex');
     } else {
       this.encryptionKey = crypto.randomBytes(32);
-      Logger.warn('⚠️ API_KEY_ENCRYPTION_KEY 未设置，使用临时密钥（重启后密钥将失效）', 'ApiKeyManager');
+      Logger.warn(
+        '⚠️ API_KEY_ENCRYPTION_KEY 未设置，使用临时密钥（重启后密钥将失效）',
+        'ApiKeyManager'
+      );
     }
   }
 
@@ -73,7 +82,12 @@ export class ApiKeyManager {
 
     try {
       this.db.pragma('journal_mode = WAL');
-    } catch {}
+    } catch (pragmaErr) {
+      Logger.debug(
+        `ApiKeyManager WAL 模式设置跳过: ${(pragmaErr as Error).message}`,
+        'ApiKeyManager'
+      );
+    }
 
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS api_keys (
@@ -99,18 +113,27 @@ export class ApiKeyManager {
   }
 
   private startRotationCheck(): void {
-    this.rotationTimer = setInterval(() => {
-      this.checkAutoRotation().catch((err) => {
-        Logger.warn(`⚠️ 自动轮换检查失败: ${(err as Error).message}`, 'ApiKeyManager');
-      });
-    }, 60 * 60 * 1000);
+    this.rotationTimer = setInterval(
+      () => {
+        this.checkAutoRotation().catch((err) => {
+          Logger.warn(
+            `⚠️ 自动轮换检查失败: ${(err as Error).message}`,
+            'ApiKeyManager'
+          );
+        });
+      },
+      60 * 60 * 1000
+    );
   }
 
   private encrypt(plaintext: string): string {
     if (!this.encryptionKey || !this.config.encryptKeys) return plaintext;
     const iv = crypto.randomBytes(16);
     const cipher = crypto.createCipheriv('aes-256-cbc', this.encryptionKey, iv);
-    const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+    const encrypted = Buffer.concat([
+      cipher.update(plaintext, 'utf8'),
+      cipher.final(),
+    ]);
     return iv.toString('hex') + ':' + encrypted.toString('hex');
   }
 
@@ -120,15 +143,26 @@ export class ApiKeyManager {
     if (parts.length !== 2) return ciphertext;
     const iv = Buffer.from(parts[0], 'hex');
     const encrypted = Buffer.from(parts[1], 'hex');
-    const decipher = crypto.createDecipheriv('aes-256-cbc', this.encryptionKey, iv);
-    return decipher.update(encrypted, undefined, 'utf8') + decipher.final('utf8');
+    const decipher = crypto.createDecipheriv(
+      'aes-256-cbc',
+      this.encryptionKey,
+      iv
+    );
+    return (
+      decipher.update(encrypted, undefined, 'utf8') + decipher.final('utf8')
+    );
   }
 
   private hashKey(key: string): string {
     return crypto.createHash('sha256').update(key).digest('hex');
   }
 
-  public registerKey(name: string, provider: string, rawKey: string, expiresAt?: number): ApiKeyEntry {
+  public registerKey(
+    name: string,
+    provider: string,
+    rawKey: string,
+    expiresAt?: number
+  ): ApiKeyEntry {
     const entry: ApiKeyEntry = {
       id: crypto.randomUUID(),
       name,
@@ -137,7 +171,9 @@ export class ApiKeyManager {
       encryptedKey: this.encrypt(rawKey),
       status: 'active',
       createdAt: Date.now(),
-      expiresAt: expiresAt ?? (Date.now() + this.config.autoRotateDays * 24 * 60 * 60 * 1000),
+      expiresAt:
+        expiresAt ??
+        Date.now() + this.config.autoRotateDays * 24 * 60 * 60 * 1000,
       rotatedFrom: null,
       rotatedTo: null,
       lastUsedAt: null,
@@ -146,11 +182,18 @@ export class ApiKeyManager {
     };
 
     this.persistEntry(entry);
-    this.auditLog('apikey.registered', `API Key 注册: ${name} (${provider})`, 'success');
+    this.auditLog(
+      'apikey.registered',
+      `API Key 注册: ${name} (${provider})`,
+      'success'
+    );
     return entry;
   }
 
-  public validateKey(name: string, rawKey: string): { valid: boolean; entry?: ApiKeyEntry; error?: string } {
+  public validateKey(
+    name: string,
+    rawKey: string
+  ): { valid: boolean; entry?: ApiKeyEntry; error?: string } {
     const entries = this.loadEntriesByName(name);
     const keyHash = this.hashKey(rawKey);
 
@@ -159,7 +202,10 @@ export class ApiKeyManager {
         if (entry.status === 'revoked') {
           return { valid: false, error: 'Key 已撤销' };
         }
-        if (entry.status === 'expired' || (entry.expiresAt && entry.expiresAt < Date.now())) {
+        if (
+          entry.status === 'expired' ||
+          (entry.expiresAt && entry.expiresAt < Date.now())
+        ) {
           this.updateStatus(entry.id, 'expired');
           return { valid: false, error: 'Key 已过期' };
         }
@@ -167,7 +213,11 @@ export class ApiKeyManager {
           this.incrementUsage(entry.id);
           return { valid: true, entry };
         }
-        if (entry.status === 'deprecated' && entry.expiresAt && (Date.now() - entry.expiresAt) < this.config.gracePeriodMs) {
+        if (
+          entry.status === 'deprecated' &&
+          entry.expiresAt &&
+          Date.now() - entry.expiresAt < this.config.gracePeriodMs
+        ) {
           this.incrementUsage(entry.id);
           return { valid: true, entry };
         }
@@ -184,7 +234,10 @@ export class ApiKeyManager {
     return this.decrypt(active.encryptedKey);
   }
 
-  public async rotateKey(name: string, newRawKey?: string): Promise<ApiKeyEntry> {
+  public async rotateKey(
+    name: string,
+    newRawKey?: string
+  ): Promise<ApiKeyEntry> {
     const entries = this.loadEntriesByName(name);
     const current = entries.find((e) => e.status === 'active');
 
@@ -193,7 +246,12 @@ export class ApiKeyManager {
     }
 
     const newKey = newRawKey || this.generateKey();
-    const newEntry = this.registerKey(name, current.provider, newKey, current.expiresAt);
+    const newEntry = this.registerKey(
+      name,
+      current.provider,
+      newKey,
+      current.expiresAt ?? undefined
+    );
 
     this.updateStatus(current.id, 'rotating');
     current.rotatedTo = newEntry.id;
@@ -207,7 +265,11 @@ export class ApiKeyManager {
       this.auditLog('apikey.rotated', `API Key 轮换完成: ${name}`, 'success');
     }, this.config.gracePeriodMs);
 
-    this.auditLog('apikey.rotated', `API Key 开始轮换: ${name}，宽限期 ${this.config.gracePeriodMs}ms`, 'success');
+    this.auditLog(
+      'apikey.rotated',
+      `API Key 开始轮换: ${name}，宽限期 ${this.config.gracePeriodMs}ms`,
+      'success'
+    );
     return newEntry;
   }
 
@@ -236,7 +298,10 @@ export class ApiKeyManager {
         params.provider = provider;
       }
       sql += ' ORDER BY created_at DESC';
-      const rows = this.db.prepare(sql).all(params) as Record<string, unknown>[];
+      const rows = this.db.prepare(sql).all(params) as Record<
+        string,
+        unknown
+      >[];
       return rows.map(this.rowToEntry);
     } catch {
       return [];
@@ -252,10 +317,14 @@ export class ApiKeyManager {
 
       const ageDays = (now - entry.createdAt) / (24 * 60 * 60 * 1000);
       const shouldRotateByAge = entry.expiresAt && now >= entry.expiresAt;
-      const shouldRotateByUsage = entry.usageCount >= this.config.maxUsageBeforeRotation;
+      const shouldRotateByUsage =
+        entry.usageCount >= this.config.maxUsageBeforeRotation;
 
       if (shouldRotateByAge || shouldRotateByUsage) {
-        Logger.info(`🔄 自动轮换 API Key: ${entry.name} (年龄: ${ageDays.toFixed(0)}天, 使用: ${entry.usageCount}次)`, 'ApiKeyManager');
+        Logger.info(
+          `🔄 自动轮换 API Key: ${entry.name} (年龄: ${ageDays.toFixed(0)}天, 使用: ${entry.usageCount}次)`,
+          'ApiKeyManager'
+        );
         await this.rotateKey(entry.name);
       }
     }
@@ -302,7 +371,9 @@ export class ApiKeyManager {
   private loadEntriesByName(name: string): ApiKeyEntry[] {
     if (!this.db) return [];
     try {
-      const stmt = this.db.prepare('SELECT * FROM api_keys WHERE name = @name ORDER BY created_at DESC');
+      const stmt = this.db.prepare(
+        'SELECT * FROM api_keys WHERE name = @name ORDER BY created_at DESC'
+      );
       const rows = stmt.all({ name }) as Record<string, unknown>[];
       return rows.map(this.rowToEntry);
     } catch {
@@ -313,7 +384,9 @@ export class ApiKeyManager {
   private updateStatus(id: string, status: ApiKeyStatus): void {
     if (!this.db) return;
     try {
-      this.db.prepare('UPDATE api_keys SET status = @status WHERE id = @id').run({ id, status });
+      this.db
+        .prepare('UPDATE api_keys SET status = @status WHERE id = @id')
+        .run({ id, status });
     } catch (error) {
       Logger.error('❌ 更新 API Key 状态失败', error as Error, 'ApiKeyManager');
     }
@@ -322,8 +395,17 @@ export class ApiKeyManager {
   private incrementUsage(id: string): void {
     if (!this.db) return;
     try {
-      this.db.prepare('UPDATE api_keys SET usage_count = usage_count + 1, last_used_at = @now WHERE id = @id').run({ id, now: Date.now() });
-    } catch {}
+      this.db
+        .prepare(
+          'UPDATE api_keys SET usage_count = usage_count + 1, last_used_at = @now WHERE id = @id'
+        )
+        .run({ id, now: Date.now() });
+    } catch (incErr) {
+      Logger.warn(
+        `API Key 使用计数更新失败: ${(incErr as Error).message}`,
+        'ApiKeyManager'
+      );
+    }
   }
 
   private rowToEntry(row: Record<string, unknown>): ApiKeyEntry {
@@ -335,20 +417,34 @@ export class ApiKeyManager {
       encryptedKey: row.encrypted_key as string,
       status: row.status as ApiKeyStatus,
       createdAt: row.created_at as number,
-      expiresAt: (row.expires_at as number) || null,
-      rotatedFrom: (row.rotated_from as string) || null,
-      rotatedTo: (row.rotated_to as string) || null,
-      lastUsedAt: (row.last_used_at as number) || null,
+      expiresAt: (row.expires_at as number) || undefined,
+      rotatedFrom: (row.rotated_from as string) || undefined,
+      rotatedTo: (row.rotated_to as string) || undefined,
+      lastUsedAt: (row.last_used_at as number) || undefined,
       usageCount: (row.usage_count as number) || 0,
       metadata: JSON.parse((row.metadata as string) || '{}'),
     };
   }
 
-  private auditLog(action: string, description: string, result: 'success' | 'failure'): void {
+  private auditLog(
+    action: string,
+    description: string,
+    result: 'success' | 'failure'
+  ): void {
     if (this.auditLogger) {
       try {
-        this.auditLogger.log({ action, result, category: 'apikey', details: { description } });
-      } catch {}
+        this.auditLogger.log({
+          action,
+          result,
+          category: 'apikey',
+          details: { description },
+        });
+      } catch (auditErr) {
+        Logger.warn(
+          `审计日志写入失败: ${(auditErr as Error).message}`,
+          'ApiKeyManager'
+        );
+      }
     }
   }
 

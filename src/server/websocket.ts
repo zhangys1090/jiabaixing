@@ -22,6 +22,18 @@ interface AudioStreamSession {
   startedAt: number;
 }
 const audioStreamBuffers = new Map<string, AudioStreamSession>();
+const AUDIO_STREAM_TIMEOUT_MS = 5 * 60 * 1000;
+const AUDIO_STREAM_MAX_CHUNKS = 1000;
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [sid, session] of audioStreamBuffers) {
+    if (now - session.startedAt > AUDIO_STREAM_TIMEOUT_MS) {
+      audioStreamBuffers.delete(sid);
+      Logger.debug(`🗑️ 清理超时音频流会话: ${sid}`, 'WebSocket');
+    }
+  }
+}, 60_000);
 
 // LRU风格去重缓存（带容量限制）
 class DedupCache {
@@ -168,11 +180,16 @@ export function setupWebSocket(
     }
 
     const clientIp = req.socket.remoteAddress || 'unknown';
-    Logger.info(`💖 新客户端连接: ${clientIp} (在线: ${wss.clients.size})`, 'WebSocket');
+    Logger.info(
+      `💖 新客户端连接: ${clientIp} (在线: ${wss.clients.size})`,
+      'WebSocket'
+    );
 
     const ext = ws as WebSocket.WebSocket & { isAlive?: boolean };
     ext.isAlive = true;
-    ws.on('pong', () => { ext.isAlive = true; });
+    ws.on('pong', () => {
+      ext.isAlive = true;
+    });
 
     ws.on('message', async (message) => {
       try {
@@ -380,6 +397,18 @@ export function setupWebSocket(
               });
             }
             audioStreamBuffers.get(sid)!.chunks.push(chunk);
+            if (
+              audioStreamBuffers.get(sid)!.chunks.length >
+              AUDIO_STREAM_MAX_CHUNKS
+            ) {
+              audioStreamBuffers
+                .get(sid)!
+                .chunks.splice(
+                  0,
+                  audioStreamBuffers.get(sid)!.chunks.length -
+                    AUDIO_STREAM_MAX_CHUNKS
+                );
+            }
           } catch {
             // 静默处理音频块错误
           }
@@ -596,7 +625,7 @@ async function processInputWithRetry(
 
   if (ws.readyState === 1 && lastError) {
     const errorMsg = lastError.message;
-    let response = `抱歉，处理出错了：${errorMsg}`;
+    let response = '抱歉，处理出错了，请稍后重试。';
 
     if (isRetryableError(lastError)) {
       response = `抱歉，网络连接出现问题，已重试${MAX_RETRIES}次仍失败。\n\n请检查：\n1. 网络连接是否正常\n2. LLM 服务是否可用\n3. 稍后再试`;

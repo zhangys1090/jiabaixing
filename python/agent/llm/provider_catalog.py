@@ -34,8 +34,8 @@ from pathlib import Path
 from typing import Any
 
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("provider_catalog")
+
 
 #: 通过该环境变量声明额外 Provider 元数据 JSON 目录（可选扩展）。
 PROVIDER_CATALOG_ENV = "AGENT_PROVIDER_CATALOG"

@@ -171,23 +171,43 @@ router.post('/:platform/disconnect', async (req: Request, res: Response) => {
   }
 });
 
-router.post('/:platform/webhook', async (req: Request, res: Response) => {
-  try {
-    const platform = req.params.platform as IntegrationPlatform;
-    // webhook 直接走主进程 IntegrationManager（有 core 才能处理消息并回复）
-    const im = IntegrationManager.getInstance();
-    const result = await im.handleWebhook(platform, req.body);
+router.post(
+  '/:platform/webhook',
+  express.json({ limit: '1mb' }),
+  async (req: Request, res: Response) => {
+    try {
+      const platform = req.params.platform as IntegrationPlatform;
+      const validPlatforms: IntegrationPlatform[] = [
+        'wechat',
+        'dingtalk',
+        'feishu',
+        'slack',
+        'telegram',
+      ];
+      if (!validPlatforms.includes(platform)) {
+        return res
+          .status(400)
+          .json({ success: false, error: `不支持的平台: ${platform}` });
+      }
+      if (!req.body || typeof req.body !== 'object') {
+        return res
+          .status(400)
+          .json({ success: false, error: '无效的webhook数据' });
+      }
+      const im = IntegrationManager.getInstance();
+      const result = await im.handleWebhook(platform, req.body);
 
-    if (result.success) {
-      res.status(200).json(result.response || { success: true });
-    } else {
-      res.status(400).json({ success: false });
+      if (result.success) {
+        res.status(200).json(result.response || { success: true });
+      } else {
+        res.status(400).json({ success: false });
+      }
+    } catch (error) {
+      Logger.error('处理 Webhook 失败', error as Error, 'IntegrationRoutes');
+      res.status(500).json({ success: false });
     }
-  } catch (error) {
-    Logger.error('处理 Webhook 失败', error as Error, 'IntegrationRoutes');
-    res.status(500).json({ success: false });
   }
-});
+);
 
 router.post('/:platform/send', async (req: Request, res: Response) => {
   try {

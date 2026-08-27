@@ -30,14 +30,15 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator
 
-from agent.core.logger import StructuredLogger
 from agent.safety.checkpoint_manager import CheckpointManager, Checkpoint
 from agent.safety.operation_scope import OperationScope, ScopeDefinition, ScopeViolation
 from agent.safety.auto_rollback import AutoRollback, RollbackPolicy, RollbackRecord
 from agent.safety.audit_trail import AuditTrail, AuditEntry
 from agent.safety.dry_run_executor import DryRunExecutor, ImpactReport
+from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("safety_net")
+
 
 
 @dataclass
@@ -125,7 +126,8 @@ class SafetyNet:
             ctx.checkpoint = rollback_guard.checkpoint
             try:
                 yield ctx
-            except Exception:
+            except Exception as _exc:
+                log.debug("safety_net 异常处理", error=str(_exc))
                 if ctx.checkpoint:
                     self._audit.record(
                         tool_name="safety_net_guard",

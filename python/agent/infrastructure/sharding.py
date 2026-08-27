@@ -27,8 +27,8 @@ from typing import Any
 from agent.core.logger import StructuredLogger
 from agent.core.logger import log_ignored
 from agent.infrastructure.distributed_lock import create_lock
-
 log = StructuredLogger("sharding")
+
 
 
 def get_shard_count() -> int:
@@ -60,7 +60,7 @@ def consistent_shard(key: str, shard_count: int | None = None) -> int:
     n = shard_count if shard_count is not None else get_shard_count()
     if n <= 1:
         return 0
-    digest = hashlib.md5(key.encode("utf-8")).digest()  # noqa: S324 - 仅作分片哈希
+    digest = hashlib.md5(key.encode("utf-8")).digest()
     return int.from_bytes(digest[:4], "big") % n
 
 
@@ -165,5 +165,6 @@ class LeaderElection:
         try:
             await self._lock.release()
         except Exception as _exc:
+            log.debug("sharding 异常处理", error=str(_exc))
             log_ignored(log, "sharding.LeaderElection.stop", _exc)
         self._is_leader = False

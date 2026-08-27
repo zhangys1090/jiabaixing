@@ -8,14 +8,14 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Protocol
+from agent.core.logger import StructuredLogger
+log = StructuredLogger("agent_factory")
 
 if TYPE_CHECKING:  # 仅供类型注解使用，避免 fanout ↔ agent_factory 循环导入
     from agent.orchestration.fanout import TaskNode
 
 from agent.config import DATA_ROOT
-from agent.core.logger import StructuredLogger
 
-log = StructuredLogger("agent_factory")
 
 
 class AgentScene(str, Enum):
@@ -145,6 +145,7 @@ class BaseAgent:
             self._total_duration_ms += (time.time() - start) * 1000
             return result
         except Exception as e:
+            log.debug("agent_factory 异常处理", error=str(e))
             self._failure_count += 1
             self._total_duration_ms += (time.time() - start) * 1000
             raise
@@ -174,11 +175,11 @@ class AgentFactory:
         scene = factory.detect_scene("帮我写一个Python脚本")
     """
     _instance: AgentFactory | None = None
-    _cache: dict[str, BaseAgent] = {}
 
     def __init__(self) -> None:
         self._agents: dict[str, BaseAgent] = {}
         self._executors: dict[AgentScene, AgentExecutor] = {}
+        self._MAX_AGENTS = 500
 
     @classmethod
     def get_instance(cls) -> AgentFactory:
@@ -188,8 +189,9 @@ class AgentFactory:
 
     @classmethod
     def reset_instance(cls) -> None:
+        if cls._instance is not None:
+            cls._instance._agents.clear()
         cls._instance = None
-        cls._cache.clear()
 
     def register_executor(self, scene: AgentScene, executor: AgentExecutor) -> None:
         self._executors[scene] = executor
@@ -208,7 +210,11 @@ class AgentFactory:
         agent_executor = executor or self._executors.get(scene)
         agent = BaseAgent(config=config, executor=agent_executor)
         self._agents[cache_key] = agent
-        log.info("Agent created", name=agent.name, scene=scene.value)
+        if len(self._agents) > self._MAX_AGENTS:
+            oldest_keys = list(self._agents.keys())[: len(self._agents) - (self._MAX_AGENTS * 3 // 4)]
+            for k in oldest_keys:
+                del self._agents[k]
+        log.debug("Agent created", name=agent.name, scene=scene.value)
         return agent
 
     def create_all_agents(self) -> list[BaseAgent]:
@@ -308,7 +314,13 @@ class MultiAgentOrchestrator:
         self._factory = factory or AgentFactory.get_instance()
         self._complexity_analyzer = TaskComplexityAnalyzer()
         self._history: list[AggregatedResult] = []
+        self._history_max = 200
         self._llm = llm
+
+    def _append_history(self, result: AggregatedResult) -> None:
+        self._history.append(result)
+        if len(self._history) > self._history_max:
+            self._history = self._history[-self._history_max:]
 
     async def process_goal(self, goal: str, context: dict[str, Any] | None = None) -> AggregatedResult:
         start = time.time()
@@ -356,6 +368,7 @@ class MultiAgentOrchestrator:
                 quality_score=1.0,
             )
         except Exception as e:
+            log.debug("agent_factory 异常处理", error=str(e))
             duration = (time.time() - start) * 1000
             aggregated = AggregatedResult(
                 success=False,
@@ -451,6 +464,7 @@ class MultiAgentOrchestrator:
                 duration_ms=(time.time() - task_start) * 1000,
             )
         except Exception as e:
+            log.debug("agent_factory 异常处理", error=str(e))
             return SubTaskResult(
                 task_id=f"task_{index}",
                 agent_name=agent.name,
@@ -460,11 +474,9 @@ class MultiAgentOrchestrator:
             )
 
     def _decompose_goal(self, goal: str, complexity: TaskComplexity) -> list[str]:
-        parts = [p.strip() for p in goal.replace("并且", "，").replace("然后", "，").replace("同时", "，").split("，") if p.strip()]
+        parts = [p.strip() for p in goal.replace("并且", "，").replace("然后", "，").replace("同时", "，").replace("，", "\n").replace("；", "\n").replace(";", "\n").split("\n") if p.strip()]
         if not parts:
             parts = [goal]
-        while len(parts) < complexity.recommended_agents and parts:
-            parts.append(parts[-1])
         return parts[:complexity.recommended_agents]
 
     async def _decompose_goal_semantic(
@@ -631,7 +643,7 @@ class MultiAgentOrchestrator:
             dep_ids = [f"dag_{d}" for d in task_def.get("dependencies", [])]
             task_id = f"dag_{task_def['id']}"
 
-            async def _make_executor(_agent: BaseAgent, _goal: str) -> Any:
+            def _make_executor(_agent: BaseAgent, _goal: str) -> Any:
                 async def _exec(completed_results: dict | None = None) -> Any:
                     return await _agent.execute(_goal, context)
                 return _exec
@@ -639,7 +651,7 @@ class MultiAgentOrchestrator:
             orch.add_task_with_id(
                 task_id=task_id,
                 name=sub_goal[:80],
-                executor=await _make_executor(agent, sub_goal),
+                executor=_make_executor(agent, sub_goal),
                 dependencies=dep_ids,
                 priority=TaskPriority.NORMAL,
                 timeout_ms=60000,
@@ -726,6 +738,7 @@ class MultiAgentOrchestrator:
                     quality_score=result.quality_score if hasattr(result, 'quality_score') else 0.0,
                 )
             except Exception as e:
+                log.debug("agent_factory 异常处理", error=str(e))
                 duration = (_t.time() - start) * 1000
                 return AggregatedResult(
                     success=False,
@@ -819,6 +832,7 @@ class MultiAgentOrchestrator:
                 duration_ms=(_t.time() - task_start) * 1000,
             )
         except Exception as e:
+            log.debug("agent_factory 异常处理", error=str(e))
             return SubTaskResult(
                 task_id=f"task_{index}",
                 agent_name="loop_controller",
@@ -950,6 +964,8 @@ class AgentRegistry:
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
         self._init_negotiation_db()
         self._load_negotiation_history()
+        self._MAX_AGENTS = 500
+        self._MAX_NEGOTIATION_HISTORY = 1000
 
     def _init_negotiation_db(self) -> None:
         with sqlite3.connect(self._db_path) as conn:
@@ -1030,6 +1046,13 @@ class AgentRegistry:
         self._agents[name] = agent
         self._agent_scenes[name] = scene or agent.config.scene
         self._agent_states[name] = "idle"
+        if len(self._agents) > self._MAX_AGENTS:
+            oldest_keys = list(self._agents.keys())[: len(self._agents) - (self._MAX_AGENTS * 3 // 4)]
+            for k in oldest_keys:
+                self._agents.pop(k, None)
+                self._agent_scenes.pop(k, None)
+                self._agent_states.pop(k, None)
+                self._agent_health.pop(k, None)
         self._agent_health[name] = {
             "last_check": time.time(),
             "status": "healthy",
@@ -1335,6 +1358,8 @@ class AgentRegistry:
                 "agreement": "",
             }
             self._negotiation_history.append(result)
+            if len(self._negotiation_history) > self._MAX_NEGOTIATION_HISTORY:
+                self._negotiation_history = self._negotiation_history[-self._MAX_NEGOTIATION_HISTORY * 3 // 4:]
             self._persist_negotiation_result(result)
             return result
 
@@ -1390,6 +1415,8 @@ class AgentRegistry:
             },
         }
         self._negotiation_history.append(result)
+        if len(self._negotiation_history) > self._MAX_NEGOTIATION_HISTORY:
+            self._negotiation_history = self._negotiation_history[-self._MAX_NEGOTIATION_HISTORY * 3 // 4:]
         self._persist_negotiation_result(result)
         log.info(
             "W4-4: 协商完成",
@@ -1538,7 +1565,7 @@ class OrchestratorAgent:
             self_agent_id="agent:jiabaixing",
         )
         result = await orchestrator.orchestrate("重构整个项目")
-        print(f"成功: {result.success}, 耗时: {result.duration_ms}ms")
+        logger.info("成功: {result.success}, 耗时: {result.duration_ms}ms")
     """
 
     def __init__(
@@ -1574,6 +1601,7 @@ class OrchestratorAgent:
         # A2A 远程发现能力
         self._a2a_manager = a2a_manager
         self._a2a_remote_endpoints = list(a2a_remote_endpoints or [])
+        self._MAX_A2A_REMOTE_ENDPOINTS = 200
         self._self_agent_id = self_agent_id
         self._a2a_poll_interval = max(0.05, a2a_poll_interval_seconds)
         self._a2a_task_timeout = max(1.0, a2a_task_timeout_seconds)
@@ -1725,6 +1753,7 @@ class OrchestratorAgent:
                 duration_ms=(time.time() - start) * 1000,
             )
         except Exception as e:
+            log.debug("agent_factory 异常处理", error=str(e))
             return AggregatedResult(
                 success=False,
                 summary=f"执行失败: {str(e)[:60]}",
@@ -1854,7 +1883,8 @@ class OrchestratorAgent:
                         result = await agent.execute(task.goal)
                         registry.set_state(task.assigned_to or "", "idle")
                         return result
-                    except Exception:
+                    except Exception as _exc:
+                        log.debug("agent_factory 异常处理", error=str(_exc))
                         registry.report_error(task.assigned_to or "")
                         raise
                 # 本地无合适 Agent → 通过 A2A 协议发现远程 Agent 委派任务

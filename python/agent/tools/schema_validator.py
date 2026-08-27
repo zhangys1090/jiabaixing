@@ -5,8 +5,8 @@ from typing import Any
 
 from agent.core.logger import StructuredLogger
 from agent.core.logger import log_ignored
-
 log = StructuredLogger("schema_validator")
+
 
 
 @dataclass
@@ -61,7 +61,7 @@ class SchemaValidator:
         validator = SchemaValidator()
         result = validator.validate({"query": "test"}, parameter_defs)
         if not result.valid:
-            print(result.errors)
+            logger.info(result.errors)
     """
 
     def validate(

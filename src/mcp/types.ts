@@ -18,4 +18,10 @@ export interface MCPServerConfig {
   tool_filtering?: boolean;
   allowed_tools?: string[];
   denied_tools?: string[];
+  /** 环境变量（桥接自 Python MCPServerConfig.env） */
+  env?: Record<string, string>;
+  /** 自定义请求头（桥接自 Python MCPServerConfig.headers） */
+  headers?: Record<string, string>;
+  /** 失败时自动重启（桥接自 Python MCPServerConfig.restart_on_failure） */
+  restart_on_failure?: boolean;
 }

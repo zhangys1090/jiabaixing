@@ -57,8 +57,17 @@ interface SensitivePattern {
  */
 const SENSITIVE_PATTERNS: SensitivePattern[] = [
   // ===== 金融类 =====
-  { pattern: /\b\d{16,19}\b/g, name: '银行卡号', risk: 'high' },
-  { pattern: /\b\d{6}\d{4}\d{2}\d{2}\d{4}\b/g, name: '身份证号', risk: 'high' },
+  {
+    pattern: /\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b/g,
+    name: '银行卡号',
+    risk: 'high',
+  },
+  {
+    pattern:
+      /\b\d{6}(?:18|19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{4}\b/g,
+    name: '身份证号',
+    risk: 'high',
+  },
   {
     pattern: /\b\d{4}[/\-]?\d{2}[/\-]?\d{2}\b/g,
     name: '银行卡有效期',
@@ -149,8 +158,10 @@ const SENSITIVE_PATTERNS: SensitivePattern[] = [
   },
 
   // ===== 网络地址 =====
+  // P1-4 修复: IPv4 模式排除版本号（如 1.2.3.4）和常见无害数字
   {
-    pattern: /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/g,
+    pattern:
+      /\b(?:(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)\b/g,
     name: 'IPv4地址',
     risk: 'low',
   },
@@ -277,9 +288,12 @@ export function sanitizeText(text: string): string {
       // Slack令牌
       .replace(/\bxox[baprs]-[a-zA-Z0-9]{10,}/g, '[Slack令牌-已脱敏]')
       // 银行卡号
-      .replace(/\b\d{16,19}\b/g, '[银行卡-已脱敏]')
+      .replace(/\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b/g, '[银行卡-已脱敏]')
       // 身份证号
-      .replace(/\b\d{6}\d{4}\d{2}\d{2}\d{4}\b/g, '[身份证-已脱敏]')
+      .replace(
+        /\b\d{6}(?:18|19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{4}\b/g,
+        '[身份证-已脱敏]'
+      )
       .replace(/\b\d{17}[\dXx]\b/g, '[身份证-已脱敏]')
       // 手机号
       .replace(/\b1[3-9]\d{9}\b/g, '[手机号-已脱敏]')
@@ -289,8 +303,11 @@ export function sanitizeText(text: string): string {
         /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g,
         '[邮箱-已脱敏]'
       )
-      // IPv4
-      .replace(/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/g, '[IP-已脱敏]')
+      // IPv4 — 使用精确模式避免误报版本号
+      .replace(
+        /\b(?:(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)\b/g,
+        '[IP-已脱敏]'
+      )
       // IPv6
       .replace(
         /\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b/gi,

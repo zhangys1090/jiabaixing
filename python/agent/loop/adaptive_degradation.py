@@ -31,8 +31,8 @@ from enum import Enum
 from typing import Any
 
 from agent.core.logger import StructuredLogger, log_ignored
-
 log = StructuredLogger("adaptive_degradation")
+
 
 
 class DegradationReason(str, Enum):
@@ -259,6 +259,7 @@ class AdaptiveDegradation:
                     latency_ms=latency_ms,
                 )
             except Exception as e:
+                log.debug("adaptive_degradation 异常处理", error=str(e))
                 log_ignored(log, "adaptive_degradation.record_result.trajectory", e)
 
     def add_chain(self, chain: DegradationChain) -> None:

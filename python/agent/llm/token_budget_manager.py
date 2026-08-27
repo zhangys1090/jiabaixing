@@ -29,8 +29,8 @@ from enum import Enum
 from typing import Any
 
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("token_budget_manager")
+
 
 
 class BudgetExhaustionPolicy(str, Enum):
@@ -148,6 +148,7 @@ class TokenBudgetManager:
         self._consumption_history: list[ConsumptionRecord] = []
         self._max_history = 1000
         self._avg_tokens_per_step = 2000
+        self._MAX_SESSIONS = 5000
 
     @classmethod
     def get_instance(cls) -> TokenBudgetManager:
@@ -167,7 +168,12 @@ class TokenBudgetManager:
         budget = total_budget or self._default_session_budget
         session = SessionBudget(session_id=session_id, total_budget=budget)
         self._sessions[session_id] = session
-        log.info("Session budget created", session_id=session_id, budget=budget)
+        if len(self._sessions) > self._MAX_SESSIONS:
+            sorted_sessions = sorted(self._sessions.items(), key=lambda x: x[1].created_at if hasattr(x[1], 'created_at') else 0)
+            to_remove = sorted_sessions[: len(self._sessions) - (self._MAX_SESSIONS * 3 // 4)]
+            for sid, _ in to_remove:
+                del self._sessions[sid]
+        log.debug("Session budget created", session_id=session_id, budget=budget)
         return session
 
     def get_session(self, session_id: str) -> SessionBudget | None:

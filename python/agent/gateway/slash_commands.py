@@ -216,6 +216,7 @@ class SlashCommandManager:
                 duration_ms=duration,
             )
         except Exception as e:
+            log.debug("slash_commands 异常处理", error=str(e))
             duration = (time.monotonic() - start) * 1000
             log.error("斜杠命令执行失败", command=cmd_name, error=str(e))
             return CommandResult(

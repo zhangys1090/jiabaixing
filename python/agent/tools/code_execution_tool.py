@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from agent.core.logger import log_ignored
+import logging
+logger = logging.getLogger(__name__)
 
 from agent.tools.registry import (
     ToolCategory,
@@ -113,6 +115,7 @@ class CodeExecutor:
                 duration_ms=elapsed,
             )
         except Exception as exc:
+            logger.warning("code_execution_tool 异常处理", error=str(exc))
             elapsed = (time.monotonic() - start) * 1000
             return ExecutionResult(
                 stderr=f"子进程启动失败: {exc}",
@@ -266,6 +269,7 @@ async def execute_code_executor(params: dict[str, Any]) -> ToolResult:
                 result="executing",
             )
         except Exception as _exc:
+            logger.warning("code_execution_tool 异常处理", error=str(_exc))
             log_ignored(None, "code_execution_tool.execute_code.audit_executing", _exc)
 
     result = await _executor_instance.execute(code, timeout=timeout)
@@ -279,6 +283,7 @@ async def execute_code_executor(params: dict[str, Any]) -> ToolResult:
                 result="success" if result.exit_code == 0 else "failed",
             )
         except Exception as _exc:
+            logger.warning("code_execution_tool 异常处理", error=str(_exc))
             log_ignored(None, "code_execution_tool.execute_code.audit_result", _exc)
 
     output_parts: list[str] = []

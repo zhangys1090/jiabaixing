@@ -27,8 +27,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("learning_reporter")
+
 
 # ========== 常量定义 ==========
 

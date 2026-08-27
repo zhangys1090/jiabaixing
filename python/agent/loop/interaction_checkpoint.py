@@ -38,9 +38,9 @@ from pathlib import Path
 from typing import Any
 
 from agent.core.logger import StructuredLogger, log_ignored
-from agent.core.logger import log_ignored
-
+from agent.core.types import BaseCheckpoint
 log = StructuredLogger("interaction_checkpoint")
+
 
 
 class CheckpointStatus(str, Enum):
@@ -51,11 +51,11 @@ class CheckpointStatus(str, Enum):
 
 
 @dataclass
-class CheckpointData:
-    checkpoint_id: str
-    session_id: str
-    step_id: str
-    timestamp: float
+class CheckpointData(BaseCheckpoint):
+    """交互还原点 — 继承 core.types.BaseCheckpoint。"""
+
+    session_id: str = ""
+    step_id: str = ""
     status: CheckpointStatus = CheckpointStatus.ACTIVE
 
     context_snapshot: dict[str, Any] = field(default_factory=dict)
@@ -65,7 +65,9 @@ class CheckpointData:
     budget_snapshot: dict[str, Any] = field(default_factory=dict)
     perception_snapshot: dict[str, Any] = field(default_factory=dict)
 
-    metadata: dict[str, Any] = field(default_factory=dict)
+    @property
+    def checkpoint_id(self) -> str:
+        return self.id
 
 
 @dataclass
@@ -122,7 +124,7 @@ class InteractionCheckpoint:
         perception_snapshot = self._serialize_perception(context)
 
         checkpoint = CheckpointData(
-            checkpoint_id=checkpoint_id,
+            id=checkpoint_id,
             session_id=session_id,
             step_id=step_id,
             timestamp=time.time(),
@@ -341,6 +343,7 @@ class InteractionCheckpoint:
             try:
                 return plan.to_dict()
             except Exception as _exc:
+                log.debug("interaction_checkpoint 异常处理", error=str(_exc))
                 log_ignored(log, "interaction_checkpoint.InteractionCheckpoint._serialize_plan", _exc)
 
         if isinstance(plan, dict):
@@ -417,6 +420,7 @@ class InteractionCheckpoint:
             with open(str(path), "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception as e:
+            log.debug("interaction_checkpoint 异常处理", error=str(e))
             log_ignored(log, "interaction_checkpoint._persist_checkpoint", e)
 
     def _load_checkpoint(self, checkpoint_id: str) -> CheckpointData | None:
@@ -429,7 +433,7 @@ class InteractionCheckpoint:
                 data = json.load(f)
 
             return CheckpointData(
-                checkpoint_id=data["checkpoint_id"],
+                id=data["checkpoint_id"],
                 session_id=data.get("session_id", "default"),
                 step_id=data.get("step_id", ""),
                 timestamp=data.get("timestamp", 0),
@@ -442,6 +446,7 @@ class InteractionCheckpoint:
                 perception_snapshot=data.get("perception_snapshot", {}),
             )
         except Exception as e:
+            log.debug("interaction_checkpoint 异常处理", error=str(e))
             log_ignored(log, "interaction_checkpoint._load_checkpoint", e)
             return None
 
@@ -454,7 +459,7 @@ class InteractionCheckpoint:
                     cp_id = data.get("checkpoint_id", "")
                     if cp_id:
                         cp = CheckpointData(
-                            checkpoint_id=cp_id,
+                            id=cp_id,
                             session_id=data.get("session_id", "default"),
                             step_id=data.get("step_id", ""),
                             timestamp=data.get("timestamp", 0),
@@ -472,9 +477,11 @@ class InteractionCheckpoint:
                             self._session_checkpoints[sid] = []
                         self._session_checkpoints[sid].append(cp_id)
                 except Exception as e:
+                    log.debug("interaction_checkpoint 异常处理", error=str(e))
                     log_ignored(log, "interaction_checkpoint._load_existing_checkpoints.loop", e)
                     continue
         except Exception as e:
+            log.debug("interaction_checkpoint 异常处理", error=str(e))
             log_ignored(log, "interaction_checkpoint._load_existing_checkpoints", e)
 
     def _remove_checkpoint_file(self, checkpoint_id: str) -> None:
@@ -483,4 +490,5 @@ class InteractionCheckpoint:
             if path.exists():
                 path.unlink()
         except Exception as e:
+            log.debug("interaction_checkpoint 异常处理", error=str(e))
             log_ignored(log, "interaction_checkpoint._remove_checkpoint_file", e)

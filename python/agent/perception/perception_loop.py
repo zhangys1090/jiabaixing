@@ -16,6 +16,7 @@ Usage:
     loop = PerceptionActionLoop()
     result = await loop.execute("点击确定按钮")
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -23,7 +24,6 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from agent.core.logger import StructuredLogger, log_ignored
 from agent.perception.uia_cache import UIAElementCache, CachedTree
 from agent.perception.action_verifier import ActionVerifier, VerificationResult, AutoRetryPolicy
 from agent.perception.visual_grounding import VisualGrounding, GroundingResult
@@ -31,8 +31,10 @@ from agent.perception.screen_watcher import ScreenWatcher, ScreenChangeEvent
 from agent.perception.local_ocr import LocalOCR, OCRResult
 from agent.perception.sensory_fusion import SensoryFusion, SenseSample, FusedPerception
 from agent.perception.closed_loop_metrics import ClosedLoopMetricCollector
+from agent.core.logger import StructuredLogger, log_ignored
 
 log = StructuredLogger("perception_loop")
+
 
 
 @dataclass
@@ -244,6 +246,39 @@ class PerceptionActionLoop:
                 actual_retries += 1
                 continue
 
+            # V3: 操作自修复 — 常规重试耗尽后，尝试智能修复
+            if not verification.success and attempt >= retries:
+                try:
+                    from agent.perception.operation_self_repair import OperationSelfRepair, FailureContext
+                    _v3_repair = OperationSelfRepair()
+                    _v3_context = FailureContext(
+                        action_description=action_description,
+                        error_message=verification.evidence if verification else "",
+                        target_element=grounding.element if grounding else None,
+                        screenshot_before=pre_screenshot,
+                        screenshot_after=post_screenshot,
+                        attempt_count=actual_retries,
+                    )
+                    _v3_result = await _v3_repair.attempt_repair(_v3_context, original_action=action_description)
+                    if _v3_result.repaired and _v3_result.should_retry:
+                        log.info("V3: operation self-repair succeeded, retrying", strategy=_v3_result.strategy_used.value)
+                        if _v3_result.new_coordinates and action_fn is not None:
+                            try:
+                                await action_fn(_v3_result.new_coordinates, _v3_result.new_element)
+                                post_screenshot = await self._capture_screenshot()
+                                verification = await self._verifier.verify(
+                                    action_description=action_description,
+                                    post_path=post_screenshot,
+                                    strategy=verify_strategy,
+                                )
+                                if verification.success:
+                                    log.info("V3: repaired operation succeeded")
+                                    break
+                            except Exception as _v3_retry_exc:
+                                log.warning("V3: repaired operation retry failed", error=str(_v3_retry_exc))
+                except Exception as _v3_exc:
+                    log.debug("V3: operation self-repair failed", error=str(_v3_exc))
+
             break
 
         # 收集屏幕变化事件
@@ -421,5 +456,6 @@ class PerceptionActionLoop:
             if result.success:
                 return result.image_path
         except Exception as _exc:
+            log.debug("perception_loop 异常处理", error=str(_exc))
             log_ignored(log, "perception_loop._screenshot", _exc)
         return ""

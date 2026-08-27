@@ -13,10 +13,11 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from typing import Any
-
 from agent.core.logger import StructuredLogger, log_ignored
 
 log = StructuredLogger("action_verifier")
+
+
 
 
 @dataclass
@@ -130,6 +131,8 @@ class ActionVerifier:
             return await self._verify_ocr(pre_path, post_path, target_region)
         if strategy == "vlm":
             return await self._verify_vlm(pre_path, post_path, question or action_description)
+        if strategy == "ocr_pixel_fallback":
+            return await self._verify_ocr_pixel_fallback(pre_path, post_path, target_region, threshold, question or action_description)
         if strategy == "uia_diff":
             return await self._verify_uia_diff()
 
@@ -200,12 +203,99 @@ class ActionVerifier:
             return result
 
     def _select_strategy(self, target_region: str, question: str) -> str:
-        """自动选择验证策略。"""
+        """自动选择验证策略（含 VLM 离线降级）。
+
+        降级链：
+        1. 有 question → 优先 VLM，不可用则降级到 OCR+pixel 组合
+        2. 有 target_region → OCR（LocalOCR 不可用时降级到 pixel）
+        3. 默认 → pixel（始终可用，无需外部依赖）
+        """
         if question:
-            return "vlm"
+            if self._vlm_available():
+                return "vlm"
+            return "ocr_pixel_fallback"
         if target_region:
-            return "ocr"
+            if self._local_ocr_available():
+                return "ocr"
+            return "pixel"
         return "pixel"
+
+    def _vlm_available(self) -> bool:
+        """检测 VLM (Vision Language Model) 是否可用。"""
+        try:
+            from agent.perception.vlm_call import vlmc
+            return vlmc is not None
+        except ImportError:
+            return False
+
+    def _local_ocr_available(self) -> bool:
+        """检测 LocalOCR 是否可用。"""
+        try:
+            from agent.perception.local_ocr import LocalOCR
+            ocr = LocalOCR()
+            return len(ocr.available_engines) > 0
+        except Exception:
+            return False
+
+    async def _verify_ocr_pixel_fallback(
+        self,
+        pre_path: str,
+        post_path: str,
+        target_region: str,
+        threshold: float,
+        question: str = "",
+    ) -> VerificationResult:
+        """VLM 不可用时的降级组合验证：LocalOCR + pixel_diff。
+
+        策略：
+        1. pixel_diff 检测屏幕是否变化（快速、无需外部依赖）
+        2. LocalOCR 提取文字变化（语义级验证，需 PaddleOCR/Tesseract）
+        3. 综合两者结果，pixel 有变化 AND OCR 有变化 → 高置信度成功
+        4. 仅 pixel 变化 → 中置信度成功
+        5. 均无变化 → 失败，建议重试
+        """
+        pixel_result = await self._verify_pixel(pre_path, post_path, target_region, threshold)
+
+        ocr_result = await self._verify_ocr(pre_path, post_path, target_region)
+
+        if pixel_result.success and ocr_result.success:
+            return VerificationResult(
+                success=True,
+                confidence=max(pixel_result.confidence, ocr_result.confidence),
+                evidence=f"[降级] OCR+pixel 组合验证: {pixel_result.evidence}; {ocr_result.evidence}",
+                retry_suggested=False,
+                method="ocr_pixel_fallback",
+                diff_ratio=pixel_result.diff_ratio,
+            )
+
+        if pixel_result.success and not ocr_result.success:
+            return VerificationResult(
+                success=True,
+                confidence=pixel_result.confidence * 0.8,
+                evidence=f"[降级] pixel 检测变化但 OCR 未检测到文字变化: {pixel_result.evidence}",
+                retry_suggested=False,
+                method="ocr_pixel_fallback",
+                diff_ratio=pixel_result.diff_ratio,
+            )
+
+        if not pixel_result.success and ocr_result.success:
+            return VerificationResult(
+                success=True,
+                confidence=ocr_result.confidence * 0.7,
+                evidence=f"[降级] OCR 检测文字变化但 pixel 差异低于阈值: {ocr_result.evidence}",
+                retry_suggested=False,
+                method="ocr_pixel_fallback",
+                diff_ratio=pixel_result.diff_ratio,
+            )
+
+        return VerificationResult(
+            success=False,
+            confidence=0.0,
+            evidence=f"[降级] OCR+pixel 均未检测到变化: {pixel_result.evidence}; {ocr_result.evidence}",
+            retry_suggested=True,
+            method="ocr_pixel_fallback",
+            diff_ratio=pixel_result.diff_ratio,
+        )
 
     async def _verify_pixel(
         self, pre_path: str, post_path: str, target_region: str, threshold: float,
@@ -241,34 +331,17 @@ class ActionVerifier:
     async def _verify_ocr(
         self, pre_path: str, post_path: str, target_region: str,
     ) -> VerificationResult:
-        """OCR 文字对比验证。"""
+        """OCR 文字对比验证（优先 LocalOCR，降级 pytesseract）。"""
         try:
-            import pytesseract
-            from PIL import Image
-
-            def _extract(path: str) -> str:
-                img = Image.open(path)
-                if target_region:
-                    try:
-                        parts = [int(p.strip()) for p in target_region.split(",")]
-                        if len(parts) == 4:
-                            sw, sh = img.size
-                            x1 = parts[0] * sw // 1000
-                            y1 = parts[1] * sh // 1000
-                            x2 = parts[2] * sw // 1000
-                            y2 = parts[3] * sh // 1000
-                            img = img.crop((x1, y1, x2, y2))
-                    except (ValueError, IndexError) as _exc:
-                        log_ignored(log, "action_verifier._verify_ocr.crop", _exc)
-                return pytesseract.image_to_string(img, lang="chi_sim+eng").strip()
-
-            pre_text = _extract(pre_path)
-            post_text = _extract(post_path)
+            pre_text, post_text, engine_used = await self._extract_ocr_texts(
+                pre_path, post_path, target_region,
+            )
 
             if pre_text == post_text:
                 return VerificationResult(
                     success=False, confidence=0.8,
-                    evidence="OCR: 文字无变化", retry_suggested=True, method="ocr",
+                    evidence=f"OCR({engine_used}): 文字无变化",
+                    retry_suggested=True, method="ocr",
                 )
 
             pre_words = set(pre_text.split())
@@ -276,7 +349,7 @@ class ActionVerifier:
             added = post_words - pre_words
             removed = pre_words - post_words
 
-            evidence_parts = ["OCR: 文字已变化"]
+            evidence_parts = [f"OCR({engine_used}): 文字已变化"]
             if added:
                 evidence_parts.append(f"新增: {' '.join(list(added)[:5])}")
             if removed:
@@ -291,13 +364,61 @@ class ActionVerifier:
         except ImportError:
             return VerificationResult(
                 success=False, confidence=0.0,
-                evidence="pytesseract 未安装", method="ocr",
+                evidence="OCR 引擎不可用（需 PaddleOCR 或 Tesseract）",
+                method="ocr",
             )
         except Exception as e:
+            log.debug("action_verifier 异常处理", error=str(e))
             return VerificationResult(
                 success=False, confidence=0.0,
                 evidence=f"OCR 验证失败: {e}", method="ocr",
             )
+
+    async def _extract_ocr_texts(
+        self, pre_path: str, post_path: str, target_region: str,
+    ) -> tuple[str, str, str]:
+        """提取前后截图的 OCR 文本，优先 LocalOCR，降级 pytesseract。
+
+        Returns:
+            (pre_text, post_text, engine_name)
+        """
+        try:
+            from agent.perception.local_ocr import LocalOCR
+            ocr = LocalOCR()
+            if ocr.available_engines:
+                region = target_region if target_region else ""
+                pre_result = await ocr.recognize(pre_path, region=region)
+                post_result = await ocr.recognize(post_path, region=region)
+                return (
+                    pre_result.text,
+                    post_result.text,
+                    pre_result.engine or ocr.best_engine,
+                )
+        except Exception as _exc:
+            log_ignored(log, "action_verifier._extract_ocr_texts.local_ocr", _exc)
+
+        import pytesseract
+        from PIL import Image
+
+        def _extract(path: str) -> str:
+            img = Image.open(path)
+            if target_region:
+                try:
+                    parts = [int(p.strip()) for p in target_region.split(",")]
+                    if len(parts) == 4:
+                        sw, sh = img.size
+                        x1 = parts[0] * sw // 1000
+                        y1 = parts[1] * sh // 1000
+                        x2 = parts[2] * sw // 1000
+                        y2 = parts[3] * sh // 1000
+                        img = img.crop((x1, y1, x2, y2))
+                except (ValueError, IndexError) as _exc:
+                    log_ignored(log, "action_verifier._extract_ocr_texts.crop", _exc)
+            return pytesseract.image_to_string(img, lang="chi_sim+eng").strip()
+
+        pre_text = _extract(pre_path)
+        post_text = _extract(post_path)
+        return pre_text, post_text, "tesseract"
 
     async def _verify_vlm(self, pre_path: str, post_path: str, question: str) -> VerificationResult:
         """VLM 视觉模型验证。"""
@@ -351,6 +472,7 @@ class ActionVerifier:
                 evidence="vision_tools 不可用", method="vlm",
             )
         except Exception as e:
+            log.debug("action_verifier 异常处理", error=str(e))
             return VerificationResult(
                 success=False, confidence=0.0,
                 evidence=f"VLM 验证失败: {e}", method="vlm",
@@ -395,6 +517,7 @@ class ActionVerifier:
             )
 
         except Exception as e:
+            log.debug("action_verifier 异常处理", error=str(e))
             return VerificationResult(
                 success=False, confidence=0.0,
                 evidence=f"UIA 差异验证失败: {e}", method="uia_diff",
@@ -444,5 +567,6 @@ class ActionVerifier:
                 changed = sum(1 for a, b in zip(pixels_pre, pixels_post) if abs(a - b) > 30)
                 return changed / total
 
-        except Exception:
+        except Exception as _exc:
+            log.warning("异常降级处理", error=str(_exc))
             return 0.5

@@ -161,7 +161,7 @@ class CrossSessionMemory:
                         metadata=entry_data.get("metadata", {}),
                     )
                     self._memories[entry.id] = entry
-                log.info("Cross-session memories loaded", count=len(self._memories))
+                log.debug("Cross-session memories loaded", count=len(self._memories))
             except Exception as e:
                 log.warning("Failed to load cross-session memories", error=str(e))
 

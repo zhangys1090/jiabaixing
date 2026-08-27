@@ -21,6 +21,8 @@ from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
 from agent.evolution.llm_capability_detector import LLMCapabilities
+import logging
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -147,7 +149,8 @@ class CapabilityAwareRouter:
         if pricing is None:
             try:
                 from agent.llm.credential_pool import _MODEL_PRICING as pricing  # 懒加载，避免重导入
-            except Exception:
+            except Exception as e:
+                logger.warning("capability_aware_router._cost_score 定价加载失败", error=str(e))
                 pricing = None
         if not pricing or model_name not in pricing:
             return 5.0

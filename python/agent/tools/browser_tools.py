@@ -29,8 +29,8 @@ from agent.tools.browser_automation import (
     BrowserConfig,
     BrowserConnectionMode,
 )
-
 log = StructuredLogger("browser_tools")
+
 
 
 # ─────────────────────────────────────────────────────────────
@@ -236,6 +236,7 @@ async def browser_agent_executor(params: dict[str, Any]) -> ToolResult:
             duration=time.time() - start,
         )
     except Exception as e:
+        log.debug("browser_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"浏览器操作失败: {e}", duration=time.time() - start)
 
 
@@ -272,6 +273,7 @@ async def browser_navigate_executor(params: dict[str, Any]) -> ToolResult:
             duration=time.time() - start,
         )
     except Exception as e:
+        log.debug("browser_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"导航失败: {e}", duration=time.time() - start)
 
 
@@ -323,6 +325,7 @@ async def browser_screenshot_executor(params: dict[str, Any]) -> ToolResult:
             duration=time.time() - start,
         )
     except Exception as e:
+        log.debug("browser_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"截图失败: {e}", duration=time.time() - start)
 
 
@@ -371,6 +374,7 @@ async def browser_click_executor(params: dict[str, Any]) -> ToolResult:
             duration=time.time() - start,
         )
     except Exception as e:
+        log.debug("browser_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"点击失败: {e}", duration=time.time() - start)
 
 
@@ -422,6 +426,7 @@ async def browser_type_executor(params: dict[str, Any]) -> ToolResult:
             duration=time.time() - start,
         )
     except Exception as e:
+        log.debug("browser_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"输入失败: {e}", duration=time.time() - start)
 
 
@@ -468,6 +473,7 @@ async def browser_get_text_executor(params: dict[str, Any]) -> ToolResult:
             duration=time.time() - start,
         )
     except Exception as e:
+        log.debug("browser_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"获取文本失败: {e}", duration=time.time() - start)
 
 
@@ -512,6 +518,7 @@ async def browser_fill_form_executor(params: dict[str, Any]) -> ToolResult:
                 try:
                     await page.wait_for_selector(wait_for_selector, timeout=5000)
                 except Exception as _exc:
+                    log.debug("browser_tools 异常处理", error=str(_exc))
                     log_ignored(log, "browser_tools.browser_fill_form_executor", _exc)
 
             # ─── iframe 处理 ───
@@ -521,6 +528,7 @@ async def browser_fill_form_executor(params: dict[str, Any]) -> ToolResult:
                     frame_locator = page.frame_locator(iframe_selector)
                     fill_context = frame_locator
                 except Exception as _exc:
+                    log.debug("browser_tools 异常处理", error=str(_exc))
                     log_ignored(log, "browser_tools.browser_fill_form_executor", _exc)
 
             results: dict[str, bool] = {}
@@ -544,7 +552,8 @@ async def browser_fill_form_executor(params: dict[str, Any]) -> ToolResult:
                         else:
                             await page.fill(selector, str(value))
                         results[desc] = True
-                    except Exception:
+                    except Exception as _exc:
+                        log.debug("browser_tools 异常处理", error=str(_exc))
                         results[desc] = False
                 else:
                     results[desc] = False
@@ -561,6 +570,7 @@ async def browser_fill_form_executor(params: dict[str, Any]) -> ToolResult:
                         if await submit_btn.count() > 0:
                             await submit_btn.click()
                 except Exception as _exc:
+                    log.debug("browser_tools 异常处理", error=str(_exc))
                     log_ignored(log, "browser_tools.browser_fill_form_executor", _exc)
 
             filled = sum(1 for v in results.values() if v)
@@ -588,6 +598,7 @@ async def browser_fill_form_executor(params: dict[str, Any]) -> ToolResult:
             duration=time.time() - start,
         )
     except Exception as e:
+        log.debug("browser_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"表单填写失败: {e}", duration=time.time() - start)
 
 
@@ -646,6 +657,7 @@ async def _detect_captcha(page: Any) -> dict[str, Any]:
                             result["hint"] = "滑块验证码，需要拖动滑块到正确位置"
                         return result
             except Exception as e:
+                log.debug("browser_tools 异常处理", error=str(e))
                 log_ignored(log, "browser_tools._detect_captcha", e)
                 continue
 
@@ -692,6 +704,7 @@ async def _find_input_selector(page: Any, description: str, is_frame: bool = Fal
             if await input_inside.count() > 0:
                 return "input, textarea, select"
     except Exception as _exc:
+        log.debug("browser_tools 异常处理", error=str(_exc))
         log_ignored(log, "browser_tools._find_input_selector", _exc)
 
     # 策略2: placeholder匹配
@@ -700,6 +713,7 @@ async def _find_input_selector(page: Any, description: str, is_frame: bool = Fal
         if await by_placeholder.count() > 0:
             return f'[placeholder*="{description}" i]'
     except Exception as _exc:
+        log.debug("browser_tools 异常处理", error=str(_exc))
         log_ignored(log, "browser_tools._find_input_selector", _exc)
 
     # 策略3: name属性匹配
@@ -708,6 +722,7 @@ async def _find_input_selector(page: Any, description: str, is_frame: bool = Fal
         if await by_name.count() > 0:
             return f'[name*="{desc_lower}" i]'
     except Exception as _exc:
+        log.debug("browser_tools 异常处理", error=str(_exc))
         log_ignored(log, "browser_tools._find_input_selector", _exc)
 
     # 策略4: aria-label 匹配
@@ -716,6 +731,7 @@ async def _find_input_selector(page: Any, description: str, is_frame: bool = Fal
         if await by_aria.count() > 0:
             return f'[aria-label*="{description}" i]'
     except Exception as _exc:
+        log.debug("browser_tools 异常处理", error=str(_exc))
         log_ignored(log, "browser_tools._find_input_selector", _exc)
 
     # 策略5: 类型推断
@@ -726,6 +742,7 @@ async def _find_input_selector(page: Any, description: str, is_frame: bool = Fal
                 if await elem.count() > 0:
                     return selector
             except Exception as _exc:
+                log.debug("browser_tools 异常处理", error=str(_exc))
                 log_ignored(log, "browser_tools._find_input_selector", _exc)
 
     return None

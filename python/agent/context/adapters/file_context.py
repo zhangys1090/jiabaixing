@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from agent.context.base import ContextComponent
+import logging
 from agent.context.models import (
     BuildContext,
     ComponentDependency,
     ComponentPriority,
     ContextBuildRequest,
 )
+logger = logging.getLogger(__name__)
 
 
 class FileContextComponent(ContextComponent):
@@ -79,7 +81,8 @@ class FileContextComponent(ContextComponent):
                             f"--- {entry.file_name} ---\n{entry.content}"
                         )
                     context_content = "\n\n".join(context_parts)
-            except Exception:
+            except Exception as e:
+                logger.warning("file_context.load 文件上下文加载失败", error=str(e))
                 # 文件上下文加载失败，降级为空
                 context_files = []
                 context_content = ""

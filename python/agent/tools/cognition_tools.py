@@ -9,7 +9,10 @@ from agent.tools.registry import (
     ToolParameterDef,
     ToolResult,
 )
-from agent.core.logger import log_ignored
+from agent.core.logger import StructuredLogger, log_ignored
+import logging
+logger = logging.getLogger(__name__)
+log = StructuredLogger("cognition_tools")
 
 
 EMOTION_DETECT_DEF = ToolDefinition(
@@ -86,6 +89,7 @@ async def emotion_detect_executor(params: dict[str, Any]) -> ToolResult:
         content = response.get("content", "")
         return ToolResult(success=True, output=content, duration=time.time() - start)
     except Exception as e:
+        logger.warning("cognition_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"情绪分析失败: {e}")
 
 
@@ -140,6 +144,7 @@ async def scene_analyze_executor(params: dict[str, Any]) -> ToolResult:
 
         return ToolResult(success=True, output=content, duration=time.time() - start)
     except Exception as e:
+        logger.warning("cognition_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"场景分析失败: {e}")
 
 
@@ -170,4 +175,5 @@ async def self_reflect_executor(params: dict[str, Any]) -> ToolResult:
         content = response.get("content", "")
         return ToolResult(success=True, output=content, duration=time.time() - start)
     except Exception as e:
+        logger.warning("cognition_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"自我反思失败: {e}")

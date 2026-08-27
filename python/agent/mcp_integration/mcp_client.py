@@ -19,35 +19,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
-
 from agent.core.logger import StructuredLogger, log_ignored
+from agent.mcp.server_manager import MCPServerConfig
 
 log = StructuredLogger("mcp_client")
-
-
-@dataclass
-class MCPServerConfig:
-    """MCP 服务端配置。
-
-    Attributes:
-        name: 服务端名称。
-        transport: 传输方式 (stdio/sse)。
-        command: 启动命令（stdio 模式）。
-        args: 启动参数。
-        env: 环境变量。
-        url: 服务端 URL（SSE 模式）。
-        auto_start: 是否自动启动。
-        restart_on_failure: 失败时是否自动重启。
-    """
-
-    name: str = ""
-    transport: str = "stdio"
-    command: str = ""
-    args: list[str] = field(default_factory=list)
-    env: dict[str, str] = field(default_factory=dict)
-    url: str = ""
-    auto_start: bool = True
-    restart_on_failure: bool = True
 
 
 @dataclass
@@ -192,10 +167,12 @@ class MCPClient:
             try:
                 state.process.terminate()
                 await asyncio.wait_for(state.process.wait(), timeout=5.0)
-            except Exception:
+            except Exception as _exc:
+                log.debug("mcp_client 异常处理", error=str(_exc))
                 try:
                     state.process.kill()
                 except Exception as _exc:
+                    log.debug("mcp_client 异常处理", error=str(_exc))
                     log_ignored(log, "mcp_client.disconnect.kill", _exc)
 
         self._states.pop(name, None)
@@ -270,6 +247,7 @@ class MCPClient:
             return result
 
         except Exception as e:
+            log.debug("mcp_client 异常处理", error=str(e))
             state.error_count += 1
             log.warning("MCP 工具调用失败", server=server_name, tool=tool_name, error=str(e))
             return {"error": str(e)}
@@ -631,6 +609,7 @@ class MCPClient:
         except httpx.HTTPStatusError as e:
             return {"error": {"message": f"SSE HTTP 错误 {e.response.status_code}: {e}"}}
         except Exception as e:
+            log.debug("mcp_client 异常处理", error=str(e))
             return {"error": {"message": f"SSE 请求失败: {e}"}}
 
     @property

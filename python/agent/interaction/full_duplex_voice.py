@@ -24,8 +24,8 @@ from enum import Enum
 from typing import Any, Callable, Awaitable
 
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("full_duplex_voice")
+
 
 
 class VoiceDialogState(str, Enum):
@@ -87,6 +87,7 @@ class VoiceActivityDetector:
         self._speech_start: float | None = None
         self._last_speech_end: float | None = None
         self._speech_buffer: list[bytes] = []
+        self._MAX_SPEECH_BUFFER = 1000
         self._energy_history: list[float] = []
 
     def process_chunk(self, chunk: VoiceChunk) -> VADState:

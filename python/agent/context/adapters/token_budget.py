@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from agent.context.base import ContextComponent
+import logging
 from agent.context.models import (
     BuildContext,
     ComponentDependency,
     ComponentPriority,
     ContextBuildRequest,
 )
+logger = logging.getLogger(__name__)
 
 
 class TokenBudgetComponent(ContextComponent):
@@ -67,7 +69,8 @@ class TokenBudgetComponent(ContextComponent):
         if self._budget_allocator is not None:
             try:
                 allocation = self._budget_allocator.allocate()
-            except Exception:
+            except Exception as e:
+                logger.warning("token_budget.allocate 预算分配失败", error=str(e))
                 allocation = None
 
         # 默认预算分配

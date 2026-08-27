@@ -28,10 +28,11 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
+from agent.core.logger import StructuredLogger, log_ignored
 from agent.core.logger import StructuredLogger
-from agent.core.logger import log_ignored
 
 log = StructuredLogger("clipboard")
+
 
 
 class ClipboardBackend(str, Enum):
@@ -234,7 +235,8 @@ class Clipboard:
             with open(path, "w", encoding="utf-8") as f:
                 f.write(text)
             return True
-        except Exception:
+        except Exception as _exc:
+            log.warning("异常降级处理", error=str(_exc))
             return False
 
     def _paste_file(self) -> str:
@@ -244,5 +246,6 @@ class Clipboard:
                 with open(path, "r", encoding="utf-8") as f:
                     return f.read()
         except Exception as _exc:
+            log.debug("clipboard 异常处理", error=str(_exc))
             log_ignored(log, "clipboard.Clipboard._paste_file", _exc)
         return ""

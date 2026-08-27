@@ -47,12 +47,17 @@ export class LLMEmbeddingModel implements SemanticEmbeddingModel {
   private model: string;
   private cache: Map<string, number[]> = new Map();
   private fallbackToHash: boolean = false;
+  private fallbackLogged: boolean = false;
 
   constructor(config?: { apiKey?: string; baseURL?: string; model?: string }) {
     this.apiKey =
-      config?.apiKey || process.env.OPENAI_API_KEY || process.env.LLM_API_KEY;
+      config?.apiKey ||
+      process.env.EMBEDDING_API_KEY ||
+      process.env.OPENAI_API_KEY ||
+      process.env.LLM_API_KEY;
     this.baseURL =
       config?.baseURL ||
+      process.env.EMBEDDING_BASE_URL ||
       process.env.OPENAI_BASE_URL ||
       process.env.LLM_BASE_URL;
     this.model =
@@ -60,16 +65,20 @@ export class LLMEmbeddingModel implements SemanticEmbeddingModel {
   }
 
   async embed(text: string): Promise<number[]> {
-    // 1. 检查缓存
     const cached = this.cache.get(text);
     if (cached) return cached;
 
-    // 2. 如果没有 API Key 或已降级，使用 hash-based fallback
     if (!this.apiKey || this.fallbackToHash) {
+      if (!this.fallbackLogged) {
+        Logger.info(
+          'Embedding 使用 hash-based 向量（无 API Key 或已降级），语义检索精度有限',
+          'LLMEmbeddingModel'
+        );
+        this.fallbackLogged = true;
+      }
       return this.hashBasedEmbed(text);
     }
 
-    // 3. 调用真正的 embedding API
     try {
       const url = `${this.baseURL || 'https://api.openai.com/v1'}/embeddings`;
       const response = await fetch(url, {
@@ -80,7 +89,7 @@ export class LLMEmbeddingModel implements SemanticEmbeddingModel {
         },
         body: JSON.stringify({
           model: this.model,
-          input: text.substring(0, 8000), // API 限制
+          input: text.substring(0, 8000),
         }),
         signal: AbortSignal.timeout(10000),
       });
@@ -94,7 +103,6 @@ export class LLMEmbeddingModel implements SemanticEmbeddingModel {
       };
       const vector = data.data[0].embedding;
 
-      // 缓存（限制缓存大小）
       if (this.cache.size > 500) {
         const firstKey = this.cache.keys().next().value;
         if (firstKey) this.cache.delete(firstKey);
@@ -103,11 +111,14 @@ export class LLMEmbeddingModel implements SemanticEmbeddingModel {
 
       return vector;
     } catch (err) {
-      Logger.warn(
-        `Embedding API 调用失败，降级到 hash-based 向量: ${(err as Error).message}`,
-        'LLMEmbeddingModel'
-      );
       this.fallbackToHash = true;
+      if (!this.fallbackLogged) {
+        Logger.info(
+          `Embedding API 不可用 (${(err as Error).message})，已降级到 hash-based 向量，语义检索精度有限`,
+          'LLMEmbeddingModel'
+        );
+        this.fallbackLogged = true;
+      }
       return this.hashBasedEmbed(text);
     }
   }

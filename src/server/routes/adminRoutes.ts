@@ -7,8 +7,24 @@
  * Python 后端不可用时统一返回 503，与 mcpRoutes 行为一致。
  */
 
+import crypto from 'crypto';
 import express from 'express';
 import { Logger } from '../../utils/Logger';
+
+const ADMIN_TOKEN = process.env.JBX_ADMIN_TOKEN || '';
+
+function validateAdminToken(req: express.Request): boolean {
+  if (!ADMIN_TOKEN) return true;
+
+  const token = req.headers['x-admin-token'] as string | undefined;
+  if (!token) return false;
+
+  try {
+    return crypto.timingSafeEqual(Buffer.from(token), Buffer.from(ADMIN_TOKEN));
+  } catch {
+    return false;
+  }
+}
 
 function getPythonAgentUrl(): string {
   return process.env.PYTHON_AGENT_URL || 'http://localhost:3112';
@@ -16,6 +32,10 @@ function getPythonAgentUrl(): string {
 
 export function registerAdminRoutes(app: express.Application): void {
   const forward = async (req: express.Request, res: express.Response) => {
+    if (!validateAdminToken(req)) {
+      return res.status(403).json({ success: false, error: '无效的管理令牌' });
+    }
+
     const bridgePath = req.originalUrl; // 形如 /v1/admin/runtime/posture
     const target = `${getPythonAgentUrl()}${bridgePath}`;
     try {
@@ -51,14 +71,24 @@ export function registerAdminRoutes(app: express.Application): void {
       res.send(text);
     } catch (error) {
       Logger.error('R1 管理面代理失败', error as Error, 'AdminRoutes');
-      res.status(503).json({ success: false, error: 'Python 后端未连接或代理失败' });
+      res
+        .status(503)
+        .json({ success: false, error: 'Python 后端未连接或代理失败' });
     }
   };
 
   app.get('/v1/admin/runtime/posture', forward);
-  app.post('/v1/admin/runtime/posture', express.json({ limit: '1mb' }), forward);
+  app.post(
+    '/v1/admin/runtime/posture',
+    express.json({ limit: '1mb' }),
+    forward
+  );
   app.get('/v1/admin/runtime/lockdown', forward);
-  app.post('/v1/admin/runtime/lockdown', express.json({ limit: '1mb' }), forward);
+  app.post(
+    '/v1/admin/runtime/lockdown',
+    express.json({ limit: '1mb' }),
+    forward
+  );
   app.get('/v1/admin/plugins/trust', forward);
   app.post('/v1/admin/plugins/trust', express.json({ limit: '1mb' }), forward);
 }

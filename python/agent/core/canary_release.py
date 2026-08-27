@@ -24,6 +24,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 from agent.core.logger import log_ignored
+import logging
+logger = logging.getLogger(__name__)
 
 
 class RolloutStrategy(str, Enum):
@@ -526,4 +528,5 @@ async def safe_record_outcome(
             user_id, strategy_name, success=success, latency_ms=latency_ms
         )
     except Exception as _exc:
+        logger.warning("canary_release 异常处理", error=str(_exc))
         log_ignored(None, "canary_release.safe_record_outcome", _exc)

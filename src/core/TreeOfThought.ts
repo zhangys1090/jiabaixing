@@ -25,6 +25,7 @@ export interface ToTOptions {
 
 export class TreeOfThoughtEngine {
   private llm: LLMProvider;
+  private nodeIndex: Map<string, ToTNode> = new Map();
 
   constructor(llm: LLMProvider) {
     this.llm = llm;
@@ -47,6 +48,8 @@ export class TreeOfThoughtEngine {
       children: [],
       depth: 0,
     };
+    this.nodeIndex.clear();
+    this.nodeIndex.set(root.id, root);
 
     await this.expandToTNode(root, maxDepth, branchCount, evaluationTopK);
 
@@ -104,6 +107,7 @@ export class TreeOfThoughtEngine {
           parentId: node.id,
         };
         node.children.push(child);
+        this.nodeIndex.set(child.id, child);
         await this.expandToTNode(child, maxDepth, branchCount, topK);
       }
     } catch (error) {
@@ -116,7 +120,7 @@ export class TreeOfThoughtEngine {
 
   private buildExpansionPrompt(node: ToTNode, branchCount: number): string {
     const pathContext = this.getPathContext(node);
-    return `你是一个推理专家。请针对以下问题，生成 ${branchCount} 个不同的推理方向。
+    return `你是家百星的推理模块。请针对以下问题，生成 ${branchCount} 个不同的推理方向。
 
 问题: ${node.thought}
 
@@ -174,13 +178,8 @@ THOUGHT_3: [推理方向3]`;
     return parts.join(' → ');
   }
 
-  private findNodeById(root: ToTNode, id: string): ToTNode | undefined {
-    if (root.id === id) return root;
-    for (const child of root.children) {
-      const found = this.findNodeById(child, id);
-      if (found) return found;
-    }
-    return undefined;
+  private findNodeById(_root: ToTNode, id: string): ToTNode | undefined {
+    return this.nodeIndex.get(id);
   }
 
   private findBestToTPath(root: ToTNode): ToTNode[] {

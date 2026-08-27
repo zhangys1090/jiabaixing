@@ -23,8 +23,8 @@ from enum import Enum
 from typing import Any
 
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("aerial_locomotion_driver")
+
 
 
 class AerialDriverType(str, Enum):
@@ -149,6 +149,7 @@ class AerialLocomotionDriver:
             return result
 
         except Exception as e:
+            log.debug("aerial_locomotion_driver 异常处理", error=str(e))
             return {
                 "success": False,
                 "error": str(e),
@@ -263,6 +264,7 @@ class AerialLocomotionDriver:
                 "detail": resp_data.get("message", "HTTP API 飞行指令已发送"),
             }
         except Exception as e:
+            log.debug("aerial_locomotion_driver 异常处理", error=str(e))
             return {"success": False, "error": f"HTTP API 调用失败: {e}"}
 
     async def _execute_dji_sdk(self, action: Any) -> dict[str, Any]:

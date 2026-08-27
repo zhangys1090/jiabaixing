@@ -9,20 +9,57 @@ import { JiabaixingCore } from '../../core/JiabaixingCore';
 import { SkillRegistry } from '../../skills/SkillRegistry';
 import { Logger } from '../../utils/Logger';
 
-/**
- * 技能执行公共处理逻辑
- */
+const SKILL_RATE_LIMIT_WINDOW_MS = 60000;
+const SKILL_RATE_LIMIT_MAX = 30;
+const _skillRateMap = new Map<string, { count: number; resetAt: number }>();
+const MAX_SKILL_NAME_LENGTH = 128;
+
+function checkSkillRate(key: string): { allowed: boolean; resetIn: number } {
+  const now = Date.now();
+  const entry = _skillRateMap.get(key);
+  if (!entry || now >= entry.resetAt) {
+    _skillRateMap.set(key, {
+      count: 1,
+      resetAt: now + SKILL_RATE_LIMIT_WINDOW_MS,
+    });
+    return { allowed: true, resetIn: 0 };
+  }
+  if (entry.count >= SKILL_RATE_LIMIT_MAX) {
+    return { allowed: false, resetIn: entry.resetAt - now };
+  }
+  entry.count++;
+  return { allowed: true, resetIn: 0 };
+}
+
 async function handleSkillExecute(
   req: express.Request,
   res: express.Response
 ): Promise<void> {
   try {
+    const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
+    const rateResult = checkSkillRate(clientIp);
+    if (!rateResult.allowed) {
+      res.setHeader('Retry-After', Math.ceil(rateResult.resetIn / 1000));
+      res
+        .status(429)
+        .json({ success: false, error: '技能调用过于频繁，请稍后再试' });
+      return;
+    }
+
     const { skillName, params } = req.body as {
       skillName?: string;
       params?: Record<string, unknown>;
     };
     if (!skillName) {
       res.status(400).json({ success: false, error: '缺少 skillName' });
+      return;
+    }
+
+    if (
+      typeof skillName !== 'string' ||
+      skillName.length > MAX_SKILL_NAME_LENGTH
+    ) {
+      res.status(400).json({ success: false, error: 'skillName 格式无效' });
       return;
     }
 

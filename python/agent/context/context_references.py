@@ -21,7 +21,7 @@
 
     refs = ContextReferences()
     result = await refs.resolve("请分析 @file:src/main.py 中的问题")
-    print(result.resolved_text)
+    logger.info(result.resolved_text)
     # "请分析 ```python\\n...main.py content...\\n``` 中的问题"
 """
 
@@ -34,10 +34,11 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Coroutine
-
 from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("context_references")
+
+
 
 
 class ReferenceType(str, Enum):
@@ -122,6 +123,7 @@ class ContextReferences:
         self._resolvers: dict[ReferenceType, Callable[..., Coroutine[Any, Any, str]]] = {}
         self._cache: dict[str, tuple[str, float]] = {}
         self._cache_ttl: float = 300.0
+        self._MAX_CACHE_SIZE = 5000
 
     def register_resolver(
         self,
@@ -207,6 +209,7 @@ class ContextReferences:
                     size_bytes=len(content),
                 )
             except Exception as e:
+                log.debug("context_references 异常处理", error=str(e))
                 return ResolvedReference(
                     ref_type=ref_type,
                     original=f"@{ref_type.value}:{path}",
@@ -277,6 +280,7 @@ class ContextReferences:
                 size_bytes=len(resolved),
             )
         except Exception as e:
+            log.debug("context_references 异常处理", error=str(e))
             return ResolvedReference(
                 ref_type=ReferenceType.FILE,
                 original=ref_mark,
@@ -312,6 +316,7 @@ class ContextReferences:
                 size_bytes=len(content),
             )
         except Exception as e:
+            log.debug("context_references 异常处理", error=str(e))
             return ResolvedReference(
                 ref_type=ReferenceType.URL,
                 original=ref_mark,
@@ -372,6 +377,7 @@ class ContextReferences:
                 size_bytes=len(data),
             )
         except Exception as e:
+            log.debug("context_references 异常处理", error=str(e))
             return ResolvedReference(
                 ref_type=ReferenceType.IMAGE,
                 original=ref_mark,
@@ -391,3 +397,8 @@ class ContextReferences:
     def _set_cached(self, key: str, content: str) -> None:
         """设置缓存。"""
         self._cache[key] = (content, time.time())
+        if len(self._cache) > self._MAX_CACHE_SIZE:
+            sorted_keys = sorted(self._cache.items(), key=lambda x: x[1][1])
+            to_remove = sorted_keys[: len(self._cache) - (self._MAX_CACHE_SIZE * 3 // 4)]
+            for k, _ in to_remove:
+                del self._cache[k]

@@ -1,9 +1,9 @@
 import { spawn } from 'child_process';
+import { getActivePythonBridge } from '../../../ide/bridgeRegistry';
 import { Logger } from '../../../utils/Logger';
 import type { ITerminalBackend } from '../../sandbox/backends/ITerminalBackend';
 import type { ToolContext, ToolDefinition, ToolResult } from '../../types';
 import { Permission, ToolCategory } from '../../types';
-import { getActivePythonBridge } from '../../../ide/bridgeRegistry';
 
 export const SHELL_EXEC_DEF: ToolDefinition = {
   name: 'shell_exec',
@@ -175,7 +175,10 @@ export function isShellCommandDangerous(rawCommand: string): DangerousCheck {
       (t) => t === '-enc' || t === '-encodedcommand' || t.startsWith('-enc:')
     )
   ) {
-    return { blocked: true, reason: '禁止编码执行的 PowerShell 命令 (-enc/-encodedcommand)' };
+    return {
+      blocked: true,
+      reason: '禁止编码执行的 PowerShell 命令 (-enc/-encodedcommand)',
+    };
   }
   if (cmdName === 'cmd' && tokens.includes('/c')) {
     const rest = tokens.slice(tokens.indexOf('/c') + 1).join(' ');
@@ -190,7 +193,14 @@ export function isShellCommandDangerous(rawCommand: string): DangerousCheck {
   const WIN_FLAGS = new Set(['/s', '/q', '/s/q', '/q/s']);
   const ALL_RM_FLAGS = new Set([...RM_FLAGS, ...WIN_FLAGS]);
   const RECURSIVE_SUBSET = new Set([
-    '-r', '-rf', '-fr', '-R', '/s', '/q', '/s/q', '/q/s',
+    '-r',
+    '-rf',
+    '-fr',
+    '-R',
+    '/s',
+    '/q',
+    '/s/q',
+    '/q/s',
   ]);
   if (destructive.has(cmdName)) {
     const hasRecursive = tokens.some((t) => RECURSIVE_SUBSET.has(t));
@@ -216,7 +226,9 @@ export function isShellCommandDangerous(rawCommand: string): DangerousCheck {
   // chmod / chown 递归 + 777 / 根目录
   if (cmdName === 'chmod' || cmdName === 'chown') {
     const hasRecursive = tokens.some((t) => t === '-r' || t === '-R');
-    const targetTokens = tokens.slice(1).filter((t) => t !== '-r' && t !== '-R');
+    const targetTokens = tokens
+      .slice(1)
+      .filter((t) => t !== '-r' && t !== '-R');
     const hitsRoot = targetTokens.some(
       (t) =>
         t === '/' ||
@@ -418,7 +430,11 @@ ${output.substring(0, 3000)}
 3. 如果是列表/表格，提取最重要的几项
 4. 不要重复原始输出`;
 
-    return await llm.chat(prompt, [], '你是一个命令行输出解读专家。简洁回答。');
+    return await llm.chat(
+      prompt,
+      [],
+      '你是家百星的命令行输出解读模块。简洁回答。'
+    );
   } catch {
     return '';
   }
@@ -518,7 +534,11 @@ export function createShellExecExecutor(deps: ShellExecDeps = {}) {
           if (pyRes?.success) {
             let finalOutput = String(pyRes.output ?? '').substring(0, 10000);
             if (interpret && deps.llm) {
-              const interp = await interpretOutput(deps.llm, command, String(pyRes.output ?? ''));
+              const interp = await interpretOutput(
+                deps.llm,
+                command,
+                String(pyRes.output ?? '')
+              );
               if (interp) finalOutput += `\n\n📖 解读:\n${interp}`;
             }
             return ok(finalOutput, duration, {

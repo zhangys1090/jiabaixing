@@ -229,6 +229,7 @@ class HotReloader:
             log.info("重载完成", type=reload_type.value, target=target, status=status.value)
             return entry
         except Exception as e:
+            log.debug("restart 异常处理", error=str(e))
             duration = (time.monotonic() - start) * 1000
             rolled_back = await self._rollback(snapshot)
             status = ReloadStatus.ROLLED_BACK if rolled_back else ReloadStatus.FAILED
@@ -271,6 +272,7 @@ class HotReloader:
                 duration_ms=duration,
             )
         except Exception as e:
+            log.debug("restart 异常处理", error=str(e))
             duration = (time.monotonic() - start) * 1000
             entry = ReloadEntry(
                 id=f"reload_{int(time.time()*1000)}",

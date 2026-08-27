@@ -32,7 +32,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 PY_ROOT = HERE.parent
 
 sys.path.insert(0, str(HERE))
-from check_silent_except import (  # noqa: E402  - 复用唯一判定源，防止两套规则漂移
+from check_silent_except import (
     _is_optional_dependency_guard,
     _is_silent,
 )

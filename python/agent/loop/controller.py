@@ -73,6 +73,7 @@ from agent.loop.middleware import (
     PerceptionInjectMiddleware,
     WorkflowInjectMiddleware,
     McpResourceInjectMiddleware,
+    SandboxAuditMiddleware,
 )
 from agent.tools.registry import ToolRegistry
 from agent.perception.bus import PerceptionBus, PerceptionLevel, PerceptionState
@@ -84,9 +85,9 @@ from agent.core.logger import log_ignored
 from agent.loop.debater import DefaultDebater, DebaterOutput
 from agent.loop.plan_quality_checker import PlanQualityChecker
 from agent.loop.feedback_loops import FeedbackLoops
+log = StructuredLogger("controller")
 
 # 模块级日志器：供 replan / A2A fallback / meta reflection 等所有代码路径使用
-log = StructuredLogger("controller")
 
 
 class InferenceCacheEntry:
@@ -257,9 +258,16 @@ class LoopController:
 
         # P0-2: ReAct 循环重规划计数器
         self._replan_count: int = 0
+        self._meta_reflect_counter: int = 0
 
         # P0-2: 工作流引擎 — 主循环感知工作流状态
         self._workflow_engine = workflow_engine
+
+        # Phase 3+4: 沙箱审计子代理 — 周期性检测隔离完整性
+        from agent.sandbox.sandbox_audit_agent import SandboxAuditAgent
+        self._sandbox_audit_agent = SandboxAuditAgent(
+            check_interval_sec=float(os.environ.get("SANDBOX_AUDIT_INTERVAL", "120")),
+        )
 
         # 安全沙箱：高风险动作预检 + 人工审批联动（注入执行器）
         self._risk_precheck = risk_precheck
@@ -281,6 +289,7 @@ class LoopController:
                     ),
                 )
             except Exception as _exc:
+                log.debug("controller 异常处理", error=str(_exc))
                 log_ignored(log, "controller.LoopController.__init__.perception_bus", _exc)
                 self._perception_bus = None
         elif tool_registry and not self._perception_bus._tool_registry:
@@ -351,6 +360,10 @@ class LoopController:
         self._middleware_pipeline.use(PerceptionInjectMiddleware(self._perception_loop))
         self._middleware_pipeline.use(WorkflowInjectMiddleware(self._workflow_engine))
         self._middleware_pipeline.use(McpResourceInjectMiddleware(self._mcp_resource_events))
+        # Phase 3+4: 沙箱审计中间件 — 将沙箱健康状态和指标注入主循环上下文
+        self._middleware_pipeline.use(SandboxAuditMiddleware(
+            enabled=os.environ.get("SANDBOX_AUDIT_MIDDLEWARE_ENABLED", "true").lower() == "true",
+        ))
 
         # 检查环境变量启用状态
         if os.environ.get("LOOP_OBSERVER_ENABLED", "").lower() == "true":
@@ -475,6 +488,7 @@ class LoopController:
                 if result is not None and hasattr(result, "__await__"):
                     await result
             except Exception as e:
+                log.debug("controller 异常处理", error=str(e))
                 from agent.core.logger import StructuredLogger as _SL
                 _SL("controller").warning("Hook error", hook=hook.value, error=str(e))
 
@@ -526,6 +540,7 @@ class LoopController:
                 )
                 max_duration_ms = allocation.max_duration_ms
             except Exception as _exc:
+                log.debug("controller 异常处理", error=str(_exc))
                 log_ignored(log, "controller.LoopController.run.agent_native_budget", _exc)
 
         context = LoopContext(
@@ -555,6 +570,7 @@ class LoopController:
         try:
             self._feedback_collector.on_user_message(input_text)
         except Exception as _exc:
+            log.debug("controller 异常处理", error=str(_exc))
             log_ignored(log, "controller.LoopController.run", _exc)
 
         exec_record: ExecutionRecord | None = None
@@ -582,6 +598,7 @@ class LoopController:
             try:
                 self._intent_tracker.set_initial_intent(input_text)
             except Exception as _exc:
+                log.debug("controller 异常处理", error=str(_exc))
                 log_ignored(log, "controller.LoopController.run.intent_init", _exc)
 
         while True:
@@ -598,6 +615,7 @@ class LoopController:
                         messages=context.messages,
                     )
                 except Exception as _exc:
+                    log.debug("controller 异常处理", error=str(_exc))
                     log_ignored(log, "controller.LoopController.run.checkpoint_on_cancel", _exc)
                 break
 
@@ -642,6 +660,7 @@ class LoopController:
                         )
                         break
                 except Exception as _exc:
+                    log.debug("controller 异常处理", error=str(_exc))
                     log_ignored(log, "controller.LoopController.run", _exc)
 
             context.budget.rounds_used += 1
@@ -687,6 +706,7 @@ class LoopController:
                                 if not perception_state.environment.screen_resolution and historical.environment.screen_resolution:
                                     perception_state.environment.screen_resolution = historical.environment.screen_resolution
                         except Exception as _exc:
+                            log.debug("controller 异常处理", error=str(_exc))
                             log_ignored(log, "controller.LoopController.run.historical_env", _exc)
 
                     context.perception_state = perception_state
@@ -707,6 +727,7 @@ class LoopController:
                         scene=perception_state.scene.scene_type,
                     )
                 except Exception as _exc:
+                    log.debug("controller 异常处理", error=str(_exc))
                     log_ignored(log, "controller.LoopController.run.perceive", _exc)
 
             self._observer.end_phase(
@@ -751,6 +772,7 @@ class LoopController:
                         avoid_tools=len(p_constraints.avoid_tools),
                     )
                 except Exception as _exc:
+                    log.debug("controller 异常处理", error=str(_exc))
                     log_ignored(log, "controller.LoopController.run.perception_driven_planning", _exc)
 
             # P1-修复4: 元决策策略选择 — 基于感知状态用 Q-Learning 选择决策策略
@@ -776,6 +798,7 @@ class LoopController:
                         risk_level=_meta_ctx.risk_level,
                     )
                 except Exception as _exc:
+                    log.debug("controller 异常处理", error=str(_exc))
                     log_ignored(log, "controller.LoopController.run.meta_decide", _exc)
 
             # ─── Phase 1: PLANNING ───
@@ -797,6 +820,7 @@ class LoopController:
                             steps=len(plan.steps),
                         )
                 except Exception as _exc:
+                    log.debug("controller 异常处理", error=str(_exc))
                     log_ignored(log, "controller.LoopController.run.mcts_driven_plan", _exc)
 
             # 闭环修复：感知约束 → 规划约束 — 将感知驱动的工具偏好/规避注入规划上下文
@@ -820,6 +844,7 @@ class LoopController:
                             "content": f"【规划约束（感知驱动）】{'；'.join(constraint_parts)}",
                         })
                 except Exception as _exc:
+                    log.debug("controller 异常处理", error=str(_exc))
                     log_ignored(log, "controller.LoopController.run.perception_to_plan", _exc)
 
             if plan is None or replan_count > 0:
@@ -838,6 +863,7 @@ class LoopController:
                                     quality=getattr(_cached_result, 'goal_progress', 0),
                                 )
                     except Exception as _exc:
+                        log.debug("controller 异常处理", error=str(_exc))
                         log_ignored(log, "controller.LoopController.run.inference_cache_lookup", _exc)
 
                 # W2-4: 历史经验驱动规划 — 从 TrajectoryDatabase 检索相似任务经验
@@ -888,6 +914,7 @@ class LoopController:
                                     high_quality_count=high_quality_count,
                                 )
                     except Exception as _exc:
+                        log.debug("controller 异常处理", error=str(_exc))
                         log_ignored(log, "controller.LoopController.run.experience_inject", _exc)
 
                 plan = await self._plan_scheduler.schedule(input_text, context)
@@ -899,6 +926,7 @@ class LoopController:
                         # 规划阶段即把「需审批」步骤推给前端确认 UI（预览一次、执行即放行）
                         await self._risk_precheck.preview_plan(plan)
                     except Exception as _exc:
+                        log.debug("controller 异常处理", error=str(_exc))
                         log_ignored(log, "controller.LoopController.run.annotate_plan", _exc)
 
                 if not plan.simple:
@@ -927,7 +955,8 @@ class LoopController:
                 if causal_task is not None:
                     try:
                         causal_graph = await causal_task
-                    except Exception:
+                    except Exception as _exc:
+                        log.debug("controller 异常处理", error=str(_exc))
                         causal_graph = None
 
                 await self._fire_hook(LifecycleHook.AFTER_PLAN, context, {"plan": plan})
@@ -1060,7 +1089,8 @@ class LoopController:
             if not has_chain and causal_graph and causal_graph.nodes:
                 try:
                     parallel_groups = self.causal.find_parallel_groups(causal_graph)
-                except Exception:
+                except Exception as _exc:
+                    log.debug("controller 异常处理", error=str(_exc))
                     parallel_groups = None
 
             use_orchestration = (
@@ -1110,8 +1140,10 @@ class LoopController:
                                     steps=len(plan.steps),
                                 )
                         except Exception as _exc:
+                            log.debug("controller 异常处理", error=str(_exc))
                             log_ignored(log, "controller.LoopController.run.orchestration_history", _exc)
                 except Exception as _exc:
+                    log.debug("controller 异常处理", error=str(_exc))
                     log_ignored(log, "controller.LoopController.run.orchestration_trigger", _exc)
 
             if has_chain:
@@ -1155,6 +1187,7 @@ class LoopController:
                             latency_ms=getattr(sr, "duration_ms", 0) or 0,
                         )
                     except Exception as _exc:
+                        log.debug("controller 异常处理", error=str(_exc))
                         log_ignored(log, "controller.LoopController.run.adaptive_degradation", _exc)
 
             # Phase 3+4: 交互中断与恢复 — 每轮执行后保存检查点
@@ -1167,6 +1200,7 @@ class LoopController:
                     messages=context.messages,
                 )
             except Exception as _exc:
+                log.debug("controller 异常处理", error=str(_exc))
                 log_ignored(log, "controller.LoopController.run.checkpoint_save", _exc)
 
             # P1-1: 感知验证结果注入 — 桌面操作验证失败时提示 LLM
@@ -1197,6 +1231,7 @@ class LoopController:
                         },
                     )
                 except Exception as _exc:
+                    log.debug("controller 异常处理", error=str(_exc))
                     log_ignored(log, "controller.LoopController.run", _exc)
 
                 await self._reflect_on_failure(failed_steps[0], context)
@@ -1212,6 +1247,7 @@ class LoopController:
                         session_id=session_id,
                     )
                 except Exception as _exc:
+                    log.debug("controller 异常处理", error=str(_exc))
                     log_ignored(log, "controller.LoopController.run.failure_learn", _exc)
 
             # P1-1: 成功反思 — 从成功执行中提炼模式和最佳实践
@@ -1225,6 +1261,7 @@ class LoopController:
                         context={"traceId": context.trace_id, "step_id": sr.step_id},
                     )
                 except Exception as _exc:
+                    log.debug("controller 异常处理", error=str(_exc))
                     log_ignored(log, "controller.LoopController.run", _exc)
 
             # 因果影响分析（如果有失败的步骤）
@@ -1279,6 +1316,7 @@ class LoopController:
                     context.metadata["verification_score"] = 1.0
                     context.metadata["verification_passed"] = True
             except Exception as _exc:
+                log.debug("controller 异常处理", error=str(_exc))
                 log_ignored(log, "controller.LoopController.run.verify", _exc)
 
             self._observer.end_phase(
@@ -1312,6 +1350,7 @@ class LoopController:
                             types=[a.action_type.value for a in proactive_actions],
                         )
                 except Exception as _exc:
+                    log.debug("controller 异常处理", error=str(_exc))
                     log_ignored(log, "controller.LoopController.run.proactive", _exc)
 
             # ─── P2 优化：评估并行启动，与轻量反思/注意力聚焦重叠 ───
@@ -1341,10 +1380,12 @@ class LoopController:
                         context.messages = compressed_msgs
                 else:
                     self._attention_focus.apply_to_context(context)
-            except Exception:
+            except Exception as _exc:
+                log.debug("controller 异常处理", error=str(_exc))
                 try:
                     self._attention_focus.apply_to_context(context)
                 except Exception as _exc:
+                    log.debug("controller 异常处理", error=str(_exc))
                     log_ignored(log, "controller.LoopController.run", _exc)
 
             # ─── Phase 3: EVALUATING ───
@@ -1374,6 +1415,7 @@ class LoopController:
                         quality=_quality,
                     )
                 except Exception as _exc:
+                    log.debug("controller 异常处理", error=str(_exc))
                     log_ignored(log, "controller.LoopController.run.inference_cache_store", _exc)
 
             # Phase 3+4: 自适应执行策略引擎 — 统一调度多维度策略信号
@@ -1431,6 +1473,7 @@ class LoopController:
                                 eval_result = eval_result._replace(suggested_action="replan") if hasattr(eval_result, '_replace') else eval_result
                                 self._logger.info("Adaptive strategy override: continue → replan")
                 except Exception as _exc:
+                    log.debug("controller 异常处理", error=str(_exc))
                     log_ignored(log, "controller.LoopController.run.adaptive_strategy", _exc)
 
             await self._fire_hook(LifecycleHook.AFTER_EVALUATE, context, {"eval_result": eval_result})
@@ -1465,6 +1508,7 @@ class LoopController:
                             if rt.get('tool_recommendations'):
                                 context.metadata['tool_weights'] = rt['tool_recommendations']
                         except Exception as _exc:
+                            log.debug("controller 异常处理", error=str(_exc))
                             log_ignored(log, "controller.LoopController.run", _exc)
 
                     log.info(
@@ -1474,6 +1518,7 @@ class LoopController:
                         slow_down=should_slow_down,
                     )
                 except Exception as _exc:
+                    log.debug("controller 异常处理", error=str(_exc))
                     log_ignored(log, "controller.LoopController.run", _exc)
 
             if should_slow_down:
@@ -1503,6 +1548,7 @@ class LoopController:
                                     merged=_consolidation_report.get("merged", 0),
                                 )
                 except Exception as _exc:
+                    log.debug("controller 异常处理", error=str(_exc))
                     log_ignored(log, "controller.LoopController.run.memory_consolidation", _exc)
 
             # W2-2: 步骤级动态调整 — should_replan + suggest_step_adjustment
@@ -1566,6 +1612,7 @@ class LoopController:
                                     rolled_back=len(_rollback_result),
                                 )
                         except Exception as _exc:
+                            log.debug("controller 异常处理", error=str(_exc))
                             log_ignored(log, "controller.LoopController.run.rollback_on_exhaust", _exc)
                     break
 
@@ -1586,6 +1633,7 @@ class LoopController:
                                 current=drift.current_intent[:50],
                             )
                     except Exception as _exc:
+                        log.debug("controller 异常处理", error=str(_exc))
                         log_ignored(log, "controller.LoopController.run.intent_drift", _exc)
 
                 if eval_result.failure_analysis:
@@ -1604,6 +1652,7 @@ class LoopController:
                                 "content": _lesson,
                             })
                     except Exception as _exc:
+                        log.debug("controller 异常处理", error=str(_exc))
                         log_ignored(log, "controller.LoopController.run.failure_inject", _exc)
 
                 failed_info = [
@@ -1630,6 +1679,7 @@ class LoopController:
                         # 重规划后同样推送待审批预览至前端确认 UI
                         await self._risk_precheck.preview_plan(plan)
                     except Exception as _exc:
+                        log.debug("controller 异常处理", error=str(_exc))
                         log_ignored(log, "controller.LoopController.run.annotate_replan", _exc)
                 log.info(
                     "Iterative replan",
@@ -1668,8 +1718,10 @@ class LoopController:
                 try:
                     asyncio.ensure_future(_evo_target.ingest_structured_report(structured_report))
                 except Exception as _exc:
+                    log.debug("controller 异常处理", error=str(_exc))
                     log_ignored(log, "controller.LoopController.run.report_to_evolution", _exc)
         except Exception as _exc:
+            log.debug("controller 异常处理", error=str(_exc))
             log_ignored(log, "controller.LoopController.run.structured_report", _exc)
 
         await self._fire_hook(LifecycleHook.AFTER_RESPONSE, context, {"report": report})
@@ -1684,6 +1736,7 @@ class LoopController:
         try:
             self._feedback_collector.on_ai_message(report.response)
         except Exception as _exc:
+            log.debug("controller 异常处理", error=str(_exc))
             log_ignored(log, "controller.LoopController.run", _exc)
 
         # 循环观察者：结束追踪
@@ -1738,6 +1791,7 @@ class LoopController:
                     user_corrections=[],
                 ))
             except Exception as _exc:
+                log.debug("controller 异常处理", error=str(_exc))
                 log_ignored(log, "controller.LoopController.run", _exc)
 
         self.state = LoopState.COMPLETED
@@ -1746,10 +1800,27 @@ class LoopController:
         self._save_reflection_experience(input_text, context, report.quality_score >= 0.6)
 
         # P1-1: 每 10 次 loop 触发一次元反思
-        self._meta_reflect_counter = getattr(self, '_meta_reflect_counter', 0) + 1
+        self._meta_reflect_counter += 1
         if self._meta_reflect_counter >= 10:
             self._meta_reflect_counter = 0
-            asyncio.ensure_future(self._trigger_meta_reflect(context))
+            try:
+                await self._trigger_meta_reflect(context)
+            except Exception as _exc:
+                log.debug("controller 异常处理", error=str(_exc))
+                log_ignored(log, "controller.LoopController.run.meta_reflect", _exc)
+
+        # Phase 3+4: 沙箱审计 — 每 10 次 loop 执行一次完整审计
+        try:
+            audit_report = await self._sandbox_audit_agent.run_audit()
+            if audit_report.has_critical:
+                log.warning(
+                    "Sandbox audit: critical findings",
+                    count=sum(1 for f in audit_report.findings if f.severity.value == "critical"),
+                )
+            context.metadata["sandbox_audit"] = audit_report.to_dict()
+        except Exception as _exc:
+            log.debug("controller 异常处理", error=str(_exc))
+            log_ignored(log, "controller.LoopController.run.sandbox_audit", _exc)
 
         # OTel 指标：记录循环迭代次数与总耗时
         try:
@@ -1761,6 +1832,7 @@ class LoopController:
             _loop_duration_s = time.time() - context.budget.start_time
             loop_duration_histogram().record(_loop_duration_s)
         except Exception as _exc:
+            log.debug("controller 异常处理", error=str(_exc))
             log_ignored(log, "controller.LoopController.run", _exc)
 
         # P1-2: 对话后自动提取知识 — 异步执行不阻塞返回
@@ -1770,6 +1842,7 @@ class LoopController:
                     context.messages, session_id=session_id,
                 ))
             except Exception as _exc:
+                log.debug("controller 异常处理", error=str(_exc))
                 log_ignored(log, "controller.LoopController.run.knowledge_ingest", _exc)
 
         # Phase 3: 元决策经验记录 — 记录本轮决策策略和结果
@@ -1793,6 +1866,7 @@ class LoopController:
                     session_id=session_id,
                 )
             except Exception as _exc:
+                log.debug("controller 异常处理", error=str(_exc))
                 log_ignored(log, "controller.LoopController.run.meta_decision_record", _exc)
 
         # Phase 3+4: 决策可解释性 — 记录本轮关键决策的完整决策链
@@ -1828,6 +1902,7 @@ class LoopController:
                 actual_outcome=f"完成 {report.steps_completed}/{report.steps_total} 步骤",
             )
         except Exception as _exc:
+            log.debug("controller 异常处理", error=str(_exc))
             log_ignored(log, "controller.LoopController.run.decision_trace", _exc)
 
         return AgentResult(
@@ -1914,6 +1989,7 @@ class LoopController:
                         "content": f"【相关历史知识】\n{knowledge_text}",
                     })
             except Exception as _exc:
+                log.debug("controller 异常处理", error=str(_exc))
                 log_ignored(log, "controller.LoopController.run_react_loop.knowledge_inject", _exc)
 
         self.state = LoopState.EXECUTING
@@ -1961,6 +2037,7 @@ class LoopController:
                         context.messages.insert(0, {"role": "system", "content": perception_text})
                     self.state = LoopState.EXECUTING
                 except Exception as _exc:
+                    log.debug("controller 异常处理", error=str(_exc))
                     log_ignored(log, "controller.LoopController.run_react_loop.perceive", _exc)
                     self.state = LoopState.EXECUTING
 
@@ -1982,6 +2059,7 @@ class LoopController:
                             context.messages, session_id=session_id,
                         ))
                     except Exception as _exc:
+                        log.debug("controller 异常处理", error=str(_exc))
                         log_ignored(log, "controller.LoopController.run_react_loop.knowledge_ingest", _exc)
                 return AgentResult(
                     response=final_answer,
@@ -2031,6 +2109,7 @@ class LoopController:
             try:
                 self._attention_focus.apply_to_context(context, max_messages=12)
             except Exception as _exc:
+                log.debug("controller 异常处理", error=str(_exc))
                 log_ignored(log, "controller.LoopController.run_react_loop", _exc)
 
             if action_result.success and action_result.is_complete:
@@ -2042,6 +2121,7 @@ class LoopController:
                             context.messages, session_id=session_id,
                         ))
                     except Exception as _exc:
+                        log.debug("controller 异常处理", error=str(_exc))
                         log_ignored(log, "controller.LoopController.run_react_loop.knowledge_ingest", _exc)
 
                 # P1-1: 任务完成后自动复盘 — 调用反思引擎沉淀经验
@@ -2056,6 +2136,7 @@ class LoopController:
                             session_id=session_id,
                         )
                     except Exception as _exc:
+                        log.debug("controller 异常处理", error=str(_exc))
                         log_ignored(log, "controller.LoopController.run_react_loop.auto_reflect", _exc)
 
                 return AgentResult(
@@ -2187,6 +2268,7 @@ class LoopController:
                                         replan_count=self._replan_count,
                                     )
                             except Exception as _replan_exc:
+                                log.debug("controller 异常处理", error=str(_replan_exc))
                                 log_ignored(log, "controller.LoopController._react_observe.auto_replan", _replan_exc)
 
         self.state = LoopState.REPORTING
@@ -2197,6 +2279,7 @@ class LoopController:
                     context.messages, session_id=session_id,
                 ))
             except Exception as _exc:
+                log.debug("controller 异常处理", error=str(_exc))
                 log_ignored(log, "controller.LoopController.run_react_loop.knowledge_ingest", _exc)
         return AgentResult(
             response=context.messages[-1].get("content", "") if context.messages else "达到最大迭代次数",
@@ -2398,6 +2481,7 @@ class LoopController:
                             threshold=quality_threshold,
                         )
                 except Exception as _exc:
+                    log.debug("controller 异常处理", error=str(_exc))
                     log_ignored(log, "controller.LoopController._react_observe.quality_check", _exc)
 
             return observation
@@ -2456,7 +2540,8 @@ class LoopController:
         try:
             complexity = await self.planner._analyze_complexity_semantic(input_text)
             return complexity == "simple"
-        except Exception:
+        except Exception as _exc:
+            log.warning("异常降级处理", error=str(_exc))
             return True  # 语义分析失败时信任关键词判定
 
     def _derive_task_type(self, input_text: str) -> str:
@@ -2477,7 +2562,8 @@ class LoopController:
         try:
             complexity = self.planner._analyze_complexity(input_text)
             return complexity  # "simple" / "moderate" / "complex"
-        except Exception:
+        except Exception as _exc:
+            log.debug("controller 异常处理", error=str(_exc))
             return "moderate"
 
     def _compute_complexity(self, input_text: str | None) -> float | None:
@@ -2499,7 +2585,8 @@ class LoopController:
             raw_score = self.planner._keyword_complexity_score(input_text)
             # 归一化到 0.0-1.0：5+ 个关键词命中即视为最高复杂度
             return min(1.0, raw_score / 5.0)
-        except Exception:
+        except Exception as _exc:
+            log.warning("异常降级处理", error=str(_exc))
             return None
 
     def _detect_agent_native(self) -> bool:
@@ -2525,7 +2612,8 @@ class LoopController:
             detector = LLMCapabilityDetector()
             caps = detector.detect(model_name, provider=provider)
             return getattr(caps, "agent_native", False)
-        except Exception:
+        except Exception as _exc:
+            log.warning("异常降级处理", error=str(_exc))
             return False
 
     def _resolve_budget_max_duration(self, task_type: str, input_text: str | None = None) -> int:
@@ -2559,6 +2647,7 @@ class LoopController:
                 if estimate is not None:
                     return int(estimate.estimated_ms * 1.2)
             except Exception as _exc:
+                log.debug("controller 异常处理", error=str(_exc))
                 log_ignored(log, "controller.LoopController._resolve_budget_max_duration", _exc)
 
         # 降级到 ConstraintsService.resolve_adaptive_budget 静态配置
@@ -2567,6 +2656,7 @@ class LoopController:
                 allocation = self.constraints_service.resolve_adaptive_budget(task_type)
                 return allocation.max_duration_ms
             except Exception as _exc:
+                log.debug("controller 异常处理", error=str(_exc))
                 log_ignored(log, "controller.LoopController._resolve_budget_max_duration", _exc)
 
         # 最终兜底：AdaptiveBudgetConfig 静态默认值
@@ -2580,7 +2670,8 @@ class LoopController:
             }
             allocation = base_map.get(task_type, config.moderate)
             return allocation.max_duration_ms
-        except Exception:
+        except Exception as _exc:
+            log.debug("controller 异常处理", error=str(_exc))
             return 60000  # BudgetAllocation 默认 max_duration_ms
 
     def _build_react_tool_list(self) -> str:
@@ -2639,7 +2730,8 @@ class LoopController:
                                 try:
                                     import json as _json
                                     tool_args = _json.loads(content[brace_start : i + 1])
-                                except Exception:
+                                except Exception as _exc:
+                                    log.debug("controller 异常处理", error=str(_exc))
                                     tool_args = {}
                                 break
                     i += 1
@@ -2717,14 +2809,17 @@ class LoopController:
                         },
                     )
                 except Exception as _exc:
+                    log.debug("controller 异常处理", error=str(_exc))
                     log_ignored(log, "controller.LoopController._lightweight_reflection_round", _exc)
 
         except Exception as e:
+            log.debug("controller 异常处理", error=str(e))
             # 静默降级，不影响主流程
             try:
                 from agent.core.logger import StructuredLogger as _SL
                 _SL("controller").debug("Lightweight reflection failed", error=str(e))
             except Exception as _exc:
+                log.debug("controller 异常处理", error=str(_exc))
                 log_ignored(log, "controller.LoopController._lightweight_reflection_round", _exc)
 
     async def _verify_execution(
@@ -2785,6 +2880,7 @@ class LoopController:
                         "feedback": "; ".join(feedback_parts) if not passed else "",
                     }
         except Exception as _exc:
+            log.debug("controller 异常处理", error=str(_exc))
             log_ignored(log, "controller.LoopController._verify_execution.semantic_verifier", _exc)
 
         if verification_level == "light":
@@ -2806,6 +2902,7 @@ class LoopController:
                     "feedback": "; ".join(feedback_parts) if not passed else "",
                 }
         except Exception as _exc:
+            log.debug("controller 异常处理", error=str(_exc))
             log_ignored(log, "controller.LoopController._verify_execution.llm", _exc)
 
         return rule_result
@@ -2884,6 +2981,7 @@ class LoopController:
                     "feedback": parsed.get("feedback", ""),
                 }
         except Exception as _exc:
+            log.debug("controller 异常处理", error=str(_exc))
             log_ignored(log, "controller.LoopController._verify_by_llm", _exc)
         return None
 
@@ -2918,6 +3016,7 @@ class LoopController:
                     context_message_count=len(context.messages),
                 )
             except Exception as _exc:
+                log.debug("controller 异常处理", error=str(_exc))
                 log_ignored(log, "controller._auto_reflect_on_completion.quality_score", _exc)
 
         overall_score = quality_report.overall_score if quality_report else 0.5
@@ -2959,6 +3058,7 @@ class LoopController:
                     root_cause=reflection.root_cause,
                 )
             except Exception as _exc:
+                log.debug("controller 异常处理", error=str(_exc))
                 log_ignored(log, "controller._auto_reflect_on_completion.deep_reflect", _exc)
         else:
             self._logger.debug(
@@ -3009,6 +3109,7 @@ class LoopController:
                         f"替代工具: 可尝试 {', '.join(similar_tools[:3])} 替代 {failed_tool}"
                     )
             except Exception as _exc:
+                log.debug("controller 异常处理", error=str(_exc))
                 log_ignored(log, "controller._auto_replan_on_failure.similar_tools", _exc)
 
         strategies.append(
@@ -3062,7 +3163,8 @@ class LoopController:
     async def _safe_build_causal(self, input_text: str) -> CausalGraph | None:
         try:
             return await self.causal.build_causal_model(input_text)
-        except Exception:
+        except Exception as _exc:
+            log.warning("异常降级处理", error=str(_exc))
             return None
 
     def _get_debater(self) -> DefaultDebater | None:
@@ -3094,6 +3196,7 @@ class LoopController:
                 reason=reason,
             ))
         except Exception as _exc:
+            log.debug("controller 异常处理", error=str(_exc))
             log_ignored(log, "controller.LoopController._async_record_transition", _exc)
 
     async def _async_record_tool(
@@ -3112,6 +3215,7 @@ class LoopController:
                 error_message=sr.error,
             ))
         except Exception as _exc:
+            log.debug("controller 异常处理", error=str(_exc))
             log_ignored(log, "controller.LoopController._async_record_tool", _exc)
 
     async def _record_signals_async(
@@ -3147,6 +3251,7 @@ class LoopController:
                         metadata={"quality_score": quality_score},
                     )
                 except Exception as _exc:
+                    log.debug("controller 异常处理", error=str(_exc))
                     log_ignored(log, "controller.LoopController._record_signals_async", _exc)
             else:
                 signals.append(LearningSignal(
@@ -3163,6 +3268,7 @@ class LoopController:
                         metadata={"quality_score": quality_score},
                     )
                 except Exception as _exc:
+                    log.debug("controller 异常处理", error=str(_exc))
                     log_ignored(log, "controller.LoopController._record_signals_async", _exc)
 
             for sr in context.step_results.values():
@@ -3182,6 +3288,7 @@ class LoopController:
                 if planned_steps > 0:
                     plan_quality = min(1.0, max(0.0, executed_steps / planned_steps))
             except Exception as _exc:
+                log.debug("controller 异常处理", error=str(_exc))
                 log_ignored(log, "controller.LoopController._record_signals_async", _exc)
             signals.append(LearningSignal(
                 signal_type=SignalType.PLAN_QUALITY,
@@ -3228,6 +3335,7 @@ class LoopController:
                 try:
                     self.evolution.record_signal(sig)
                 except Exception as _exc:
+                    log.debug("controller 异常处理", error=str(_exc))
                     log_ignored(log, "controller.LoopController._record_signals_async", _exc)
 
             try:
@@ -3235,8 +3343,10 @@ class LoopController:
                 if hasattr(self.evolution, 'record_implicit_feedback'):
                     self.evolution.record_implicit_feedback(feedback_stats)
             except Exception as _exc:
+                log.debug("controller 异常处理", error=str(_exc))
                 log_ignored(log, "controller.LoopController._record_signals_async", _exc)
         except Exception as _exc:
+            log.debug("controller 异常处理", error=str(_exc))
             log_ignored(log, "controller.LoopController._record_signals_async", _exc)
 
     async def _deep_reflect(
@@ -3423,11 +3533,13 @@ class LoopController:
                 })
 
         except Exception as e:
+            log.debug("controller 异常处理", error=str(e))
             # 静默降级，不影响主流程
             try:
                 from agent.core.logger import StructuredLogger as _SL
                 _SL("controller").debug("Apply reflection to planning failed", error=str(e))
             except Exception as _exc:
+                log.debug("controller 异常处理", error=str(_exc))
                 log_ignored(log, "controller.LoopController._apply_reflection_to_planning", _exc)
 
     def _update_reflection_knowledge(
@@ -3462,11 +3574,13 @@ class LoopController:
                     )
 
         except Exception as e:
+            log.debug("controller 异常处理", error=str(e))
             # 静默降级，不影响主流程
             try:
                 from agent.core.logger import StructuredLogger as _SL
                 _SL("controller").debug("Update reflection knowledge failed", error=str(e))
             except Exception as _exc:
+                log.debug("controller 异常处理", error=str(_exc))
                 log_ignored(log, "controller.LoopController._update_reflection_knowledge", _exc)
 
     def _save_reflection_experience(
@@ -3501,11 +3615,13 @@ class LoopController:
             )
 
         except Exception as e:
+            log.debug("controller 异常处理", error=str(e))
             # 静默降级，不影响主流程
             try:
                 from agent.core.logger import StructuredLogger as _SL
                 _SL("controller").debug("Save reflection experience failed", error=str(e))
             except Exception as _exc:
+                log.debug("controller 异常处理", error=str(_exc))
                 log_ignored(log, "controller.LoopController._save_reflection_experience", _exc)
 
     def _suggest_step_adjustment(

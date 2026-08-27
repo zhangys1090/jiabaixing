@@ -19,8 +19,8 @@ from pathlib import Path
 from typing import Any
 
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("feedback_collector")
+
 
 # 内存缓冲区大小阈值，达到此数量触发 flush
 _BUFFER_FLUSH_SIZE = 100
@@ -118,6 +118,8 @@ class FeedbackCollector:
         self._feedback_buffer: list[UserFeedbackRecord] = []
         self._last_flush_time = time.time()
         self._flush_task: asyncio.Task | None = None
+        self._MAX_BUFFER = 5000
+        self._MAX_FEEDBACK_BUFFER = 5000
         self._init_db()
 
     @classmethod
@@ -202,6 +204,8 @@ class FeedbackCollector:
             timestamp=time.time(),
         )
         self._buffer.append(record)
+        if len(self._buffer) > self._MAX_BUFFER:
+            self._buffer = self._buffer[-self._MAX_BUFFER * 3 // 4:]
         if len(self._buffer) >= _BUFFER_FLUSH_SIZE:
             self.flush()
 
@@ -226,6 +230,8 @@ class FeedbackCollector:
             timestamp=time.time(),
         )
         self._feedback_buffer.append(record)
+        if len(self._feedback_buffer) > self._MAX_FEEDBACK_BUFFER:
+            self._feedback_buffer = self._feedback_buffer[-self._MAX_FEEDBACK_BUFFER * 3 // 4:]
         self._flush_feedback()
         log.debug("用户评价已记录", tool=tool_name, rating=rating)
 

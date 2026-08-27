@@ -20,7 +20,7 @@
     ]
 
     results = await runner.run(tasks, executor=my_llm_call)
-    print(results.summary)
+    logger.info(results.summary)
 """
 
 from __future__ import annotations
@@ -30,10 +30,11 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Coroutine
-
 from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("batch_runner")
+
+
 
 
 class BatchStatus(str, Enum):
@@ -196,7 +197,7 @@ class BatchRunner:
         completed_count = 0
         total = len(tasks)
 
-        log.info("Batch run started", total=total, mode=exec_mode.value)
+        log.debug("Batch run started", total=total, mode=exec_mode.value)
 
         if exec_mode == ExecutionMode.SEQUENTIAL:
             for task in tasks:
@@ -225,7 +226,8 @@ class BatchRunner:
                     return result
 
             coros = [_run_with_semaphore(t) for t in tasks]
-            report.results = await asyncio.gather(*coros, return_exceptions=False)
+            raw = await asyncio.gather(*coros, return_exceptions=True)
+            report.results = [r if isinstance(r, BatchResult) else BatchResult(task_id="error", success=False, error=str(r)) for r in raw]
 
         elif exec_mode == ExecutionMode.ADAPTIVE:
             semaphore = asyncio.Semaphore(self._max_concurrency)
@@ -244,7 +246,8 @@ class BatchRunner:
                     return result
 
             coros = [_run_adaptive(t) for t in tasks]
-            report.results = await asyncio.gather(*coros, return_exceptions=False)
+            raw = await asyncio.gather(*coros, return_exceptions=True)
+            report.results = [r if isinstance(r, BatchResult) else BatchResult(task_id="error", success=False, error=str(r)) for r in raw]
 
         report.completed_at = time.time()
         report.summary = self._build_summary(tasks, report.results)
@@ -290,6 +293,7 @@ class BatchRunner:
                     metadata=task.metadata,
                 )
             except Exception as e:
+                log.debug("batch_runner 异常处理", error=str(e))
                 last_error = str(e)[:500]
                 log.warning(
                     "Task failed",

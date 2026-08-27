@@ -39,8 +39,8 @@ from enum import Enum
 from typing import Any, Protocol
 
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("debate_harness")
+
 
 
 class HarnessLevel(str, Enum):

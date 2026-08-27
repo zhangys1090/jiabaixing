@@ -166,11 +166,23 @@ class ApiService {
     return this.request<T>(endpoint, { method: 'GET' }, cacheExpiry, params);
   }
 
-  async post<T>(endpoint: string, data?: unknown): Promise<ApiResponse<T>> {
-    return this.request<T>(endpoint, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
+  async post<T>(endpoint: string, data?: unknown, timeoutMs: number = 30000): Promise<ApiResponse<T>> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await this.request<T>(endpoint, {
+        method: 'POST',
+        body: JSON.stringify(data),
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return { success: false, error: `请求超时 (${timeoutMs / 1000}s)，请稍后重试` };
+      }
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    } finally {
+      clearTimeout(timeoutId);
+    }
   }
 
   async put<T>(endpoint: string, data?: unknown): Promise<ApiResponse<T>> {
@@ -241,12 +253,24 @@ export class JiabaixingApiService extends ApiService {
     input: string,
     images?: string[],
     userId?: string
-  ): Promise<ApiResponse<{ response: string; traceId: string; intent: string }>> {
-    return this.post<{ response: string; traceId: string; intent: string }>(API_ENDPOINTS.PROCESS, {
-      input,
-      images,
-      userId,
-    });
+  ): Promise<
+    ApiResponse<{ response: string; traceId: string; intent: string; finishReason?: string; qualityScore?: number }>
+  > {
+    return this.post<{
+      response: string;
+      traceId: string;
+      intent: string;
+      finishReason?: string;
+      qualityScore?: number;
+    }>(
+      API_ENDPOINTS.PROCESS,
+      {
+        input,
+        images,
+        userId,
+      },
+      60000
+    );
   }
 
   async processMultimodalMessage(

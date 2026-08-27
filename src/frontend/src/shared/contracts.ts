@@ -691,6 +691,7 @@ export const WS_EVENTS = {
   SERVER: {
     CONNECTED: 'connected',
     RESPONSE_READY: 'response_ready',
+    RESPONSE_READY_ACK: 'response_ready_ack',
     RESPONSE: 'response',
     ERROR: 'error',
     STATUS: 'status',
@@ -866,7 +867,7 @@ export interface WsExecutionPreviewData {
     type: 'file' | 'command' | 'api';
     target: string;
     action: string;
-    risk: 'low' | 'medium' | 'high';
+    risk: 'none' | 'low' | 'medium' | 'high' | 'critical';
     preview?: string;
   }>;
   estimatedTime?: number;
@@ -945,22 +946,27 @@ export interface WsGitStatusData {
 }
 
 export interface WsStreamStartData {
-  traceId: string;
-  totalLength: number;
-  timestamp: number;
+  traceId?: string;
+  sessionId?: string;
+  metadata?: Record<string, unknown>;
+  timestamp?: number;
 }
 
 export interface WsStreamChunkData {
-  traceId: string;
-  chunk: string;
-  offset: number;
-  timestamp: number;
+  traceId?: string;
+  sessionId?: string;
+  content?: string;
+  metadata?: Record<string, unknown>;
+  timestamp?: number;
 }
 
 export interface WsStreamDoneData {
-  traceId: string;
-  fullText: string;
-  timestamp: number;
+  traceId?: string;
+  sessionId?: string;
+  content?: string;
+  done?: boolean;
+  metadata?: Record<string, unknown>;
+  timestamp?: number;
 }
 
 // ====================== EventBus → WebSocket 桥接映射 ======================

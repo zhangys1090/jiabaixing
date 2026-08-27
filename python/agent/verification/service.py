@@ -5,12 +5,31 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Protocol, Callable
 
+from agent.core.types import RiskLevel
 from agent.security.sensitive_detector import (
     CheckScene,
-    RiskLevel,
     check_sensitive_info,
 )
 from agent.core.logger import log_ignored
+import logging
+logger = logging.getLogger(__name__)
+
+
+def _extract_json(text: str) -> str | None:
+    """从可能包含非 JSON 文本的字符串中安全提取第一个 JSON 对象。
+
+    使用 json.JSONDecoder.raw_decode 逐位置尝试解析，避免正则贪婪/
+    非贪婪匹配导致的截断或回溯爆炸问题。
+    """
+    decoder = json.JSONDecoder()
+    for i, ch in enumerate(text):
+        if ch == '{':
+            try:
+                obj, end = decoder.raw_decode(text, i)
+                return text[i:end]
+            except json.JSONDecodeError:
+                continue
+    return None
 
 
 @dataclass
@@ -397,6 +416,7 @@ class VerificationService:
             try:
                 return await self._llm_evaluate_goal(original_input, current_output)
             except Exception as _exc:
+                logger.warning("service 异常处理", error=str(_exc))
                 log_ignored(None, "service.VerificationService.evaluate_goal_progress", _exc)
 
         # 无 LLM 时无法真正评估目标达成，不得误判为成功（审计 V-01）
@@ -429,8 +449,8 @@ class VerificationService:
         )
 
         response = await self.deps.llm.chat(prompt)
-        json_match = re.search(r"\{[\s\S]*\}", response)
-        if not json_match:
+        json_str = _extract_json(response)
+        if not json_str:
             # 解析失败时不得默认成功（审计 V-02）
             return GoalProgress(
                 achieved=False,
@@ -440,7 +460,7 @@ class VerificationService:
             )
 
         try:
-            parsed = json.loads(json_match.group())
+            parsed = json.loads(json_str)
             return GoalProgress(
                 # 缺字段时默认未达成，避免误通过（审计 V-02）
                 achieved=parsed.get("achieved", False),

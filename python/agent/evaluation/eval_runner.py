@@ -20,8 +20,8 @@ from agent.evaluation.ab_comparator import (
     EvalReport,
     EvalSummary,
 )
-
 logger = logging.getLogger(__name__)
+
 
 
 class LLMOrEngineProtocol(Protocol):
@@ -127,6 +127,7 @@ class EvalRunner:
                 passed = score >= threshold
                 details = "" if passed else f"score={score:.2f} < threshold={threshold}"
             except Exception as e:
+                logger.debug("eval_runner 异常处理", error=str(e))
                 output = ""
                 score = 0.0
                 passed = False

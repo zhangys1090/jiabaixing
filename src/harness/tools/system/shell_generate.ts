@@ -7,9 +7,9 @@
  * - 评估命令风险等级
  */
 
+import { Logger } from '../../../utils/Logger';
 import type { ToolContext, ToolDefinition, ToolResult } from '../../types';
 import { Permission, ToolCategory } from '../../types';
-import { Logger } from '../../../utils/Logger';
 
 export const SHELL_GENERATE_DEF: ToolDefinition = {
   name: 'shell_generate',
@@ -109,7 +109,7 @@ export function createShellGenerateExecutor(deps: ShellGenerateDeps = {}) {
 
     try {
       const osName = getOSName(os);
-      const prompt = `你是一个命令行专家。用户想完成以下操作，请生成对应的 shell 命令。
+      const prompt = `你是家百星的命令行助手。用户想完成以下操作，请生成对应的 shell 命令。
 
 用户意图: ${intent}
 操作系统: ${osName}
@@ -132,7 +132,7 @@ export function createShellGenerateExecutor(deps: ShellGenerateDeps = {}) {
       const response = await deps.llm.chat(
         prompt,
         [],
-        '你是一个命令行专家，只输出 JSON。'
+        '你是家百星的命令行助手，只输出 JSON。'
       );
 
       // 解析 LLM 返回的 JSON

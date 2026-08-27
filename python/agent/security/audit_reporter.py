@@ -24,17 +24,13 @@ import os
 import re
 import time
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import Any
 
+from agent.core.types import RiskLevel, BaseAuditFinding, BaseAuditReport
+from enum import Enum
 
-class Severity(str, Enum):
-    """严重级别。"""
 
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-    CRITICAL = "critical"
+Severity = RiskLevel
 
 
 class AuditDimension(str, Enum):
@@ -48,48 +44,40 @@ class AuditDimension(str, Enum):
 
 
 @dataclass
-class AuditFinding:
-    """审计发现。
+class AuditFinding(BaseAuditFinding):
+    """安全审计发现 — 继承 core.types.BaseAuditFinding。
 
-    Attributes:
+    扩展字段：
         id: 发现ID。
         dimension: 审计维度。
-        severity: 严重级别。
         title: 发现标题。
-        description: 详细描述。
-        recommendation: 修复建议。
-        evidence: 证据（如路径、值）。
+        recommendation: 修复建议（覆盖基类 remediation）。
+        evidence: 证据。
     """
 
     id: str = ""
     dimension: AuditDimension = AuditDimension.CONFIG
-    severity: Severity = Severity.LOW
     title: str = ""
-    description: str = ""
     recommendation: str = ""
     evidence: str = ""
 
 
 @dataclass
-class AuditReport:
-    """审计报告。
+class AuditReport(BaseAuditReport):
+    """安全审计报告 — 继承 core.types.BaseAuditReport。
 
-    Attributes:
+    扩展字段：
         report_id: 报告ID。
-        generated_at: 生成时间。
         severity: 整体严重级别（取最高）。
         total_findings: 发现总数。
-        findings: 发现列表。
         dimensions_checked: 已检查的维度。
         pass_count: 通过的检查数。
         fail_count: 失败/警告的检查数。
     """
 
     report_id: str = ""
-    generated_at: float = 0.0
-    severity: Severity = Severity.LOW
+    severity: RiskLevel = RiskLevel.LOW
     total_findings: int = 0
-    findings: list[AuditFinding] = field(default_factory=list)
     dimensions_checked: list[str] = field(default_factory=list)
     pass_count: int = 0
     fail_count: int = 0
@@ -119,6 +107,7 @@ class SecurityAuditReporter:
 
     def __init__(self) -> None:
         self._findings: list[AuditFinding] = []
+        self._MAX_FINDINGS = 5000
         self._finding_counter = 0
 
     def run_audit(

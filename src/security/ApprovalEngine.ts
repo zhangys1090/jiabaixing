@@ -18,6 +18,8 @@
 
 import { EventBus } from '../shared/EventBus';
 import { Logger } from '../utils/Logger';
+import type { RiskLevel } from './types';
+export type { RiskLevel };
 
 /** 审批请求 */
 export interface ApprovalRequest {
@@ -53,9 +55,6 @@ export type ApprovalType =
   | 'network_unknown_domain' // 未知域名访问
   | 'code_generation' // 代码生成
   | 'multi_file_edit'; // 多文件修改
-
-/** 风险等级 */
-export type RiskLevel = 'low' | 'medium' | 'high' | 'critical';
 
 /** 审批决策 */
 export interface ApprovalDecision {
@@ -154,6 +153,9 @@ interface PendingApproval {
 }
 
 export class ApprovalEngine {
+  private static readonly DECISION_LOG_MAX = 2000;
+  private static readonly DECISION_LOG_TRIM_TO = 1500;
+
   private policy: ApprovalPolicy;
   private pending: Map<string, PendingApproval> = new Map();
   private batchApprovals: BatchApproval[] = [];
@@ -416,17 +418,23 @@ export class ApprovalEngine {
 
   /**
    * 检查是否有匹配的批量批准
+   * 支持精确匹配(type+target)和类型匹配(仅type)
    */
   private checkBatchApproval(request: ApprovalRequest): BatchApproval | null {
     const now = Date.now();
-    // 清理过期批量批准
     this.batchApprovals = this.batchApprovals.filter((b) => b.expiresAt > now);
 
-    const match = this.batchApprovals.find(
+    const exactMatch = this.batchApprovals.find(
       (b) => b.type === request.type && b.target === request.target
     );
+    if (exactMatch) return exactMatch;
 
-    return match || null;
+    const typeMatch = this.batchApprovals.find((b) => b.type === request.type);
+    if (typeMatch && request.risk !== 'critical' && request.risk !== 'high') {
+      return typeMatch;
+    }
+
+    return null;
   }
 
   /**
@@ -437,18 +445,20 @@ export class ApprovalEngine {
     decision: ApprovalDecision
   ): void {
     this.decisionLog.push({ request, decision });
-    // 保留最近 1000 条
-    if (this.decisionLog.length > 1000) {
-      this.decisionLog = this.decisionLog.slice(-1000);
+    if (this.decisionLog.length > ApprovalEngine.DECISION_LOG_MAX) {
+      this.decisionLog = this.decisionLog.slice(
+        -ApprovalEngine.DECISION_LOG_TRIM_TO
+      );
     }
 
-    // 通过 EventBus 通知（用于 UI 显示和审计日志）
     EventBus.emit('approval_request', {
       id: request.id,
       type: request.type,
       description: request.description,
       target: request.target,
       risk: request.risk,
+      approved: decision.approved,
+      method: decision.method,
     });
   }
 

@@ -17,8 +17,8 @@
     from agent.gateway.platforms.relay_adapter import RelayAdapter
 
     relay = RelayAdapter(
-        relay_url="wss://relay.example.com/ws",
-        api_key="relay-key-123",
+        relay_url=os.environ["RELAY_URL"],
+        api_key=os.environ["RELAY_API_KEY"],
     )
     await relay.start()
 """
@@ -91,6 +91,7 @@ class RelayAdapter(PlatformAdapter):
         self._recv_task: asyncio.Task | None = None
         self._heartbeat_task: asyncio.Task | None = None
         self._stats = {"sent": 0, "received": 0, "errors": 0}
+        self._MAX_STATS = 500
 
     @property
     def name(self) -> str:
@@ -190,7 +191,8 @@ class RelayAdapter(PlatformAdapter):
                 await asyncio.sleep(self._config.heartbeat_interval)
             except asyncio.CancelledError:
                 break
-            except Exception:
+            except Exception as _exc:
+                log.debug("relay_adapter 异常处理", error=str(_exc))
                 await asyncio.sleep(5)
 
     async def _send_raw(self, data: dict[str, Any]) -> bool:
@@ -214,7 +216,8 @@ class RelayAdapter(PlatformAdapter):
         if isinstance(raw, bytes):
             try:
                 raw = gzip.decompress(raw).decode()
-            except Exception:
+            except Exception as _exc:
+                log.debug("relay_adapter 异常处理", error=str(_exc))
                 raw = raw.decode()
         return json.loads(raw)
 
@@ -228,6 +231,7 @@ class RelayAdapter(PlatformAdapter):
             try:
                 await self._ws.close()
             except Exception as _exc:
+                log.debug("relay_adapter 异常处理", error=str(_exc))
                 log_ignored(log, "relay_adapter.RelayAdapter.stop", _exc)
         log.info("中继适配器已停止")
 

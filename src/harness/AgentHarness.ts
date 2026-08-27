@@ -24,18 +24,21 @@ import { EventBus } from '../shared/EventBus';
 import { I18nManager } from '../shared/I18nManager';
 import { MessageProcessor } from '../shared/MessageProcessor';
 
+import { getPromptTemplate } from '../models/prompt-templates';
 import { SkillRegistry } from '../skills/SkillRegistry';
 import { Logger } from '../utils/Logger';
 import { ConstraintsService } from './constraints/ConstraintsService';
 import { ContextManager } from './context/ContextManager';
 import { ContextWindowManager } from './context/ContextWindowManager';
-import { type HarnessDeps } from './deps';
+import { validateHarnessDeps, type HarnessDeps } from './deps';
 import { IndependentEvaluationService } from './evaluation/IndependentEvaluationService';
 import { LspClientManager } from './lsp/LspClientManager';
 import { LspCompletionProvider } from './lsp/LspCompletionProvider';
 import { LspDiagnosticsProvider } from './lsp/LspDiagnosticsProvider';
 import { AgentRegistry } from './orchestration/AgentRegistry';
 import { OrchestratorAgent } from './orchestration/OrchestratorAgent';
+import { EventStore } from './persistence/EventStore';
+import { EventStoreBridge } from './persistence/EventStoreBridge';
 import { PersistenceService } from './persistence/PersistenceService';
 import { TrajectoryDatabase } from './persistence/TrajectoryDatabase';
 
@@ -439,7 +442,8 @@ export class AgentHarness {
       if (this.deps?.eventBus) {
         const sessionId = `session_${Date.now()}`;
         this.eventStoreBridge = new EventStoreBridge(
-          this.deps.eventBus,
+          this.deps
+            .eventBus as unknown as import('../shared/EventBus').JiabaixingEventBus,
           this.eventStore,
           { sessionId }
         );
@@ -646,19 +650,19 @@ export class AgentHarness {
             : [];
 
           try {
-            await evo.collectFeedback(input, response, {
+            evo.collectFeedback(input, response, {
               success: true,
               toolsUsed,
             });
 
             if (quality) {
-              await evo.assessQuality(traceId, true, quality.overall, 0);
+              evo.assessQuality(traceId, true, quality.overall, 0);
             }
 
             // 高质量任务 → 自动生成 SKILL.md
             if (quality && quality.overall >= 0.7) {
               const metadata = hookCtx.metadata;
-              await evo.generateSkill({
+              evo.generateSkill({
                 input,
                 response,
                 toolsUsed,
@@ -849,35 +853,45 @@ export class AgentHarness {
         const roundsUsed = result.roundsUsed ?? 1;
         const totalDuration = result.duration ?? 0;
         return {
-          response: result.response || '',
+          response: this.applyOutputGuardrails(result.response || ''),
           quality: {
             overall: qualityScore,
             accuracy: qualityScore,
             usefulness: Math.min(qualityScore + 0.05, 1),
             friendliness: Math.min(qualityScore + 0.1, 1),
-            efficiency: totalToolCalls > 0 ? Math.max(qualityScore - 0.05, 0) : qualityScore,
+            efficiency:
+              totalToolCalls > 0
+                ? Math.max(qualityScore - 0.05, 0)
+                : qualityScore,
             details: `Python backend response (tools=${totalToolCalls}, rounds=${roundsUsed}, duration=${totalDuration}ms)`,
           },
           trace: {
             traceId: result.traceId || input.traceId || `harness_${Date.now()}`,
             state: LoopState.COMPLETED,
-            stateTransitions: [{
-              state: LoopState.COMPLETED,
-              timestamp: Date.now(),
-              duration: totalDuration,
-              result: result.finishReason || 'stop',
-            }],
-            trajectory: totalToolCalls > 0 ? [{
-              type: 'tool_call',
-              timestamp: Date.now() - totalDuration,
-              duration: totalDuration,
-              toolName: 'python_backend_loop',
-              metadata: {
-                toolCallsMade: totalToolCalls,
-                roundsUsed,
-                finishReason: result.finishReason,
+            stateTransitions: [
+              {
+                state: LoopState.COMPLETED,
+                timestamp: Date.now(),
+                duration: totalDuration,
+                result: result.finishReason || 'stop',
               },
-            }] : [],
+            ],
+            trajectory:
+              totalToolCalls > 0
+                ? [
+                    {
+                      type: 'tool_call',
+                      timestamp: Date.now() - totalDuration,
+                      duration: totalDuration,
+                      toolName: 'python_backend_loop',
+                      metadata: {
+                        toolCallsMade: totalToolCalls,
+                        roundsUsed,
+                        finishReason: result.finishReason,
+                      },
+                    },
+                  ]
+                : [],
             totalDuration,
             totalToolCalls,
             budgetState: {
@@ -893,7 +907,11 @@ export class AgentHarness {
               maxToolCalls: 20,
             },
           },
-          metadata: { loopRounds: roundsUsed, backend: 'python', finishReason: result.finishReason },
+          metadata: {
+            loopRounds: roundsUsed,
+            backend: 'python',
+            finishReason: result.finishReason,
+          },
         };
       }
     } catch (bridgeErr) {
@@ -908,12 +926,12 @@ export class AgentHarness {
       try {
         const llmResponse = await this.deps.llm.chat(
           input.text,
-          '你是一个智能助手，请直接回答问题。'
+          getPromptTemplate('chat')
         );
         const responseText =
           typeof llmResponse === 'string' ? llmResponse : String(llmResponse);
         return {
-          response: responseText,
+          response: this.applyOutputGuardrails(responseText),
           quality: {
             overall: 0.7,
             accuracy: 0.7,
@@ -1111,6 +1129,30 @@ export class AgentHarness {
    */
   getSandboxExecutor(): SandboxExecutor | null {
     return this.sandboxExecutor;
+  }
+
+  /**
+   * P0 安全: 输出护栏检查 — 在响应返回给用户之前，
+   * 经 OutputGuardrailEngine 检测敏感信息泄露、有害内容、系统提示泄露。
+   * 拦截时替换为脱敏输出或安全提示，绝不原样放行。
+   */
+  private applyOutputGuardrails(response: string): string {
+    const guardrails = this.deps?.outputGuardrails;
+    if (!guardrails) return response;
+    try {
+      const result = guardrails.check(response);
+      if (result.passed) return response;
+      Logger.warn(`🛡️ 输出护栏拦截: ${result.reason}`, 'AgentHarness');
+      if (result.sanitizedOutput) return result.sanitizedOutput;
+      return `[安全拦截] 输出因安全策略被过滤: ${result.reason || '内容不符合安全规范'}`;
+    } catch (err) {
+      Logger.error(
+        '输出护栏异常，fail-closed 拦截',
+        err as Error,
+        'AgentHarness'
+      );
+      return '[安全拦截] 输出护栏异常，响应已被安全策略拦截。';
+    }
   }
 
   /**

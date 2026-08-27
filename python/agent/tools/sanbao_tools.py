@@ -24,6 +24,8 @@ from agent.tools.registry import (
     ToolParameterDef,
     ToolResult,
 )
+import logging
+logger = logging.getLogger(__name__)
 
 # ═══════════════════════════════════════════
 # Sanbao模型单例（懒加载）
@@ -64,6 +66,7 @@ def _get_sanbao_model():
         _sanbao_model.initialize()
         return _sanbao_model
     except Exception as e:
+        logger.debug("sanbao_tools 异常处理", error=str(e))
         _sanbao_init_error = e
         raise
 
@@ -213,6 +216,7 @@ async def sanbao_ask_executor(**kwargs) -> ToolResult:
             },
         )
     except Exception as e:
+        logger.warning("sanbao_tools 异常处理", error=str(e))
         return ToolResult(
             success=False,
             error=f"Sanbao推理失败: {e}",
@@ -246,7 +250,8 @@ async def sanbao_predict_executor(**kwargs) -> ToolResult:
             HexagramRegistry.initialize()
             from_interp = HexagramRegistry.interpret(from_id)
             pred_interp = HexagramRegistry.interpret(predicted_id)
-        except Exception:
+        except Exception as e:
+            logger.warning("sanbao_tools._interpret 卦象解读失败", error=str(e))
             from_interp = {"name": str(from_id)}
             pred_interp = {"name": str(predicted_id)}
 
@@ -270,6 +275,7 @@ async def sanbao_predict_executor(**kwargs) -> ToolResult:
             },
         )
     except Exception as e:
+        logger.warning("sanbao_tools 异常处理", error=str(e))
         return ToolResult(
             success=False,
             error=f"Sanbao预测失败: {e}",
@@ -312,6 +318,7 @@ async def sanbao_diagnose_executor(**kwargs) -> ToolResult:
             },
         )
     except Exception as e:
+        logger.warning("sanbao_tools 异常处理", error=str(e))
         return ToolResult(
             success=False,
             error=f"Sanbao辨证失败: {e}",
@@ -353,6 +360,7 @@ async def sanbao_train_executor(**kwargs) -> ToolResult:
             },
         )
     except Exception as e:
+        logger.warning("sanbao_tools 异常处理", error=str(e))
         return ToolResult(
             success=False,
             error=f"Sanbao训练失败: {e}",
@@ -376,7 +384,8 @@ async def sanbao_feedback_executor(**kwargs) -> ToolResult:
             total = stats.get("total", 0) + 1
             pos = stats.get("positive", 0) + (1 if feedback == "positive" else 0)
             neg = stats.get("negative", 0) + (1 if feedback == "negative" else 0)
-        except Exception:
+        except Exception as e:
+            logger.warning("sanbao_tools._record_feedback 反馈记录失败", error=str(e))
             total, pos, neg = 1, (1 if feedback == "positive" else 0), (1 if feedback == "negative" else 0)
 
         emoji = "👍" if feedback == "positive" else "👎"
@@ -397,6 +406,7 @@ async def sanbao_feedback_executor(**kwargs) -> ToolResult:
             },
         )
     except Exception as e:
+        logger.warning("sanbao_tools 异常处理", error=str(e))
         return ToolResult(
             success=False,
             error=f"Sanbao反馈失败: {e}",
@@ -449,6 +459,7 @@ async def sanbao_status_executor(**kwargs) -> ToolResult:
             },
         )
     except Exception as e:
+        logger.warning("sanbao_tools 异常处理", error=str(e))
         return ToolResult(
             success=False,
             error=f"Sanbao状态查询失败: {e}",

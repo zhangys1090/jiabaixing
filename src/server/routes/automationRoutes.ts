@@ -31,12 +31,37 @@ router.post('/tasks', async (req: Request, res: Response) => {
       return;
     }
     const task = req.body;
+    if (!task || typeof task !== 'object') {
+      res.status(400).json({ success: false, error: '无效的任务数据' });
+      return;
+    }
+    const taskName = typeof task.name === 'string' ? task.name.trim() : '';
+    if (taskName.length === 0 || taskName.length > 200) {
+      res
+        .status(400)
+        .json({ success: false, error: '任务名称长度须在1-200字之间' });
+      return;
+    }
+    const schedule =
+      typeof task.schedule === 'string' ? task.schedule : '0 9 * * *';
+    const cronPattern = /^[\d*/,\-]+(\s+[\d*/,\-]+){4,5}$/;
+    if (!cronPattern.test(schedule)) {
+      res.status(400).json({ success: false, error: '无效的cron表达式' });
+      return;
+    }
+    const priority =
+      typeof task.priority === 'number'
+        ? Math.min(Math.max(task.priority, 1), 10)
+        : 5;
     const taskId = schedulerInstance.addTask({
       id: `task_${Date.now()}`,
-      name: task.name || '未命名任务',
-      description: task.description || '',
-      schedule: task.schedule || '0 9 * * *',
-      priority: task.priority || 5,
+      name: taskName,
+      description:
+        typeof task.description === 'string'
+          ? task.description.substring(0, 1000)
+          : '',
+      schedule,
+      priority,
       enabled: true,
       executionCount: 0,
       successCount: 0,

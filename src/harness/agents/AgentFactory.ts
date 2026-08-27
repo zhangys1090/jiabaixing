@@ -3,13 +3,14 @@
  *
  * 根据场景创建对应的专业化 Agent。
  * 提供 goal → Agent 的智能选择能力。
+ * P0-6修复：自动注入默认执行函数，确保 isReady=true
  */
 
 import { Logger } from '../../utils/Logger';
 import { BaseAgent } from './BaseAgent';
 import { CodingAgent } from './CodingAgent';
-import { FileAgent } from './FileAgent';
 import { DesktopAgent } from './DesktopAgent';
+import { FileAgent } from './FileAgent';
 
 /** Agent 场景类型 */
 export type AgentScene = 'coding' | 'file' | 'desktop';
@@ -63,9 +64,28 @@ const SCENE_KEYWORDS: Record<AgentScene, string[]> = {
   ],
 };
 
+/** 全局执行函数注入器 — 外部可注入实际执行逻辑 */
+let globalExecuteFn: import('./BaseAgent').AgentExecuteFn | null = null;
+
 export class AgentFactory {
-  /** 缓存的 Agent 实例 */
   private static cache: Map<string, BaseAgent> = new Map();
+
+  /**
+   * 注入全局执行函数 — 在系统初始化时调用
+   * 使所有 AgentFactory 创建的 Agent 自动具备执行能力
+   * @param fn - 执行函数
+   */
+  static injectExecuteFn(
+    fn: (goal: string, context: string, agent: BaseAgent) => Promise<string>
+  ): void {
+    globalExecuteFn = fn;
+    for (const agent of AgentFactory.cache.values()) {
+      if (!agent.isReady) {
+        agent.setExecuteFn(fn);
+      }
+    }
+    Logger.info('🏭 AgentFactory: 全局执行函数已注入', 'AgentFactory');
+  }
 
   /**
    * 根据场景创建 Agent
@@ -94,8 +114,15 @@ export class AgentFactory {
         throw new Error(`未知 Agent 场景: ${scene}`);
     }
 
+    if (globalExecuteFn && !agent.isReady) {
+      agent.setExecuteFn(globalExecuteFn);
+    }
+
     this.cache.set(cacheKey, agent);
-    Logger.info(`🏭 AgentFactory 创建: ${agent.name}`, 'AgentFactory');
+    Logger.info(
+      `🏭 AgentFactory 创建: ${agent.name} (ready=${agent.isReady})`,
+      'AgentFactory'
+    );
     return agent;
   }
 
@@ -119,7 +146,6 @@ export class AgentFactory {
   static selectAgentByGoal(goal: string): BaseAgent {
     const lowerGoal = goal.toLowerCase();
 
-    // 按优先级匹配场景
     for (const scene of ['coding', 'file', 'desktop'] as AgentScene[]) {
       const keywords = SCENE_KEYWORDS[scene];
       if (keywords.some((kw) => lowerGoal.includes(kw.toLowerCase()))) {
@@ -131,7 +157,6 @@ export class AgentFactory {
       }
     }
 
-    // 默认返回 CodingAgent
     Logger.info(`🎯 目标未匹配特定场景，使用默认 CodingAgent`, 'AgentFactory');
     return this.createAgent('coding');
   }

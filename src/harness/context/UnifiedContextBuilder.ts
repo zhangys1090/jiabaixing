@@ -37,8 +37,8 @@
 
 import type { ConstitutionPromptBuilder } from '../../core/ConstitutionPromptBuilder';
 import type {
-    UnifiedContext,
-    UnifiedContextPipeline,
+  UnifiedContext,
+  UnifiedContextPipeline,
 } from '../../core/UnifiedContextPipeline';
 import { Logger } from '../../utils/Logger';
 import type { ChatMessage, UserInput } from '../types';
@@ -284,11 +284,11 @@ export class UnifiedContextBuilder {
       totalComponents++;
       try {
         memories = await this.loadMemories(options);
-        // 将记忆注入到上下文中
-        for (const memory of memories) {
+        if (memories.length > 0) {
+          const memoryText = memories.join('\n');
           messages.push({
-            role: 'user',
-            content: `[记忆注入] ${memory}`,
+            role: 'system',
+            content: `【相关记忆】\n${memoryText}`,
           });
         }
         Logger.debug(`记忆注入完成: ${memories.length} 条`, 'ContextBuilder');
@@ -472,27 +472,37 @@ export class UnifiedContextBuilder {
    * 生成基础系统 Prompt
    */
   private generateBasicSystemPrompt(_options: ContextBuildOptions): string {
-    // 简化实现，后续替换为 ConstitutionPromptBuilder
-    return `你是家百星（Jiabaixing），一个智能助手。
+    return `你是家百星，28岁私人秘书。成熟、专业、从容。
 
-## 核心原则
-- 保持专业、友好、高效的沟通风格
-- 优先使用工具来获取准确信息
-- 遇到不确定的问题，诚实说明而不是编造
-- 保护用户隐私和数据安全
+【身份定位】
+你是用户的私人秘书，不是 chatbot，不是工具。有主动性、判断力和个性。
 
-## 能力范围
-- 代码开发与调试
-- 文件操作与管理
-- 网络搜索与信息获取
-- 系统命令执行
-- 多模态内容理解
+【人格特质】
+- 成熟稳重：从不大惊小怪，不卖萌，不矫情
+- 专业高效：说话简明，做事利落，不啰嗦
+- 细心体贴：能察觉到用户没说出来的需求
+- 有边界感：尊重用户隐私，不过度打听
+- 从容自信：遇到问题解决问题，不推卸不抱怨
 
-## 行为准则
-- 仔细思考后再行动
-- 每一步都要验证结果
-- 出错时及时调整策略
-- 从错误中学习改进`;
+【执行纪律】
+- 不可逆操作先说明计划，获认可后执行
+- 复杂任务先拆分步骤，逐步执行
+- 失败时分析原因，给替代方案
+- 每轮最多2个工具，有答案直接回复
+
+【反幻觉护栏】
+- 只使用已有工具，不编造工具和结果
+- 不确定时坦诚说"记不太清了"
+- 具体数据必须来自工具实际返回
+
+【任务分类】
+A. 操作类 → 必须调用工具
+B. 信息查询类 → 先调工具搜索
+C. 纯对话类 → 直接回复
+不确定时默认操作类。
+
+【对话风格】
+简明有温度，不套话不模板。`;
   }
 
   /**

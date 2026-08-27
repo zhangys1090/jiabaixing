@@ -12,11 +12,44 @@ import express from 'express';
 import { JiabaixingCore } from '../../core/JiabaixingCore';
 import { Logger } from '../../utils/Logger';
 
+const TOOL_RATE_LIMIT_WINDOW_MS = 60000;
+const TOOL_RATE_LIMIT_MAX = 30;
+const _toolRateMap = new Map<string, { count: number; resetAt: number }>();
+const MAX_TOOL_NAME_LENGTH = 128;
+const MAX_PARAMS_SIZE = 100000;
+
+function checkToolRate(key: string): { allowed: boolean; resetIn: number } {
+  const now = Date.now();
+  const entry = _toolRateMap.get(key);
+  if (!entry || now >= entry.resetAt) {
+    _toolRateMap.set(key, {
+      count: 1,
+      resetAt: now + TOOL_RATE_LIMIT_WINDOW_MS,
+    });
+    return { allowed: true, resetIn: 0 };
+  }
+  if (entry.count >= TOOL_RATE_LIMIT_MAX) {
+    return { allowed: false, resetIn: entry.resetAt - now };
+  }
+  entry.count++;
+  return { allowed: true, resetIn: 0 };
+}
+
 async function handleToolExecute(
   req: express.Request,
   res: express.Response
 ): Promise<void> {
   try {
+    const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
+    const rateResult = checkToolRate(clientIp);
+    if (!rateResult.allowed) {
+      res.setHeader('Retry-After', Math.ceil(rateResult.resetIn / 1000));
+      res
+        .status(429)
+        .json({ success: false, error: '工具调用过于频繁，请稍后再试' });
+      return;
+    }
+
     const { toolName, params, userId } = req.body as {
       toolName?: string;
       params?: Record<string, unknown>;
@@ -25,6 +58,19 @@ async function handleToolExecute(
 
     if (!toolName) {
       res.status(400).json({ success: false, error: '缺少 toolName' });
+      return;
+    }
+
+    if (
+      typeof toolName !== 'string' ||
+      toolName.length > MAX_TOOL_NAME_LENGTH
+    ) {
+      res.status(400).json({ success: false, error: 'toolName 格式无效' });
+      return;
+    }
+
+    if (params && JSON.stringify(params).length > MAX_PARAMS_SIZE) {
+      res.status(400).json({ success: false, error: '参数过大' });
       return;
     }
 

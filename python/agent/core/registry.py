@@ -250,13 +250,14 @@ class SubsystemRegistry:
                 "duration_ms": duration_ms,
                 "success": True,
             }
-            log.info(
+            log.debug(
                 "Subsystem ready",
                 name=spec.name,
                 duration_ms=duration_ms,
                 critical=spec.critical,
             )
         except Exception as e:
+            log.debug("registry 异常处理", error=str(e))
             duration_ms = int((time.perf_counter() - start) * 1000)
             metrics[spec.name] = {
                 "duration_ms": duration_ms,

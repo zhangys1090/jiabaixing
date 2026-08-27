@@ -7,6 +7,8 @@ from typing import Any, Protocol
 
 from agent.loop.types import ExecutionPlan, LoopContext, PlanStep
 from agent.core.logger import log_ignored
+import logging
+logger = logging.getLogger(__name__)
 
 
 class LLMProtocol(Protocol):
@@ -68,6 +70,7 @@ class DefaultDebater:
             try:
                 return await self._llm_debate(plan, input_text)
             except Exception as _exc:
+                logger.warning("debater 异常处理", error=str(_exc))
                 log_ignored(None, "debater.DefaultDebater.debate", _exc)
         return self._rule_based_debate(plan, input_text)
 
@@ -101,7 +104,7 @@ class DefaultDebater:
             '}'
         )
 
-        response = await self.llm.chat(  # type: ignore[union-attr]
+        response = await self.llm.chat(
             messages=[{"role": "user", "content": prompt}],
             use_cache=False,
         )
@@ -237,6 +240,7 @@ class DefaultDebater:
                     llm_vulns = await self._llm_devils_advocate(plan, input_text)
                     vulnerabilities.extend(llm_vulns)
                 except Exception as _exc:
+                    logger.warning("debater 异常处理", error=str(_exc))
                     log_ignored(None, "debater.DefaultDebater.multi_round_debate", _exc)
 
             # 辩护方回应
@@ -395,7 +399,8 @@ class DefaultDebater:
             # 按行分割，过滤空行
             vulns = [line.strip().lstrip("-•0123456789. ") for line in content.split("\n") if line.strip()]
             return [v for v in vulns if len(v) > 3][:5]  # 最多5条
-        except Exception:
+        except Exception as e:
+            logger.warning("debater._attack_plan 攻击评估失败", error=str(e))
             return []
 
     def _defend_plan(

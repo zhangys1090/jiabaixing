@@ -53,6 +53,8 @@ const authenticator = new WsAuthenticator();
 const clientConnectTimes = new Map<string, number[]>();
 const CONNECT_RATE_LIMIT_MS = 2000;
 const MAX_CONNECTS_PER_MINUTE = 30;
+// P0-4 修复: WS 连接速率 Map 最大容量，防止恶意连接撑爆内存
+const MAX_CONNECT_RATE_ENTRIES = 10000;
 
 function checkConnectRate(clientIp: string): boolean {
   const now = Date.now();
@@ -66,6 +68,24 @@ function checkConnectRate(clientIp: string): boolean {
     return false;
   }
   recent.push(now);
+  // P0-4: 超过最大条目时淘汰最旧条目
+  if (
+    !clientConnectTimes.has(clientIp) &&
+    clientConnectTimes.size >= MAX_CONNECT_RATE_ENTRIES
+  ) {
+    let oldestKey: string | null = null;
+    let oldestTime = Infinity;
+    for (const [ip, arr] of clientConnectTimes) {
+      const t = arr[0] ?? Infinity;
+      if (t < oldestTime) {
+        oldestTime = t;
+        oldestKey = ip;
+      }
+    }
+    if (oldestKey !== null) {
+      clientConnectTimes.delete(oldestKey);
+    }
+  }
   clientConnectTimes.set(clientIp, recent);
   return true;
 }

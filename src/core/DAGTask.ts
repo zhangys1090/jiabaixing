@@ -136,7 +136,7 @@ export class TaskNode {
 
     return this.dependencies.every((depId) => {
       const status = dependencyStatuses.get(depId);
-      return status === TaskStatus.SUCCESS;
+      return status === TaskStatus.SUCCESS || status === TaskStatus.SKIPPED;
     });
   }
 
@@ -172,6 +172,8 @@ export class DAGTask {
   private eventHandlers: Map<string, ((node: TaskNode) => void)[]> = new Map(); // 事件处理器
   private maxParallelTasks: number = 4; // 最大并行任务数
   private runningTasks: Set<string> = new Set(); // 正在执行的任务
+  private _dirty: boolean = false;
+  private _cachedTopoOrder: string[] | null = null;
 
   constructor(name: string, maxParallelTasks: number = 4) {
     this.name = name;
@@ -191,7 +193,6 @@ export class DAGTask {
   public addNode(node: TaskNode): void {
     this.nodes.set(node.id, node);
 
-    // 更新邻接表
     if (node.dependencies.length > 0) {
       node.dependencies.forEach((depId) => {
         if (!this.adjacencyList.has(depId)) {
@@ -201,10 +202,15 @@ export class DAGTask {
       });
     }
 
-    // 检查是否存在循环依赖
+    this._dirty = true;
+  }
+
+  public commit(): void {
+    if (!this._dirty) return;
     if (this.hasCycle()) {
-      throw new Error(`检测到循环依赖！节点: ${node.id}`);
+      throw new Error('检测到循环依赖！请检查任务依赖关系');
     }
+    this._dirty = false;
   }
 
   /**
@@ -481,6 +487,10 @@ export class DAGTask {
    * 拓扑排序 - 获取任务执行顺序
    */
   public topologicalSort(): string[] {
+    if (this._cachedTopoOrder && !this._dirty) {
+      return this._cachedTopoOrder;
+    }
+
     const result: string[] = [];
     const visited = new Set<string>();
     const tempVisited = new Set<string>();
@@ -493,11 +503,12 @@ export class DAGTask {
       if (!visited.has(nodeId)) {
         tempVisited.add(nodeId);
 
-        // 获取所有依赖此节点的节点
-        const dependents = this.adjacencyList.get(nodeId) || [];
-        dependents.forEach((dependentId) => {
-          dfs(dependentId);
-        });
+        const node = this.nodes.get(nodeId);
+        if (node) {
+          for (const depId of node.dependencies) {
+            dfs(depId);
+          }
+        }
 
         tempVisited.delete(nodeId);
         visited.add(nodeId);
@@ -505,14 +516,14 @@ export class DAGTask {
       }
     };
 
-    // 对所有节点执行DFS
-    this.nodes.forEach((node, id) => {
+    for (const id of this.nodes.keys()) {
       if (!visited.has(id)) {
         dfs(id);
       }
-    });
+    }
 
-    return result.reverse(); // 反转得到正确的执行顺序
+    this._cachedTopoOrder = result;
+    return result;
   }
 
   /**

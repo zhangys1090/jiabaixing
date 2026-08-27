@@ -1,9 +1,9 @@
-# Jiabaixing V5.5 — 开发文档
+# Jiabaixing V6.1 — 开发文档
 
-> **版本**: V5.5 Harness Agent Framework | **架构**: E-T-C-S-L-V 六层管控 + Python 后端 + Facade 拆分
+> **版本**: V6.1 Harness Agent Framework | **架构**: E-T-C-S-L-V 六层管控 + Python 后端 + Facade 拆分 + P0-P2 内核提升 + P2 战略能力
 > **语言**: TypeScript (ES2022) + Python 3.13 | **运行**: Node.js >= 20.x / Python >= 3.13
 > **默认模型**: deepseek-chat (OpenAI 兼容接口)
-> **验证日期**: 2026-07-14
+> **验证日期**: 2026-08-24
 
 ---
 

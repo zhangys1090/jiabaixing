@@ -22,8 +22,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("learning_signals")
+
 
 
 class SignalType(str):
@@ -143,6 +143,7 @@ class LearningSignalCollector:
             config: 配置。
             enabled: 是否启用。
         """
+        self._MAX_STATS = 500
         self._config = config or SignalCollectorConfig()
         self._enabled = enabled
 

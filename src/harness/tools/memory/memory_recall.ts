@@ -7,9 +7,9 @@
  */
 
 import type { MemoryAssistant } from '../../../core/MemoryAssistant';
+import { Logger } from '../../../utils/Logger';
 import type { ToolContext, ToolDefinition, ToolResult } from '../../types';
 import { Permission, ToolCategory } from '../../types';
-import { Logger } from '../../utils/Logger';
 
 export const MEMORY_RECALL_DEF: ToolDefinition = {
   name: 'memory_recall',
@@ -71,9 +71,13 @@ export function createMemoryRecallExecutor(deps: MemoryRecallDeps = {}) {
         const memories = await deps.retrieveRelevant({ query, limit });
 
         if (deps.updateAccessStats && memories.length > 0) {
-          deps.updateAccessStats(query).catch((err) =>
-            Logger.warn('更新记忆访问统计失败（非关键）', err as Error, 'memory_recall')
-          );
+          deps
+            .updateAccessStats(query)
+            .catch((err) =>
+              Logger.warn('更新记忆访问统计失败（非关键）', 'memory_recall', {
+                error: (err as Error).message,
+              })
+            );
         }
 
         let results = memories;

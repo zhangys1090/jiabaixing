@@ -5,8 +5,8 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { Logger } from '../utils/Logger';
 import { SYSTEM_CONSTANTS } from '../shared/contracts';
+import { Logger } from '../utils/Logger';
 
 export interface ConversationEntry {
   role: 'user' | 'assistant' | 'system';
@@ -24,11 +24,8 @@ export class ConversationHistoryManager {
   private static readonly MAX_HISTORY = 20;
 
   private getStateFilePath(userId: string): string {
-    return path.join(
-      process.cwd(),
-      'data',
-      `conversation-state-${userId}.json`
-    );
+    const baseDir = process.env.DATA_DIR || path.join(process.cwd(), 'data');
+    return path.join(baseDir, `conversation-state-${userId}.json`);
   }
 
   private stateFilePath: string;

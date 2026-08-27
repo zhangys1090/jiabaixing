@@ -28,10 +28,11 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Coroutine
-
 from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("background_review")
+
+
 
 
 class ReviewAction(str, Enum):
@@ -155,6 +156,7 @@ class BackgroundReview:
         self._config = config or ReviewConfig()
         self._reports: list[ReviewReport] = []
         self._on_action: Callable[..., Coroutine[Any, Any, None]] | None = None
+        self._MAX_REPORTS = 100
 
     @property
     def config(self) -> ReviewConfig:
@@ -292,6 +294,8 @@ class BackgroundReview:
 
         report.completed_at = time.time()
         self._reports.append(report)
+        if len(self._reports) > self._MAX_REPORTS:
+            self._reports = self._reports[-(self._MAX_REPORTS * 3 // 4):]
 
         log.info(
             "Memory review completed",

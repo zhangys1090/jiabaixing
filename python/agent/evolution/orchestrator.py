@@ -94,6 +94,7 @@ class EvolutionOrchestrator:
         self._last_auto_detection_time = 0.0
         self._runtime_signals_accumulator: list[dict] = []
         self._provider_for_runtime: str = ""
+        self._per_turn_signals: list[dict] = []
 
         # 验证回滚（P0）
         self._pending_rollbacks: dict[str, RollbackSnapshot] = {}
@@ -134,7 +135,7 @@ class EvolutionOrchestrator:
         if strategy_adapter:
             active.append("StrategyAdapter")
 
-        log.info(f"Evolution orchestrator registered {len(active)} engines: {', '.join(active)}")
+        log.debug(f"Evolution orchestrator registered {len(active)} engines: {', '.join(active)}")
 
     def start(self) -> None:
         if self._is_running:
@@ -142,7 +143,7 @@ class EvolutionOrchestrator:
             return
         self._is_running = True
         self._start_auto_detection()
-        log.info("Evolution orchestrator started")
+        log.debug("Evolution orchestrator started")
 
     def stop(self) -> None:
         self._is_running = False
@@ -167,6 +168,7 @@ class EvolutionOrchestrator:
 
     async def record_interaction(self, quality: float, response_time_ms: float, tool_successes: bool = True) -> None:
         self._interaction_count += 1
+        quality = max(0.0, min(1.0, quality))
         self._quality_history.append(quality)
         self._response_time_history.append(response_time_ms)
 
@@ -212,6 +214,44 @@ class EvolutionOrchestrator:
         if self._pending_rollbacks:
             await self._check_pending_rollbacks(quality)
 
+    async def record_tool_signal(self, tool_name: str, success: bool, latency_ms: float = 0.0) -> None:
+        """每工具调用即时信号 — 解决信号稀疏问题。
+
+        每次工具调用后立即记录信号，无需等待完整优化周期。
+        设计目标：<1ms，不阻塞主流程，失败时静默降级。
+        """
+        try:
+            self._interaction_count += 1
+            quality = 1.0 if success else 0.0
+            self._quality_history.append(quality)
+            if len(self._quality_history) > _MAX_QUALITY_HISTORY:
+                self._quality_history = self._quality_history[-_MAX_QUALITY_HISTORY:]
+            self._response_time_history.append(latency_ms)
+            if len(self._response_time_history) > _MAX_RESPONSE_TIME_HISTORY:
+                self._response_time_history = self._response_time_history[-_MAX_RESPONSE_TIME_HISTORY:]
+
+            if self._strategy_adapter:
+                signal = f"tool_success:{tool_name}" if success else f"tool_failure:{tool_name}"
+                value = 1.0 if success else -1.0
+                self._strategy_adapter.record_signal(signal, value=value)
+
+            if not success:
+                self._consecutive_failure_count += 1
+                self._consecutive_low_quality_count += 1
+            else:
+                self._consecutive_low_quality_count = max(0, self._consecutive_low_quality_count - 1)
+                if self._consecutive_failure_count > 0:
+                    self._consecutive_failure_count -= 1
+
+            log.debug(
+                "Tool signal recorded",
+                tool=tool_name,
+                success=success,
+                latency_ms=round(latency_ms, 1),
+            )
+        except Exception as e:
+            log.debug("record_tool_signal failed", error=str(e))
+
     async def _per_turn_lightweight_signal(
         self,
         quality: float,
@@ -226,7 +266,6 @@ class EvolutionOrchestrator:
         设计目标：<50ms，不阻塞主流程，失败时静默降级。
         """
         try:
-            self._per_turn_signals = getattr(self, "_per_turn_signals", [])
             self._per_turn_signals.append({
                 "quality": quality,
                 "response_time_ms": response_time_ms,
@@ -290,7 +329,7 @@ class EvolutionOrchestrator:
                 except Exception as e:
                     log.debug("Runtime capability upgrade failed", error=str(e))
 
-            log.debug(
+            log.info(
                 "Per-turn lightweight signal processed",
                 avg_quality=round(avg_q, 3),
                 avg_response_time_ms=round(avg_rt, 1),
@@ -334,6 +373,7 @@ class EvolutionOrchestrator:
                                 detail="No evolution needed",
                             ))
                     except Exception as e:
+                        log.debug("orchestrator 异常处理", error=str(e))
                         results.append(OptimizationCycleResult(
                             engine_name="EvolutionEngine",
                             triggered=False,
@@ -388,6 +428,7 @@ class EvolutionOrchestrator:
                                 detail="No evolution cause detected",
                             ))
                     except Exception as e:
+                        log.debug("orchestrator 异常处理", error=str(e))
                         results.append(OptimizationCycleResult(
                             engine_name="EvolutionEngineV2",
                             triggered=False,
@@ -673,7 +714,7 @@ class EvolutionOrchestrator:
             tool_recommendations = dict(self._evolution_engine._tool_weights)
 
         per_turn_summary: dict[str, Any] = {}
-        per_turn_signals = getattr(self, "_per_turn_signals", [])
+        per_turn_signals = self._per_turn_signals
         if per_turn_signals:
             recent = per_turn_signals[-5:]
             per_turn_summary = {

@@ -21,14 +21,31 @@ from enum import Enum
 from typing import Any
 
 from agent.core.logger import StructuredLogger
+from agent.core.types import BaseAuditFinding, RiskLevel as CoreRiskLevel
 
 log = StructuredLogger("evolution_feedback_auditor")
+
 
 
 class AuditSeverity(str, Enum):
     INFO = "info"
     WARNING = "warning"
     CRITICAL = "critical"
+
+
+_AUDIT_SEVERITY_TO_RISK: dict[AuditSeverity, CoreRiskLevel] = {
+    AuditSeverity.INFO: CoreRiskLevel.LOW,
+    AuditSeverity.WARNING: CoreRiskLevel.MEDIUM,
+    AuditSeverity.CRITICAL: CoreRiskLevel.CRITICAL,
+}
+
+_RISK_TO_AUDIT_SEVERITY: dict[CoreRiskLevel, AuditSeverity] = {
+    CoreRiskLevel.NONE: AuditSeverity.INFO,
+    CoreRiskLevel.LOW: AuditSeverity.INFO,
+    CoreRiskLevel.MEDIUM: AuditSeverity.WARNING,
+    CoreRiskLevel.HIGH: AuditSeverity.WARNING,
+    CoreRiskLevel.CRITICAL: AuditSeverity.CRITICAL,
+}
 
 
 class SignalType(str, Enum):
@@ -67,16 +84,19 @@ class ExecutionRecord:
 
 
 @dataclass
-class AuditFinding:
+class AuditFinding(BaseAuditFinding):
+    """进化反馈审计发现 — 继承 core.types.BaseAuditFinding。"""
+
     finding_id: str = ""
-    severity: AuditSeverity = AuditSeverity.INFO
-    category: str = ""
     description: str = ""
     tool_name: str = ""
     expected: str = ""
     actual: str = ""
-    timestamp: float = 0.0
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def audit_severity(self) -> AuditSeverity:
+        return _RISK_TO_AUDIT_SEVERITY.get(self.severity, AuditSeverity.INFO)
 
 
 @dataclass
@@ -186,7 +206,7 @@ class EvolutionFeedbackAuditor:
         for ex in unreported:
             findings.append(AuditFinding(
                 finding_id=f"cov_{len(findings)}",
-                severity=AuditSeverity.WARNING if not ex.success else AuditSeverity.INFO,
+                severity=_AUDIT_SEVERITY_TO_RISK[AuditSeverity.WARNING] if not ex.success else _AUDIT_SEVERITY_TO_RISK[AuditSeverity.INFO],
                 category="coverage_gap",
                 description=f"工具 '{ex.tool_name}' 执行未上报信号",
                 tool_name=ex.tool_name,
@@ -219,7 +239,7 @@ class EvolutionFeedbackAuditor:
                 if ex.success != sig.success:
                     findings.append(AuditFinding(
                         finding_id=f"con_{len(findings)}",
-                        severity=AuditSeverity.CRITICAL,
+                        severity=_AUDIT_SEVERITY_TO_RISK[AuditSeverity.CRITICAL],
                         category="consistency_violation",
                         description=f"工具 '{tool_name}' 执行结果与信号不一致",
                         tool_name=tool_name,
@@ -262,7 +282,7 @@ class EvolutionFeedbackAuditor:
         if len(stagnant_tools) > len(priority_changes) * 0.8:
             findings.append(AuditFinding(
                 finding_id="stag_0",
-                severity=AuditSeverity.WARNING,
+                severity=_AUDIT_SEVERITY_TO_RISK[AuditSeverity.WARNING],
                 category="adaptation_stagnation",
                 description=f"自适应优先级大面积停滞 ({len(stagnant_tools)}/{len(priority_changes)} 工具无变化)",
                 tool_name="",
@@ -286,7 +306,7 @@ class EvolutionFeedbackAuditor:
                     if delay_ms > 1000:
                         findings.append(AuditFinding(
                             finding_id=f"delay_{len(findings)}",
-                            severity=AuditSeverity.WARNING,
+                            severity=_AUDIT_SEVERITY_TO_RISK[AuditSeverity.WARNING],
                             category="signal_delay",
                             description=f"工具 '{sig.tool_name}' 信号延迟过高 ({delay_ms:.0f}ms)",
                             tool_name=sig.tool_name,
@@ -327,8 +347,8 @@ class EvolutionFeedbackAuditor:
             f.category == "adaptation_stagnation" for f in all_findings
         )
 
-        critical_count = sum(1 for f in all_findings if f.severity == AuditSeverity.CRITICAL)
-        warning_count = sum(1 for f in all_findings if f.severity == AuditSeverity.WARNING)
+        critical_count = sum(1 for f in all_findings if f.audit_severity == AuditSeverity.CRITICAL)
+        warning_count = sum(1 for f in all_findings if f.audit_severity == AuditSeverity.WARNING)
 
         if critical_count > 0:
             health = "unhealthy"

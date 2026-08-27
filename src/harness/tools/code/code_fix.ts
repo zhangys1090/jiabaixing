@@ -2,6 +2,7 @@
  * Harness Tool: code_fix - 修复代码问题
  */
 
+import { Logger } from '../../../utils/Logger';
 import type { ToolContext, ToolDefinition, ToolResult } from '../../types';
 import { Permission, ToolCategory } from '../../types';
 import { scanGeneratedCode } from './codeShared';

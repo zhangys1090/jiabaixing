@@ -7,8 +7,8 @@ from enum import Enum
 from typing import Any, Optional
 
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("reflection_application")
+
 
 
 class ReflectionType(str, Enum):

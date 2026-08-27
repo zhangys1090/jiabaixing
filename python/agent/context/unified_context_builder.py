@@ -17,7 +17,7 @@ Usage:
         include_system_prompt=True,
         include_memory=True,
     )
-    print(f"状态: {result.status}, 消息数: {len(result.messages)}")
+    logger.info("状态: {result.status}, 消息数: {len(result.messages)}")
 """
 
 from __future__ import annotations
@@ -31,6 +31,8 @@ from agent.context.unified_context_pipeline import (
     UnifiedContext,
     UnifiedContextPipeline,
 )
+import logging
+logger = logging.getLogger(__name__)
 
 
 @dataclass

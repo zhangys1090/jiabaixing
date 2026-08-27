@@ -35,10 +35,11 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
-
 from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("turn_retry_state")
+
+
 
 
 class RetryState(str, Enum):
@@ -153,6 +154,7 @@ class TurnRetryState:
     def __init__(self) -> None:
         self._state = RetryState.IDLE
         self._attempts: list[RetryAttempt] = []
+        self._MAX_ATTEMPTS = 1000
         self._context = RetryContext()
         self._total_retries: int = 0
         self._total_recoveries: int = 0

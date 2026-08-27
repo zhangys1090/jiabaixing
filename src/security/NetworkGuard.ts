@@ -101,6 +101,25 @@ class NetworkGuardInner {
         }
       }
 
+      const ipLike = /^(\d{1,3}\.){3}\d{1,3}$/.test(hostname);
+      if (ipLike) {
+        const octets = hostname.split('.').map(Number);
+        const isPrivate =
+          octets[0] === 10 ||
+          (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
+          (octets[0] === 192 && octets[1] === 168) ||
+          octets[0] === 127 ||
+          octets[0] === 0 ||
+          (octets[0] === 169 && octets[1] === 254);
+        if (isPrivate) {
+          Logger.warn(
+            `🚫 网络守卫：阻止私有/回环IP访问 (SSRF防护): ${hostname}`,
+            'NetworkGuard'
+          );
+          return false;
+        }
+      }
+
       return false;
     } catch {
       return false;

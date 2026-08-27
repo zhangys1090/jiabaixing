@@ -390,7 +390,14 @@ class WebSocketConnectionManager {
             // 静默处理
           }
         });
+        setTimeout(() => this.updateDialogState('idle'), 200);
         break;
+      case 'response_ready_ack': {
+        const ackData = message.data as { traceId?: string; success?: boolean; source?: string };
+        console.log(`✅ [WS] Python后端响应确认: traceId=${ackData.traceId}, source=${ackData.source}`);
+        this.updateDialogState('idle');
+        break;
+      }
       case 'response':
         this.updateDialogState('speaking');
         break;
@@ -412,6 +419,7 @@ class WebSocketConnectionManager {
       case 'error': {
         const errorData = message.data as ErrorEvent;
         console.error('❌ 收到服务器错误:', errorData);
+        this.updateDialogState('idle');
         this.errorListeners.forEach((listener) => {
           try {
             listener(errorData);
@@ -549,6 +557,7 @@ class WebSocketConnectionManager {
       }
       case 'stream_done': {
         const streamDoneData = message.data as StreamDoneData;
+        this.updateDialogState('idle');
         this.streamDoneListeners.forEach((listener) => {
           try {
             listener(streamDoneData);
@@ -635,6 +644,7 @@ class WebSocketConnectionManager {
   }
 
   sendProcess(input: string, userId: string = 'default'): boolean {
+    this.updateDialogState('processing');
     return this.send({
       type: 'user_input',
       payload: { input, userId },
@@ -642,6 +652,7 @@ class WebSocketConnectionManager {
   }
 
   sendMessage(input: string, userId: string = 'default'): boolean {
+    this.updateDialogState('processing');
     return this.send({
       type: 'user_input',
       payload: { input, userId },

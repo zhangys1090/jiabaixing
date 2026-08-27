@@ -68,7 +68,7 @@
     "ts-jest": "^29.4.9",
     "ts-node": "^10.9.2",
     "tsx": "4.22.4",
-    "typescript": "^5.7.0"
+    "typescript": "5.9.3"
   },
   "scripts": {
     "setup": "tsx --env-file=.env src/config/setup.ts",
@@ -77,12 +77,12 @@
     "start": "concurrently \"npm run start:backend\" \"npm run start:frontend\"",
     "fix:native": "npm rebuild better-sqlite3",
     "postinstall": "npm rebuild better-sqlite3 || node -e \"console.warn('[postinstall] better-sqlite3 rebuild skipped; run npm run fix:native if startup fails')\"",
-    "start:backend": "tsx --env-file=.env src/main.ts",
+    "start:backend": "cross-env NODE_OPTIONS=--max-old-space-size=512 tsx --env-file=.env src/main.ts",
     "start:frontend": "cd src/frontend && cross-env BROWSER=none npm start",
-    "start:main": "tsx --env-file=.env src/main.ts",
+    "start:main": "cross-env NODE_OPTIONS=--max-old-space-size=512 tsx --env-file=.env src/main.ts",
     "start:full": "concurrently --kill-others-on-fail \"npm run start:backend\" \"npm run start:frontend\"",
-    "cli": "tsx --env-file=.env src/cli.ts",
-    "daemon": "tsx --env-file=.env src/cli.ts daemon",
+    "cli": "cross-env NODE_OPTIONS=--max-old-space-size=512 tsx --env-file=.env src/cli.ts",
+    "daemon": "cross-env NODE_OPTIONS=--max-old-space-size=512 tsx --env-file=.env src/cli.ts daemon",
     "build": "tsc",
     "build:fast": "tsc --project tsconfig.fast.json",
     "test": "jest",

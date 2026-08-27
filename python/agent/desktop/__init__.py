@@ -13,6 +13,20 @@ from agent.desktop.desktop_controller import (
     ScreenshotResult,
     ActionResult,
 )
+from agent.desktop.action_sandbox import (
+    ActionSandbox,
+    RiskLevel,
+    ActionType,
+    RiskCheckResult,
+    CheckpointData as SandboxCheckpointData,
+    SandboxConfig,
+)
+from agent.desktop.operation_loop import (
+    DesktopOperationLoop,
+    OperationSpec,
+    OperationResult,
+    OperationLoopMetrics,
+)
 
 __all__ = [
     "DesktopController",
@@ -22,4 +36,14 @@ __all__ = [
     "WindowInfo",
     "ScreenshotResult",
     "ActionResult",
+    "ActionSandbox",
+    "RiskLevel",
+    "ActionType",
+    "RiskCheckResult",
+    "SandboxCheckpointData",
+    "SandboxConfig",
+    "DesktopOperationLoop",
+    "OperationSpec",
+    "OperationResult",
+    "OperationLoopMetrics",
 ]

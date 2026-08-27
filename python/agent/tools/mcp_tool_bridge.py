@@ -8,8 +8,8 @@ from typing import Any, Callable
 
 from agent.core.logger import StructuredLogger
 from agent.tools.registry import ToolCategory, ToolDefinition, ToolParameterDef, ToolResult, ToolRegistry
-
 log = StructuredLogger("mcp_tool_bridge")
+
 
 DEFAULT_SYNC_INTERVAL = 60.0
 
@@ -165,7 +165,7 @@ class MCPToolBridge:
                     f"MCP服务器 {server_name} 工具同步失败: {err}"
                 )
 
-        log.info(f"MCP工具桥接完成: {synced_count} 个新工具")
+        log.debug(f"MCP工具桥接完成: {synced_count} 个新工具")
         return synced_count
 
     @staticmethod
@@ -204,6 +204,7 @@ class MCPToolBridge:
                 duration=time.monotonic() - start_time,
             )
         except Exception as err:
+            log.debug("mcp_tool_bridge 异常处理", error=str(err))
             return ToolResult(
                 success=False,
                 error=f"MCP工具调用失败 [{server_name}/{tool_name}]: {err}",
@@ -280,7 +281,7 @@ class MCPToolBridge:
         if self._sync_task and not self._sync_task.done():
             return
         self._sync_task = asyncio.create_task(self._auto_sync_loop(registry))
-        log.info(f"MCP工具自动同步已启动 (间隔={self._sync_interval}s)")
+        log.debug(f"MCP工具自动同步已启动 (间隔={self._sync_interval}s)")
 
     def stop_auto_sync(self) -> None:
         if self._sync_task and not self._sync_task.done():

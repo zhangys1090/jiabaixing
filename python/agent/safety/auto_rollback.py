@@ -28,11 +28,12 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Awaitable
 
-from agent.core.logger import StructuredLogger
 from agent.safety.checkpoint_manager import CheckpointManager, Checkpoint
 from agent.safety.operation_scope import OperationScope, ScopeViolation
+from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("auto_rollback")
+
 
 
 @dataclass
@@ -201,6 +202,8 @@ class AutoRollback:
         self._path_locks: dict[str, asyncio.Lock] = {}
         self._active_path_set: set[str] = set()
         self._master_lock = asyncio.Lock()
+        self._MAX_HISTORY = 5000
+        self._MAX_PATH_LOCKS = 10000
 
     def guard(
         self,
@@ -248,8 +251,13 @@ class AutoRollback:
                     self._path_locks[p] = asyncio.Lock()
 
         for p in resolved:
-            await self._path_locks[p].acquire()
-            acquired.append(p)
+            try:
+                await self._path_locks[p].acquire()
+                acquired.append(p)
+            except BaseException:
+                for ap in reversed(acquired):
+                    self._path_locks[ap].release()
+                raise
 
         async with self._master_lock:
             self._active_path_set.update(acquired)
@@ -264,6 +272,10 @@ class AutoRollback:
                 lock.release()
         async with self._master_lock:
             self._active_path_set -= set(paths)
+            if len(self._path_locks) > self._MAX_PATH_LOCKS:
+                stale = [p for p in self._path_locks if p not in self._active_path_set]
+                for p in stale[: len(self._path_locks) - (self._MAX_PATH_LOCKS * 3 // 4)]:
+                    del self._path_locks[p]
 
     def execute_rollback(
         self,
@@ -296,6 +308,8 @@ class AutoRollback:
         record.errors = result.get("errors", [])
 
         self._history.append(record)
+        if len(self._history) > self._MAX_HISTORY:
+            self._history = self._history[-self._MAX_HISTORY * 3 // 4:]
         log.info(
             "回滚执行完成",
             id=record.id,

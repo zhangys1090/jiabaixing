@@ -39,8 +39,8 @@ from agent.loop.types import (
 )
 from agent.tools.registry import ToolRegistry
 from agent.llm.provider import LLMProvider
-
 log = StructuredLogger("plan_scheduler")
+
 
 
 class PlanStrategy(str, Enum):
@@ -261,12 +261,14 @@ class PlanScheduler:
                     if len(recommendations) > 1 and all(r.capability_level >= 2 for r in recommendations[:2]):
                         return "complex"
             except Exception as _exc:
+                log.debug("plan_scheduler 异常处理", error=str(_exc))
                 log_ignored(log, "plan_scheduler.PlanScheduler._assess_complexity", _exc)
 
         if self._planner:
             try:
                 return await self._planner._analyze_complexity_semantic(input_text)
             except Exception as _exc:
+                log.debug("plan_scheduler 异常处理", error=str(_exc))
                 log_ignored(log, "plan_scheduler.PlanScheduler._assess_complexity", _exc)
 
         return self._keyword_complexity(input_text)

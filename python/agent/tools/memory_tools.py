@@ -8,7 +8,10 @@ from agent.tools.registry import (
     ToolParameterDef,
     ToolResult,
 )
-from agent.core.logger import log_ignored
+from agent.core.logger import StructuredLogger, log_ignored
+import logging
+logger = logging.getLogger(__name__)
+log = StructuredLogger("memory_tools")
 
 
 MEMORY_RECALL_DEF = ToolDefinition(
@@ -122,6 +125,7 @@ async def memory_recall_executor(params: dict[str, Any]) -> ToolResult:
         output = f"找到 {len(results)} 条相关记忆:\n" + "\n".join(formatted)
         return ToolResult(success=True, output=output, duration=time.time() - start)
     except Exception as e:
+        logger.warning("memory_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"记忆召回失败: {e}")
 
 
@@ -151,6 +155,7 @@ async def memory_search_executor(params: dict[str, Any]) -> ToolResult:
         output = f"找到 {len(results)} 条记忆:\n" + "\n".join(formatted)
         return ToolResult(success=True, output=output, duration=time.time() - start)
     except Exception as e:
+        logger.warning("memory_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"记忆搜索失败: {e}")
 
 
@@ -178,6 +183,7 @@ async def memory_store_executor(params: dict[str, Any]) -> ToolResult:
                     duration=time.time() - start,
                 )
         except Exception as _exc:
+            logger.warning("memory_tools 异常处理", error=str(_exc))
             log_ignored(None, "memory_tools.memory_store_executor", _exc)
 
     memory = _get_memory_engine()
@@ -197,6 +203,7 @@ async def memory_store_executor(params: dict[str, Any]) -> ToolResult:
             duration=time.time() - start,
         )
     except Exception as e:
+        logger.warning("memory_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"记忆存储失败: {e}")
 
 
@@ -224,4 +231,5 @@ async def knowledge_query_executor(params: dict[str, Any]) -> ToolResult:
         output = f"找到 {len(results)} 条相关知识:\n" + "\n".join(formatted)
         return ToolResult(success=True, output=output, duration=time.time() - start)
     except Exception as e:
+        logger.warning("memory_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"知识查询失败: {e}")

@@ -15,10 +15,11 @@ import os
 import time
 from dataclasses import dataclass, field
 from typing import Any
-
 from agent.core.logger import StructuredLogger, log_ignored
 
 log = StructuredLogger("screen_watcher")
+
+
 
 
 @dataclass
@@ -63,8 +64,12 @@ class ScreenWatcher:
     1. pixel_diff: 像素级差异检测（精确，较慢）
     2. hash_diff: 感知哈希对比（快速，粗略）
 
+    支持ROI（Region of Interest）配置，仅监控指定区域，
+    忽略无关区域变化，提升检测精度和性能。
+
     Usage:
         watcher = ScreenWatcher()
+        watcher.set_roi([Rect(x=100, y=100, width=800, height=600)])
         await watcher.start()
         events = watcher.get_events()
         await watcher.stop()
@@ -76,6 +81,7 @@ class ScreenWatcher:
         diff_threshold: float = 0.02,
         detection_mode: str = "hash_diff",
         shutdown_event: asyncio.Event | None = None,
+        roi_regions: list[Rect] | None = None,
     ) -> None:
         self._poll_interval = poll_interval
         self._diff_threshold = diff_threshold
@@ -83,10 +89,59 @@ class ScreenWatcher:
         self._baseline_path: str = ""
         self._baseline_hash: str = ""
         self._events: list[ScreenChangeEvent] = []
+        self._MAX_EVENTS = 1000
         self._running: bool = False
         self._task: asyncio.Task | None = None
         self._screenshot_dir: str = ""
         self._shutdown_event = shutdown_event
+        self._roi_regions: list[Rect] = roi_regions or []
+        self._on_change_callbacks: list[Any] = []
+        self._on_change_threshold: float = 0.05
+
+    def set_roi(self, regions: list[Rect]) -> None:
+        """设置 ROI 监控区域。
+
+        仅检测指定区域内的变化，忽略区域外变化。
+        设置为空列表则恢复全屏监控。
+
+        Args:
+            regions: 感兴趣的矩形区域列表。
+        """
+        self._roi_regions = regions
+        log.info("ROI regions updated", count=len(regions),
+                 regions=[f"({r.x},{r.y},{r.width}x{r.height})" for r in regions])
+
+    def add_roi(self, region: Rect) -> None:
+        """添加单个 ROI 区域。"""
+        self._roi_regions.append(region)
+        log.info("ROI region added", region=f"({region.x},{region.y},{region.width}x{region.height})")
+
+    def clear_roi(self) -> None:
+        """清除所有 ROI 区域，恢复全屏监控。"""
+        self._roi_regions.clear()
+        log.info("ROI regions cleared, full-screen monitoring")
+
+    def on_change(self, callback: Any, threshold: float = 0.05) -> None:
+        """注册屏幕变化回调 — 当变化超过阈值时自动触发。
+
+        Args:
+            callback: 异步回调函数，签名为 async callback(event: ScreenChangeEvent) -> None
+            threshold: 触发阈值，diff_score >= threshold 时触发
+        """
+        self._on_change_callbacks.append(callback)
+        if threshold > self._on_change_threshold:
+            self._on_change_threshold = threshold
+        log.info("Change callback registered", threshold=threshold, total_callbacks=len(self._on_change_callbacks))
+
+    def clear_callbacks(self) -> None:
+        """清除所有变化回调。"""
+        self._on_change_callbacks.clear()
+        self._on_change_threshold = 0.05
+
+    @property
+    def roi_regions(self) -> list[Rect]:
+        """当前 ROI 区域列表。"""
+        return list(self._roi_regions)
 
     @property
     def is_running(self) -> bool:
@@ -149,8 +204,11 @@ class ScreenWatcher:
                 regions = self._detect_changed_regions(self._baseline_path, current_path)
                 event.changed_regions = regions
                 self._events.append(event)
+                if len(self._events) > self._MAX_EVENTS:
+                    self._events = self._events[-self._MAX_EVENTS * 3 // 4:]
                 self._baseline_path = current_path
                 self._baseline_hash = current_hash
+                await self._fire_callbacks(event)
                 return [event]
 
             return []
@@ -167,9 +225,26 @@ class ScreenWatcher:
             screenshot_path=current_path,
         )
         self._events.append(event)
+        if len(self._events) > self._MAX_EVENTS:
+            self._events = self._events[-self._MAX_EVENTS * 3 // 4:]
         self._baseline_path = current_path
         self._baseline_hash = self._compute_hash(current_path)
+        await self._fire_callbacks(event)
         return [event]
+
+    async def _fire_callbacks(self, event: ScreenChangeEvent) -> None:
+        """当变化超过阈值时触发已注册的回调。"""
+        if not self._on_change_callbacks:
+            return
+        if event.diff_score < self._on_change_threshold:
+            return
+        for cb in self._on_change_callbacks:
+            try:
+                result = cb(event)
+                if asyncio.iscoroutine(result):
+                    await result
+            except Exception as e:
+                log.debug("Change callback error", error=str(e))
 
     def get_events(self, limit: int = 50) -> list[ScreenChangeEvent]:
         """获取变化事件列表。
@@ -252,6 +327,7 @@ class ScreenWatcher:
             if result.success:
                 return result.image_path
         except Exception as _exc:
+            log.debug("screen_watcher 异常处理", error=str(_exc))
             log_ignored(log, "screen_watcher._take_screenshot", _exc)
 
         timestamp = time.strftime("%Y%m%d_%H%M%S")
@@ -275,11 +351,12 @@ class ScreenWatcher:
             from PIL import Image
             img = Image.open(image_path).convert("L").resize((16, 16))
             return str(list(img.getdata())[:64])
-        except Exception:
+        except Exception as _exc:
+            log.warning("异常降级处理", error=str(_exc))
             return ""
 
     def _compute_pixel_diff_ratio(self, pre_path: str, post_path: str) -> float:
-        """计算两张截图的像素差异率。"""
+        """计算两张截图的像素差异率（支持ROI区域）。"""
         if not pre_path or not post_path:
             return 0.0
         if not os.path.exists(pre_path) or not os.path.exists(post_path):
@@ -293,6 +370,9 @@ class ScreenWatcher:
 
             if img_pre.size != img_post.size:
                 img_post = img_post.resize(img_pre.size)
+
+            if self._roi_regions:
+                return self._compute_roi_diff(img_pre, img_post)
 
             try:
                 import numpy as np
@@ -313,8 +393,55 @@ class ScreenWatcher:
                 changed = sum(1 for a, b in zip(pixels_pre, pixels_post) if abs(a - b) > 30)
                 return changed / total
 
-        except Exception:
+        except Exception as _exc:
+            log.warning("异常降级处理", error=str(_exc))
             return 0.0
+
+    def _compute_roi_diff(self, img_pre: Any, img_post: Any) -> float:
+        """计算 ROI 区域内的像素差异率。
+
+        Args:
+            img_pre: 操作前灰度图 (PIL Image)。
+            img_post: 操作后灰度图 (PIL Image)。
+
+        Returns:
+            ROI 区域内的差异率 (0-1)。
+        """
+        try:
+            import numpy as np
+            arr_pre = np.array(img_pre, dtype=np.float32)
+            arr_post = np.array(img_post, dtype=np.float32)
+            h, w = arr_pre.shape[:2]
+            total_pixels = 0
+            changed_pixels = 0
+            for roi in self._roi_regions:
+                y1 = max(0, roi.y)
+                y2 = min(h, roi.y + roi.height)
+                x1 = max(0, roi.x)
+                x2 = min(w, roi.x + roi.width)
+                if y2 <= y1 or x2 <= x1:
+                    continue
+                block_pre = arr_pre[y1:y2, x1:x2]
+                block_post = arr_post[y1:y2, x1:x2]
+                diff = np.abs(block_pre - block_post)
+                total_pixels += diff.size
+                changed_pixels += int(np.count_nonzero(diff > 30))
+            return changed_pixels / max(total_pixels, 1)
+        except ImportError:
+            total_pixels = 0
+            changed_pixels = 0
+            for roi in self._roi_regions:
+                y1 = max(0, roi.y)
+                y2 = min(img_pre.size[1], roi.y + roi.height)
+                x1 = max(0, roi.x)
+                x2 = min(img_pre.size[0], roi.x + roi.width)
+                if y2 <= y1 or x2 <= x1:
+                    continue
+                block_pre = list(img_pre.crop((x1, y1, x2, y2)).getdata())
+                block_post = list(img_post.crop((x1, y1, x2, y2)).getdata())
+                total_pixels += len(block_pre)
+                changed_pixels += sum(1 for a, b in zip(block_pre, block_post) if abs(a - b) > 30)
+            return changed_pixels / max(total_pixels, 1)
 
     def _detect_changed_regions(self, pre_path: str, post_path: str) -> list[Rect]:
         """检测变化的屏幕区域（基于网格分块）。
@@ -388,7 +515,8 @@ class ScreenWatcher:
 
             return self._merge_regions(regions)
 
-        except Exception:
+        except Exception as _exc:
+            log.warning("异常降级处理", error=str(_exc))
             return []
 
     def _merge_regions(self, regions: list[Rect], gap: int = 20) -> list[Rect]:

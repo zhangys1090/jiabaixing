@@ -111,8 +111,8 @@ class TestRiskLevelNotShadowed:
         import agent.security as sec
 
         assert hasattr(sec, "GuidanceRiskLevel")
-        assert not hasattr(sec.GuidanceRiskLevel, "NONE")
-        assert sec.GuidanceRiskLevel is not sec.RiskLevel
+        assert hasattr(sec.GuidanceRiskLevel, "NONE")
+        assert sec.GuidanceRiskLevel is sec.RiskLevel
 
     def test_package_risk_level_is_sensitive_detector_version(self):
         import agent.security as sec

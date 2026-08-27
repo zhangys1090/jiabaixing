@@ -28,10 +28,11 @@ import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
-
 from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("message_content")
+
+
 
 
 class ContentType(str, Enum):

@@ -261,6 +261,204 @@ class TestBatchProcessing:
         assert processor is not None, "BatchProcessor应能正确实例化"
 
 
+class TestSandboxContract:
+    """测试沙箱隔离模块契约"""
+
+    async def test_sandbox_tier_enum(self):
+        from agent.sandbox.executor import SandboxTier
+
+        assert SandboxTier.KERNEL.value == "kernel"
+        assert SandboxTier.CONTAINER.value == "container"
+        assert SandboxTier.PROCESS.value == "process"
+        assert SandboxTier.LOGICAL.value == "logical"
+
+    async def test_sandbox_tier_info_dataclass(self):
+        from agent.sandbox.executor import SandboxTier, SandboxTierInfo
+
+        info = SandboxTierInfo(tier=SandboxTier.PROCESS, available=True, reason="test")
+        assert info.tier == SandboxTier.PROCESS
+        assert info.available is True
+        assert info.reason == "test"
+
+    async def test_sandbox_config_contract(self):
+        from agent.sandbox.executor import SandboxConfig, SecurityLevel
+
+        config = SandboxConfig(security_level=SecurityLevel.HIGH, timeout_ms=5000)
+        assert config.security_level == SecurityLevel.HIGH
+        assert config.timeout_ms == 5000
+        assert config.network_policy == "deny"
+
+    async def test_sandbox_execution_result_contract(self):
+        from agent.sandbox.executor import SandboxExecutionResult
+
+        result = SandboxExecutionResult(success=True, output="ok", duration_ms=100)
+        assert result.success is True
+        assert result.output == "ok"
+        assert result.duration_ms == 100
+
+    async def test_kernel_isolation_type_enum(self):
+        from agent.sandbox.kernel_isolation import KernelIsolationType
+
+        assert KernelIsolationType.GVISOR.value == "gvisor"
+        assert KernelIsolationType.FIRECRACKER.value == "firecracker"
+        assert KernelIsolationType.WINDOWS_SANDBOX.value == "windows_sandbox"
+
+    async def test_kernel_sandbox_config_contract(self):
+        from agent.sandbox.kernel_isolation import KernelSandboxConfig, KernelIsolationType
+
+        config = KernelSandboxConfig(isolation_type=KernelIsolationType.GVISOR, memory_mb=512)
+        assert config.isolation_type == KernelIsolationType.GVISOR
+        assert config.memory_mb == 512
+        assert config.network == "none"
+
+    async def test_kernel_sandbox_result_contract(self):
+        from agent.sandbox.kernel_isolation import KernelSandboxResult, KernelIsolationType
+
+        result = KernelSandboxResult(
+            success=True, output="done", isolation_type=KernelIsolationType.GVISOR, vm_id="vm-001",
+        )
+        assert result.success is True
+        assert result.isolation_type == KernelIsolationType.GVISOR
+        assert result.vm_id == "vm-001"
+
+    async def test_kernel_provider_plugin_api(self):
+        from agent.sandbox.kernel_isolation import KernelIsolationProvider, KernelIsolationType
+
+        backends = KernelIsolationProvider.list_backends()
+        assert len(backends) >= 3, "应有至少3个默认后端"
+        names = [b.name for b in backends]
+        assert KernelIsolationType.GVISOR in names
+        assert KernelIsolationType.FIRECRACKER in names
+        assert KernelIsolationType.WINDOWS_SANDBOX in names
+
+    async def test_risk_tool_classification(self):
+        from agent.sandbox.executor import _HIGH_RISK_TOOLS, _MEDIUM_RISK_TOOLS
+
+        assert "delete_file" in _HIGH_RISK_TOOLS
+        assert "execute_command" in _HIGH_RISK_TOOLS
+        assert "write_file" in _MEDIUM_RISK_TOOLS
+        assert _HIGH_RISK_TOOLS.isdisjoint(_MEDIUM_RISK_TOOLS), "高/中危工具不应重叠"
+
+
+class TestGatewayContract:
+    """测试网关模块契约"""
+
+    async def test_message_dataclass(self):
+        from agent.gateway.base import Message
+
+        msg = Message(platform="feishu", sender="user1", content="hello")
+        assert msg.platform == "feishu"
+        assert msg.sender == "user1"
+        assert msg.content == "hello"
+        assert msg.id != ""
+
+    async def test_platform_adapter_interface(self):
+        from agent.gateway.base import PlatformAdapter
+
+        abstract_methods = {"start", "stop", "send_message", "receive_message", "is_connected"}
+        actual = {m for m in dir(PlatformAdapter) if not m.startswith("_")}
+        assert abstract_methods.issubset(actual), f"PlatformAdapter缺少方法: {abstract_methods - actual}"
+
+    async def test_feishu_adapter_contract(self):
+        from agent.gateway.platforms.feishu_adapter import FeishuAdapter
+        from agent.gateway.base import PlatformAdapter
+
+        adapter = FeishuAdapter(app_id="test_id", app_secret="test_secret")
+        assert isinstance(adapter, PlatformAdapter)
+        assert adapter.name == "feishu"
+        assert adapter.simulated is False
+
+    async def test_gateway_config_contract(self):
+        from agent.gateway.base import GatewayConfig
+
+        config = GatewayConfig(host="0.0.0.0", port=9000)
+        assert config.host == "0.0.0.0"
+        assert config.port == 9000
+        assert config.max_retries == 3
+
+    async def test_platform_toolset_contract(self):
+        from agent.tools.platform_toolset import AgentPlatform, PLATFORM_TOOLSET_MAP
+
+        assert AgentPlatform.FEISHU.value == "feishu"
+        assert AgentPlatform.FEISHU in PLATFORM_TOOLSET_MAP
+        assert PLATFORM_TOOLSET_MAP[AgentPlatform.FEISHU] == "daily"
+
+
+class TestEvolutionContract:
+    """测试进化闭环模块契约"""
+
+    async def test_learning_signal_types(self):
+        from agent.evolution.types import SignalType
+
+        assert hasattr(SignalType, "TASK_SUCCESS")
+        assert hasattr(SignalType, "TASK_FAILURE")
+        assert hasattr(SignalType, "TOOL_ERROR")
+
+    async def test_learning_signal_dataclass(self):
+        from agent.evolution.types import LearningSignal, SignalType
+        import time
+
+        signal = LearningSignal(
+            signal_type=SignalType.TASK_SUCCESS,
+            quality=0.85,
+            timestamp=time.time(),
+        )
+        assert signal.signal_type == SignalType.TASK_SUCCESS
+        assert signal.quality == 0.85
+
+    async def test_feedback_types(self):
+        from agent.evolution.types import FeedbackType, FeedbackStrength, FeedbackSource
+
+        assert hasattr(FeedbackType, "POSITIVE")
+        assert hasattr(FeedbackType, "NEGATIVE")
+        assert hasattr(FeedbackStrength, "MEDIUM")
+        assert hasattr(FeedbackSource, "SATISFACTION")
+
+
+class TestLongTaskContract:
+    """测试长任务编排模块契约"""
+
+    async def test_long_task_config(self):
+        from agent.core.long_task import LongTaskConfig
+
+        config = LongTaskConfig(max_duration_sec=3600, checkpoint_interval_sec=60)
+        assert config.max_duration_sec == 3600
+        assert config.checkpoint_interval_sec == 60
+
+    async def test_long_task_priority(self):
+        from agent.core.long_task import TaskPriority
+
+        assert hasattr(TaskPriority, "CRITICAL")
+        assert hasattr(TaskPriority, "HIGH")
+        assert hasattr(TaskPriority, "NORMAL")
+        assert hasattr(TaskPriority, "LOW")
+
+
+class TestEvaluationContract:
+    """测试评测系统模块契约"""
+
+    async def test_eval_config(self):
+        from agent.evaluation.agent_eval_system import EvalConfig
+
+        config = EvalConfig()
+        assert hasattr(config, "pass_k")
+        assert hasattr(config, "max_retries")
+
+    async def test_three_axis_weights(self):
+        from agent.harness.three_axis import ThreeAxisScorer
+
+        scorer = ThreeAxisScorer()
+        assert hasattr(scorer, "score")
+
+    async def test_golden_eval_set_categories(self):
+        from agent.evaluation.golden_eval_set import GOLDEN_EVAL_SET
+
+        categories = {case.get("category", "") for case in GOLDEN_EVAL_SET}
+        assert "safety" in categories
+        assert "memory" in categories
+        assert "desktop" in categories
+
+
 async def run_module_contract_tests():
     """运行模块契约测试"""
     print("=" * 80)
@@ -276,6 +474,11 @@ async def run_module_contract_tests():
         TestSecurityAndGuardrails,
         TestToolCallValidation,
         TestBatchProcessing,
+        TestSandboxContract,
+        TestGatewayContract,
+        TestEvolutionContract,
+        TestLongTaskContract,
+        TestEvaluationContract,
     ]
 
     total_passed = 0

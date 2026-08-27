@@ -12,8 +12,8 @@ from agent.tools.toolset_sampling import (
     build_default_sampler,
     parse_sampling_flag,
 )
-
 log = StructuredLogger("toolset_registry")
+
 
 
 @dataclass
@@ -92,7 +92,7 @@ class ToolsetRegistry:
             log.debug(f"工具集已存在，覆盖: {definition.id}")
         self._definitions[definition.id] = definition
         self._resolved_cache.pop(definition.id, None)
-        log.info(f"注册工具集: {definition.id} ({definition.display_name})")
+        log.debug(f"注册工具集: {definition.id} ({definition.display_name})")
 
     def get(self, id: str) -> ToolsetDefinition | None:
         return self._definitions.get(id)

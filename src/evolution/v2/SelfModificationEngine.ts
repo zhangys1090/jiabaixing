@@ -3,8 +3,31 @@ import * as path from 'path';
 import { Logger } from '../../utils/Logger';
 import { EvolutionAction, EvolutionPlan, EvolutionResult } from './types';
 
-/** 安全边界类型 */
-type RiskLevel = 'safe' | 'cautious' | 'restricted' | 'forbidden';
+/**
+ * 进化引擎领域风险等级 — 与统一 RiskLevel ('low'|'medium'|'high'|'critical') 语义不同。
+ * SAFE/CAUTIOUS/RESTRICTED/FORBIDDEN 描述自修改安全边界。
+ * 通过 evolutionRiskToCore() 映射到统一 RiskLevel。
+ */
+type EvolutionRiskLevel = 'safe' | 'cautious' | 'restricted' | 'forbidden';
+
+/** 进化风险 → 统一 RiskLevel 映射 */
+function evolutionRiskToCore(
+  level: EvolutionRiskLevel
+): 'low' | 'medium' | 'high' | 'critical' {
+  const map: Record<
+    EvolutionRiskLevel,
+    'low' | 'medium' | 'high' | 'critical'
+  > = {
+    safe: 'low',
+    cautious: 'medium',
+    restricted: 'high',
+    forbidden: 'critical',
+  };
+  return map[level];
+}
+
+/** @deprecated Use EvolutionRiskLevel — will be removed in future version */
+type RiskLevel = EvolutionRiskLevel;
 
 /** 安全边界记录 */
 interface SafetyBoundary {

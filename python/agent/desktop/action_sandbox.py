@@ -33,6 +33,7 @@ import hashlib
 import json
 import os
 import shutil
+import sqlite3
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -40,15 +41,38 @@ from pathlib import Path
 from typing import Any
 
 from agent.core.logger import StructuredLogger, log_ignored
-
+from agent.core.types import RiskLevel as CoreRiskLevel, BaseCheckpoint
 log = StructuredLogger("action_sandbox")
 
 
-class RiskLevel(str, Enum):
+class ActionRiskLevel(str, Enum):
+    """行动沙箱领域风险等级 — 与 core.types.RiskLevel 语义不同。
+
+    ALLOWED/CAUTION/RESTRICTED/BLOCKED 描述操作可执行性，
+    而 core.types.RiskLevel 描述风险严重程度。
+    通过 to_core_risk_level() 映射到统一 RiskLevel。
+    """
+
     ALLOWED = "allowed"
     CAUTION = "caution"
     RESTRICTED = "restricted"
     BLOCKED = "blocked"
+
+
+_ACTION_TO_CORE_RISK: dict[ActionRiskLevel, CoreRiskLevel] = {
+    ActionRiskLevel.ALLOWED: CoreRiskLevel.LOW,
+    ActionRiskLevel.CAUTION: CoreRiskLevel.MEDIUM,
+    ActionRiskLevel.RESTRICTED: CoreRiskLevel.HIGH,
+    ActionRiskLevel.BLOCKED: CoreRiskLevel.CRITICAL,
+}
+
+
+def to_core_risk_level(level: ActionRiskLevel) -> CoreRiskLevel:
+    """将行动沙箱风险等级映射到统一 RiskLevel。"""
+    return _ACTION_TO_CORE_RISK.get(level, CoreRiskLevel.MEDIUM)
+
+
+RiskLevel = ActionRiskLevel
 
 
 class ActionType(str, Enum):
@@ -81,14 +105,16 @@ class RiskCheckResult:
 
 
 @dataclass
-class CheckpointData:
-    checkpoint_id: str
-    action_type: str
-    target: str
-    timestamp: float
+class CheckpointData(BaseCheckpoint):
+    """沙箱还原点 — 继承 core.types.BaseCheckpoint。"""
+
+    action_type: str = ""
     snapshot: dict[str, Any] = field(default_factory=dict)
     rollback_data: dict[str, Any] = field(default_factory=dict)
-    restored: bool = False
+
+    @property
+    def checkpoint_id(self) -> str:
+        return self.id
 
 
 @dataclass
@@ -168,6 +194,8 @@ class ActionSandbox:
         self._checkpoints: dict[str, CheckpointData] = {}
         self._audit_log: list[dict[str, Any]] = []
         self._max_audit_log = 500
+        self._audit_db: sqlite3.Connection | None = None
+        self._init_audit_db()
 
     def pre_check(
         self,
@@ -234,9 +262,9 @@ class ActionSandbox:
         rollback_data = self._capture_rollback_data(action_type, target, params)
 
         checkpoint = CheckpointData(
-            checkpoint_id=checkpoint_id,
+            id=checkpoint_id,
             action_type=action_type.value,
-            target=target,
+            label=target,
             timestamp=time.time(),
             snapshot=snapshot,
             rollback_data=rollback_data,
@@ -308,6 +336,8 @@ class ActionSandbox:
                 return self._rollback_registry(rollback_data, target)
             elif action_type == ActionType.WRITE.value:
                 return self._rollback_write(rollback_data, target)
+            elif action_type == ActionType.EXECUTE.value:
+                return self._rollback_process(rollback_data, target)
             else:
                 log.info(
                     "No rollback handler for action type",
@@ -571,6 +601,13 @@ class ActionSandbox:
         elif action_type == ActionType.REGISTRY:
             rollback["key"] = target
             rollback["original_value"] = (params or {}).get("original_value")
+            rollback["original_type"] = (params or {}).get("original_type")
+            rollback["value_name"] = (params or {}).get("value_name", "")
+            rollback["key_existed"] = (params or {}).get("key_existed", True)
+
+        elif action_type == ActionType.EXECUTE:
+            rollback["spawned_pids"] = (params or {}).get("spawned_pids", [])
+            rollback["command"] = target
 
         return rollback
 
@@ -614,15 +651,121 @@ class ActionSandbox:
 
     def _rollback_registry(self, rollback_data: dict[str, Any], target: str) -> bool:
         original_value = rollback_data.get("original_value")
+        original_type = rollback_data.get("original_type")
+        key_existed = rollback_data.get("key_existed", True)
+
+        if not key_existed:
+            return self._rollback_registry_delete_key(target)
+
         if original_value is None:
             log.warning("Registry rollback: no original value stored", key=target)
             return False
 
-        log.info("Registry rollback would restore", key=target, value=original_value)
-        return True
+        if os.name != "nt":
+            log.info("Registry rollback: non-Windows, logging only", key=target, value=original_value)
+            return True
+
+        try:
+            import winreg
+            key_path = target
+            hive_map = {
+                "HKEY_LOCAL_MACHINE": winreg.HKEY_LOCAL_MACHINE,
+                "HKEY_CURRENT_USER": winreg.HKEY_CURRENT_USER,
+                "HKEY_CLASSES_ROOT": winreg.HKEY_CLASSES_ROOT,
+                "HKEY_USERS": winreg.HKEY_USERS,
+            }
+            hive_name = key_path.split("\\")[0]
+            sub_key = "\\".join(key_path.split("\\")[1:])
+            hive = hive_map.get(hive_name)
+            if hive is None:
+                log.warning("Registry rollback: unsupported hive", hive=hive_name)
+                return False
+
+            value_name = rollback_data.get("value_name", "")
+            reg_type = winreg.REG_SZ
+            if original_type == "REG_DWORD":
+                reg_type = winreg.REG_DWORD
+                original_value = int(original_value)
+            elif original_type == "REG_EXPAND_SZ":
+                reg_type = winreg.REG_EXPAND_SZ
+            elif original_type == "REG_MULTI_SZ":
+                reg_type = winreg.REG_MULTI_SZ
+
+            try:
+                hkey = winreg.OpenKey(hive, sub_key, 0, winreg.KEY_SET_VALUE)
+                winreg.SetValueEx(hkey, value_name, 0, reg_type, original_value)
+                winreg.CloseKey(hkey)
+                log.info("Registry rollback successful", key=target, value_name=value_name)
+                return True
+            except OSError as e:
+                log.warning("Registry rollback: failed to set value", key=target, error=str(e))
+                return False
+
+        except ImportError:
+            log.info("Registry rollback: winreg not available, logging only", key=target, value=original_value)
+            return True
+
+    def _rollback_registry_delete_key(self, target: str) -> bool:
+        """回滚注册表键删除：删除被创建的键。"""
+        if os.name != "nt":
+            return True
+        try:
+            import winreg
+            key_path = target
+            hive_map = {
+                "HKEY_LOCAL_MACHINE": winreg.HKEY_LOCAL_MACHINE,
+                "HKEY_CURRENT_USER": winreg.HKEY_CURRENT_USER,
+                "HKEY_CLASSES_ROOT": winreg.HKEY_CLASSES_ROOT,
+                "HKEY_USERS": winreg.HKEY_USERS,
+            }
+            hive_name = key_path.split("\\")[0]
+            sub_key = "\\".join(key_path.split("\\")[1:])
+            hive = hive_map.get(hive_name)
+            if hive is None:
+                return False
+            try:
+                winreg.DeleteKey(hive, sub_key)
+                log.info("Registry key deleted for rollback", key=target)
+                return True
+            except OSError as e:
+                log.warning("Registry key delete failed", key=target, error=str(e))
+                return False
+        except ImportError:
+            return True
 
     def _rollback_write(self, rollback_data: dict[str, Any], target: str) -> bool:
         return self._rollback_file(rollback_data, target)
+
+    def _rollback_process(self, rollback_data: dict[str, Any], target: str) -> bool:
+        """Rollback process operation: terminate spawned child processes."""
+        spawned_pids = rollback_data.get("spawned_pids", [])
+        if not spawned_pids:
+            log.info("Process rollback: no spawned PIDs recorded", command=target)
+            return True
+
+        terminated = 0
+        for pid in spawned_pids:
+            try:
+                if os.name == "nt":
+                    import ctypes
+                    kernel32 = ctypes.windll.kernel32
+                    PROCESS_TERMINATE = 0x0001
+                    handle = kernel32.OpenProcess(PROCESS_TERMINATE, False, pid)
+                    if handle:
+                        kernel32.TerminateProcess(handle, 1)
+                        kernel32.CloseHandle(handle)
+                        terminated += 1
+                    else:
+                        log.debug("Process rollback: PID not found", pid=pid)
+                else:
+                    import signal
+                    os.kill(pid, signal.SIGTERM)
+                    terminated += 1
+            except (ProcessLookupError, PermissionError, OSError) as e:
+                log.debug("Process rollback: failed to terminate PID", pid=pid, error=str(e))
+
+        log.info("Process rollback completed", command=target, terminated=terminated, total=len(spawned_pids))
+        return terminated > 0 or not spawned_pids
 
     def _persist_checkpoint(self, checkpoint: CheckpointData) -> None:
         try:
@@ -641,6 +784,7 @@ class ActionSandbox:
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception as e:
+            log.debug("action_sandbox 异常处理", error=str(e))
             log_ignored(log, "action_sandbox._persist_checkpoint", e)
 
     def _cleanup_checkpoint(self, checkpoint: CheckpointData) -> None:
@@ -652,6 +796,7 @@ class ActionSandbox:
             if os.path.exists(path):
                 os.remove(path)
         except Exception as e:
+            log.debug("action_sandbox 异常处理", error=str(e))
             log_ignored(log, "action_sandbox._cleanup_checkpoint", e)
 
     def _audit(self, event: str, action: str, target: str, detail: str = "") -> None:
@@ -665,3 +810,111 @@ class ActionSandbox:
         self._audit_log.append(entry)
         if len(self._audit_log) > self._max_audit_log:
             self._audit_log = self._audit_log[-self._max_audit_log:]
+        self._persist_audit_entry(entry)
+
+    def _init_audit_db(self) -> None:
+        try:
+            db_path = os.path.join(self._config.checkpoint_dir, "audit_log.db")
+            self._audit_db = sqlite3.connect(db_path, check_same_thread=False)
+            self._audit_db.execute(
+                """CREATE TABLE IF NOT EXISTS audit_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp REAL NOT NULL,
+                    event TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    target TEXT NOT NULL,
+                    detail TEXT NOT NULL DEFAULT ''
+                )"""
+            )
+            self._audit_db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_audit_event ON audit_log(event)"
+            )
+            self._audit_db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp)"
+            )
+            self._audit_db.commit()
+        except Exception as e:
+            log.debug("action_sandbox 异常处理", error=str(e))
+            log_ignored(log, "action_sandbox._init_audit_db", e)
+            self._audit_db = None
+
+    def _persist_audit_entry(self, entry: dict[str, Any]) -> None:
+        if not self._audit_db:
+            return
+        try:
+            self._audit_db.execute(
+                "INSERT INTO audit_log (timestamp, event, action, target, detail) VALUES (?, ?, ?, ?, ?)",
+                (entry["timestamp"], entry["event"], entry["action"], entry["target"], entry.get("detail", "")),
+            )
+            self._audit_db.commit()
+        except Exception as e:
+            log.debug("action_sandbox 异常处理", error=str(e))
+            log_ignored(log, "action_sandbox._persist_audit_entry", e)
+
+    def query_audit_db(
+        self,
+        event: str | None = None,
+        action: str | None = None,
+        since: float | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        if not self._audit_db:
+            return []
+        try:
+            clauses = []
+            params: list[Any] = []
+            if event:
+                clauses.append("event = ?")
+                params.append(event)
+            if action:
+                clauses.append("action = ?")
+                params.append(action)
+            if since:
+                clauses.append("timestamp >= ?")
+                params.append(since)
+            where = " AND ".join(clauses)
+            sql = f"SELECT timestamp, event, action, target, detail FROM audit_log"
+            if where:
+                sql += f" WHERE {where}"
+            sql += " ORDER BY timestamp DESC LIMIT ?"
+            params.append(limit)
+            rows = self._audit_db.execute(sql, params).fetchall()
+            return [
+                {"timestamp": r[0], "event": r[1], "action": r[2], "target": r[3], "detail": r[4]}
+                for r in rows
+            ]
+        except Exception as e:
+            log.debug("action_sandbox 异常处理", error=str(e))
+            log_ignored(log, "action_sandbox.query_audit_db", e)
+            return []
+
+    def close(self) -> None:
+        if self._audit_db:
+            try:
+                self._audit_db.close()
+            except Exception:
+                pass
+            self._audit_db = None
+
+    async def integrate_with_sandbox_audit(self) -> dict[str, Any]:
+        """L7: 与沙箱审计子代理集成 — 将 ActionSandbox 审计数据注入沙箱审计报告。
+
+        Returns:
+            集成结果摘要
+        """
+        result: dict[str, Any] = {
+            "sandbox_stats": self.get_stats(),
+            "recent_blocked": [],
+            "recent_rollbacks": [],
+        }
+        try:
+            blocked_entries = self.query_audit_db(event="blocked", limit=10)
+            result["recent_blocked"] = blocked_entries
+
+            rollback_entries = self.query_audit_db(event="auto_rollback_success", limit=10)
+            rollback_failed = self.query_audit_db(event="auto_rollback_failed", limit=10)
+            result["recent_rollbacks"] = rollback_entries + rollback_failed
+        except Exception as e:
+            log.debug("action_sandbox 异常处理", error=str(e))
+            log_ignored(log, "action_sandbox.integrate_with_sandbox_audit", e)
+        return result

@@ -448,6 +448,7 @@ class EvolutionClosedLoop:
                 if hasattr(self._evolution_engine, "_tool_weights"):
                     state["tool_weights"] = dict(self._evolution_engine._tool_weights)
             except Exception as _exc:
+                log.debug("closed_loop 异常处理", error=str(_exc))
                 log_ignored(log, "closed_loop.EvolutionClosedLoop._capture_pre_state", _exc)
         return state
 
@@ -571,10 +572,11 @@ class EvolutionClosedLoop:
                             severity=_sev,
                         )
                     except Exception as _exc:
+                        log.debug("closed_loop 异常处理", error=str(_exc))
                         log_ignored(log, "closed_loop.EvolutionClosedLoop.ingest_structured_report", _exc)
 
             if improvements:
-                pass
+                log.debug("Improvements detected from structured report", count=len(improvements))
 
             log.info(
                 "Structured report ingested into evolution",

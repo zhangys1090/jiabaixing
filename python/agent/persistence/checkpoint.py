@@ -10,6 +10,9 @@ from typing import Any
 
 from agent.config import DATA_DIR
 from agent.core.logger import log_ignored
+from agent.core.types import BaseCheckpoint
+import logging
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -20,10 +23,9 @@ class CheckpointFile:
 
 
 @dataclass
-class CheckpointEntry:
-    id: str = ""
-    label: str = ""
-    timestamp: float = 0.0
+class CheckpointEntry(BaseCheckpoint):
+    """持久化还原点条目 — 继承 core.types.BaseCheckpoint。"""
+
     file_count: int = 0
     total_size: int = 0
     files: list[CheckpointFile] = field(default_factory=list)
@@ -69,6 +71,7 @@ class CheckpointService:
                 shutil.copy2(str(src), str(dst))
                 total_size += f.size
             except Exception as _exc:
+                logger.warning("checkpoint 异常处理", error=str(_exc))
                 log_ignored(None, "checkpoint.CheckpointService.create_checkpoint", _exc)
 
         entry = CheckpointEntry(
@@ -99,8 +102,10 @@ class CheckpointService:
                         data = json.loads(meta.read_text(encoding="utf-8"))
                         entries.append(_dict_to_checkpoint(data))
                     except Exception as _exc:
+                        logger.warning("checkpoint 异常处理", error=str(_exc))
                         log_ignored(None, "checkpoint.CheckpointService.list_checkpoints", _exc)
         except Exception as _exc:
+            logger.warning("checkpoint 异常处理", error=str(_exc))
             log_ignored(None, "checkpoint.CheckpointService.list_checkpoints", _exc)
 
         entries.sort(key=lambda e: e.timestamp, reverse=True)
@@ -140,7 +145,8 @@ class CheckpointService:
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(str(src), str(dst))
                 restored.append(f.relative_path)
-        except Exception:
+        except Exception as e:
+            logger.warning("checkpoint.rollback 回滚失败", error=str(e))
             rollback_failed = True
 
         return not rollback_failed
@@ -170,6 +176,7 @@ class CheckpointService:
                     size=len(content),
                 ))
             except Exception as _exc:
+                logger.warning("checkpoint 异常处理", error=str(_exc))
                 log_ignored(None, "checkpoint.CheckpointService._scan_project_files", _exc)
 
         return files
@@ -191,6 +198,7 @@ class CheckpointService:
             try:
                 shutil.rmtree(d, ignore_errors=True)
             except Exception as _exc:
+                logger.warning("checkpoint 异常处理", error=str(_exc))
                 log_ignored(None, "checkpoint.CheckpointService._prune_old_checkpoints", _exc)
 
 

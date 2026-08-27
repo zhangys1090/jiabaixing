@@ -7,8 +7,8 @@ from typing import Any, Callable
 
 from agent.core.logger import StructuredLogger
 from agent.security.runtime_posture import PostureDecision, RuntimePosture, decide
-
 log = StructuredLogger("approval_manager")
+
 
 
 @dataclass
@@ -45,6 +45,37 @@ class ApprovalResponse:
 
     approved: bool
     reason: str = ""
+
+
+@dataclass
+class BatchApprovalResult:
+    """批量审批结果。
+
+    Attributes:
+        total: 总请求数。
+        approved: 批准数。
+        rejected: 拒绝数。
+        skipped: 跳过数（非pending状态）。
+        aggregated_risk: 聚合风险等级（取最高）。
+        details: 各请求处理详情。
+    """
+
+    total: int = 0
+    approved: int = 0
+    rejected: int = 0
+    skipped: int = 0
+    aggregated_risk: str = "low"
+    details: list[dict[str, Any]] = field(default_factory=list)
+
+
+_RISK_ORDER = {"read-only": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
+
+
+def _aggregate_risk(risk_levels: list[str]) -> str:
+    """聚合多个风险等级，取最高。"""
+    if not risk_levels:
+        return "low"
+    return max(risk_levels, key=lambda r: _RISK_ORDER.get(r, 2))
 
 
 _ApprovalCallback = Callable[[ApprovalRequest], None]
@@ -291,3 +322,128 @@ class ApprovalManager:
         if ids:
             log.info("已推送规划阶段待审批预览", count=len(ids))
         return ids
+
+    def batch_respond(
+        self,
+        request_ids: list[str],
+        approved: bool,
+        reason: str = "",
+    ) -> BatchApprovalResult:
+        """批量审批：一次性批准/拒绝多个待审批请求.
+
+        Args:
+            request_ids: 待审批请求ID列表.
+            approved: True=批量批准, False=批量拒绝.
+            reason: 审批原因.
+
+        Returns:
+            BatchApprovalResult 含处理统计和聚合风险.
+        """
+        result = BatchApprovalResult(total=len(request_ids))
+        risk_levels: list[str] = []
+
+        for rid in request_ids:
+            entry = self._pending.get(rid)
+            if not entry:
+                result.skipped += 1
+                result.details.append({"id": rid, "status": "not_found"})
+                continue
+            req = entry["request"]
+            if req.status != "pending":
+                result.skipped += 1
+                result.details.append({"id": rid, "status": req.status, "tool": req.tool_name})
+                continue
+            risk_levels.append(req.risk_level)
+            ok = self.respond(rid, approved, reason)
+            if ok:
+                if approved:
+                    result.approved += 1
+                else:
+                    result.rejected += 1
+                result.details.append({
+                    "id": rid,
+                    "tool": req.tool_name,
+                    "risk": req.risk_level,
+                    "action": "approved" if approved else "rejected",
+                })
+            else:
+                result.skipped += 1
+                result.details.append({"id": rid, "status": "respond_failed"})
+
+        result.aggregated_risk = _aggregate_risk(risk_levels)
+        log.info(
+            "批量审批完成",
+            total=result.total,
+            approved=result.approved,
+            rejected=result.rejected,
+            skipped=result.skipped,
+            aggregated_risk=result.aggregated_risk,
+        )
+        return result
+
+    def get_pending_by_risk(self, risk_level: str) -> list[ApprovalRequest]:
+        """按风险等级筛选待审批请求."""
+        return [
+            r for r in self.get_pending_requests()
+            if r.risk_level == risk_level
+        ]
+
+    def get_pending_grouped_by_risk(self) -> dict[str, list[ApprovalRequest]]:
+        """按风险等级分组返回待审批请求."""
+        grouped: dict[str, list[ApprovalRequest]] = {}
+        for r in self.get_pending_requests():
+            grouped.setdefault(r.risk_level, []).append(r)
+        return grouped
+
+    def batch_auto_approve_below_risk(self, threshold: str = "medium") -> BatchApprovalResult:
+        """批量自动批准低于指定风险等级的所有待审批请求.
+
+        Args:
+            threshold: 风险阈值，低于此等级的请求自动批准.
+                       例如 "medium" 会批准 low 和 read-only.
+
+        Returns:
+            BatchApprovalResult 含处理统计.
+        """
+        threshold_order = _RISK_ORDER.get(threshold, 2)
+        eligible_ids: list[str] = []
+        risk_levels: list[str] = []
+
+        for r in self.get_pending_requests():
+            req_order = _RISK_ORDER.get(r.risk_level, 2)
+            if req_order < threshold_order:
+                eligible_ids.append(r.id)
+                risk_levels.append(r.risk_level)
+
+        if not eligible_ids:
+            return BatchApprovalResult()
+
+        result = self.batch_respond(
+            eligible_ids, approved=True,
+            reason=f"批量自动批准: 风险低于{threshold}",
+        )
+        result.aggregated_risk = _aggregate_risk(risk_levels)
+        return result
+
+    def get_risk_summary(self) -> dict[str, Any]:
+        """获取当前待审批请求的风险聚合摘要.
+
+        Returns:
+            含各风险等级计数、聚合风险、工具列表的摘要.
+        """
+        pending = self.get_pending_requests()
+        by_risk: dict[str, int] = {}
+        tools: set[str] = set()
+        risk_levels: list[str] = []
+
+        for r in pending:
+            by_risk[r.risk_level] = by_risk.get(r.risk_level, 0) + 1
+            tools.add(r.tool_name)
+            risk_levels.append(r.risk_level)
+
+        return {
+            "total_pending": len(pending),
+            "by_risk": by_risk,
+            "aggregated_risk": _aggregate_risk(risk_levels),
+            "tools": sorted(tools),
+        }

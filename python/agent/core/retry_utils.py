@@ -32,10 +32,10 @@ import random
 import time
 from dataclasses import dataclass
 from typing import Any, Callable, Coroutine, TypeVar
-
 from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("retry_utils")
+
 
 T = TypeVar("T")
 
@@ -279,6 +279,7 @@ class RetryExecutor:
             )
             self._stats.total_successes += 1
             return result
-        except Exception:
+        except Exception as _exc:
+            log.debug("retry_utils 异常处理", error=str(_exc))
             self._stats.total_failures += 1
             raise

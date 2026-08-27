@@ -7,7 +7,7 @@ Usage:
     guard = BudgetGuard()
     result = guard.check_budget(estimated_tokens=500, estimated_cost=0.01)
     if not result.allowed:
-        print(f"预算超限: {result.reason}")
+        logger.info("预算超限: {result.reason}")
     guard.record_usage(tokens_used=500, cost_usd=0.01, model="gpt-4o")
 """
 
@@ -16,6 +16,8 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from enum import Enum
+import logging
+logger = logging.getLogger(__name__)
 
 
 class BudgetPeriod(str, Enum):

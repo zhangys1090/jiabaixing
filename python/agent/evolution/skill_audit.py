@@ -19,7 +19,7 @@
     auditor = SkillAuditor()
     report = auditor.audit_file("my_skill/skill.py")
     if report.risk_level == RiskLevel.CRITICAL:
-        print("拒绝加载: 存在严重安全风险")
+        logger.info("拒绝加载: 存在严重安全风险")
 """
 
 from __future__ import annotations
@@ -31,18 +31,10 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any
-
 from agent.core.logger import StructuredLogger
+from agent.core.types import RiskLevel, BaseAuditReport
 
 log = StructuredLogger("skill_audit")
-
-
-class RiskLevel(str, Enum):
-    SAFE = "safe"
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-    CRITICAL = "critical"
 
 
 class ViolationType(str, Enum):
@@ -68,23 +60,24 @@ class Violation:
 
 
 @dataclass
-class AuditReport:
-    file_path: str
+class AuditReport(BaseAuditReport):
+    """Skill 安全审计报告 — 继承 core.types.BaseAuditReport。"""
+
+    file_path: str = ""
     violations: list[Violation] = field(default_factory=list)
-    risk_level: RiskLevel = RiskLevel.SAFE
+    risk_level: RiskLevel = RiskLevel.NONE
     scan_time_ms: float = 0.0
     lines_scanned: int = 0
-    timestamp: float = 0.0
 
     def __post_init__(self) -> None:
         if self.timestamp == 0.0:
             self.timestamp = time.time()
-        if self.violations and self.risk_level == RiskLevel.SAFE:
+        if self.violations and self.risk_level == RiskLevel.NONE:
             self.risk_level = max(v.risk for v in self.violations)
 
     @property
     def is_safe(self) -> bool:
-        return self.risk_level in (RiskLevel.SAFE, RiskLevel.LOW)
+        return self.risk_level in (RiskLevel.NONE, RiskLevel.LOW)
 
     @property
     def summary(self) -> str:
@@ -152,7 +145,7 @@ _OS_DANGEROUS: dict[str, RiskLevel] = {
 }
 
 _RISK_ORDER = {
-    RiskLevel.SAFE: 0,
+    RiskLevel.NONE: 0,
     RiskLevel.LOW: 1,
     RiskLevel.MEDIUM: 2,
     RiskLevel.HIGH: 3,
@@ -204,7 +197,7 @@ class SkillAuditor:
         violations.extend(self._check_attribute_access(tree))
         violations.extend(self._check_string_patterns(code))
 
-        risk = RiskLevel.SAFE
+        risk = RiskLevel.NONE
         if violations:
             risk = max(violations, key=lambda v: _RISK_ORDER[v.risk]).risk
 

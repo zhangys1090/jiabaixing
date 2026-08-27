@@ -6,8 +6,8 @@
  */
 
 import { Logger } from '../../../utils/Logger';
-import { Permission } from '../../types';
 import type { RiskLevel, ToolContext, ToolResult } from '../../types';
+import { Permission } from '../../types';
 
 /** 工具访问策略 */
 export type ToolAccessPolicy = 'allow' | 'deny' | 'ask';
@@ -55,13 +55,14 @@ export interface SessionLimits {
 }
 
 const RISK_CONFIRMATION_MAP: Record<RiskLevel, boolean> = {
+  none: false,
   low: false,
   medium: false,
   high: true,
   critical: true,
 };
 
-const RISK_ORDER: RiskLevel[] = ['low', 'medium', 'high', 'critical'];
+const RISK_ORDER: RiskLevel[] = ['none', 'low', 'medium', 'high', 'critical'];
 
 const DEFAULT_PERMISSIONS: Permission[] = [
   Permission.MEMORY_READ,
@@ -87,6 +88,9 @@ const DEFAULT_SESSION_LIMITS: SessionLimits = {
 };
 
 export class PermissionGuard {
+  private static readonly AUDIT_TRAIL_MAX = 2000;
+  private static readonly AUDIT_TRAIL_TRIM_TO = 1500;
+
   private userPermissions: Map<string, Set<Permission>> = new Map();
   private pendingConfirmations: Map<
     string,
@@ -94,6 +98,7 @@ export class PermissionGuard {
       toolName: string;
       riskLevel: RiskLevel;
       resolve: (confirmed: boolean) => void;
+      createdAt: number;
     }
   > = new Map();
 
@@ -101,9 +106,31 @@ export class PermissionGuard {
   private sessionStats: Map<string, SessionStats> = new Map();
   private sessionLimits: Map<string, SessionLimits> = new Map();
   private auditTrail: AuditEntry[] = [];
+  private staleCleanupInterval: ReturnType<typeof setInterval>;
+
+  private static readonly STALE_CONFIRMATION_MS = 60000;
+  private static readonly MAX_PENDING_CONFIRMATIONS = 100;
 
   constructor() {
     this.loadDefaultPolicies();
+    this.staleCleanupInterval = setInterval(
+      () => this.cleanupStaleConfirmations(),
+      30000
+    );
+    if (this.staleCleanupInterval.unref) {
+      this.staleCleanupInterval.unref();
+    }
+  }
+
+  private cleanupStaleConfirmations(): void {
+    const now = Date.now();
+    for (const [id, entry] of this.pendingConfirmations) {
+      if (now - entry.createdAt > PermissionGuard.STALE_CONFIRMATION_MS) {
+        entry.resolve(false);
+        this.pendingConfirmations.delete(id);
+        Logger.warn(`⏰ 清理过期确认: ${entry.toolName}`, 'PermissionGuard');
+      }
+    }
   }
 
   private loadDefaultPolicies(): void {
@@ -344,17 +371,37 @@ export class PermissionGuard {
     this.sessionLimits.delete(sessionId);
   }
 
+  destroy(): void {
+    clearInterval(this.staleCleanupInterval);
+    for (const [, entry] of this.pendingConfirmations) {
+      entry.resolve(false);
+    }
+    this.pendingConfirmations.clear();
+  }
+
   async requestConfirmation(
     toolName: string,
     riskLevel: RiskLevel,
     timeoutMs: number = 30000
   ): Promise<boolean> {
+    if (
+      this.pendingConfirmations.size >=
+      PermissionGuard.MAX_PENDING_CONFIRMATIONS
+    ) {
+      Logger.warn(
+        `🛑 待确认队列已满 (${PermissionGuard.MAX_PENDING_CONFIRMATIONS})，拒绝: ${toolName}`,
+        'PermissionGuard'
+      );
+      return false;
+    }
+
     const confirmationId = `${toolName}-${Date.now()}`;
     return new Promise<boolean>((resolve) => {
       this.pendingConfirmations.set(confirmationId, {
         toolName,
         riskLevel,
         resolve,
+        createdAt: Date.now(),
       });
       setTimeout(() => {
         const pending = this.pendingConfirmations.get(confirmationId);
@@ -425,6 +472,10 @@ export class PermissionGuard {
       reason,
       riskLevel,
     });
-    if (this.auditTrail.length > 10000) this.auditTrail.shift();
+    if (this.auditTrail.length > PermissionGuard.AUDIT_TRAIL_MAX) {
+      this.auditTrail = this.auditTrail.slice(
+        -PermissionGuard.AUDIT_TRAIL_TRIM_TO
+      );
+    }
   }
 }

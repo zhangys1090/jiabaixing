@@ -658,6 +658,7 @@ def create_a2a_router(
                             json={"taskId": task_id, "eventType": event_type, **data},
                         )
                 except Exception as _exc:
+                    logger.debug("server 异常处理", error=str(_exc))
                     log_ignored(logger, "server._dispatch_push_to_subscribers.webhook", _exc)
 
     # ───────────────────────────────────────────────────────────

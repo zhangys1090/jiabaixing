@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from agent.tools.approval_manager import ApprovalManager, ApprovalResponse
+from agent.tools.approval_manager import ApprovalManager, ApprovalResponse, BatchApprovalResult, _aggregate_risk
 
 
 # ─── Basic approval ───
@@ -161,3 +161,103 @@ async def test_auto_approve_low_risk_skips_pending():
     resp = await manager.request_approval("safe", {}, "low")
     assert resp.approved is True
     assert manager.pending_count() == 0
+
+
+# ─── Risk aggregation ───
+
+
+def test_aggregate_risk_empty():
+    assert _aggregate_risk([]) == "low"
+
+
+def test_aggregate_risk_single():
+    assert _aggregate_risk(["medium"]) == "medium"
+
+
+def test_aggregate_risk_max():
+    assert _aggregate_risk(["low", "medium", "high", "critical"]) == "critical"
+
+
+def test_aggregate_risk_no_critical():
+    assert _aggregate_risk(["low", "high", "medium"]) == "high"
+
+
+# ─── Batch approval ───
+
+
+@pytest.mark.anyio
+async def test_batch_respond_approve_all():
+    manager = ApprovalManager()
+    import asyncio
+
+    ids: list[str] = []
+
+    async def _create_pending() -> None:
+        for i in range(3):
+            task = asyncio.create_task(
+                manager.request_approval(f"tool_{i}", {}, "medium")
+            )
+            await asyncio.sleep(0.01)
+            pending = manager.get_pending_requests()
+            for p in pending:
+                if p.id not in ids:
+                    ids.append(p.id)
+            if not task.done():
+                manager.respond(pending[-1].id, True)
+
+    await _create_pending()
+    pending = manager.get_pending_requests()
+    if len(pending) >= 2:
+        result = manager.batch_respond([pending[0].id, pending[1].id], True, "batch approve")
+        assert result.approved == 2
+        assert result.aggregated_risk in ("medium", "low", "high")
+
+
+def test_batch_respond_empty():
+    manager = ApprovalManager()
+    result = manager.batch_respond([], True)
+    assert result.total == 0
+    assert result.approved == 0
+
+
+def test_batch_respond_nonexistent():
+    manager = ApprovalManager()
+    result = manager.batch_respond(["fake_id_1", "fake_id_2"], True)
+    assert result.total == 2
+    assert result.skipped == 2
+    assert result.approved == 0
+
+
+# ─── Risk summary ───
+
+
+def test_risk_summary_empty():
+    manager = ApprovalManager()
+    summary = manager.get_risk_summary()
+    assert summary["total_pending"] == 0
+    assert summary["aggregated_risk"] == "low"
+    assert summary["tools"] == []
+
+
+# ─── Grouped by risk ───
+
+
+def test_grouped_empty():
+    manager = ApprovalManager()
+    grouped = manager.get_pending_grouped_by_risk()
+    assert grouped == {}
+
+
+def test_pending_by_risk_empty():
+    manager = ApprovalManager()
+    result = manager.get_pending_by_risk("high")
+    assert result == []
+
+
+# ─── Batch auto approve below risk ───
+
+
+def test_batch_auto_approve_no_pending():
+    manager = ApprovalManager()
+    result = manager.batch_auto_approve_below_risk("medium")
+    assert result.total == 0

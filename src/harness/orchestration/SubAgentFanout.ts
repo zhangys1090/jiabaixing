@@ -11,8 +11,8 @@
 
 import { randomUUID } from 'crypto';
 import { Logger } from '../../utils/Logger';
-import type { TaskNode, TaskExecutor } from './TaskDispatcher';
 import { AgentRegistry } from './AgentRegistry';
+import type { TaskExecutor, TaskNode } from './TaskDispatcher';
 
 /** 扇出策略 */
 export type FanoutStrategy = 'parallel' | 'sequential' | 'adaptive';
@@ -48,7 +48,10 @@ export interface PerceptionAgentTemplate {
   useSharedFusion: boolean;
 }
 
-export const PERCEPTION_AGENT_TEMPLATES: Record<string, PerceptionAgentTemplate> = {
+export const PERCEPTION_AGENT_TEMPLATES: Record<
+  string,
+  PerceptionAgentTemplate
+> = {
   visual_operator: {
     kind: 'visual_operator',
     description: '视觉操作型子 Agent：结合视觉定位与 UI 自动化执行界面操作。',
@@ -58,7 +61,8 @@ export const PERCEPTION_AGENT_TEMPLATES: Record<string, PerceptionAgentTemplate>
   },
   desktop_automation: {
     kind: 'desktop_automation',
-    description: '桌面自动化型子 Agent：调度桌面自动化完成点击/输入/拖拽等动作。',
+    description:
+      '桌面自动化型子 Agent：调度桌面自动化完成点击/输入/拖拽等动作。',
     modalities: ['uia', 'visual', 'proprioception'],
     tools: ['nut', 'playwright', 'uia', 'action_verifier'],
     useSharedFusion: true,
@@ -116,6 +120,8 @@ export interface FanoutResult {
   allSucceeded: boolean;
   /** 贯通用链路ID（W8） */
   traceId: string;
+  /** P0-3: 因扇出限制被截断的任务ID列表 */
+  truncatedTaskIds?: string[];
 }
 
 export class SubAgentFanout {
@@ -152,9 +158,14 @@ export class SubAgentFanout {
     const startTime = Date.now();
 
     const limitedTasks = subTasks.slice(0, runConfig.maxFanout);
+    const truncatedTaskIds: string[] = [];
     if (subTasks.length > runConfig.maxFanout) {
+      const truncated = subTasks.slice(runConfig.maxFanout);
+      for (const t of truncated) {
+        truncatedTaskIds.push(t.id);
+      }
       Logger.warn(
-        `⚠️ 子任务数 ${subTasks.length} 超过扇出限制 ${runConfig.maxFanout}，截断执行`,
+        `⚠️ 子任务数 ${subTasks.length} 超过扇出限制 ${runConfig.maxFanout}，截断 ${truncatedTaskIds.length} 个任务: [${truncatedTaskIds.join(', ')}]`,
         'SubAgentFanout'
       );
     }
@@ -162,7 +173,10 @@ export class SubAgentFanout {
     // W7：把感知模板透传到每个子任务的元数据，供执行器注入感知上下文
     if (options?.perceptionTemplate) {
       for (const t of limitedTasks) {
-        t.metadata = { ...(t.metadata ?? {}), perceptionTemplate: options.perceptionTemplate };
+        t.metadata = {
+          ...(t.metadata ?? {}),
+          perceptionTemplate: options.perceptionTemplate,
+        };
       }
     }
 
@@ -193,20 +207,37 @@ export class SubAgentFanout {
         break;
       case 'adaptive':
       default:
-        if (this.hasDependencies(limitedTasks)) {
-          subResults = await this.executeSequential(
-            parentTaskId,
-            limitedTasks,
-            runConfig,
-            traceId
+        {
+          const independentTasks = limitedTasks.filter(
+            (t) => t.dependencies.length === 0
           );
-        } else {
-          subResults = await this.executeParallel(
-            parentTaskId,
-            limitedTasks,
-            runConfig,
-            traceId
+          const dependentTasks = limitedTasks.filter(
+            (t) => t.dependencies.length > 0
           );
+
+          const allResults: SubTaskResult[] = [];
+
+          if (independentTasks.length > 0) {
+            const parallelResults = await this.executeParallel(
+              parentTaskId,
+              independentTasks,
+              runConfig,
+              traceId
+            );
+            allResults.push(...parallelResults);
+          }
+
+          if (dependentTasks.length > 0) {
+            const sequentialResults = await this.executeSequential(
+              parentTaskId,
+              dependentTasks,
+              runConfig,
+              traceId
+            );
+            allResults.push(...sequentialResults);
+          }
+
+          subResults = allResults;
         }
         break;
     }
@@ -227,8 +258,10 @@ export class SubAgentFanout {
       successCount,
       failedCount,
       totalDuration,
-      allSucceeded: failedCount === 0,
+      allSucceeded: failedCount === 0 && truncatedTaskIds.length === 0,
       traceId,
+      truncatedTaskIds:
+        truncatedTaskIds.length > 0 ? truncatedTaskIds : undefined,
     };
   }
 
@@ -274,7 +307,12 @@ export class SubAgentFanout {
 
     for (const task of tasks) {
       try {
-        const result = await this.executeSubTask(parentTaskId, task, config, traceId);
+        const result = await this.executeSubTask(
+          parentTaskId,
+          task,
+          config,
+          traceId
+        );
         results.push(result);
 
         if (!result.success && !config.continueOnPartialFailure) {
@@ -334,7 +372,10 @@ export class SubAgentFanout {
     if (!agent) {
       agent =
         this.registry.findBestAgent((task.tools && task.tools[0]) || '') ||
-        this.registry.findAgentByCapability((task.tools && task.tools[0]) || '');
+        this.registry.findAgentByCapability(
+          (task.tools && task.tools[0]) || ''
+        ) ||
+        undefined;
     }
 
     if (!agent) {

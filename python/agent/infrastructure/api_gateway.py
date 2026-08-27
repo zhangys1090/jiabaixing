@@ -18,10 +18,11 @@ import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Callable
-
 from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("api_gateway")
+
+
 
 
 @dataclass
@@ -113,7 +114,11 @@ class ApiGatewayMiddleware:
             "/health",
         }
         self._buckets: dict[str, TokenBucket] = {}
+        self._bucket_access: dict[str, float] = {}
         self._request_counts: dict[str, int] = defaultdict(int)
+        self._MAX_BUCKETS = 5000
+        self._TRIM_BUCKETS_TO = 3500
+        self._MAX_REQUEST_COUNTS = 5000
 
     def _get_bucket(self, key: str) -> TokenBucket:
         """获取或创建客户端对应的令牌桶。
@@ -129,6 +134,13 @@ class ApiGatewayMiddleware:
                 capacity=self._rate_limit_capacity,
                 refill_rate=self._rate_limit_refill,
             )
+            if len(self._buckets) > self._MAX_BUCKETS:
+                sorted_buckets = sorted(self._bucket_access.items(), key=lambda x: x[1])
+                to_remove = sorted_buckets[: len(self._buckets) - self._TRIM_BUCKETS_TO]
+                for k, _ in to_remove:
+                    self._buckets.pop(k, None)
+                    self._bucket_access.pop(k, None)
+        self._bucket_access[key] = time.monotonic()
         return self._buckets[key]
 
     def _generate_trace_id(self) -> str:
@@ -224,6 +236,11 @@ class ApiGatewayMiddleware:
                 return
 
         self._request_counts[client_id] += 1
+        if len(self._request_counts) > self._MAX_REQUEST_COUNTS:
+            sorted_counts = sorted(self._request_counts.items(), key=lambda x: x[1])
+            to_remove = sorted_counts[: len(self._request_counts) - (self._MAX_REQUEST_COUNTS * 3 // 4)]
+            for k, _ in to_remove:
+                del self._request_counts[k]
 
         # 3. 注入 trace_id 到响应头
         async def send_with_trace(message: dict) -> None:

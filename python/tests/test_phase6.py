@@ -2,7 +2,7 @@ import pytest
 
 from agent.core.context_pipeline import ContextManager, TokenBudgetAllocator, TokenAllocation
 from agent.core.persona import PersonaCore, ToneParams
-from agent.core.security import SecurityGuard, SecurityCheckResult
+from agent.core.command_guard import SecurityGuard, SecurityCheckResult
 
 
 def test_token_allocation():

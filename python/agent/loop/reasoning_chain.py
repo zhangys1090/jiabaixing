@@ -277,7 +277,7 @@ class ReasoningChainEngine:
                 f"用JSON格式输出: [{{\"content\": \"...\", \"confidence\": 0.8, \"type\": \"inference\"}}]"
             )
 
-            response = await self._llm.chat(  # type: ignore[union-attr]
+            response = await self._llm.chat(
                 messages=[{"role": "user", "content": prompt}],
                 use_cache=False,
             )
@@ -467,7 +467,7 @@ class ReasoningChainEngine:
                     f"陈述: {claim_node.content}\n\n"
                     f"回答格式: {{\"factual\": true/false/null, \"reason\": \"...\"}}"
                 )
-                response = await self._llm.chat(  # type: ignore[union-attr]
+                response = await self._llm.chat(
                     messages=[{"role": "user", "content": prompt}],
                     use_cache=True,
                 )
@@ -597,3 +597,95 @@ class ReasoningChainEngine:
             ratio=round(len(kept_nodes) / len(chain.nodes), 2),
         )
         return compressed
+
+    # ─── D3: 反事实推理 ───
+
+    async def counterfactual(
+        self,
+        chain: ReasoningChain,
+        alternative_hypothesis: str = "",
+    ) -> dict[str, Any]:
+        """对关键决策生成反事实路径评估。
+
+        分析"如果不这样做会怎样"，对比原路径与替代路径的预期结果，
+        帮助Agent做出更鲁棒的决策。
+
+        Args:
+            chain: 原始推理链
+            alternative_hypothesis: 替代假设（空则自动生成）
+
+        Returns:
+            dict: 包含 original_summary, counterfactual_paths, recommendation
+        """
+        inferences = [n for n in chain.nodes if n.node_type == ChainNodeType.INFERENCE]
+        if not inferences:
+            return {"original_summary": "无推理节点可分析", "counterfactual_paths": [], "recommendation": "insufficient_data"}
+
+        original_summary = "; ".join(n.content[:60] for n in inferences[:3])
+        counterfactual_paths: list[dict[str, Any]] = []
+
+        if self._llm:
+            for inf_node in inferences[:2]:
+                try:
+                    alt = alternative_hypothesis or f"如果不{inf_node.content[:30]}"
+                    prompt = (
+                        f"反事实推理分析：\n"
+                        f"原推理: {inf_node.content}\n"
+                        f"替代假设: {alt}\n"
+                        f"原始查询: {chain.query}\n\n"
+                        f"请分析替代假设下的可能结果，用JSON格式输出：\n"
+                        f'{{"outcome": "可能结果", "probability": 0.3, "risk": "low/medium/high", "reasoning": "推理过程"}}'
+                    )
+                    response = await self._llm.chat(
+                        messages=[{"role": "user", "content": prompt}],
+                        use_cache=False,
+                    )
+                    content = response.get("content", "")
+                    import json, re
+                    json_match = re.search(r"\{[\s\S]*\}", content)
+                    if json_match:
+                        try:
+                            cf = json.loads(json_match.group())
+                            counterfactual_paths.append({
+                                "original_inference": inf_node.content[:60],
+                                "alternative": alt,
+                                "outcome": cf.get("outcome", ""),
+                                "probability": float(cf.get("probability", 0.5)),
+                                "risk": cf.get("risk", "medium"),
+                                "reasoning": cf.get("reasoning", ""),
+                            })
+                        except (json.JSONDecodeError, ValueError):
+                            pass
+                except Exception as e:
+                    log.debug("Counterfactual analysis failed for node", node_id=inf_node.id, error=str(e))
+        else:
+            for inf_node in inferences[:2]:
+                alt = alternative_hypothesis or f"不执行: {inf_node.content[:30]}"
+                counterfactual_paths.append({
+                    "original_inference": inf_node.content[:60],
+                    "alternative": alt,
+                    "outcome": "可能失败或结果不同",
+                    "probability": 0.5,
+                    "risk": "medium",
+                    "reasoning": "无LLM，基于规则的保守估计",
+                })
+
+        high_risk_count = sum(1 for p in counterfactual_paths if p.get("risk") == "high")
+        if high_risk_count > 0:
+            recommendation = "proceed_with_caution"
+        elif any(p.get("probability", 0) > 0.7 for p in counterfactual_paths):
+            recommendation = "consider_alternative"
+        else:
+            recommendation = "proceed_as_planned"
+
+        log.info(
+            "D3: counterfactual analysis completed",
+            chain_id=chain.id,
+            paths=len(counterfactual_paths),
+            recommendation=recommendation,
+        )
+        return {
+            "original_summary": original_summary,
+            "counterfactual_paths": counterfactual_paths,
+            "recommendation": recommendation,
+        }

@@ -3,12 +3,21 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
+from pydantic import BaseModel, Field
 
 from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("api.canary")
 
 router = APIRouter(tags=["canary"])
+
+
+class CreateStrategyRequest(BaseModel):
+    name: str = Field(..., max_length=100)
+    description: str = Field(default="", max_length=500)
+    canary_percentage: float = Field(default=10.0, ge=0.0, le=100.0)
+    success_threshold: float = Field(default=0.95, ge=0.0, le=1.0)
+    duration_seconds: int = Field(default=300, ge=10, le=86400)
 
 
 @router.get("/canary/strategies")
@@ -25,14 +34,19 @@ async def list_strategies(request: Request):
 
 
 @router.post("/canary/strategies")
-async def create_strategy(request: Request):
+async def create_strategy(req: CreateStrategyRequest, request: Request):
     engine = request.app.state.engine if hasattr(request.app.state, "engine") else None
     if not engine or not engine.canary_manager:
         return {"success": False, "error": "Canary manager not available"}
     try:
         from agent.core.canary_release import CanaryStrategy
-        body = await request.json()
-        strategy = CanaryStrategy(**body)
+        strategy = CanaryStrategy(
+            name=req.name,
+            description=req.description,
+            canary_percentage=req.canary_percentage,
+            success_threshold=req.success_threshold,
+            duration_seconds=req.duration_seconds,
+        )
         await engine.canary_manager.create_strategy(strategy)
         return {"success": True, "name": strategy.name}
     except Exception as e:
@@ -49,6 +63,7 @@ async def promote_strategy(name: str, request: Request):
         await engine.canary_manager.promote(name)
         return {"success": True, "name": name, "action": "promote"}
     except Exception as e:
+        log.debug("canary 异常处理", error=str(e))
         return {"success": False, "error": str(e)}
 
 
@@ -61,6 +76,7 @@ async def rollback_strategy(name: str, request: Request):
         await engine.canary_manager.rollback(name)
         return {"success": True, "name": name, "action": "rollback"}
     except Exception as e:
+        log.debug("canary 异常处理", error=str(e))
         return {"success": False, "error": str(e)}
 
 
@@ -73,6 +89,7 @@ async def pause_strategy(name: str, request: Request):
         await engine.canary_manager.pause(name)
         return {"success": True, "name": name, "action": "pause"}
     except Exception as e:
+        log.debug("canary 异常处理", error=str(e))
         return {"success": False, "error": str(e)}
 
 
@@ -85,6 +102,7 @@ async def strategy_health(name: str, request: Request):
         health = engine.canary_manager.check_health(name)
         return {"name": name, "health": health}
     except Exception as e:
+        log.debug("canary 异常处理", error=str(e))
         return {"error": str(e)}
 
 

@@ -5,9 +5,10 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from agent.core.logger import StructuredLogger
-from agent.security.sensitive_detector import check_sensitive_info, CheckScene, RiskLevel
-
+from agent.core.types import RiskLevel
+from agent.security.sensitive_detector import check_sensitive_info, CheckScene
 log = StructuredLogger("output_guardrail")
+
 
 
 @dataclass
@@ -79,12 +80,13 @@ class OutputGuardrailEngine:
         engine = OutputGuardrailEngine()
         result = engine.check("这是一段输出文本")
         if not result.get("passed"):
-            print(result["reason"])
+            logger.info(result["reason"])
     """
 
     def __init__(self) -> None:
         self._guardrails: list[OutputGuardrail] = []
         self._enabled: bool = True
+        self._MAX_GUARDRAILS = 50
         self._register_builtin_guardrails()
 
     def _register_builtin_guardrails(self) -> None:
@@ -138,6 +140,8 @@ class OutputGuardrailEngine:
         return GuardrailResult(passed=True)
 
     def register(self, guardrail: OutputGuardrail) -> None:
+        if len(self._guardrails) >= self._MAX_GUARDRAILS:
+            self._guardrails = self._guardrails[-(self._MAX_GUARDRAILS * 3 // 4):]
         self._guardrails.append(guardrail)
         log.info(f"注册输出Guardrail: {guardrail.name}")
 

@@ -11,6 +11,8 @@ from agent.models.memory import (
     MemoryStoreRequest,
     MemoryStoreResponse,
 )
+import logging
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -123,7 +125,8 @@ async def store_short_term(req: StoreTypedRequest):
         )
         return {"success": True, "id": mem_id}
     except Exception as e:
-        return {"success": False, "id": "", "error": str(e)}
+        logger.warning("memory 异常处理", error=str(e))
+        return {"success": False, "id": "", "error": "存储操作失败"}
 
 
 @router.post("/store-long-term")
@@ -137,7 +140,8 @@ async def store_long_term(req: StoreTypedRequest):
         )
         return {"success": True, "id": mem_id}
     except Exception as e:
-        return {"success": False, "id": "", "error": str(e)}
+        logger.warning("memory 异常处理", error=str(e))
+        return {"success": False, "id": "", "error": "存储操作失败"}
 
 
 @router.post("/store-instant")
@@ -151,7 +155,8 @@ async def store_instant(req: StoreTypedRequest):
         )
         return {"success": True, "id": mem_id}
     except Exception as e:
-        return {"success": False, "id": "", "error": str(e)}
+        logger.warning("memory 异常处理", error=str(e))
+        return {"success": False, "id": "", "error": "存储操作失败"}
 
 
 @router.post("/store-feedback")
@@ -180,7 +185,8 @@ async def store_feedback(req: StoreFeedbackRequest):
         await mem.store(content=content, memory_type="feedback_signal", scene="user_feedback")
         return {"success": True}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        logger.warning("memory 异常处理", error=str(e))
+        return {"success": False, "error": "存储操作失败"}
 
 
 @router.post("/store-episodic")
@@ -207,7 +213,8 @@ async def store_episodic(req: StoreEpisodicRequest):
             )
         return {"success": True, "id": ep_id}
     except Exception as e:
-        return {"success": False, "id": "", "error": str(e)}
+        logger.warning("memory 异常处理", error=str(e))
+        return {"success": False, "id": "", "error": "存储操作失败"}
 
 
 @router.post("/hybrid-retrieval")
@@ -235,6 +242,7 @@ async def hybrid_retrieval(req: HybridRetrievalRequest):
             })
         return {"success": True, "results": items}
     except Exception as e:
+        logger.warning("memory 异常处理", error=str(e))
         return {"success": False, "results": [], "error": str(e)}
 
 
@@ -251,6 +259,7 @@ async def user_profile():
             return {"success": True, "profile": profile.__dict__}
         return {"success": True, "profile": profile}
     except Exception as e:
+        logger.warning("memory 异常处理", error=str(e))
         return {"success": False, "profile": {}, "error": str(e)}
 
 
@@ -271,6 +280,7 @@ async def update_memory(req: UpdateMemoryRequest):
     except ValueError as e:
         return {"success": False, "error": str(e)}
     except Exception as e:
+        logger.warning("memory 异常处理", error=str(e))
         return {"success": False, "error": str(e)}
 
 
@@ -294,6 +304,7 @@ async def retrieve_context(req: RetrieveContextRequest):
             })
         return {"success": True, "results": items}
     except Exception as e:
+        logger.warning("memory 异常处理", error=str(e))
         return {"success": False, "results": [], "error": str(e)}
 
 
@@ -313,6 +324,7 @@ async def query_recent_feedback(req: QueryRecentFeedbackRequest):
         filtered = [r for r in results if r.get("timestamp", 0) >= cutoff]
         return {"success": True, "results": filtered}
     except Exception as e:
+        logger.warning("memory 异常处理", error=str(e))
         return {"success": False, "results": [], "error": str(e)}
 
 
@@ -361,6 +373,7 @@ async def calculate_decay_score(req: DecayScoreRequest):
         )
         return {"success": True, "decay_score": score}
     except Exception as e:
+        logger.warning("memory 异常处理", error=str(e))
         return {"success": False, "error": str(e)}
 
 
@@ -373,6 +386,7 @@ async def update_decay_scores(batch_size: int = 100):
         updated = await mem.update_decay_scores(batch_size)
         return {"success": True, "updated": updated}
     except Exception as e:
+        logger.warning("memory 异常处理", error=str(e))
         return {"success": False, "error": str(e), "updated": 0}
 
 
@@ -385,6 +399,7 @@ async def perform_dream():
         stats = await mem.perform_dream()
         return {"success": True, "stats": stats}
     except Exception as e:
+        logger.warning("memory 异常处理", error=str(e))
         return {"success": False, "error": str(e)}
 
 
@@ -396,6 +411,7 @@ async def dream_stats():
     try:
         return {"success": True, "stats": mem.get_dream_stats()}
     except Exception as e:
+        logger.warning("memory 异常处理", error=str(e))
         return {"success": False, "error": str(e)}
 
 
@@ -408,6 +424,7 @@ async def knowledge_graph(limit: int = 100):
         graph = await mem.build_knowledge_graph(limit)
         return {"success": True, "nodes": graph["nodes"], "edges": graph["edges"]}
     except Exception as e:
+        logger.warning("memory 异常处理", error=str(e))
         return {"success": False, "nodes": [], "edges": [], "error": str(e)}
 
 
@@ -425,6 +442,7 @@ async def store_encrypted(req: StoreEncryptedRequest):
         )
         return {"success": True, "id": mem_id}
     except Exception as e:
+        logger.warning("memory 异常处理", error=str(e))
         return {"success": False, "id": "", "error": str(e)}
 
 
@@ -443,6 +461,7 @@ async def store_with_trace(req: StoreWithTraceRequest):
         )
         return {"success": True, "id": mem_id}
     except Exception as e:
+        logger.warning("memory 异常处理", error=str(e))
         return {"success": False, "id": "", "error": str(e)}
 
 
@@ -455,4 +474,5 @@ async def search_by_trace(req: SearchByTraceRequest):
         results = await mem.search_by_trace(req.trace_id)
         return {"success": True, "results": results}
     except Exception as e:
+        logger.warning("memory 异常处理", error=str(e))
         return {"success": False, "results": [], "error": str(e)}

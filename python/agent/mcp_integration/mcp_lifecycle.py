@@ -10,6 +10,7 @@ Usage:
     await lifecycle.start_all()
     status = lifecycle.get_status()
 """
+
 from __future__ import annotations
 
 import json
@@ -18,10 +19,11 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from agent.core.logger import StructuredLogger
 from agent.mcp_integration.mcp_client import MCPClient, MCPServerConfig, MCPServerState
+from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("mcp_lifecycle")
+
 
 
 @dataclass
@@ -150,7 +152,7 @@ class MCPLifecycle:
             count += 1
 
         self._config_path = config_path
-        log.info("MCP 配置加载", path=config_path, servers=count)
+        log.debug("MCP 配置加载", path=config_path, servers=count)
         return count
 
     async def auto_load(self) -> int:
@@ -176,7 +178,7 @@ class MCPLifecycle:
 
         count = await self.load_config(path)
         if count > 0:
-            log.info("MCP 自动加载配置", path=path, servers=count)
+            log.debug("MCP 自动加载配置", path=path, servers=count)
         return count
 
     async def start_all(self) -> dict[str, bool]:
@@ -205,7 +207,7 @@ class MCPLifecycle:
 
             results[name] = success
 
-        log.info("MCP 批量启动", results=results)
+        log.debug("MCP 批量启动", results=results)
         return results
 
     async def start_server(self, name: str) -> bool:
@@ -271,7 +273,8 @@ class MCPLifecycle:
                 tools = await self._client.list_tools(name)
                 state.last_ping = time.time()
                 results[name] = True
-            except Exception:
+            except Exception as _exc:
+                log.debug("mcp_lifecycle 异常处理", error=str(_exc))
                 state.connected = False
                 results[name] = False
 

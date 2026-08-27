@@ -8,8 +8,8 @@ from agent.core.logger import StructuredLogger
 from agent.core.tracing import new_trace_id
 from agent.orchestration.perception_bus import SharedPerceptionBus
 from agent.perception.sensory_fusion import SenseSample, FusedPerception
-
 log = StructuredLogger("fanout")
+
 
 FanoutStrategy = Literal["parallel", "sequential", "adaptive"]
 
@@ -114,7 +114,7 @@ class SubAgentFanout:
         fanout = SubAgentFanout(FanoutConfig(max_fanout=3, strategy="adaptive"))
         tasks = [TaskNode(id="1", goal="分析代码"), TaskNode(id="2", goal="写测试")]
         result = await fanout.fanout(tasks, executor_fn)
-        print(f"成功: {result.success_count}/{result.total_count}")
+        logger.info("成功: {result.success_count}/{result.total_count}")
     """
 
     def __init__(
@@ -162,8 +162,17 @@ class SubAgentFanout:
 
         if strategy == "parallel":
             sub_results = await self._execute_parallel(tasks, executor)
-        else:
+        elif strategy == "sequential":
             sub_results = await self._execute_sequential(tasks, executor)
+        else:
+            independent = [t for t in tasks if not t.dependencies]
+            dependent = [t for t in tasks if t.dependencies]
+            all_results: list[SubTaskResult] = []
+            if independent:
+                all_results.extend(await self._execute_parallel(independent, executor))
+            if dependent:
+                all_results.extend(await self._execute_sequential(dependent, executor))
+            sub_results = all_results
 
         duration = (time.time() - start) * 1000
         success_count = sum(1 for r in sub_results if r.success)
@@ -218,7 +227,8 @@ class SubAgentFanout:
         self, tasks: list[TaskNode], executor: Any
     ) -> list[SubTaskResult]:
         sem_tasks = [self._execute_with_semaphore(task, executor) for task in tasks]
-        return list(await asyncio.gather(*sem_tasks))
+        results = await asyncio.gather(*sem_tasks, return_exceptions=True)
+        return [r if isinstance(r, SubTaskResult) else SubTaskResult(task_id="error", status="failed", error=str(r)) for r in results]
 
     async def _execute_sequential(
         self, tasks: list[TaskNode], executor: Any
@@ -285,6 +295,7 @@ class SubAgentFanout:
                     trace_id=self._current_trace,
                 )
             except Exception as e:
+                log.debug("fanout 异常处理", error=str(e))
                 task.status = "failed"
                 task.error = str(e)
                 return SubTaskResult(

@@ -94,6 +94,8 @@ class DeviceSenseChannel:
         self._lock = threading.Lock()
         self._latest: dict[str, DeviceStatus] = {}
         self._history: list[SenseSample] = []
+        self._MAX_DEVICES = 5000
+        self._MAX_HISTORY = 10000
 
     def ingest(self, status: dict[str, Any]) -> SenseSample | None:
         """吸收一条设备状态，返回生成的 SenseSample（通道禁用时返回 None）。"""
@@ -104,6 +106,12 @@ class DeviceSenseChannel:
         with self._lock:
             self._latest[ds.device_id] = ds
             self._history.append(sample)
+            if len(self._history) > self._MAX_HISTORY:
+                self._history = self._history[-self._MAX_HISTORY * 3 // 4:]
+            if len(self._latest) > self._MAX_DEVICES:
+                oldest_keys = list(self._latest.keys())[: len(self._latest) - (self._MAX_DEVICES * 3 // 4)]
+                for did in oldest_keys:
+                    del self._latest[did]
         return sample
 
     def ingest_many(self, statuses: list[dict[str, Any]]) -> list[SenseSample]:

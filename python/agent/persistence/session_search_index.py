@@ -28,10 +28,10 @@ from pathlib import Path
 from typing import Any
 
 from agent.config import DATA_DIR
-from agent.core.logger import StructuredLogger
 from agent.persistence.database import get_sync_connection
 from agent.persistence.session_lineage import SessionLineageTracker
 from agent.persistence.session_store import Session, SessionStore
+from agent.core.logger import StructuredLogger
 
 # jieba 可选加载
 _jieba_available = False
@@ -42,6 +42,7 @@ except ImportError:
     pass
 
 log = StructuredLogger("session_search_index")
+
 
 
 class SessionSearchIndex:

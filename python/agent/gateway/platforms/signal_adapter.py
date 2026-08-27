@@ -62,10 +62,9 @@ class SignalAdapter(PlatformAdapter):
         try:
             import httpx
 
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.get(
                     f"{self._api_url}/v1/about",
-                    timeout=10,
                 )
                 if resp.status_code != 200:
                     raise ConnectionError(f"signal-cli API 不可用: {resp.status_code}")
@@ -84,18 +83,18 @@ class SignalAdapter(PlatformAdapter):
         try:
             import httpx
 
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 while self._connected:
                     try:
                         resp = await client.get(
                             f"{self._api_url}/v1/receive/{self._phone_number}",
-                            timeout=30,
                         )
                         if resp.status_code == 200:
                             messages = resp.json()
                             for msg_data in messages if isinstance(messages, list) else [messages]:
                                 await self._process_signal_message(msg_data)
                     except Exception as _exc:
+                        log.debug("signal_adapter 异常处理", error=str(_exc))
                         log_ignored(log, "signal_adapter.SignalAdapter._poll_messages", _exc)
                     await asyncio.sleep(2)
         except asyncio.CancelledError as _exc:
@@ -157,11 +156,10 @@ class SignalAdapter(PlatformAdapter):
             else:
                 payload["groupId"] = chat_id
 
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.post(
                     f"{self._api_url}/v2/send",
                     json=payload,
-                    timeout=30,
                 )
                 return resp.status_code == 201
         except Exception as e:

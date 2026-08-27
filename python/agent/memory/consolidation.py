@@ -14,6 +14,8 @@ import time
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Protocol
+import logging
+logger = logging.getLogger(__name__)
 
 
 class LLMProtocol(Protocol):
@@ -122,7 +124,8 @@ class MemoryConsolidator:
                 use_cache=False,
             )
             summary = str(resp.get("content", ""))
-        except Exception:
+        except Exception as e:
+            logger.warning("consolidation.summarize 摘要生成失败", error=str(e))
             summary = f"[对话摘要: {len(messages)} 条消息]"
         self._last_summary = summary
         compressed = [{"role": "system", "content": f"对话历史摘要: {summary}"}]
@@ -159,7 +162,8 @@ class MemoryConsolidator:
                     use_cache=False,
                 )
                 summary = str(resp.get("content", ""))
-            except Exception:
+            except Exception as e:
+                logger.warning("consolidation.consolidate 早期对话摘要失败", error=str(e))
                 summary = f"[早期对话: {len(old_messages)} 条消息]"
         self._last_summary = summary
         compressed = [

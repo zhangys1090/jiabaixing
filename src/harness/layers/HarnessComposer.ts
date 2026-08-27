@@ -12,21 +12,22 @@
  * - 优雅降级：如果指定实现不可用，回退到默认实现
  */
 
+import { EventBus } from '../../shared/EventBus';
 import { Logger } from '../../utils/Logger';
 import { EventStore } from '../persistence/EventStore';
 import { EventStoreBridge } from '../persistence/EventStoreBridge';
 import { SessionReplay } from '../persistence/SessionReplay';
 import { ToolRegistry } from '../tools/registry/ToolRegistry';
 import {
-    HarnessConfigManager,
-    type HarnessConfigFile,
-    type LayerConfig,
+  HarnessConfigManager,
+  type HarnessConfigFile,
+  type LayerConfig,
 } from './HarnessConfigManager';
 import type {
-    ILayerPort,
-    IPersistenceLayer,
-    IToolLayer,
-    LayerName
+  ILayerPort,
+  IPersistenceLayer,
+  IToolLayer,
+  LayerName,
 } from './interfaces';
 
 export interface LayerInstance {
@@ -38,11 +39,14 @@ export interface LayerInstance {
 }
 
 export interface ComposerDeps {
-  eventBus?: EventBus;
+  eventBus?: typeof EventBus;
   dataDir?: string;
 }
 
-type LayerFactory = (config: LayerConfig, deps: ComposerDeps) => Promise<ILayerPort | unknown>;
+type LayerFactory = (
+  config: LayerConfig,
+  deps: ComposerDeps
+) => Promise<ILayerPort | unknown>;
 
 export class HarnessComposer {
   private configManager: HarnessConfigManager;
@@ -71,52 +75,81 @@ export class HarnessComposer {
     });
 
     this.factories.set('context:unified-pipeline', async (config, _deps) => {
-      return {
-        layerName: 'context' as const,
+      const layer: ILayerPort = {
+        layerName: 'context',
         initialized: false,
-        async initialize() { this.initialized = true; },
-        async shutdown() { this.initialized = false; },
+        async initialize() {
+          this.initialized = true;
+        },
+        async shutdown() {
+          this.initialized = false;
+        },
       };
+      return layer;
     });
 
     this.factories.set('verification:builtin', async (config, _deps) => {
-      return {
-        layerName: 'verification' as const,
+      const layer: ILayerPort = {
+        layerName: 'verification',
         initialized: false,
-        async initialize() { this.initialized = true; },
-        async shutdown() { this.initialized = false; },
+        async initialize() {
+          this.initialized = true;
+        },
+        async shutdown() {
+          this.initialized = false;
+        },
       };
+      return layer;
     });
 
     this.factories.set('constraints:builtin', async (config, _deps) => {
-      return {
-        layerName: 'constraints' as const,
+      const layer: ILayerPort = {
+        layerName: 'constraints',
         initialized: false,
-        async initialize() { this.initialized = true; },
-        async shutdown() { this.initialized = false; },
+        async initialize() {
+          this.initialized = true;
+        },
+        async shutdown() {
+          this.initialized = false;
+        },
       };
+      return layer;
     });
 
     this.factories.set('loop:python-backend', async (config, _deps) => {
-      return {
-        layerName: 'loop' as const,
+      const layer: ILayerPort = {
+        layerName: 'loop',
         initialized: false,
-        async initialize() { this.initialized = true; },
-        async shutdown() { this.initialized = false; },
+        async initialize() {
+          this.initialized = true;
+        },
+        async shutdown() {
+          this.initialized = false;
+        },
       };
+      return layer;
     });
 
     this.factories.set('loop:local', async (config, _deps) => {
-      return {
-        layerName: 'loop' as const,
+      const layer: ILayerPort = {
+        layerName: 'loop',
         initialized: false,
-        async initialize() { this.initialized = true; },
-        async shutdown() { this.initialized = false; },
+        async initialize() {
+          this.initialized = true;
+        },
+        async shutdown() {
+          this.initialized = false;
+        },
       };
+      return layer;
     });
   }
 
-  registerFactory(layerName: LayerName, implementation: string, factory: LayerFactory): void {
+  registerFactory(
+    layerName: LayerName,
+    implementation: string,
+    factory: LayerFactory
+  ): void {
     this.factories.set(`${layerName}:${implementation}`, factory);
     Logger.info(
       `HarnessComposer: 注册层工厂 ${layerName}:${implementation}`,
@@ -133,10 +166,7 @@ export class HarnessComposer {
       if (!layerConfig) continue;
 
       if (!layerConfig.enabled) {
-        Logger.info(
-          `  ⏭️ ${layerName}: 已禁用`,
-          'HarnessComposer'
-        );
+        Logger.info(`  ⏭️ ${layerName}: 已禁用`, 'HarnessComposer');
         continue;
       }
 
@@ -178,10 +208,17 @@ export class HarnessComposer {
     return this.layers;
   }
 
-  async switchLayer(layerName: LayerName, implementation: string, config?: Record<string, unknown>): Promise<boolean> {
+  async switchLayer(
+    layerName: LayerName,
+    implementation: string,
+    config?: Record<string, unknown>
+  ): Promise<boolean> {
     const currentLayer = this.layers.get(layerName);
 
-    if (currentLayer?.instance && typeof (currentLayer.instance as ILayerPort).shutdown === 'function') {
+    if (
+      currentLayer?.instance &&
+      typeof (currentLayer.instance as ILayerPort).shutdown === 'function'
+    ) {
       try {
         await (currentLayer.instance as ILayerPort).shutdown();
       } catch (error) {
@@ -235,7 +272,11 @@ export class HarnessComposer {
     return this.layers.get(layerName) ?? null;
   }
 
-  listLayers(): Array<{ name: LayerName; implementation: string; initialized: boolean }> {
+  listLayers(): Array<{
+    name: LayerName;
+    implementation: string;
+    initialized: boolean;
+  }> {
     return Array.from(this.layers.entries()).map(([name, instance]) => ({
       name,
       implementation: instance.implementation,
@@ -253,7 +294,10 @@ export class HarnessComposer {
 
   async shutdown(): Promise<void> {
     for (const [name, layer] of this.layers) {
-      if (layer.instance && typeof (layer.instance as ILayerPort).shutdown === 'function') {
+      if (
+        layer.instance &&
+        typeof (layer.instance as ILayerPort).shutdown === 'function'
+      ) {
         try {
           await (layer.instance as ILayerPort).shutdown();
         } catch (error) {
@@ -271,7 +315,10 @@ export class HarnessComposer {
     Logger.info('HarnessComposer: 已关闭所有层', 'HarnessComposer');
   }
 
-  private async createLayer(layerName: LayerName, config: LayerConfig): Promise<ILayerPort | unknown> {
+  private async createLayer(
+    layerName: LayerName,
+    config: LayerConfig
+  ): Promise<ILayerPort | unknown> {
     const factoryKey = `${layerName}:${config.implementation}`;
     const factory = this.factories.get(factoryKey);
 
@@ -285,22 +332,33 @@ export class HarnessComposer {
     return factory(config, this.deps);
   }
 
-  private async createPluginLayer(layerName: LayerName, config: LayerConfig): Promise<ILayerPort> {
-    const pluginName = config.implementation.replace('plugin:', '');
+  private async createPluginLayer(
+    layerName: LayerName,
+    _config: LayerConfig
+  ): Promise<ILayerPort> {
+    const pluginName = _config.implementation.replace('plugin:', '');
     Logger.info(
       `HarnessComposer: 尝试加载插件层 ${pluginName} (Phase 4 功能)`,
       'HarnessComposer'
     );
 
-    return {
+    const layer: ILayerPort = {
       layerName,
       initialized: false,
-      async initialize() { this.initialized = true; },
-      async shutdown() { this.initialized = false; },
+      async initialize() {
+        this.initialized = true;
+      },
+      async shutdown() {
+        this.initialized = false;
+      },
     };
+    return layer;
   }
 
-  private async tryFallback(layerName: LayerName, failedConfig: LayerConfig): Promise<void> {
+  private async tryFallback(
+    layerName: LayerName,
+    failedConfig: LayerConfig
+  ): Promise<void> {
     const fallbacks: Partial<Record<LayerName, string>> = {
       tools: 'builtin',
       context: 'unified-pipeline',
@@ -349,7 +407,10 @@ export class HarnessComposer {
     }
   }
 
-  private async createBuiltinToolLayer(config: LayerConfig, deps: ComposerDeps): Promise<IToolLayer> {
+  private async createBuiltinToolLayer(
+    config: LayerConfig,
+    deps: ComposerDeps
+  ): Promise<IToolLayer> {
     const toolRegistry = new ToolRegistry();
 
     return {
@@ -358,7 +419,9 @@ export class HarnessComposer {
         Logger.info('BuiltinToolLayer: 初始化', 'HarnessComposer');
       },
       getRegistry() {
-        return toolRegistry as unknown as IToolLayer['getRegistry'] extends () => infer R ? R : never;
+        return toolRegistry as unknown as IToolLayer['getRegistry'] extends () => infer R
+          ? R
+          : never;
       },
       async shutdown() {
         Logger.info('BuiltinToolLayer: 关闭', 'HarnessComposer');
@@ -366,7 +429,10 @@ export class HarnessComposer {
     };
   }
 
-  private async createEventSourcingPersistenceLayer(config: LayerConfig, deps: ComposerDeps): Promise<IPersistenceLayer> {
+  private async createEventSourcingPersistenceLayer(
+    config: LayerConfig,
+    deps: ComposerDeps
+  ): Promise<IPersistenceLayer> {
     const eventStore = new EventStore({
       dbPath: config.config.dbPath as string | undefined,
       snapshotInterval: config.config.snapshotInterval as number | undefined,
@@ -388,10 +454,14 @@ export class HarnessComposer {
       layerName: 'persistence',
       async initialize() {},
       getEventStore() {
-        return eventStore as unknown as IPersistenceLayer['getEventStore'] extends () => infer R ? R : never;
+        return eventStore as unknown as IPersistenceLayer['getEventStore'] extends () => infer R
+          ? R
+          : never;
       },
       getSessionReplay() {
-        return sessionReplay as unknown as IPersistenceLayer['getSessionReplay'] extends () => infer R ? R : never;
+        return sessionReplay as unknown as IPersistenceLayer['getSessionReplay'] extends () => infer R
+          ? R
+          : never;
       },
       async shutdown() {
         bridge?.stop();
@@ -400,12 +470,19 @@ export class HarnessComposer {
     };
   }
 
-  private async createLegacyPersistenceLayer(config: LayerConfig, deps: ComposerDeps): Promise<IPersistenceLayer> {
+  private async createLegacyPersistenceLayer(
+    config: LayerConfig,
+    deps: ComposerDeps
+  ): Promise<IPersistenceLayer> {
     return {
       layerName: 'persistence',
       async initialize() {},
-      getEventStore() { return null; },
-      getSessionReplay() { return null; },
+      getEventStore() {
+        return null;
+      },
+      getSessionReplay() {
+        return null;
+      },
       async shutdown() {},
     };
   }

@@ -13,9 +13,12 @@ export type {
   A2AAgentCard,
   A2ACapability,
   A2ATask,
-  A2ATaskStatus,
   A2ATaskEvent,
 } from '../harness/orchestration/AgentRegistry';
+
+import type { A2ATaskStatus } from '../harness/orchestration/AgentRegistry';
+
+export type { A2ATaskStatus };
 
 /** A2A 传输协议（与 Python A2ATransport 对应）。 */
 export type A2ATransport = 'json-rpc' | 'grpc' | 'http';

@@ -98,7 +98,7 @@ export interface PythonAgentConfig {
   apiKey?: string;
 }
 
-/** 流式聊天事件类型 */
+/** 流式聊天事件类型 — 与 Python ConversationLoop.run_stream() 产出的事件对齐 */
 export type StreamEventType =
   | 'stream_start'
   | 'stream_chunk'
@@ -106,10 +106,18 @@ export type StreamEventType =
   | 'thinking'
   | 'tool_start'
   | 'tool_end'
+  | 'tool_progress'
   | 'progress'
   | 'error'
   | 'task_cancelled'
-  | 'clarification_request';
+  | 'clarification_request'
+  | 'llm_request'
+  | 'llm_response'
+  | 'checkpoint'
+  | 'verification'
+  | 'plan'
+  | 'token'
+  | 'reflection';
 
 /** 流式聊天事件 */
 export interface StreamEvent {
@@ -134,6 +142,7 @@ export interface StreamEvent {
   session_id?: string;
   done?: boolean;
   options?: string[];
+  metadata?: Record<string, unknown>;
 }
 
 /** 流式回调 */
@@ -157,6 +166,11 @@ interface PendingRequest {
     response: string;
     traceId?: string;
     intent?: string;
+    qualityScore?: number;
+    toolCallsMade?: number;
+    roundsUsed?: number;
+    duration?: number;
+    finishReason?: string;
   }) => void;
   reject: (err: Error) => void;
   onStream?: StreamCallback;
@@ -595,7 +609,10 @@ export class PythonAgentBridge implements ACPDeps {
     const map: Record<string, unknown> = {};
     for (const s of servers) {
       const name = s.name as string;
-      const { name: _n, ...status } = s;
+      const status: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(s)) {
+        if (k !== 'name') status[k] = v;
+      }
       map[name] = status;
     }
     return map;
@@ -796,6 +813,31 @@ export class PythonAgentBridge implements ACPDeps {
       { name: promptName, arguments: args }
     );
     return data?.messages ?? data;
+  }
+
+  /**
+   * 通用 HTTP 请求代理 — 供路由层直接透传到 Python 后端。
+   * 支持 GET / POST / PUT / DELETE / PATCH，返回 Python 响应的 data 部分。
+   */
+  async request(
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH',
+    path: string,
+    body?: unknown
+  ): Promise<unknown> {
+    const methodLower = method.toLowerCase() as
+      | 'get'
+      | 'post'
+      | 'put'
+      | 'delete'
+      | 'patch';
+    if (methodLower === 'get' || methodLower === 'delete') {
+      const { data } = await this.client[methodLower](path, {
+        params: body,
+      });
+      return data;
+    }
+    const { data } = await this.client[methodLower](path, body);
+    return data;
   }
 
   // ── LLM 桥接（代理到 Python agent/llm，第一批：chat/chatWithTools/health/model/mark/reset）──
@@ -1339,7 +1381,11 @@ export class PythonAgentBridge implements ACPDeps {
       return data.result ?? data;
     } catch (error) {
       const err = error as Error;
-      Logger.error(`浏览器自动化操作失败: ${err.message}`, err, 'PythonAgentBridge');
+      Logger.error(
+        `浏览器自动化操作失败: ${err.message}`,
+        err,
+        'PythonAgentBridge'
+      );
       throw new Error(`浏览器自动化操作失败: ${err.message}`);
     }
   }
@@ -1373,7 +1419,11 @@ export class PythonAgentBridge implements ACPDeps {
       return data.result ?? data;
     } catch (error) {
       const err = error as Error;
-      Logger.error(`桌面自动化操作失败: ${err.message}`, err, 'PythonAgentBridge');
+      Logger.error(
+        `桌面自动化操作失败: ${err.message}`,
+        err,
+        'PythonAgentBridge'
+      );
       throw new Error(`桌面自动化操作失败: ${err.message}`);
     }
   }
@@ -1409,7 +1459,11 @@ export class PythonAgentBridge implements ACPDeps {
       return data.result ?? data;
     } catch (error) {
       const err = error as Error;
-      Logger.error(`代码重构操作失败: ${err.message}`, err, 'PythonAgentBridge');
+      Logger.error(
+        `代码重构操作失败: ${err.message}`,
+        err,
+        'PythonAgentBridge'
+      );
       throw new Error(`代码重构操作失败: ${err.message}`);
     }
   }
@@ -1444,7 +1498,11 @@ export class PythonAgentBridge implements ACPDeps {
       return data.result ?? data;
     } catch (error) {
       const err = error as Error;
-      Logger.error(`多模态视觉分析失败: ${err.message}`, err, 'PythonAgentBridge');
+      Logger.error(
+        `多模态视觉分析失败: ${err.message}`,
+        err,
+        'PythonAgentBridge'
+      );
       throw new Error(`多模态视觉分析失败: ${err.message}`);
     }
   }
@@ -1477,7 +1535,11 @@ export class PythonAgentBridge implements ACPDeps {
       return data.tools ?? data;
     } catch (error) {
       const err = error as Error;
-      Logger.error(`工具集列表查询失败: ${err.message}`, err, 'PythonAgentBridge');
+      Logger.error(
+        `工具集列表查询失败: ${err.message}`,
+        err,
+        'PythonAgentBridge'
+      );
       throw new Error(`工具集列表查询失败: ${err.message}`);
     }
   }
@@ -1618,7 +1680,11 @@ export class PythonAgentBridge implements ACPDeps {
       return data.results ?? data;
     } catch (error) {
       const err = error as Error;
-      Logger.error(`混合记忆检索失败: ${err.message}`, err, 'PythonAgentBridge');
+      Logger.error(
+        `混合记忆检索失败: ${err.message}`,
+        err,
+        'PythonAgentBridge'
+      );
       throw new Error(`混合记忆检索失败: ${err.message}`);
     }
   }
@@ -1845,20 +1911,42 @@ export class PythonAgentBridge implements ACPDeps {
       headers['x-trace-id'] = traceId;
     }
     try {
-      const { data } = await this.client.post('/v1/chat', {
-        message,
-        session_id: sessionId,
-        trace_id: traceId,
-        request_id: requestId,
-        images: images ?? [],
-      }, { headers });
+      const { data } = await this.client.post(
+        '/v1/chat',
+        {
+          message,
+          session_id: sessionId,
+          trace_id: traceId,
+          request_id: requestId,
+          images: images ?? [],
+        },
+        { headers }
+      );
+      const rawContent = data.content || '';
+      const finishReason = data.finish_reason || undefined;
+      let responseText = rawContent || '抱歉，后端未返回有效内容，请稍后重试。';
+      if (finishReason === 'budget_exceeded' && !rawContent.trim()) {
+        responseText =
+          '抱歉，当前AI服务预算已达上限，暂时无法处理更多请求。请稍后重试。';
+        Logger.warn(
+          'Python后端返回budget_exceeded，使用降级提示',
+          'PythonAgentBridge'
+        );
+      }
       return {
-        response: data.content || '',
+        response: responseText,
         traceId: data.trace_id ?? traceId,
         intent: data.intent,
-        qualityScore: typeof data.quality_score === 'number' ? data.quality_score : undefined,
-        toolCallsMade: typeof data.tool_calls_made === 'number' ? data.tool_calls_made : undefined,
-        roundsUsed: typeof data.rounds_used === 'number' ? data.rounds_used : undefined,
+        qualityScore:
+          typeof data.quality_score === 'number'
+            ? data.quality_score
+            : undefined,
+        toolCallsMade:
+          typeof data.tool_calls_made === 'number'
+            ? data.tool_calls_made
+            : undefined,
+        roundsUsed:
+          typeof data.rounds_used === 'number' ? data.rounds_used : undefined,
         duration: typeof data.duration === 'number' ? data.duration : undefined,
         finishReason: data.finish_reason || undefined,
       };
@@ -1913,9 +2001,9 @@ export class PythonAgentBridge implements ACPDeps {
 
   /** 处理来自 Chat WS 的事件 */
   private _handleChatEvent(event: StreamEvent): void {
-    // 尝试通过 request_id 路由
-    const requestId = (event as unknown as Record<string, unknown>)
-      .request_id as string | undefined;
+    const eventAny = event as unknown as Record<string, unknown>;
+
+    const requestId = eventAny.request_id as string | undefined;
 
     if (requestId) {
       const pending = this._pendingRequests.get(requestId);
@@ -1934,23 +2022,54 @@ export class PythonAgentBridge implements ACPDeps {
             pending.contentBuffer.push(text);
           } else if (event.done || event.type === 'stream_done') {
             clearTimeout(pending.timeout);
-            const _meta = event.metadata || {} as Record<string, unknown>;
+            const _meta = (event.metadata || {}) as Record<string, unknown>;
+            const wsContent =
+              event.content || pending.contentBuffer.join('') || '';
+            const wsFinishReason =
+              (eventAny.finish_reason as string) ||
+              (_meta.finish_reason as string) ||
+              undefined;
+            let wsResponseText =
+              wsContent || '抱歉，后端未返回有效内容，请稍后重试。';
+            if (wsFinishReason === 'budget_exceeded' && !wsContent.trim()) {
+              wsResponseText =
+                '抱歉，当前AI服务预算已达上限，暂时无法处理更多请求。请稍后重试。';
+              Logger.warn(
+                'WS通道返回budget_exceeded，使用降级提示',
+                'PythonAgentBridge'
+              );
+            }
             pending.resolve({
-              response: event.content || pending.contentBuffer.join('') || '',
+              response: wsResponseText,
               traceId: event.trace_id,
-              qualityScore: typeof (event as Record<string, unknown>).quality_score === 'number'
-                ? (event as Record<string, unknown>).quality_score as number
-                : typeof _meta.quality_score === 'number' ? _meta.quality_score as number : undefined,
-              toolCallsMade: typeof (event as Record<string, unknown>).tool_calls_made === 'number'
-                ? (event as Record<string, unknown>).tool_calls_made as number
-                : typeof _meta.tool_calls_made === 'number' ? _meta.tool_calls_made as number : undefined,
-              roundsUsed: typeof (event as Record<string, unknown>).rounds_used === 'number'
-                ? (event as Record<string, unknown>).rounds_used as number
-                : typeof _meta.rounds_used === 'number' ? _meta.rounds_used as number : undefined,
-              duration: typeof (event as Record<string, unknown>).duration === 'number'
-                ? (event as Record<string, unknown>).duration as number
-                : typeof _meta.duration === 'number' ? _meta.duration as number : undefined,
-              finishReason: ((event as Record<string, unknown>).finish_reason as string) || (_meta.finish_reason as string) || undefined,
+              qualityScore:
+                typeof eventAny.quality_score === 'number'
+                  ? eventAny.quality_score
+                  : typeof _meta.quality_score === 'number'
+                    ? _meta.quality_score
+                    : undefined,
+              toolCallsMade:
+                typeof eventAny.tool_calls_made === 'number'
+                  ? eventAny.tool_calls_made
+                  : typeof _meta.tool_calls_made === 'number'
+                    ? _meta.tool_calls_made
+                    : undefined,
+              roundsUsed:
+                typeof eventAny.rounds_used === 'number'
+                  ? eventAny.rounds_used
+                  : typeof _meta.rounds_used === 'number'
+                    ? _meta.rounds_used
+                    : undefined,
+              duration:
+                typeof eventAny.duration === 'number'
+                  ? eventAny.duration
+                  : typeof _meta.duration === 'number'
+                    ? _meta.duration
+                    : undefined,
+              finishReason:
+                (eventAny.finish_reason as string) ||
+                (_meta.finish_reason as string) ||
+                undefined,
             });
             this._pendingRequests.delete(requestId);
           } else if (event.type === 'error') {
@@ -2063,7 +2182,10 @@ export class PythonAgentBridge implements ACPDeps {
       }
       case 'mcp_sync': {
         try {
-          JiabaixingEventBus.getInstance().emit('bridge:mcp_sync' as any, msg.payload);
+          JiabaixingEventBus.getInstance().emit(
+            'bridge:mcp_sync' as any,
+            msg.payload
+          );
         } catch {
           // EventBus 不可用时静默
         }

@@ -22,10 +22,11 @@ import sqlite3
 import time
 from dataclasses import dataclass, field
 from typing import Any
-
 from agent.core.logger import StructuredLogger, log_ignored
 
 log = StructuredLogger("knowledge_store")
+
+
 
 
 @dataclass
@@ -100,12 +101,20 @@ class KnowledgeStore:
         self._conn = sqlite3.connect(self._db_path)
         self._conn.row_factory = sqlite3.Row
         self._create_tables()
-        log.info("KnowledgeStore 初始化完成", db=self._db_path)
+        log.debug("KnowledgeStore 初始化完成", db=self._db_path)
 
     async def close(self) -> None:
         """关闭数据库连接。"""
         if self._conn:
             self._conn.close()
+            self._conn = None
+
+    def __del__(self) -> None:
+        if self._conn:
+            try:
+                self._conn.close()
+            except Exception as _exc:
+                log.debug("knowledge_store __del__ close 失败", error=str(_exc))
             self._conn = None
 
     async def add(
@@ -411,6 +420,7 @@ class KnowledgeStore:
                 if result:
                     return result
         except Exception as _exc:
+            log.debug("knowledge_store 异常处理", error=str(_exc))
             log_ignored(log, "knowledge_store._embed_with_engine", _exc)
 
         return self._simple_hash_embedding(text)

@@ -57,7 +57,7 @@ from agent.context.adapters import (
     ContextAssemblerComponent,
 )
 from agent.context.attention_focus import AttentionFocusEngine
-from agent.core.security import SecurityGuard
+from agent.core.command_guard import CommandGuard as SecurityGuard
 from agent.core.hooks import (
     HookManager,
     BEFORE_TOOL_CALL,
@@ -71,11 +71,19 @@ from agent.core.hooks import (
     ON_CONSTRAINT_VIOLATION,
 )
 from agent.tools.registry import ToolRegistry, register_default_tools
-from agent.tools.permission_guard import PermissionGuard, Permission
+from agent.core.types import Permission
+from agent.tools.permission_guard import PermissionGuard
 from agent.tools.schema_validator import SchemaValidator
 from agent.tools.tool_call_guard import ToolCallGuard
 from agent.tools.approval_manager import ApprovalManager
 from agent.security.runtime_posture import RuntimePosture
+
+try:
+    from agent.harness.trace_log import TraceLog as HarnessTraceLog
+    from agent.harness.context_window import ContextWindowManager as HarnessContextWindowManager, TokenBudget as HarnessTokenBudget
+    _HAS_HARNESS_TRACE = True
+except ImportError:
+    _HAS_HARNESS_TRACE = False
 from agent.tools.toolset_registry import ToolsetRegistry
 from agent.tools.mcp_tool_bridge import MCPToolBridge
 from agent.skills.registry import SkillRegistry
@@ -121,6 +129,37 @@ from agent.sandbox.executor import SandboxExecutor
 from agent.loop.batch_processor import BatchProcessor, BatchConfig
 
 log = StructuredLogger("engine")
+
+_SYSTEM_PROMPT_SIMPLE = (
+    "你是家百星（Jiabaixing），一个智能AI助手。"
+    "你拥有57个工具，必须主动使用工具完成任务。"
+    "即使是简单问候，也要检查是否有相关上下文可以展示。"
+    "用简洁、友好的方式回答，展示你的思考过程和工具调用结果。"
+)
+
+_SYSTEM_PROMPT_REACT = (
+    "你是家百星（Jiabaixing），一个智能AI助手。\n\n"
+    "# 核心原则\n"
+    "- 你拥有57个工具（文件读写/代码执行/Web搜索/MCP服务等），必须主动使用工具完成任务\n"
+    "- 即使是简单问候，也要先检查是否有相关上下文或待办事项可以展示\n"
+    "- 绝不允许'为了省算力不调工具'——工具是你的核心能力\n\n"
+    "# ReAct 思维模式\n"
+    "对每个用户输入，按以下流程思考：\n"
+    "1. Thought: 分析用户意图，判断是否需要工具\n"
+    "2. Action: 如果需要，选择最合适的工具并调用\n"
+    "3. Observation: 分析工具返回结果\n"
+    "4. Reflection: 结果是否满足需求？是否需要修正参数重试？\n"
+    "5. Response: 基于所有观察给出最终回复\n\n"
+    "# 工具使用规则\n"
+    "- 优先使用工具获取真实数据，不要凭记忆猜测\n"
+    "- 工具失败时分析原因、修正参数后重试，最多3次\n"
+    "- 多步任务时依次调用工具，逐步推进\n"
+    "- 回复中要说明你做了什么操作、得到了什么结果\n\n"
+    "# 输出要求\n"
+    "- 用简洁、友好的方式回答\n"
+    "- 展示你的思考过程和工具调用结果\n"
+    "- 如果不确定，先用工具验证再回答"
+)
 
 
 class AgentEngine:
@@ -239,7 +278,7 @@ class AgentEngine:
 
         try:
             results = await self._registry.boot_all(self)
-            log.info("Agent Engine v2 initialized", module_count=len(results))
+            log.info("Agent Engine v2 initialized", subsystems=len(results))
         except Exception as e:
             log.error("Agent Engine v2 init failed, falling back to v1", error=str(e))
             await self.initialize()
@@ -277,9 +316,9 @@ class AgentEngine:
         """初始化 OTel + Redis + 活跃会话 gauge（P0 阶段）。"""
         try:
             if setup_otel():
-                log.info("OpenTelemetry initialized", enabled=True)
+                log.debug("OpenTelemetry initialized", enabled=True)
             else:
-                log.info("OpenTelemetry disabled (set OTEL_ENABLED=true to enable)")
+                log.debug("OpenTelemetry disabled (set OTEL_ENABLED=true to enable)")
         except Exception as e:
             log.warning("OpenTelemetry init failed", error=str(e))
 
@@ -293,7 +332,7 @@ class AgentEngine:
             if is_redis_enabled():
                 self._redis_cache = get_redis_cache()
             else:
-                log.info("Redis Cache disabled (set REDIS_ENABLED=true to enable)")
+                log.debug("Redis Cache disabled (set REDIS_ENABLED=true to enable)")
         except Exception as e:
             log.warning("Redis Cache init failed", error=str(e))
             self._redis_cache = None
@@ -515,9 +554,9 @@ class AgentEngine:
         # 默认 false 以保证开发环境友好（部署文档需明确标注）。
         try:
             if setup_otel():
-                log.info("OpenTelemetry initialized", enabled=True)
+                log.debug("OpenTelemetry initialized", enabled=True)
             else:
-                log.info("OpenTelemetry disabled (set OTEL_ENABLED=true to enable)")
+                log.debug("OpenTelemetry disabled (set OTEL_ENABLED=true to enable)")
         except Exception as e:
             log.warning("OpenTelemetry init failed", error=str(e))
 
@@ -533,16 +572,16 @@ class AgentEngine:
             if is_redis_enabled():
                 self._redis_cache = get_redis_cache()
                 health = await self._redis_cache.health_check()
-                log.info("Redis Cache initialized", healthy=health)
+                log.debug("Redis Cache initialized", healthy=health)
             else:
-                log.info("Redis Cache disabled (set REDIS_ENABLED=true to enable)")
+                log.debug("Redis Cache disabled (set REDIS_ENABLED=true to enable)")
         except Exception as e:
             log.warning("Redis Cache init failed", error=str(e))
             self._redis_cache = None
 
         available = await self.llm.check_available()
         status = "available" if available else "unavailable"
-        log.info("LLM Provider initialized", model=self.llm.model, status=status)
+        log.debug("LLM Provider initialized", model=self.llm.model, status=status)
 
         try:
             self.memory = MemoryEngine(llm=self.llm)
@@ -550,7 +589,7 @@ class AgentEngine:
             # 此前 set_episodic_store 从未被调用，导致 engine.py:91 的 if self._episodic_store 分支永远为 False
             self.memory.set_episodic_store(EpisodicMemoryStore())
             await self.memory.initialize()
-            log.info("Memory Engine ready (with EpisodicMemoryStore)")
+            log.debug("Memory Engine ready (with EpisodicMemoryStore)")
         except Exception as e:
             log.warning("Memory Engine init failed", error=str(e))
             self.memory = None
@@ -558,7 +597,7 @@ class AgentEngine:
 
         try:
             self.trajectory_db = TrajectoryDatabase()
-            log.info("Trajectory Database ready")
+            log.debug("Trajectory Database ready")
         except Exception as e:
             log.warning("Trajectory Database init failed", error=str(e))
             self.trajectory_db = None
@@ -570,18 +609,18 @@ class AgentEngine:
             try:
                 from agent.perception.tools import register_perception_tools
                 register_perception_tools(self.tool_registry)
-                log.info("Perception tools registered")
+                log.debug("Perception tools registered")
             except Exception as _e:
                 log.warning("Perception tools registration failed", error=str(_e))
-            log.info("Tool Registry ready", count=count)
+            log.debug("Tool Registry ready", count=count)
         except Exception as e:
             log.warning("Tool Registry init failed", error=str(e))
             self.tool_registry = None
             self._mark_subsystem_degraded("tool_registry", str(e), critical=True)
 
         try:
-            self.toolset_registry = ToolsetRegistry(self.tool_registry)
-            log.info("Toolset Registry ready")
+            self.toolset_registry = ToolsetRegistry()
+            log.debug("Toolset Registry ready")
         except Exception as e:
             log.warning("Toolset Registry init failed", error=str(e))
             self.toolset_registry = None
@@ -597,7 +636,7 @@ class AgentEngine:
             if self.tool_registry is not None:
                 synced = await self.mcp_tool_bridge.sync_to_registry(self.tool_registry)
                 self.mcp_tool_bridge.start_auto_sync(self.tool_registry)
-                log.info("MCP Tool Bridge ready", synced_tools=synced)
+                log.debug("MCP Tool Bridge ready", synced_tools=synced)
             else:
                 log.warning("MCP Tool Bridge ready but tool_registry is None, sync skipped")
         except Exception as e:
@@ -607,7 +646,7 @@ class AgentEngine:
 
         try:
             self.permission_guard = PermissionGuard()
-            log.info("Permission Guard ready")
+            log.debug("Permission Guard ready")
         except Exception as e:
             log.warning("Permission Guard init failed", error=str(e))
             self.permission_guard = None
@@ -615,7 +654,7 @@ class AgentEngine:
 
         try:
             self.schema_validator = SchemaValidator()
-            log.info("Schema Validator ready")
+            log.debug("Schema Validator ready")
         except Exception as e:
             log.warning("Schema Validator init failed", error=str(e))
             self.schema_validator = None
@@ -623,7 +662,7 @@ class AgentEngine:
 
         try:
             self.tool_call_guard = ToolCallGuard()
-            log.info("Tool Call Guard ready")
+            log.debug("Tool Call Guard ready")
         except Exception as e:
             log.warning("Tool Call Guard init failed", error=str(e))
             self.tool_call_guard = None
@@ -635,7 +674,7 @@ class AgentEngine:
             _env_mode = _os.environ.get("ENV", "development").lower()
             _auto_approve = _env_mode not in ("production", "prod", "staging", "stage")
             self.approval_manager = ApprovalManager(auto_approve_all=_auto_approve, posture=_posture)
-            log.info("Approval Manager ready", posture=_posture.value, auto_approve_all=_auto_approve)
+            log.debug("Approval Manager ready", posture=_posture.value, auto_approve_all=_auto_approve)
         except Exception as e:
             log.warning("Approval Manager init failed", error=str(e))
             self.approval_manager = None
@@ -643,7 +682,7 @@ class AgentEngine:
 
         try:
             self.canary_manager = CanaryReleaseManager()
-            log.info("Canary Release Manager ready")
+            log.debug("Canary Release Manager ready")
         except Exception as e:
             log.warning("Canary Release Manager init failed", error=str(e))
             self.canary_manager = None
@@ -657,12 +696,24 @@ class AgentEngine:
         self.memory_consolidator = MemoryConsolidator(llm=self.llm)
         self.verification_loop = VerificationLoop(verification=self.verification)
         self.clarification_engine = ClarificationEngine()
-        log.info("Engine extensions initialized (backpressure, config_reloader, memory_consolidator, verification_loop, clarification_engine)")
+        if _HAS_HARNESS_TRACE:
+            try:
+                self.harness_trace_log = HarnessTraceLog()
+                self.harness_context_window = HarnessContextWindowManager(budget=HarnessTokenBudget(total=128000))
+                log.debug("Harness TraceLog + ContextWindowManager initialized (main loop integration)")
+            except Exception as e:
+                self.harness_trace_log = None
+                self.harness_context_window = None
+                log.warning("Harness TraceLog init failed", error=str(e))
+        else:
+            self.harness_trace_log = None
+            self.harness_context_window = None
+        log.debug("Engine extensions initialized (backpressure, config_reloader, memory_consolidator, verification_loop, clarification_engine)")
 
         # 约束服务 — 必须在 LoopController 之前初始化，供其调用 resolve_adaptive_budget
         try:
             self.constraints = ConstraintsService()
-            log.info("Constraints Service ready")
+            log.debug("Constraints Service ready")
         except Exception as e:
             log.warning("Constraints Service init failed", error=str(e))
             self.constraints = None
@@ -679,7 +730,7 @@ class AgentEngine:
                         os.environ.get("PERCEPTION_LEVEL", "standard")
                     ),
                 )
-                log.info("PerceptionBus ready")
+                log.debug("PerceptionBus ready")
             except Exception as _e:
                 log.warning("PerceptionBus init failed", error=str(_e))
 
@@ -707,7 +758,7 @@ class AgentEngine:
                 if hasattr(self.loop, "_causal") and self.loop._causal:
                     self.loop._debate_harness._causal_modeler = self.loop._causal
 
-            log.info("Loop Controller ready")
+            log.debug("Loop Controller ready")
         except Exception as e:
             log.warning("Loop Controller init failed", error=str(e))
             self.loop = None
@@ -722,7 +773,7 @@ class AgentEngine:
                 self.evolution_closed_loop = EvolutionClosedLoop(
                     evolution_engine=self.evolution,
                 )
-                log.info("Evolution Closed Loop ready")
+                log.debug("Evolution Closed Loop ready")
             except Exception as _e:
                 log.warning("Evolution Closed Loop init failed", error=str(_e))
                 self.evolution_closed_loop = None
@@ -735,18 +786,21 @@ class AgentEngine:
                     memory=self.cross_session_memory,
                     perception_bus=perception_bus,
                 )
-                log.info("Cross-session Memory + Proactive Engine ready")
+                log.debug("Cross-session Memory + Proactive Engine ready")
             except Exception as _e:
                 log.warning("Cross-session Memory init failed", error=str(_e))
                 self.cross_session_memory = None
                 self.proactive_engine = None
+
+            self._reflection_kb = None
+            self._tool_selection_memory = None
 
             # Phase 3: 任务感知模型路由
             try:
                 from agent.llm.task_aware_model_router import TaskAwareModelRouter
                 cap_router = getattr(self.llm, "_capability_router", None)
                 self.task_aware_router = TaskAwareModelRouter(capability_router=cap_router)
-                log.info("Task-aware Model Router ready")
+                log.debug("Task-aware Model Router ready")
             except Exception as _e:
                 log.warning("Task-aware Model Router init failed", error=str(_e))
                 self.task_aware_router = None
@@ -755,7 +809,7 @@ class AgentEngine:
             try:
                 from agent.desktop.action_sandbox import ActionSandbox
                 self.action_sandbox = ActionSandbox()
-                log.info("Action Sandbox ready")
+                log.debug("Action Sandbox ready")
             except Exception as _e:
                 log.warning("Action Sandbox init failed", error=str(_e))
                 self.action_sandbox = None
@@ -764,7 +818,7 @@ class AgentEngine:
             try:
                 from agent.tools.smart_tool_cache import SmartToolCache
                 self.smart_tool_cache = SmartToolCache()
-                log.info("Smart Tool Cache ready")
+                log.debug("Smart Tool Cache ready")
             except Exception as _e:
                 log.warning("Smart Tool Cache init failed", error=str(_e))
                 self.smart_tool_cache = None
@@ -777,12 +831,12 @@ class AgentEngine:
                     trajectory_db=self.trajectory_db,
                     llm=self.llm,
                 )
-                log.info("Tool Self-Healing ready")
+                log.debug("Tool Self-Healing ready")
             except Exception as _e:
                 log.warning("Tool Self-Healing init failed", error=str(_e))
                 self.tool_self_healing = None
 
-            log.info("Evolution Engine ready")
+            log.debug("Evolution Engine ready")
         except Exception as e:
             log.warning("Evolution Engine init failed", error=str(e))
             self.evolution = None
@@ -797,13 +851,13 @@ class AgentEngine:
             self.loop.evolution_closed_loop = self.evolution_closed_loop
             if hasattr(self.loop, "_debate_harness") and self.loop._debate_harness:
                 self.loop._debate_harness._evolution_closed_loop = self.evolution_closed_loop
-                log.info("EvolutionClosedLoop injected into DebateHarness (L5)")
+                log.debug("EvolutionClosedLoop injected into DebateHarness (L5)")
 
         # F8: 注入 EpisodicMemoryStore 到 ReflectionEngine，启用反思经验的情景记忆存储
         if self.loop and self.memory and hasattr(self.memory, '_episodic_store') and self.memory._episodic_store:
             try:
                 self.loop.reflection._episodic_store = self.memory._episodic_store
-                log.info("EpisodicMemoryStore injected into ReflectionEngine")
+                log.debug("EpisodicMemoryStore injected into ReflectionEngine")
             except Exception as e:
                 log.warning("EpisodicMemoryStore injection into ReflectionEngine failed", error=str(e))
 
@@ -814,7 +868,7 @@ class AgentEngine:
                 self.loop._orchestration_executor = OrchestrationExecutor(
                     config=OrchestrationConfig(),
                 )
-                log.info("OrchestrationExecutor injected into LoopController")
+                log.debug("OrchestrationExecutor injected into LoopController")
             except Exception as e:
                 log.warning("OrchestrationExecutor injection failed", error=str(e))
 
@@ -828,14 +882,14 @@ class AgentEngine:
                         executor._smart_tool_cache = self.smart_tool_cache
                     if self.tool_self_healing is not None:
                         executor._tool_self_healing = self.tool_self_healing
-                    log.info("ActionSandbox/SmartToolCache/ToolSelfHealing injected into Executor")
+                    log.debug("ActionSandbox/SmartToolCache/ToolSelfHealing injected into Executor")
             except Exception as e:
                 log.warning("Executor injection failed", error=str(e))
 
         # F4: 注入 FeedbackLoops 到 LoopController
         if self.loop and self.feedback_loops:
             self.loop._feedback_loops = self.feedback_loops
-            log.info("FeedbackLoops injected into LoopController")
+            log.debug("FeedbackLoops injected into LoopController")
 
         # F7: 注入 ContextWindowManager 到 LoopController（在 context pipeline 初始化之后）
         # 此处先标记需要注入，实际注入在 context_window_manager 初始化后执行
@@ -843,7 +897,7 @@ class AgentEngine:
         # GAP-02: 性能监控 + 自动进化触发
         try:
             self.performance_monitor = PerformanceMonitor()
-            log.info("Performance Monitor ready")
+            log.debug("Performance Monitor ready")
         except Exception as e:
             log.warning("Performance Monitor init failed", error=str(e))
             self.performance_monitor = None
@@ -864,7 +918,7 @@ class AgentEngine:
                     ),
                 )
                 self.evolution_trigger.start()
-                log.info("Evolution Trigger ready and started (GAP-02 integrated)")
+                log.debug("Evolution Trigger ready and started (GAP-02 integrated)")
             except Exception as e:
                 log.warning("Evolution Trigger init failed", error=str(e))
                 self.evolution_trigger = None
@@ -874,7 +928,7 @@ class AgentEngine:
             from agent.loop.reflection_knowledge_base import ReflectionKnowledgeBase
             kb = ReflectionKnowledgeBase.get_instance() if hasattr(ReflectionKnowledgeBase, 'get_instance') else ReflectionKnowledgeBase()
             self.fewshot_generalizer = FewShotGeneralizer(kb)
-            log.info("FewShot Generalizer ready (GAP-03 integrated)")
+            log.debug("FewShot Generalizer ready (GAP-03 integrated)")
         except Exception as e:
             log.warning("FewShot Generalizer init failed", error=str(e))
             self.fewshot_generalizer = None
@@ -882,7 +936,7 @@ class AgentEngine:
         # GAP-06: 细粒度策略自适应
         try:
             self.strategy_adapter = StrategyAdapter()
-            log.info("Strategy Adapter ready (GAP-06 integrated)")
+            log.debug("Strategy Adapter ready (GAP-06 integrated)")
         except Exception as e:
             log.warning("Strategy Adapter init failed", error=str(e))
             self.strategy_adapter = None
@@ -890,7 +944,7 @@ class AgentEngine:
         # GAP-09: 多维度学习信号
         try:
             self.learning_signals = LearningSignalCollector()
-            log.info("Learning Signal Collector ready (GAP-09 integrated)")
+            log.debug("Learning Signal Collector ready (GAP-09 integrated)")
         except Exception as e:
             log.warning("Learning Signal Collector init failed", error=str(e))
             self.learning_signals = None
@@ -898,7 +952,7 @@ class AgentEngine:
         # GAP-05: 增量重规划
         try:
             self.incremental_planner = IncrementalPlanner()
-            log.info("Incremental Planner ready (GAP-05 integrated)")
+            log.debug("Incremental Planner ready (GAP-05 integrated)")
         except Exception as e:
             log.warning("Incremental Planner init failed", error=str(e))
             self.incremental_planner = None
@@ -906,7 +960,7 @@ class AgentEngine:
         # GAP-08: 规划质量预检
         try:
             self.plan_quality_checker = PlanQualityChecker()
-            log.info("Plan Quality Checker ready (GAP-08 integrated)")
+            log.debug("Plan Quality Checker ready (GAP-08 integrated)")
         except Exception as e:
             log.warning("Plan Quality Checker init failed", error=str(e))
             self.plan_quality_checker = None
@@ -914,7 +968,7 @@ class AgentEngine:
         # GAP-10: 反思结果应用闭环
         try:
             self.reflection_applier = ReflectionApplicationManager()
-            log.info("Reflection Applier ready (GAP-10 integrated)")
+            log.debug("Reflection Applier ready (GAP-10 integrated)")
         except Exception as e:
             log.warning("Reflection Applier init failed", error=str(e))
             self.reflection_applier = None
@@ -922,7 +976,7 @@ class AgentEngine:
         # 动态优先级评分
         try:
             self.priority_scorer = DynamicPriorityScorer()
-            log.info("Dynamic Priority Scorer ready")
+            log.debug("Dynamic Priority Scorer ready")
         except Exception as e:
             log.warning("Dynamic Priority Scorer init failed", error=str(e))
             self.priority_scorer = None
@@ -934,7 +988,7 @@ class AgentEngine:
             orchestrator.register_engines(evolution_engine=self.evolution)
             orchestrator.start()
             self._evolution_orchestrator = orchestrator
-            log.info("Evolution Orchestrator started (auto-detection + rollback enabled)")
+            log.debug("Evolution Orchestrator started (auto-detection + rollback enabled)")
         except Exception as e:
             log.warning("Evolution Orchestrator init failed", error=str(e))
             self._evolution_orchestrator = None
@@ -948,7 +1002,7 @@ class AgentEngine:
         if self.loop:
             try:
                 self._multi_agent_orchestrator = MultiAgentOrchestrator(llm=self.llm)
-                log.info("Multi-Agent Orchestrator ready (connected to LoopController)")
+                log.debug("Multi-Agent Orchestrator ready (connected to LoopController)")
             except Exception as e:
                 log.warning("Multi-Agent Orchestrator init failed", error=str(e))
 
@@ -963,13 +1017,128 @@ class AgentEngine:
                 approval_manager=self.approval_manager,
                 hook_manager=self.hook_manager,
                 tool_selector=self.select_openai_tools_for_input,
-                # D8（审计 §1.7）：接入验证闭环，工具结果验证失败时回灌纠错提示。
                 verification_loop=getattr(self, "verification_loop", None),
+                trace_log=getattr(self, "harness_trace_log", None),
+                context_window_manager=getattr(self, "harness_context_window", None),
             )
-            log.info("Conversation Loop ready (with safety modules + hooks + verification)")
+            log.debug("Conversation Loop ready (with safety modules + hooks + verification + harness_trace + context_window)")
         except Exception as e:
             log.warning("Conversation Loop init failed", error=str(e))
             self.conversation = None
+
+        # S2+S3: 注入推理链引擎 + 语义验证器到 ConversationLoop
+        if self.conversation is not None:
+            try:
+                from agent.loop.reasoning_chain import ReasoningChainEngine
+                _rc_engine = ReasoningChainEngine(llm=self.llm)
+                self.conversation.set_reasoning_chain_engine(_rc_engine)
+                log.debug("ReasoningChainEngine injected into ConversationLoop")
+            except Exception as _rc_exc:
+                log.warning("ReasoningChainEngine injection failed", error=str(_rc_exc))
+
+            try:
+                from agent.loop.semantic_verifier import SemanticVerifier
+                _sv = SemanticVerifier(llm=self.llm)
+                self.conversation.set_semantic_verifier(_sv)
+                log.debug("SemanticVerifier injected into ConversationLoop")
+            except Exception as _sv_exc:
+                log.warning("SemanticVerifier injection failed", error=str(_sv_exc))
+
+            # R3: 因果建模器注入
+            try:
+                from agent.loop.causal import CausalModeler
+                _causal = CausalModeler(llm=self.llm)
+                self.conversation.set_causal_modeler(_causal)
+                log.debug("R3: CausalModeler injected into ConversationLoop")
+            except Exception as _r3_exc:
+                log.warning("R3: CausalModeler injection failed", error=str(_r3_exc))
+
+            # R4: 反思知识库注入
+            try:
+                from agent.loop.reflection_knowledge_base import ReflectionKnowledgeBase
+                _rkb = ReflectionKnowledgeBase()
+                self.conversation.set_reflection_kb(_rkb)
+                self._reflection_kb = _rkb
+                log.debug("R4: ReflectionKnowledgeBase injected into ConversationLoop")
+            except Exception as _r4_exc:
+                log.warning("R4: ReflectionKnowledgeBase injection failed", error=str(_r4_exc))
+
+            # R2: 工具选择记忆注入
+            try:
+                from agent.loop.tool_selection_memory import ToolSelectionMemory
+                _tsm = ToolSelectionMemory()
+                self.conversation.set_tool_selection_memory(_tsm)
+                self._tool_selection_memory = _tsm
+                log.debug("R2: ToolSelectionMemory injected into ConversationLoop")
+            except Exception as _r2_exc:
+                log.warning("R2: ToolSelectionMemory injection failed", error=str(_r2_exc))
+
+        # A3: 行为边界监控初始化
+        try:
+            from agent.safety.behavior_monitor import BehaviorMonitor
+            self._behavior_monitor = BehaviorMonitor()
+            if self.conversation is not None:
+                self.conversation.set_behavior_monitor(self._behavior_monitor)
+            log.debug("A3: BehaviorMonitor initialized and injected")
+        except Exception as _a3_init_exc:
+            log.warning("A3: BehaviorMonitor init failed", error=str(_a3_init_exc))
+            self._behavior_monitor = None
+
+        # V1: 屏幕语义理解引擎初始化
+        try:
+            from agent.perception.screen_semantics import ScreenSemanticsEngine
+            self._screen_semantics = ScreenSemanticsEngine(llm=self.llm)
+            log.debug("V1: ScreenSemanticsEngine initialized")
+        except Exception as _v1_exc:
+            log.warning("V1: ScreenSemanticsEngine init failed", error=str(_v1_exc))
+            self._screen_semantics = None
+
+        # V2: 视觉记忆初始化
+        try:
+            from agent.memory.visual_memory import VisualMemory
+            self._visual_memory = VisualMemory(memory_engine=self.memory)
+            log.debug("V2: VisualMemory initialized")
+        except Exception as _v2_exc:
+            log.warning("V2: VisualMemory init failed", error=str(_v2_exc))
+            self._visual_memory = None
+
+        # V3: 操作自修复引擎初始化
+        try:
+            from agent.perception.operation_self_repair import OperationSelfRepair
+            self._operation_self_repair = OperationSelfRepair(llm=self.llm)
+            log.debug("V3: OperationSelfRepair initialized")
+        except Exception as _v3_exc:
+            log.warning("V3: OperationSelfRepair init failed", error=str(_v3_exc))
+            self._operation_self_repair = None
+
+        # V4: 跨设备协同引擎初始化
+        try:
+            from agent.perception.cross_device import CrossDeviceOrchestrator
+            self._cross_device = CrossDeviceOrchestrator()
+            log.debug("V4: CrossDeviceOrchestrator initialized")
+        except Exception as _v4_exc:
+            log.warning("V4: CrossDeviceOrchestrator init failed", error=str(_v4_exc))
+            self._cross_device = None
+
+        try:
+            from agent.core.long_task import LongTaskOrchestrator
+            self.long_task = LongTaskOrchestrator(engine=self)
+            if self.conversation and hasattr(self.conversation, "set_long_task_orchestrator"):
+                self.conversation.set_long_task_orchestrator(self.long_task)
+            log.debug("Long Task Orchestrator ready (Codex-style decompose+checkpoint+resume+persistence+priority)")
+        except Exception as e:
+            log.warning("Long Task Orchestrator init failed", error=str(e))
+            self.long_task = None
+
+        try:
+            from agent.desktop.operation_loop import DesktopOperationLoop
+            self.desktop_op_loop = DesktopOperationLoop()
+            if self.long_task:
+                self.desktop_op_loop.bind_long_task_orchestrator(self.long_task)
+            log.debug("DesktopOperationLoop ready (bound to LongTask)")
+        except Exception as e:
+            log.debug("DesktopOperationLoop init skipped", error=str(e))
+            self.desktop_op_loop = None
 
         try:
             self.context_file_registry = ContextFileRegistry()
@@ -988,8 +1157,8 @@ class AgentEngine:
             # F7: 注入 ContextWindowManager 到 LoopController，启用循环级 Token 预算管理
             if self.loop and self.context_window_manager:
                 self.loop._context_window_manager = self.context_window_manager
-                log.info("ContextWindowManager injected into LoopController")
-            log.info("Context Pipeline ready (with file registry, reference resolver, window manager)")
+                log.debug("ContextWindowManager injected into LoopController")
+            log.debug("Context Pipeline ready (with file registry, reference resolver, window manager)")
         except Exception as e:
             log.warning("Context Pipeline init failed", error=str(e))
 
@@ -1024,7 +1193,7 @@ class AgentEngine:
                     self.unified_context_orchestrator.register_component(
                         AttentionFocusComponent(attention_engine=self.attention_focus)
                     )
-                    log.info("Attention Focus Engine ready and registered")
+                    log.debug("Attention Focus Engine ready and registered")
                 except Exception as e:
                     log.warning("Attention Focus Engine init failed", error=str(e))
 
@@ -1040,25 +1209,25 @@ class AgentEngine:
 
         try:
             self.persona = PersonaCore()
-            log.info("Persona Core ready")
+            log.debug("Persona Core ready")
         except Exception as e:
             log.warning("Persona Core init failed", error=str(e))
 
         try:
             self.security = SecurityGuard()
-            log.info("Security Guard ready")
+            log.debug("Security Guard ready")
         except Exception as e:
             log.warning("Security Guard init failed", error=str(e))
 
         try:
             self.verification = VerificationService()
-            log.info("Verification Service ready")
+            log.debug("Verification Service ready")
         except Exception as e:
             log.warning("Verification Service init failed", error=str(e))
 
         try:
             self.output_guardrail = OutputGuardrailEngine()
-            log.info("Output Guardrail Engine ready")
+            log.debug("Output Guardrail Engine ready")
         except Exception as e:
             log.warning("Output Guardrail Engine init failed", error=str(e))
             self.output_guardrail = None
@@ -1066,7 +1235,7 @@ class AgentEngine:
         try:
             self.skill_registry = SkillRegistry.get_instance()
             self.skill_registry.register_builtin_skills()
-            log.info("Skill Registry ready", count=len(self.skill_registry.get_all_skills()))
+            log.debug("Skill Registry ready", count=len(self.skill_registry.get_all_skills()))
         except Exception as e:
             log.warning("Skill Registry init failed", error=str(e))
 
@@ -1074,7 +1243,7 @@ class AgentEngine:
         try:
             from agent.evolution.skill_audit import SkillAuditor
             self.skill_audit = SkillAuditor()
-            log.info("Skill Auditor ready")
+            log.debug("Skill Auditor ready")
         except Exception as e:
             log.warning("Skill Auditor init failed", error=str(e))
             self.skill_audit = None
@@ -1082,14 +1251,14 @@ class AgentEngine:
         try:
             from agent.evolution.skill_hub import SkillHub
             self.skill_hub = SkillHub(auditor=self.skill_audit)
-            log.info("Skill Hub ready (with Auditor)")
+            log.debug("Skill Hub ready (with Auditor)")
         except Exception as e:
             log.warning("Skill Hub init failed", error=str(e))
             self.skill_hub = None
 
         try:
             self.session_store = SessionStore()
-            log.info("Session Store ready")
+            log.debug("Session Store ready")
         except Exception as e:
             log.warning("Session Store init failed", error=str(e))
 
@@ -1098,14 +1267,14 @@ class AgentEngine:
             try:
                 from agent.tools.session_search_tool import register_session_search_tool
                 register_session_search_tool(self.tool_registry, self.session_store)
-                log.info("Session search tool registered")
+                log.debug("Session search tool registered")
             except Exception as e:
                 log.warning("Session search tool registration failed", error=str(e))
 
         if self.trajectory_db:
             try:
                 self.flywheel = TrajectoryFlywheel(self.trajectory_db, FlywheelConfig())
-                log.info("Trajectory Flywheel ready")
+                log.debug("Trajectory Flywheel ready")
             except Exception as e:
                 log.warning("Trajectory Flywheel init failed", error=str(e))
 
@@ -1115,21 +1284,21 @@ class AgentEngine:
                 trajectory_db=self.trajectory_db,
             )
             await self.persistence.initialize()
-            log.info("Persistence Service ready")
+            log.debug("Persistence Service ready")
         except Exception as e:
             log.warning("Persistence Service init failed", error=str(e))
 
         if self.memory:
             try:
                 self.curator = Curator(self.memory)
-                log.info("Curator ready")
+                log.debug("Curator ready")
             except Exception as e:
                 log.warning("Curator init failed", error=str(e))
 
         try:
             self.hook_manager = HookManager()
             self._setup_default_hooks()
-            log.info("Hook Manager ready")
+            log.debug("Hook Manager ready")
         except Exception as e:
             log.warning("Hook Manager init failed", error=str(e))
             self.hook_manager = None
@@ -1143,7 +1312,7 @@ class AgentEngine:
                 memory_engine=self.memory,
                 episodic_store=episodic_store,
             )
-            log.info("Feedback Loops ready (with EpisodicMemoryStore)")
+            log.debug("Feedback Loops ready (with EpisodicMemoryStore)")
         except Exception as e:
             log.warning("Feedback Loops init failed", error=str(e))
             self.feedback_loops = None
@@ -1223,7 +1392,7 @@ class AgentEngine:
                 self_agent_id=self.a2a_self_card.id if self.a2a_self_card else "agent:jiabaixing",
                 a2a_auth_interceptor=self.a2a_auth_interceptor,
             )
-            log.info("Agent Registry + Orchestrator ready", agent_count=self.agent_registry.get_agent_count())
+            log.debug("Agent Registry + Orchestrator ready", agent_count=self.agent_registry.get_agent_count())
         except Exception as e:
             log.warning("Agent Registry + Orchestrator init failed", error=str(e))
             self.agent_registry = None
@@ -1232,28 +1401,28 @@ class AgentEngine:
         try:
             self.cron_scheduler = CronJobScheduler.get_instance()
             await self.cron_scheduler.start()
-            log.info("Cron Job Scheduler ready")
+            log.debug("Cron Job Scheduler ready")
         except Exception as e:
             log.warning("Cron Job Scheduler init failed", error=str(e))
             self.cron_scheduler = None
 
         try:
             self.sandbox = SandboxExecutor()
-            log.info("Sandbox Executor ready")
+            log.debug("Sandbox Executor ready")
         except Exception as e:
             log.warning("Sandbox Executor init failed", error=str(e))
             self.sandbox = None
 
         try:
             self.batch_processor = BatchProcessor(BatchConfig(concurrency=5))
-            log.info("Batch Processor ready")
+            log.debug("Batch Processor ready")
         except Exception as e:
             log.warning("Batch Processor init failed", error=str(e))
             self.batch_processor = None
 
         try:
             self.think_scrubber = ThinkScrubber()
-            log.info("Think Scrubber ready")
+            log.debug("Think Scrubber ready")
         except Exception as e:
             log.warning("Think Scrubber init failed", error=str(e))
             self.think_scrubber = None
@@ -1261,7 +1430,7 @@ class AgentEngine:
         # P3-#3: 生产埋点采集器（单例，OTel 未启用时为 NoOp）
         try:
             self.production_metrics = get_production_metrics_collector()
-            log.info("Production Metrics Collector ready")
+            log.debug("Production Metrics Collector ready")
         except Exception as e:
             log.warning("Production Metrics Collector init failed", error=str(e))
             self.production_metrics = None
@@ -1274,7 +1443,7 @@ class AgentEngine:
                 optimize_threshold=int(os.environ.get("FEEDBACK_OPTIMIZE_THRESHOLD", "100")),
                 time_window_seconds=int(os.environ.get("FEEDBACK_OPTIMIZE_WINDOW", "86400")),
             )
-            log.info("Continuous Feedback Loop ready")
+            log.debug("Continuous Feedback Loop ready")
         except Exception as e:
             log.warning("Continuous Feedback Loop init failed", error=str(e))
             self.feedback_loop = None
@@ -1282,7 +1451,7 @@ class AgentEngine:
         self._mark_domains_initialized()
         await self.startup_domains()
         await self.hook_manager.trigger(ON_SESSION_START, session_id="engine", modules_loaded=True)
-        log.info("Agent Engine fully initialized", module_count=20)
+        log.info("Agent Engine fully initialized")
 
     def _setup_default_hooks(self) -> None:
         if not self.hook_manager:
@@ -1436,9 +1605,97 @@ class AgentEngine:
             if context_text:
                 message = context_text + "\n\n--- 用户输入 ---\n" + message
 
+            # S4: 跨会话记忆注入 — 检索用户偏好/习惯/任务模式，注入上下文
+            cross_session_context = ""
+            if self.cross_session_memory is not None:
+                try:
+                    preferences = self.cross_session_memory.get_preferences()
+                    if preferences:
+                        pref_items = [f"  - {k}: {v}" for k, v in list(preferences.items())[:5]]
+                        cross_session_context += "\n用户偏好:\n" + "\n".join(pref_items)
+
+                    habits = self.cross_session_memory.get_habits()
+                    if habits:
+                        habit_items = [f"  - {k}: {v}" for k, v in list(habits.items())[:3]]
+                        cross_session_context += "\n用户习惯:\n" + "\n".join(habit_items)
+
+                    task_patterns = self.cross_session_memory.retrieve(
+                        memory_type=None, tags=[message[:20]], limit=2,
+                    )
+                    if task_patterns:
+                        pattern_items = [f"  - {p.key}: {p.value}" for p in task_patterns]
+                        cross_session_context += "\n相关任务模式:\n" + "\n".join(pattern_items)
+                except Exception as _cs_exc:
+                    log_ignored(log, "engine.AgentEngine.process_input.cross_session", _cs_exc)
+
+            if cross_session_context:
+                message = cross_session_context + "\n\n" + message
+
             should_use_loop = use_loop
             if should_use_loop is None:
                 should_use_loop = self._should_use_loop(message)
+
+            # R1: 动态预算 — 根据任务复杂度调整 max_tool_rounds
+            # D2: 复杂度同时联动推理深度
+            if self.conversation is not None:
+                try:
+                    _complexity = self._assess_input_complexity(message)
+                    _budget_map = {"simple": 4, "moderate": 8, "complex": 14, "very_complex": 20}
+                    _dynamic_rounds = _budget_map.get(_complexity, 10)
+                    self.conversation.set_max_tool_rounds(_dynamic_rounds)
+                    self.conversation._current_complexity = _complexity
+                    log.debug("R1: dynamic budget set", complexity=_complexity, max_rounds=_dynamic_rounds)
+                except Exception as _r1_exc:
+                    log_ignored(log, "engine.AgentEngine.process_input.R1", _r1_exc)
+
+            # P2: 环境变化→Agent触发 — 检测环境变化并触发主动行为
+            _env_change: dict[str, Any] | None = None
+            if self.proactive_engine is not None:
+                try:
+                    _env_change = self._detect_environment_change()
+                    if _env_change:
+                        _p2_actions = self.proactive_engine.evaluate(
+                            perception_state=None,
+                            current_input=message,
+                            prediction_stats=None,
+                            environment_change=_env_change,
+                        )
+                        if _p2_actions:
+                            _env_adaptations = [
+                                f"[{a.action_type.value}] {a.title}" for a in _p2_actions if a.action_type.value == "environment_adaptation"
+                            ]
+                            if _env_adaptations:
+                                log.info("P2: environment change triggered actions", adaptations=_env_adaptations)
+                except Exception as _p2_exc:
+                    log_ignored(log, "engine.AgentEngine.process_input.P2", _p2_exc)
+
+            # R5: A2A子Agent委派 — 极复杂任务自动委派子Agent
+            # W3修复: complex级任务也以30%概率委派，very_complex必委派
+            _subagent_delegated = False
+            _r5_should_delegate = (
+                _complexity == "very_complex"
+                or (_complexity == "complex" and (hash(message) % 10 < 3))
+            )
+            if (
+                _r5_should_delegate
+                and self._multi_agent_orchestrator is not None
+                and self.loop is not None
+            ):
+                try:
+                    _delegated_result = await self._multi_agent_orchestrator.process_goal_with_loop(
+                        goal=message,
+                        context={"delegated_by": "R5_auto", "complexity": _complexity},
+                        loop_controller=self.loop,
+                    )
+                    if _delegated_result and _delegated_result.summary:
+                        _subagent_delegated = True
+                        log.info(
+                            "R5: task delegated to sub-agents",
+                            complexity=_complexity,
+                            success=_delegated_result.all_succeeded if hasattr(_delegated_result, 'all_succeeded') else True,
+                        )
+                except Exception as _r5_exc:
+                    log_ignored(log, "engine.AgentEngine.process_input.R5", _r5_exc)
 
             strategy = self._resolve_execution_strategy(message, should_use_loop)
             strategy_impl = self.get_loop_strategy(strategy)
@@ -1619,10 +1876,16 @@ class AgentEngine:
         complex_indicators = [
             "分析", "对比", "设计", "实现", "优化", "重构",
             "迁移", "集成", "部署", "步骤", "流程", "方案",
+            "analyze", "compare", "design", "implement", "optimize", "refactor",
+            "migrate", "integrate", "deploy", "steps", "workflow", "plan",
         ]
-        tool_indicators = ["搜索", "查找", "读取", "修改", "执行", "运行"]
-        complex_score = sum(1 for kw in complex_indicators if kw in message)
-        tool_score = sum(1 for kw in tool_indicators if kw in message)
+        tool_indicators = [
+            "搜索", "查找", "读取", "修改", "执行", "运行",
+            "search", "find", "read", "write", "execute", "run",
+        ]
+        msg_lower = message.lower()
+        complex_score = sum(1 for kw in complex_indicators if kw in msg_lower)
+        tool_score = sum(1 for kw in tool_indicators if kw in msg_lower)
         if complex_score >= 2:
             return True
         if complex_score >= 1 and tool_score >= 1:
@@ -1633,6 +1896,83 @@ class AgentEngine:
         if tool_score >= 2:
             return True
         return False
+
+    def _assess_input_complexity(self, message: str) -> str:
+        """R1: 评估输入复杂度，返回 simple/moderate/complex/very_complex。
+
+        基于关键词评分，与 _should_use_loop 共享词表但产出四级分级。
+        """
+        very_complex_indicators = [
+            "架构", "重构", "迁移", "集成测试", "端到端", "多Agent",
+            "全栈", "分布式", "微服务",
+        ]
+        complex_indicators = [
+            "分析", "对比", "设计", "实现", "优化", "部署", "集成",
+            "步骤", "流程", "方案", "调试", "排查",
+            "analyze", "compare", "design", "implement", "optimize", "debug",
+        ]
+        moderate_indicators = [
+            "搜索", "查找", "读取", "修改", "执行", "运行", "转换",
+            "search", "find", "read", "write", "execute", "run", "convert",
+        ]
+        msg_lower = message.lower()
+        vc_score = sum(1 for kw in very_complex_indicators if kw in msg_lower)
+        c_score = sum(1 for kw in complex_indicators if kw in msg_lower)
+        m_score = sum(1 for kw in moderate_indicators if kw in msg_lower)
+        if vc_score >= 1 or c_score >= 3:
+            return "very_complex"
+        if c_score >= 2 or (c_score >= 1 and m_score >= 1):
+            return "complex"
+        if c_score >= 1 or m_score >= 2:
+            return "moderate"
+        return "simple"
+
+    def _detect_environment_change(self) -> dict[str, Any] | None:
+        """P2: 检测环境变化（网络/时间/系统），返回变化描述或None。
+
+        对比当前环境状态与上次记录的状态，检测关键字段变化。
+        """
+        import os
+        import time as _t
+        import platform
+
+        now = _t.time()
+        current_state = {
+            "network_status": "unknown",
+            "hour": int(_t.localtime(now).tm_hour),
+            "platform": platform.system(),
+        }
+        try:
+            import socket
+            socket.create_connection(("8.8.8.8", 53), timeout=2)
+            current_state["network_status"] = "connected"
+        except OSError:
+            current_state["network_status"] = "disconnected"
+
+        _prev_key = "_p2_last_env_state"
+        _prev_time_key = "_p2_last_env_check"
+        prev_state = getattr(self, _prev_key, None)
+        prev_time = getattr(self, _prev_time_key, 0.0)
+
+        setattr(self, _prev_key, current_state)
+        setattr(self, _prev_time_key, now)
+
+        if prev_state is None or (now - prev_time) > 300:
+            return None
+
+        changed_fields = []
+        for k, v in current_state.items():
+            if prev_state.get(k) != v:
+                changed_fields.append(k)
+
+        if not changed_fields:
+            return None
+
+        return {
+            "changed_fields": changed_fields,
+            "old_state": prev_state,
+            "new_state": current_state,
+        }
 
     async def _process_simple(
         self,
@@ -1656,12 +1996,7 @@ class AgentEngine:
             except Exception as _exc:
                 log_ignored(log, "engine.AgentEngine._process_simple", _exc)
 
-        system_content = (
-            "你是家百星（Jiabaixing），一个智能AI助手。"
-            "你拥有57个工具，必须主动使用工具完成任务。"
-            "即使是简单问候，也要检查是否有相关上下文可以展示。"
-            "用简洁、友好的方式回答，展示你的思考过程和工具调用结果。"
-        )
+        system_content = _SYSTEM_PROMPT_SIMPLE
         if context_parts:
             system_content += "\n\n" + "\n".join(context_parts)
 
@@ -1819,29 +2154,7 @@ class AgentEngine:
         use_tools: bool = True,
         trace_id: str | None = None,
     ) -> dict[str, Any]:
-        system_prompt = (
-            "你是家百星（Jiabaixing），一个智能AI助手。\n\n"
-            "# 核心原则\n"
-            "- 你拥有57个工具（文件读写/代码执行/Web搜索/MCP服务等），必须主动使用工具完成任务\n"
-            "- 即使是简单问候，也要先检查是否有相关上下文或待办事项可以展示\n"
-            "- 绝不允许'为了省算力不调工具'——工具是你的核心能力\n\n"
-            "# ReAct 思维模式\n"
-            "对每个用户输入，按以下流程思考：\n"
-            "1. Thought: 分析用户意图，判断是否需要工具\n"
-            "2. Action: 如果需要，选择最合适的工具并调用\n"
-            "3. Observation: 分析工具返回结果\n"
-            "4. Reflection: 结果是否满足需求？是否需要修正参数重试？\n"
-            "5. Response: 基于所有观察给出最终回复\n\n"
-            "# 工具使用规则\n"
-            "- 优先使用工具获取真实数据，不要凭记忆猜测\n"
-            "- 工具失败时分析原因、修正参数后重试，最多3次\n"
-            "- 多步任务时依次调用工具，逐步推进\n"
-            "- 回复中要说明你做了什么操作、得到了什么结果\n\n"
-            "# 输出要求\n"
-            "- 用简洁、友好的方式回答\n"
-            "- 展示你的思考过程和工具调用结果\n"
-            "- 如果不确定，先用工具验证再回答"
-        )
+        system_prompt = _SYSTEM_PROMPT_REACT
 
         if self.evolution:
             try:
@@ -2209,6 +2522,211 @@ class AgentEngine:
             except Exception as _exc:
                 log_ignored(log, "engine.AgentEngine._process_with_conversation", _exc)
 
+        # P1: 执行结果自验证 — 对关键工具结果进行二次验证
+        # W2修复: 扩展触发条件 — 低质量必验证 + 高质量多工具采样验证(20%)
+        _p1_verified = True
+        _p1_should_verify = (
+            (conv_result.tool_calls_made > 0 and quality_score < 0.6)
+            or (conv_result.tool_calls_made >= 3 and quality_score >= 0.6 and (conv_result.tool_calls_made % 5 == 0))
+        )
+        if _p1_should_verify:
+            try:
+                from agent.perception.action_verifier import ActionVerifier
+                _verifier = ActionVerifier()
+                _verify_result = await _verifier.verify(
+                    action=f"验证: {message[:50]}",
+                    pre_screenshot=None,
+                    post_screenshot=None,
+                )
+                if not _verify_result.success and _verify_result.retry_suggested:
+                    log.info(
+                        "P1: execution self-verification failed, retry suggested",
+                        confidence=_verify_result.confidence,
+                        evidence=_verify_result.evidence,
+                    )
+                    _p1_verified = False
+                else:
+                    log.debug("P1: execution self-verification passed", confidence=_verify_result.confidence)
+            except Exception as _p1_exc:
+                log_ignored(log, "engine.AgentEngine._process_with_conversation.P1", _p1_exc)
+
+        # S5: 主动行为引擎调度 — ConversationLoop路径也触发主动行为
+        _proactive_suggestions: list[dict[str, str]] = []
+        if self.proactive_engine is not None:
+            try:
+                _p_actions = self.proactive_engine.evaluate(
+                    perception_state=None,
+                    current_input=message,
+                    prediction_stats=None,
+                    environment_change=None,
+                )
+                if _p_actions:
+                    for pa in _p_actions[:3]:
+                        _proactive_suggestions.append({
+                            "type": pa.action_type.value,
+                            "title": pa.title,
+                            "description": pa.description,
+                        })
+                    log.debug("S5: proactive actions evaluated", count=len(_p_actions))
+            except Exception as _s5_exc:
+                log_ignored(log, "engine.AgentEngine._process_with_conversation.S5", _s5_exc)
+
+        # E2: 工具自创造 — 检测重复工具组合模式，自动创造复合工具
+        _e2_skill_name: str | None = None
+        if self.evolution is not None and conv_result.tool_calls_made >= 2:
+            try:
+                _tool_seq = [tc.get("name", "") for tc in conv_result.metadata.get("tool_calls", []) if tc.get("name")]
+                if len(_tool_seq) >= 2:
+                    _e2_skill_name = self.evolution.generate_compound_skill(_tool_seq, context=message)
+                    if _e2_skill_name:
+                        _proactive_suggestions.append({
+                            "type": "skill_creation",
+                            "title": f"新复合工具: {_e2_skill_name}",
+                            "description": "检测到重复工具组合模式，已自动创建复合工具",
+                        })
+                        log.info("E2: compound skill created in conversation", skill_name=_e2_skill_name)
+            except Exception as _e2_exc:
+                log_ignored(log, "engine.AgentEngine._process_with_conversation.E2", _e2_exc)
+
+        # E3: 知识自增长 — 自动沉淀知识到长期记忆，无需用户显式调用memory_store
+        if self.evolution is not None and self.memory is not None:
+            try:
+                _tool_names_e3 = [tc.get("name", "") for tc in conv_result.metadata.get("tool_calls", []) if tc.get("name")]
+                _deposits = self.evolution.auto_deposit_knowledge(
+                    user_input=message,
+                    assistant_output=output_content,
+                    tools_used=_tool_names_e3,
+                    quality_score=quality_score,
+                )
+                if _deposits:
+                    for _dep_type, _dep_content in _deposits.items():
+                        try:
+                            await self.memory.store_long_term(_dep_content, scene=f"auto_deposit_{_dep_type}")
+                        except Exception as _dep_exc:
+                            log_ignored(log, f"engine.AgentEngine._process_with_conversation.E3.{_dep_type}", _dep_exc)
+                    log.info("E3: knowledge auto-deposited", types=list(_deposits.keys()))
+            except Exception as _e3_exc:
+                log_ignored(log, "engine.AgentEngine._process_with_conversation.E3", _e3_exc)
+
+        # M3: 记忆自动遗忘 — 每次对话后以10%概率触发（避免频繁执行）
+        if self.memory is not None and (hash(message) % 10 == 0):
+            try:
+                from agent.memory.memory_governor import MemoryGovernor
+                _governor = MemoryGovernor.get_instance()
+                _forget_result = _governor.auto_forget()
+                if _forget_result.get("deleted", 0) > 0 or _forget_result.get("conflicts_resolved", 0) > 0:
+                    log.info("M3: memory auto-forget triggered", **_forget_result)
+            except Exception as _m3_exc:
+                log_ignored(log, "engine.AgentEngine._process_with_conversation.M3", _m3_exc)
+
+        # A1: 幻觉检测 — 对Agent最终输出进行深度事实性检查
+        _a1_hallucination_flags: list[str] = []
+        if output_content and len(output_content) > 20:
+            try:
+                from agent.loop.semantic_verifier import SemanticVerifier, VerificationLevel
+                _a1_verifier = SemanticVerifier(llm=self.llm)
+                _a1_level = VerificationLevel.STANDARD if quality_score < 0.7 else VerificationLevel.MINIMAL
+                _a1_result = await _a1_verifier.verify(
+                    input_text=message,
+                    output=output_content,
+                    level=_a1_level,
+                )
+                if not _a1_result.passed:
+                    _a1_hallucination_flags = [
+                        f"{i.issue_type}: {i.description}" for i in _a1_result.issues
+                        if i.severity.value in ("error", "critical")
+                    ]
+                    quality_score = min(quality_score, _a1_result.score)
+                    log.warning(
+                        "A1: hallucination detected",
+                        issues=len(_a1_hallucination_flags),
+                        score=_a1_result.score,
+                        flags=_a1_hallucination_flags[:3],
+                    )
+                elif _a1_result.score < 0.8:
+                    _a1_hallucination_flags = [
+                        f"{i.issue_type}: {i.description}" for i in _a1_result.issues
+                        if i.severity.value == "warning"
+                    ]
+            except Exception as _a1_exc:
+                log_ignored(log, "engine.AgentEngine._process_with_conversation.A1", _a1_exc)
+
+        # A2: 权限动态收缩 — 任务完成后收回高风险权限
+        _a2_shrunk: list[str] = []
+        try:
+            from agent.safety.operation_scope import OperationScope
+            _scope = OperationScope.get_instance() if hasattr(OperationScope, 'get_instance') else None
+            if _scope is None and hasattr(self, '_operation_scope') and self._operation_scope is not None:
+                _scope = self._operation_scope
+            if _scope is not None:
+                _a2_shrunk = _scope.shrink_permissions(task_phase="completed")
+                if _a2_shrunk:
+                    log.info("A2: permissions shrunk after task completion", removed=_a2_shrunk)
+        except Exception as _a2_exc:
+            log_ignored(log, "engine.AgentEngine._process_with_conversation.A2", _a2_exc)
+
+        # A3: 行为边界监控 — 检查异常行为模式
+        _a3_alerts: list[dict[str, Any]] = []
+        if self._behavior_monitor is not None:
+            try:
+                self._behavior_monitor.record_quality(quality_score)
+                _anomalies = self._behavior_monitor.check_anomalies()
+                if _anomalies:
+                    _a3_alerts = [
+                        {"type": a.alert_type, "level": a.level.value, "description": a.description}
+                        for a in _anomalies
+                    ]
+                    log.warning("A3: behavior anomalies", count=len(_anomalies), types=[a.alert_type for a in _anomalies])
+            except Exception as _a3_exc:
+                log_ignored(log, "engine.AgentEngine._process_with_conversation.A3", _a3_exc)
+
+        # V1: 屏幕语义理解 — 对话涉及屏幕操作时自动分析当前场景
+        _v1_scene_summary: str = ""
+        if self._screen_semantics is not None:
+            try:
+                _screen_keywords = ("屏幕", "界面", "页面", "窗口", "点击", "按钮", "菜单", "screen", "click", "button", "window", "page")
+                if any(kw in message.lower() for kw in _screen_keywords):
+                    _v1_scene = await self._screen_semantics.analyze()
+                    _v1_scene_summary = _v1_scene.summary
+                    if _v1_scene.scene_confidence > 0.5:
+                        log.info(
+                            "V1: screen semantics enriched",
+                            scene=_v1_scene.scene_type.value,
+                            app=_v1_scene.app_name,
+                            regions=len(_v1_scene.regions),
+                        )
+                    # V2: 视觉记忆 — 自动存储场景记忆
+                    if self._visual_memory is not None and _v1_scene.scene_confidence > 0.3:
+                        try:
+                            await self._visual_memory.store_scene(
+                                scene=_v1_scene,
+                                action=message[:100],
+                                success=quality_score >= 0.6,
+                            )
+                        except Exception as _v2_store_exc:
+                            log_ignored(log, "engine.V2.store_scene", _v2_store_exc)
+            except Exception as _v1_exc:
+                log_ignored(log, "engine.AgentEngine._process_with_conversation.V1", _v1_exc)
+
+        # V2: 视觉记忆 — 场景匹配，检索历史相似场景的操作经验
+        _v2_matched_scenes: list[dict[str, Any]] = []
+        if self._visual_memory is not None and self._screen_semantics is not None:
+            try:
+                _screen_keywords = ("屏幕", "界面", "页面", "窗口", "screen", "window", "page")
+                if any(kw in message.lower() for kw in _screen_keywords):
+                    _v2_current_scene = await self._screen_semantics.quick_scene_type()
+                    if _v2_current_scene.value != "unknown":
+                        _v2_scene_obj = await self._screen_semantics.analyze()
+                        _v2_matches = await self._visual_memory.match_scene(_v2_scene_obj, limit=3)
+                        if _v2_matches:
+                            _v2_matched_scenes = [
+                                {"scene_type": m.scene_type, "app": m.app_name, "similarity": round(m.similarity, 2), "success_rate": round(m.success_rate, 2)}
+                                for m in _v2_matches
+                            ]
+                            log.info("V2: matched historical scenes", count=len(_v2_matches), top_sim=_v2_matches[0].similarity)
+            except Exception as _v2_match_exc:
+                log_ignored(log, "engine.AgentEngine._process_with_conversation.V2", _v2_match_exc)
+
         return {
             "content": output_content,
             "session_id": conv_result.session_id,
@@ -2221,6 +2739,12 @@ class AgentEngine:
             "duration": conv_result.duration,
             "finish_reason": conv_result.finish_reason,
             "quality_score": quality_score,
+            "verified": _p1_verified,
+            "proactive_suggestions": _proactive_suggestions,
+            "hallucination_flags": _a1_hallucination_flags,
+            "behavior_alerts": _a3_alerts,
+            "scene_summary": _v1_scene_summary,
+            "matched_scenes": _v2_matched_scenes,
         }
 
     async def _process_with_loop(
@@ -2744,7 +3268,7 @@ class AgentEngine:
                             tags=tool_names or [],
                         )
                         if record:
-                            log.info("Reflection recorded for application", record_id=record.id)
+                            log.debug("Reflection recorded for application", record_id=record.id)
                     except Exception as e:
                         log.warning("Reflection applier record failed", error=str(e))
                 # GAP-09: 记录学习信号
@@ -2809,6 +3333,14 @@ class AgentEngine:
         # 立即发送 thinking 事件 — 首字反馈，让用户知道系统已开始处理
         yield {"type": "thinking", "content": "正在理解您的请求..."}
 
+        # D2: 流式路径也联动推理深度
+        if self.conversation is not None:
+            try:
+                _stream_complexity = self._assess_input_complexity(message)
+                self.conversation._current_complexity = _stream_complexity
+            except Exception:
+                pass
+
         # 2. 加载会话历史
         history: list[dict[str, str]] = []
         if self.session_store:
@@ -2819,6 +3351,21 @@ class AgentEngine:
                 log_ignored(log, "engine.AgentEngine.process_input_stream", _exc)
 
         # 3. 构建统一上下文（系统提示、人格、记忆）
+        # M1: 流式路径也加载跨会话记忆
+        _stream_cross_session_ctx = ""
+        if self.cross_session_memory is not None:
+            try:
+                _prefs = self.cross_session_memory.get_preferences()
+                if _prefs:
+                    _stream_cross_session_ctx += "\n用户偏好:\n" + "\n".join(f"  - {k}: {v}" for k, v in list(_prefs.items())[:5])
+                _habits = self.cross_session_memory.get_habits()
+                if _habits:
+                    _stream_cross_session_ctx += "\n用户习惯:\n" + "\n".join(f"  - {k}: {v}" for k, v in list(_habits.items())[:3])
+            except Exception:
+                pass
+        if _stream_cross_session_ctx:
+            message = _stream_cross_session_ctx + "\n\n" + message
+
         yield {"type": "thinking", "content": "正在检索记忆和构建上下文..."}
 
         system_prompt: str = ""
@@ -2841,14 +3388,11 @@ class AgentEngine:
                 log.warning("Stream context build failed", error=str(e))
 
         if not system_prompt:
-            system_prompt = (
-                "你是家百星（Jiabaixing），一个智能AI助手。"
-                "你善于理解中文，能够帮助用户完成各种任务。"
-                "请用简洁、友好的方式回答问题。"
-            )
+            system_prompt = _SYSTEM_PROMPT_SIMPLE
 
         # 用于累积完整响应内容，以便最终持久化
         response_buffer: list[str] = []
+        _stream_quality_score: float = 0.7
 
         # 4. 委托给 ConversationLoop.run_stream
         if self.conversation:
@@ -2879,6 +3423,11 @@ class AgentEngine:
                     elif event.get("type") == "done" and event.get("content"):
                         if not response_buffer:
                             response_buffer.append(event["content"])
+                    # W4修复: 从done事件提取动态quality_score
+                    if event.get("type") == "done":
+                        _qs = event.get("quality_score")
+                        if isinstance(_qs, (int, float)) and _qs > 0:
+                            _stream_quality_score = float(_qs)
 
                     # 透传事件
                     yield event
@@ -2938,6 +3487,63 @@ class AgentEngine:
                             self.session_store.add_message(session_id, "assistant", assistant_response)
                     except Exception as e:
                         log.warning("Failed to persist stream session history", error=str(e))
+
+                # S5: 主动行为引擎调度（流式路径）
+                if self.proactive_engine is not None:
+                    try:
+                        _p_actions = self.proactive_engine.evaluate(
+                            perception_state=None,
+                            current_input=message,
+                        )
+                        if _p_actions:
+                            yield {
+                                "type": "proactive_suggestion",
+                                "content": "",
+                                "metadata": {
+                                    "suggestions": [
+                                        {"type": a.action_type.value, "title": a.title, "description": a.description}
+                                        for a in _p_actions[:3]
+                                    ],
+                                },
+                            }
+                    except Exception as _s5_exc:
+                        log_ignored(log, "engine.AgentEngine.process_input_stream.S5", _s5_exc)
+
+                # E2: 工具自创造（流式路径）
+                if self.evolution is not None:
+                    try:
+                        _stream_tool_seq = [tc.get("name", "") for tc in conv_result.metadata.get("tool_calls", []) if tc.get("name")] if hasattr(conv_result, 'metadata') and conv_result.metadata else []
+                        if len(_stream_tool_seq) >= 2:
+                            _e2_name = self.evolution.generate_compound_skill(_stream_tool_seq, context=message)
+                            if _e2_name:
+                                yield {
+                                    "type": "proactive_suggestion",
+                                    "content": "",
+                                    "metadata": {"suggestions": [{"type": "skill_creation", "title": f"新复合工具: {_e2_name}", "description": "检测到重复工具组合模式，已自动创建复合工具"}]},
+                                }
+                    except Exception as _e2_exc:
+                        log_ignored(log, "engine.AgentEngine.process_input_stream.E2", _e2_exc)
+
+                # E3: 知识自增长（流式路径）
+                if self.evolution is not None and self.memory is not None:
+                    try:
+                        _e3_tools = [tc.get("name", "") for tc in conv_result.metadata.get("tool_calls", []) if tc.get("name")] if hasattr(conv_result, 'metadata') and conv_result.metadata else []
+                        _e3_output = "".join(response_buffer).strip()
+                        _e3_deposits = self.evolution.auto_deposit_knowledge(
+                            user_input=message,
+                            assistant_output=_e3_output,
+                            tools_used=_e3_tools,
+                            quality_score=_stream_quality_score,
+                        )
+                        if _e3_deposits:
+                            for _dt, _dc in _e3_deposits.items():
+                                try:
+                                    await self.memory.store_long_term(_dc, scene=f"auto_deposit_{_dt}")
+                                except Exception:
+                                    pass
+                    except Exception as _e3_exc:
+                        log_ignored(log, "engine.AgentEngine.process_input_stream.E3", _e3_exc)
+
                 return
             except _asyncio.CancelledError:
                 if self.session_store:
@@ -3112,7 +3718,7 @@ class AgentEngine:
 
         available = await self.llm.check_available()
         status = "available" if available else "unavailable"
-        log.info("LLM Provider initialized", model=self.llm.model, status=status)
+        log.debug("LLM Provider initialized", model=self.llm.model, status=status)
         return self.llm
 
     async def _init_memory(self) -> MemoryEngine | None:
@@ -3120,7 +3726,7 @@ class AgentEngine:
             self.memory = MemoryEngine(llm=self.llm)
             self.memory.set_episodic_store(EpisodicMemoryStore())
             await self.memory.initialize()
-            log.info("Memory Engine ready (with EpisodicMemoryStore)")
+            log.debug("Memory Engine ready (with EpisodicMemoryStore)")
             return self.memory
         except Exception as e:
             log.warning("Memory Engine init failed", error=str(e))
@@ -3129,7 +3735,7 @@ class AgentEngine:
     async def _init_trajectory_db(self) -> TrajectoryDatabase | None:
         try:
             self.trajectory_db = TrajectoryDatabase()
-            log.info("Trajectory Database ready")
+            log.debug("Trajectory Database ready")
             return self.trajectory_db
         except Exception as e:
             log.warning("Trajectory Database init failed", error=str(e))
@@ -3142,10 +3748,10 @@ class AgentEngine:
             try:
                 from agent.perception.tools import register_perception_tools
                 register_perception_tools(self.tool_registry)
-                log.info("Perception tools registered")
+                log.debug("Perception tools registered")
             except Exception as _e:
                 log.warning("Perception tools registration failed", error=str(_e))
-            log.info("Tool Registry ready", count=count)
+            log.debug("Tool Registry ready", count=count)
             return self.tool_registry
         except Exception as e:
             log.warning("Tool Registry init failed", error=str(e))
@@ -3153,13 +3759,13 @@ class AgentEngine:
 
     async def _init_toolset_registry(self) -> ToolsetRegistry | None:
         try:
-            self.toolset_registry = ToolsetRegistry(self.tool_registry)
+            self.toolset_registry = ToolsetRegistry()
             # R2 运行时依赖：将内置工具集定义注册进引擎持有的注册表实例，
             # 使 resolve(toolset_id) 可用（全局注册表与引擎实例不是同一个）。
             from agent.tools.builtin_toolsets import BUILTIN_TOOLSETS
             for definition in BUILTIN_TOOLSETS:
                 self.toolset_registry.register(definition)
-            log.info("Toolset Registry ready", toolsets=len(BUILTIN_TOOLSETS))
+            log.debug("Toolset Registry ready", toolsets=len(BUILTIN_TOOLSETS))
             return self.toolset_registry
         except Exception as e:
             log.warning("Toolset Registry init failed", error=str(e))
@@ -3381,7 +3987,7 @@ class AgentEngine:
                     self.tool_registry, enabled_check=enabled_check
                 )
                 self.mcp_tool_bridge.start_auto_sync(self.tool_registry)
-                log.info("MCP Tool Bridge ready", synced_tools=synced)
+                log.debug("MCP Tool Bridge ready", synced_tools=synced)
             else:
                 log.warning("MCP Tool Bridge ready but tool_registry is None, sync skipped")
             return self.mcp_tool_bridge
@@ -3392,7 +3998,7 @@ class AgentEngine:
     async def _init_permission_guard(self) -> PermissionGuard | None:
         try:
             self.permission_guard = PermissionGuard()
-            log.info("Permission Guard ready")
+            log.debug("Permission Guard ready")
             return self.permission_guard
         except Exception as e:
             log.warning("Permission Guard init failed", error=str(e))
@@ -3401,7 +4007,7 @@ class AgentEngine:
     async def _init_schema_validator(self) -> SchemaValidator | None:
         try:
             self.schema_validator = SchemaValidator()
-            log.info("Schema Validator ready")
+            log.debug("Schema Validator ready")
             return self.schema_validator
         except Exception as e:
             log.warning("Schema Validator init failed", error=str(e))
@@ -3410,7 +4016,7 @@ class AgentEngine:
     async def _init_tool_call_guard(self) -> ToolCallGuard | None:
         try:
             self.tool_call_guard = ToolCallGuard()
-            log.info("Tool Call Guard ready")
+            log.debug("Tool Call Guard ready")
             return self.tool_call_guard
         except Exception as e:
             log.warning("Tool Call Guard init failed", error=str(e))
@@ -3426,7 +4032,7 @@ class AgentEngine:
             # 接线 R1 管理面控制器（姿态覆盖 / 锁定 推送到真实执行器）
             from agent.security.runtime_control import get_controller
             get_controller().attach_approval_manager(self.approval_manager)
-            log.info("Approval Manager ready", posture=_posture.value, auto_approve_all=_auto_approve2)
+            log.debug("Approval Manager ready", posture=_posture.value, auto_approve_all=_auto_approve2)
             return self.approval_manager
         except Exception as e:
             log.warning("Approval Manager init failed", error=str(e))
@@ -3435,7 +4041,7 @@ class AgentEngine:
     async def _init_canary_manager(self) -> CanaryReleaseManager | None:
         try:
             self.canary_manager = CanaryReleaseManager()
-            log.info("Canary Release Manager ready")
+            log.debug("Canary Release Manager ready")
             return self.canary_manager
         except Exception as e:
             log.warning("Canary Release Manager init failed", error=str(e))
@@ -3444,7 +4050,7 @@ class AgentEngine:
     async def _init_constraints(self) -> ConstraintsService | None:
         try:
             self.constraints = ConstraintsService()
-            log.info("Constraints Service ready")
+            log.debug("Constraints Service ready")
             return self.constraints
         except Exception as e:
             log.warning("Constraints Service init failed", error=str(e))
@@ -3454,7 +4060,7 @@ class AgentEngine:
         try:
             self.hook_manager = HookManager()
             self._setup_default_hooks()
-            log.info("Hook Manager ready")
+            log.debug("Hook Manager ready")
             return self.hook_manager
         except Exception as e:
             log.warning("Hook Manager init failed", error=str(e))
@@ -3472,7 +4078,7 @@ class AgentEngine:
                         os.environ.get("PERCEPTION_LEVEL", "standard")
                     ),
                 )
-                log.info("PerceptionBus ready")
+                log.debug("PerceptionBus ready")
             except Exception as _e:
                 log.warning("PerceptionBus init failed", error=str(_e))
 
@@ -3489,7 +4095,7 @@ class AgentEngine:
                 tool_call_guard=getattr(self, "tool_call_guard", None),
                 proactive_engine=getattr(self, "proactive_engine", None),
             )
-            log.info("Loop Controller ready")
+            log.debug("Loop Controller ready")
             return self.loop
         except Exception as e:
             log.warning("Loop Controller init failed", error=str(e))
@@ -3498,7 +4104,7 @@ class AgentEngine:
     async def _init_evolution(self) -> EvolutionEngine | None:
         try:
             self.evolution = EvolutionEngine()
-            log.info("Evolution Engine ready")
+            log.debug("Evolution Engine ready")
             return self.evolution
         except Exception as e:
             log.warning("Evolution Engine init failed", error=str(e))
@@ -3516,10 +4122,36 @@ class AgentEngine:
                 approval_manager=self.approval_manager,
                 hook_manager=self.hook_manager,
                 tool_selector=self.select_openai_tools_for_input,
-                # D8（审计 §1.7）：接入验证闭环，工具结果验证失败时回灌纠错提示。
                 verification_loop=getattr(self, "verification_loop", None),
+                trace_log=getattr(self, "harness_trace_log", None),
+                context_window_manager=getattr(self, "harness_context_window", None),
             )
-            log.info("Conversation Loop ready (with safety modules + hooks + verification)")
+            log.debug("Conversation Loop ready (with safety modules + hooks + verification + harness_trace + context_window)")
+
+            # R3+R4+R2: 注入因果建模器、反思知识库、工具选择记忆
+            try:
+                from agent.loop.causal import CausalModeler
+                self.conversation.set_causal_modeler(CausalModeler(llm=self.llm))
+                log.debug("R3: CausalModeler injected")
+            except Exception as _r3_exc:
+                log.warning("R3: CausalModeler injection failed", error=str(_r3_exc))
+            try:
+                from agent.loop.reflection_knowledge_base import ReflectionKnowledgeBase
+                _rkb = ReflectionKnowledgeBase()
+                self.conversation.set_reflection_kb(_rkb)
+                self._reflection_kb = _rkb
+                log.debug("R4: ReflectionKnowledgeBase injected")
+            except Exception as _r4_exc:
+                log.warning("R4: ReflectionKnowledgeBase injection failed", error=str(_r4_exc))
+            try:
+                from agent.loop.tool_selection_memory import ToolSelectionMemory
+                _tsm = ToolSelectionMemory()
+                self.conversation.set_tool_selection_memory(_tsm)
+                self._tool_selection_memory = _tsm
+                log.debug("R2: ToolSelectionMemory injected")
+            except Exception as _r2_exc:
+                log.warning("R2: ToolSelectionMemory injection failed", error=str(_r2_exc))
+
             return self.conversation
         except Exception as e:
             log.warning("Conversation Loop init failed", error=str(e))
@@ -3528,7 +4160,7 @@ class AgentEngine:
     async def _init_context_file_registry(self) -> ContextFileRegistry | None:
         try:
             self.context_file_registry = ContextFileRegistry()
-            log.info("Context File Registry ready")
+            log.debug("Context File Registry ready")
             return self.context_file_registry
         except Exception as e:
             log.warning("Context File Registry init failed", error=str(e))
@@ -3539,7 +4171,7 @@ class AgentEngine:
             self.context_reference_resolver = ContextReferenceResolver(
                 project_root=str(__import__("pathlib").Path.cwd())
             )
-            log.info("Context Reference Resolver ready")
+            log.debug("Context Reference Resolver ready")
             return self.context_reference_resolver
         except Exception as e:
             log.warning("Context Reference Resolver init failed", error=str(e))
@@ -3552,7 +4184,7 @@ class AgentEngine:
                 self.context_manager.set_file_registry(self.context_file_registry)
             if self.context_reference_resolver:
                 self.context_manager.set_reference_resolver(self.context_reference_resolver)
-            log.info("Context Manager ready")
+            log.debug("Context Manager ready")
             return self.context_manager
         except Exception as e:
             log.warning("Context Manager init failed", error=str(e))
@@ -3561,7 +4193,7 @@ class AgentEngine:
     async def _init_context_compressor(self) -> ContextCompressor | None:
         try:
             self.context_compressor = ContextCompressor()
-            log.info("Context Compressor ready")
+            log.debug("Context Compressor ready")
             return self.context_compressor
         except Exception as e:
             log.warning("Context Compressor init failed", error=str(e))
@@ -3574,7 +4206,7 @@ class AgentEngine:
                 reserve_ratio=0.3,
                 auto_compress=True,
             )
-            log.info("Context Window Manager ready")
+            log.debug("Context Window Manager ready")
             return self.context_window_manager
         except Exception as e:
             log.warning("Context Window Manager init failed", error=str(e))
@@ -3609,7 +4241,7 @@ class AgentEngine:
                     self.unified_context_orchestrator.register_component(
                         AttentionFocusComponent(attention_engine=self.attention_focus)
                     )
-                    log.info("Attention Focus Engine ready and registered")
+                    log.debug("Attention Focus Engine ready and registered")
                 except Exception as e:
                     log.warning("Attention Focus Engine init failed", error=str(e))
 
@@ -3627,7 +4259,7 @@ class AgentEngine:
     async def _init_persona(self) -> PersonaCore | None:
         try:
             self.persona = PersonaCore()
-            log.info("Persona Core ready")
+            log.debug("Persona Core ready")
             return self.persona
         except Exception as e:
             log.warning("Persona Core init failed", error=str(e))
@@ -3636,7 +4268,7 @@ class AgentEngine:
     async def _init_security(self) -> SecurityGuard | None:
         try:
             self.security = SecurityGuard()
-            log.info("Security Guard ready")
+            log.debug("Security Guard ready")
             return self.security
         except Exception as e:
             log.warning("Security Guard init failed", error=str(e))
@@ -3645,7 +4277,7 @@ class AgentEngine:
     async def _init_verification(self) -> VerificationService | None:
         try:
             self.verification = VerificationService()
-            log.info("Verification Service ready")
+            log.debug("Verification Service ready")
             return self.verification
         except Exception as e:
             log.warning("Verification Service init failed", error=str(e))
@@ -3654,7 +4286,7 @@ class AgentEngine:
     async def _init_output_guardrail(self) -> OutputGuardrailEngine | None:
         try:
             self.output_guardrail = OutputGuardrailEngine()
-            log.info("Output Guardrail Engine ready")
+            log.debug("Output Guardrail Engine ready")
             return self.output_guardrail
         except Exception as e:
             log.warning("Output Guardrail Engine init failed", error=str(e))
@@ -3670,7 +4302,7 @@ class AgentEngine:
                 else None
             )
             self.skill_registry.register_builtin_skills(enabled_check=enabled_check)
-            log.info("Skill Registry ready", count=len(self.skill_registry.get_all_skills()))
+            log.debug("Skill Registry ready", count=len(self.skill_registry.get_all_skills()))
             return self.skill_registry
         except Exception as e:
             log.warning("Skill Registry init failed", error=str(e))
@@ -3679,7 +4311,7 @@ class AgentEngine:
     async def _init_session_store(self) -> SessionStore | None:
         try:
             self.session_store = SessionStore()
-            log.info("Session Store ready")
+            log.debug("Session Store ready")
             return self.session_store
         except Exception as e:
             log.warning("Session Store init failed", error=str(e))
@@ -3692,7 +4324,7 @@ class AgentEngine:
                 trajectory_db=self.trajectory_db,
             )
             await self.persistence.initialize()
-            log.info("Persistence Service ready")
+            log.debug("Persistence Service ready")
             return self.persistence
         except Exception as e:
             log.warning("Persistence Service init failed", error=str(e))
@@ -3701,7 +4333,7 @@ class AgentEngine:
     async def _init_curator(self) -> Curator | None:
         try:
             self.curator = Curator(self.memory)
-            log.info("Curator ready")
+            log.debug("Curator ready")
             return self.curator
         except Exception as e:
             log.warning("Curator init failed", error=str(e))
@@ -3711,7 +4343,7 @@ class AgentEngine:
         try:
             if self.trajectory_db:
                 self.flywheel = TrajectoryFlywheel(self.trajectory_db, FlywheelConfig())
-                log.info("Trajectory Flywheel ready")
+                log.debug("Trajectory Flywheel ready")
             return self.flywheel
         except Exception as e:
             log.warning("Trajectory Flywheel init failed", error=str(e))
@@ -3723,7 +4355,7 @@ class AgentEngine:
                 evolution_engine=self.evolution,
                 memory_engine=self.memory,
             )
-            log.info("Feedback Loops ready")
+            log.debug("Feedback Loops ready")
             return self.feedback_loops
         except Exception as e:
             log.warning("Feedback Loops init failed", error=str(e))
@@ -3732,7 +4364,7 @@ class AgentEngine:
     async def _init_performance_monitor(self) -> PerformanceMonitor | None:
         try:
             self.performance_monitor = PerformanceMonitor()
-            log.info("Performance Monitor ready")
+            log.debug("Performance Monitor ready")
             return self.performance_monitor
         except Exception as e:
             log.warning("Performance Monitor init failed", error=str(e))
@@ -3754,7 +4386,7 @@ class AgentEngine:
                     ),
                 )
                 self.evolution_trigger.start()
-                log.info("Evolution Trigger ready and started")
+                log.debug("Evolution Trigger ready and started")
             return self.evolution_trigger
         except Exception as e:
             log.warning("Evolution Trigger init failed", error=str(e))
@@ -3765,7 +4397,7 @@ class AgentEngine:
             from agent.loop.reflection_knowledge_base import ReflectionKnowledgeBase
             kb = ReflectionKnowledgeBase.get_instance() if hasattr(ReflectionKnowledgeBase, 'get_instance') else ReflectionKnowledgeBase()
             self.fewshot_generalizer = FewShotGeneralizer(kb)
-            log.info("FewShot Generalizer ready")
+            log.debug("FewShot Generalizer ready")
             return self.fewshot_generalizer
         except Exception as e:
             log.warning("FewShot Generalizer init failed", error=str(e))
@@ -3774,7 +4406,7 @@ class AgentEngine:
     async def _init_strategy_adapter(self) -> StrategyAdapter | None:
         try:
             self.strategy_adapter = StrategyAdapter()
-            log.info("Strategy Adapter ready")
+            log.debug("Strategy Adapter ready")
             return self.strategy_adapter
         except Exception as e:
             log.warning("Strategy Adapter init failed", error=str(e))
@@ -3783,7 +4415,7 @@ class AgentEngine:
     async def _init_learning_signals(self) -> LearningSignalCollector | None:
         try:
             self.learning_signals = LearningSignalCollector()
-            log.info("Learning Signal Collector ready")
+            log.debug("Learning Signal Collector ready")
             return self.learning_signals
         except Exception as e:
             log.warning("Learning Signal Collector init failed", error=str(e))
@@ -3792,7 +4424,7 @@ class AgentEngine:
     async def _init_incremental_planner(self) -> IncrementalPlanner | None:
         try:
             self.incremental_planner = IncrementalPlanner()
-            log.info("Incremental Planner ready")
+            log.debug("Incremental Planner ready")
             return self.incremental_planner
         except Exception as e:
             log.warning("Incremental Planner init failed", error=str(e))
@@ -3801,7 +4433,7 @@ class AgentEngine:
     async def _init_plan_quality_checker(self) -> PlanQualityChecker | None:
         try:
             self.plan_quality_checker = PlanQualityChecker()
-            log.info("Plan Quality Checker ready")
+            log.debug("Plan Quality Checker ready")
             return self.plan_quality_checker
         except Exception as e:
             log.warning("Plan Quality Checker init failed", error=str(e))
@@ -3810,7 +4442,7 @@ class AgentEngine:
     async def _init_reflection_applier(self) -> ReflectionApplicationManager | None:
         try:
             self.reflection_applier = ReflectionApplicationManager()
-            log.info("Reflection Applier ready")
+            log.debug("Reflection Applier ready")
             return self.reflection_applier
         except Exception as e:
             log.warning("Reflection Applier init failed", error=str(e))
@@ -3819,7 +4451,7 @@ class AgentEngine:
     async def _init_priority_scorer(self) -> DynamicPriorityScorer | None:
         try:
             self.priority_scorer = DynamicPriorityScorer()
-            log.info("Dynamic Priority Scorer ready")
+            log.debug("Dynamic Priority Scorer ready")
             return self.priority_scorer
         except Exception as e:
             log.warning("Dynamic Priority Scorer init failed", error=str(e))
@@ -3905,7 +4537,7 @@ class AgentEngine:
             orchestrator = EvolutionOrchestrator.get_instance()
             orchestrator.register_engines(evolution_engine=self.evolution)
             orchestrator.start()
-            log.info("Evolution Orchestrator started")
+            log.debug("Evolution Orchestrator started")
             return orchestrator
         except Exception as e:
             log.warning("Evolution Orchestrator init failed", error=str(e))
@@ -3915,7 +4547,7 @@ class AgentEngine:
         try:
             if self.loop:
                 self._multi_agent_orchestrator = MultiAgentOrchestrator(llm=self.llm)
-                log.info("Multi-Agent Orchestrator ready")
+                log.debug("Multi-Agent Orchestrator ready")
             return self._multi_agent_orchestrator
         except Exception as e:
             log.warning("Multi-Agent Orchestrator init failed", error=str(e))
@@ -3931,7 +4563,7 @@ class AgentEngine:
             ]
 
             self.a2a_auth_interceptor = A2AAuthInterceptor.from_env()
-            log.info("A2A Manager ready")
+            log.debug("A2A Manager ready")
             return self.a2a_manager
         except Exception as e:
             log.warning("A2A Manager init failed", error=str(e))
@@ -3959,7 +4591,7 @@ class AgentEngine:
                     provider={"name": "Jiabaixing", "url": "https://jiabaixing.example.com"},
                 )
                 await self.a2a_manager.publish_agent_card(self.a2a_self_card)
-                log.info("A2A Self Card published")
+                log.debug("A2A Self Card published")
             return self.a2a_self_card
         except Exception as e:
             log.warning("A2A Self Card init failed", error=str(e))
@@ -3981,7 +4613,7 @@ class AgentEngine:
             for scene in AgentScene:
                 agent = agent_factory.create_agent(scene)
                 self.agent_registry.register(name=agent.name, agent=agent, scene=scene)
-            log.info("Agent Registry ready", agent_count=self.agent_registry.get_agent_count())
+            log.debug("Agent Registry ready", agent_count=self.agent_registry.get_agent_count())
             return self.agent_registry
         except Exception as e:
             log.warning("Agent Registry init failed", error=str(e))
@@ -3999,7 +4631,7 @@ class AgentEngine:
                     self_agent_id=self.a2a_self_card.id if self.a2a_self_card else "agent:jiabaixing",
                     a2a_auth_interceptor=self.a2a_auth_interceptor,
                 )
-                log.info("Orchestrator ready")
+                log.debug("Orchestrator ready")
             return self.orchestrator
         except Exception as e:
             log.warning("Orchestrator init failed", error=str(e))
@@ -4011,7 +4643,7 @@ class AgentEngine:
             self.orchestration_executor = OrchestrationExecutor(
                 config=OrchestrationConfig(),
             )
-            log.info("OrchestrationExecutor ready")
+            log.debug("OrchestrationExecutor ready")
             return self.orchestration_executor
         except Exception as e:
             log.warning("OrchestrationExecutor init failed", error=str(e))
@@ -4021,7 +4653,7 @@ class AgentEngine:
         try:
             self.cron_scheduler = CronJobScheduler.get_instance()
             await self.cron_scheduler.start()
-            log.info("Cron Job Scheduler ready")
+            log.debug("Cron Job Scheduler ready")
             return self.cron_scheduler
         except Exception as e:
             log.warning("Cron Job Scheduler init failed", error=str(e))
@@ -4030,7 +4662,7 @@ class AgentEngine:
     async def _init_sandbox(self) -> SandboxExecutor | None:
         try:
             self.sandbox = SandboxExecutor()
-            log.info("Sandbox Executor ready")
+            log.debug("Sandbox Executor ready")
             return self.sandbox
         except Exception as e:
             log.warning("Sandbox Executor init failed", error=str(e))
@@ -4039,7 +4671,7 @@ class AgentEngine:
     async def _init_batch_processor(self) -> BatchProcessor | None:
         try:
             self.batch_processor = BatchProcessor(BatchConfig(concurrency=5))
-            log.info("Batch Processor ready")
+            log.debug("Batch Processor ready")
             return self.batch_processor
         except Exception as e:
             log.warning("Batch Processor init failed", error=str(e))
@@ -4048,7 +4680,7 @@ class AgentEngine:
     async def _init_think_scrubber(self) -> ThinkScrubber | None:
         try:
             self.think_scrubber = ThinkScrubber()
-            log.info("Think Scrubber ready")
+            log.debug("Think Scrubber ready")
             return self.think_scrubber
         except Exception as e:
             log.warning("Think Scrubber init failed", error=str(e))
@@ -4057,7 +4689,7 @@ class AgentEngine:
     async def _init_production_metrics(self) -> Any:
         try:
             self.production_metrics = get_production_metrics_collector()
-            log.info("Production Metrics Collector ready")
+            log.debug("Production Metrics Collector ready")
             return self.production_metrics
         except Exception as e:
             log.warning("Production Metrics Collector init failed", error=str(e))
@@ -4071,7 +4703,7 @@ class AgentEngine:
                 optimize_threshold=int(os.environ.get("FEEDBACK_OPTIMIZE_THRESHOLD", "100")),
                 time_window_seconds=int(os.environ.get("FEEDBACK_OPTIMIZE_WINDOW", "86400")),
             )
-            log.info("Continuous Feedback Loop ready")
+            log.debug("Continuous Feedback Loop ready")
             return self.feedback_loop
         except Exception as e:
             log.warning("Continuous Feedback Loop init failed", error=str(e))
@@ -4083,9 +4715,9 @@ class AgentEngine:
             if is_redis_enabled():
                 self._redis_cache = get_redis_cache()
                 health = await self._redis_cache.health_check()
-                log.info("Redis Cache initialized", healthy=health)
+                log.debug("Redis Cache initialized", healthy=health)
             else:
-                log.info("Redis Cache disabled")
+                log.debug("Redis Cache disabled")
             return self._redis_cache
         except Exception as e:
             log.warning("Redis Cache init failed", error=str(e))
@@ -4096,7 +4728,7 @@ class AgentEngine:
         try:
             from agent.tools.web_search_provider import WebSearchRegistry
             self.web_search_registry = WebSearchRegistry()
-            log.info("Web Search Registry ready")
+            log.debug("Web Search Registry ready")
             return self.web_search_registry
         except Exception as e:
             log.warning("Web Search Registry init failed", error=str(e))
@@ -4109,7 +4741,7 @@ class AgentEngine:
             self.tool_search_index = ToolSearchIndex()
             if self.tool_registry:
                 self.tool_search_index.index_tools(self.tool_registry)
-            log.info("Tool Search Index ready")
+            log.debug("Tool Search Index ready")
             return self.tool_search_index
         except Exception as e:
             log.warning("Tool Search Index init failed", error=str(e))
@@ -4120,7 +4752,7 @@ class AgentEngine:
         try:
             from agent.security.path_security import PathSecurityGuard
             self.path_security_guard = PathSecurityGuard()
-            log.info("Path Security Guard ready")
+            log.debug("Path Security Guard ready")
             return self.path_security_guard
         except Exception as e:
             log.warning("Path Security Guard init failed", error=str(e))
@@ -4131,7 +4763,7 @@ class AgentEngine:
         try:
             from agent.security.url_safety import URLSafetyGuard
             self.url_safety_guard = URLSafetyGuard()
-            log.info("URL Safety Guard ready")
+            log.debug("URL Safety Guard ready")
             return self.url_safety_guard
         except Exception as e:
             log.warning("URL Safety Guard init failed", error=str(e))
@@ -4142,7 +4774,7 @@ class AgentEngine:
         try:
             from agent.security.ssl_guard import SSLGuard
             self.ssl_guard = SSLGuard()
-            log.info("SSL Guard ready")
+            log.debug("SSL Guard ready")
             return self.ssl_guard
         except Exception as e:
             log.warning("SSL Guard init failed", error=str(e))
@@ -4153,7 +4785,7 @@ class AgentEngine:
         try:
             from agent.security.redact import RedactionEngine
             self.redaction_engine = RedactionEngine()
-            log.info("Redaction Engine ready")
+            log.debug("Redaction Engine ready")
             return self.redaction_engine
         except Exception as e:
             log.warning("Redaction Engine init failed", error=str(e))
@@ -4164,7 +4796,7 @@ class AgentEngine:
         try:
             from agent.core.error_classifier import ErrorClassifier
             self.error_classifier = ErrorClassifier()
-            log.info("Error Classifier ready")
+            log.debug("Error Classifier ready")
             return self.error_classifier
         except Exception as e:
             log.warning("Error Classifier init failed", error=str(e))
@@ -4175,7 +4807,7 @@ class AgentEngine:
         try:
             from agent.persistence.title_generator import TitleGenerator
             self.local_title_generator = TitleGenerator()
-            log.info("Title Generator (local) ready")
+            log.debug("Title Generator (local) ready")
             return self.local_title_generator
         except Exception as e:
             log.warning("Title Generator init failed", error=str(e))
@@ -4186,7 +4818,7 @@ class AgentEngine:
         try:
             from agent.persistence.session_recap import SessionRecap
             self.session_recap_engine = SessionRecap()
-            log.info("Session Recap Engine ready")
+            log.debug("Session Recap Engine ready")
             return self.session_recap_engine
         except Exception as e:
             log.warning("Session Recap init failed", error=str(e))
@@ -4197,7 +4829,7 @@ class AgentEngine:
         try:
             from agent.persistence.session_search_index import SessionSearchIndex
             self.session_search_index = SessionSearchIndex()
-            log.info("Session Search Index ready")
+            log.debug("Session Search Index ready")
             return self.session_search_index
         except Exception as e:
             log.warning("Session Search Index init failed", error=str(e))
@@ -4208,7 +4840,7 @@ class AgentEngine:
         try:
             from agent.persistence.session_lineage import SessionLineageTracker
             self.session_lineage_tracker = SessionLineageTracker()
-            log.info("Session Lineage Tracker ready")
+            log.debug("Session Lineage Tracker ready")
             return self.session_lineage_tracker
         except Exception as e:
             log.warning("Session Lineage Tracker init failed", error=str(e))
@@ -4219,7 +4851,7 @@ class AgentEngine:
         try:
             from agent.llm.credential_persistence import CredentialStore
             self.credential_store = CredentialStore()
-            log.info("Credential Store ready")
+            log.debug("Credential Store ready")
             return self.credential_store
         except Exception as e:
             log.warning("Credential Store init failed", error=str(e))
@@ -4230,7 +4862,7 @@ class AgentEngine:
         try:
             from agent.llm.credential_sources import CredentialDiscovery
             self.credential_discovery = CredentialDiscovery()
-            log.info("Credential Discovery ready")
+            log.debug("Credential Discovery ready")
             return self.credential_discovery
         except Exception as e:
             log.warning("Credential Discovery init failed", error=str(e))
@@ -4241,7 +4873,7 @@ class AgentEngine:
         try:
             from agent.evaluation.eval_runner import EvalRunner
             self.eval_runner = EvalRunner()
-            log.info("Eval Runner ready")
+            log.debug("Eval Runner ready")
             return self.eval_runner
         except Exception as e:
             log.warning("Eval Runner init failed", error=str(e))
@@ -4267,7 +4899,7 @@ class AgentEngine:
             self.gateway_dispatcher.set_handler(_gateway_handler)
             await self.gateway_dispatcher.start_consuming()
 
-            log.info("Gateway Dispatcher ready (consuming)")
+            log.debug("Gateway Dispatcher ready (consuming)")
             return self.gateway_dispatcher
         except Exception as e:
             log.warning("Gateway Dispatcher init failed", error=str(e))
@@ -4278,7 +4910,7 @@ class AgentEngine:
         try:
             from agent.a2a.protocol import A2ATaskManager
             self.a2a_task_manager = A2ATaskManager()
-            log.info("A2A Task Manager ready")
+            log.debug("A2A Task Manager ready")
             return self.a2a_task_manager
         except Exception as e:
             log.warning("A2A Task Manager init failed", error=str(e))
@@ -4289,7 +4921,7 @@ class AgentEngine:
         try:
             from agent.a2a.protocol import A2ADiscovery
             self.a2a_discovery = A2ADiscovery()
-            log.info("A2A Discovery ready")
+            log.debug("A2A Discovery ready")
             return self.a2a_discovery
         except Exception as e:
             log.warning("A2A Discovery init failed", error=str(e))
@@ -4300,7 +4932,7 @@ class AgentEngine:
         try:
             from agent.a2a.protocol import A2ATrustManager
             self.a2a_trust_manager = A2ATrustManager()
-            log.info("A2A Trust Manager ready")
+            log.debug("A2A Trust Manager ready")
             return self.a2a_trust_manager
         except Exception as e:
             log.warning("A2A Trust Manager init failed", error=str(e))
@@ -4314,7 +4946,7 @@ class AgentEngine:
             from agent.tools.clarify_tool import register_clarify_tool
             # clarify 已在 register_default_tools 中注册，这里只做标记
             self.clarify_manager = True
-            log.info("Clarify tool ready")
+            log.debug("Clarify tool ready")
             return self.clarify_manager
         except Exception as e:
             log.warning("Clarify init failed", error=str(e))
@@ -4325,7 +4957,7 @@ class AgentEngine:
         try:
             from agent.tools.todo_tool import TodoManager
             self.todo_manager = TodoManager()
-            log.info("Todo Manager ready")
+            log.debug("Todo Manager ready")
             return self.todo_manager
         except Exception as e:
             log.warning("Todo Manager init failed", error=str(e))
@@ -4336,7 +4968,7 @@ class AgentEngine:
         try:
             from agent.tools.code_execution_tool import CodeExecutor
             self.code_executor = CodeExecutor()
-            log.info("Code Executor ready")
+            log.debug("Code Executor ready")
             return self.code_executor
         except Exception as e:
             log.warning("Code Executor init failed", error=str(e))
@@ -4349,7 +4981,7 @@ class AgentEngine:
             self.delegate_delegator = SubAgentDelegator()
             if self.llm:
                 self.delegate_delegator.set_llm(self.llm)
-            log.info("Delegate Delegator ready")
+            log.debug("Delegate Delegator ready")
             return self.delegate_delegator
         except Exception as e:
             log.warning("Delegate Delegator init failed", error=str(e))
@@ -4362,7 +4994,7 @@ class AgentEngine:
         try:
             from agent.infrastructure.lazy_deps import create_default_lazy_deps
             self.lazy_deps = create_default_lazy_deps()
-            log.info("Lazy Deps ready")
+            log.debug("Lazy Deps ready")
             return self.lazy_deps
         except Exception as e:
             log.warning("Lazy Deps init failed", error=str(e))
@@ -4373,7 +5005,7 @@ class AgentEngine:
         try:
             from agent.context.coding_context import CodingContextDetector
             self.coding_context_detector = CodingContextDetector()
-            log.info("Coding Context Detector ready")
+            log.debug("Coding Context Detector ready")
             return self.coding_context_detector
         except Exception as e:
             log.warning("Coding Context Detector init failed", error=str(e))
@@ -4384,7 +5016,7 @@ class AgentEngine:
         try:
             from agent.context.subdirectory_hints import SubdirectoryHints
             self.subdirectory_hints = SubdirectoryHints()
-            log.info("Subdirectory Hints ready")
+            log.debug("Subdirectory Hints ready")
             return self.subdirectory_hints
         except Exception as e:
             log.warning("Subdirectory Hints init failed", error=str(e))
@@ -4404,7 +5036,7 @@ class AgentEngine:
         try:
             from agent.core.context_compressor import ConversationCompressor
             self.conversation_compressor_v2 = ConversationCompressor()
-            log.info("Conversation Compressor V2 ready")
+            log.debug("Conversation Compressor V2 ready")
             return self.conversation_compressor_v2
         except Exception as e:
             log.warning("Conversation Compressor V2 init failed", error=str(e))
@@ -4417,7 +5049,7 @@ class AgentEngine:
         try:
             from agent.llm.budget_config import BudgetGuard
             self.budget_guard = BudgetGuard()
-            log.info("Budget Guard ready")
+            log.debug("Budget Guard ready")
             return self.budget_guard
         except Exception as e:
             log.warning("Budget Guard init failed", error=str(e))
@@ -4428,7 +5060,7 @@ class AgentEngine:
         try:
             from agent.security.osv_check import OSVChecker
             self.osv_checker = OSVChecker()
-            log.info("OSV Checker ready")
+            log.debug("OSV Checker ready")
             return self.osv_checker
         except Exception as e:
             log.warning("OSV Checker init failed", error=str(e))
@@ -4439,7 +5071,7 @@ class AgentEngine:
         try:
             from agent.infrastructure.disk_cleanup import DiskCleaner
             self.disk_cleaner = DiskCleaner()
-            log.info("Disk Cleaner ready")
+            log.debug("Disk Cleaner ready")
             return self.disk_cleaner
         except Exception as e:
             log.warning("Disk Cleaner init failed", error=str(e))
@@ -4450,7 +5082,7 @@ class AgentEngine:
         try:
             from agent.security.security_guidance import SecurityGuidance
             self.security_guidance = SecurityGuidance()
-            log.info("Security Guidance ready")
+            log.debug("Security Guidance ready")
             return self.security_guidance
         except Exception as e:
             log.warning("Security Guidance init failed", error=str(e))
@@ -4463,7 +5095,7 @@ class AgentEngine:
         try:
             from agent.tools.voice_mode_tool import VoiceModeManager
             self.voice_mode_manager = VoiceModeManager()
-            log.info("Voice Mode Manager ready")
+            log.debug("Voice Mode Manager ready")
             return self.voice_mode_manager
         except Exception as e:
             log.warning("Voice Mode Manager init failed", error=str(e))
@@ -4474,7 +5106,7 @@ class AgentEngine:
         try:
             from agent.persistence.workspace import WorkspaceManager
             self.workspace_manager = WorkspaceManager()
-            log.info("Workspace Manager ready")
+            log.debug("Workspace Manager ready")
             return self.workspace_manager
         except Exception as e:
             log.warning("Workspace Manager init failed", error=str(e))
@@ -4485,7 +5117,7 @@ class AgentEngine:
         try:
             from agent.i18n import get_i18n
             self.i18n_instance = get_i18n()
-            log.info("I18n ready")
+            log.debug("I18n ready")
             return self.i18n_instance
         except Exception as e:
             log.warning("I18n init failed", error=str(e))
@@ -4504,10 +5136,10 @@ class AgentEngine:
             if self.tool_registry is not None:
                 try:
                     self.plugin_manager.register_all_tools(self.tool_registry)
-                    log.info("Plugin tools registration (trust-gated) attempted")
+                    log.debug("Plugin tools registration (trust-gated) attempted")
                 except Exception as e:
                     log.warning("Plugin tools registration skipped", error=str(e))
-            log.info("Plugin Manager ready")
+            log.debug("Plugin Manager ready")
             # 接线 R1-B 管理面控制器（插件信任改写推送到真实策略）
             from agent.security.runtime_control import get_controller
             get_controller().attach_plugin_policy(self.plugin_manager._trust)
@@ -4543,7 +5175,7 @@ class AgentEngine:
         try:
             from agent.evolution.skill_hub import SkillHub
             self.skill_hub = SkillHub()
-            log.info("Skill Hub ready")
+            log.debug("Skill Hub ready")
             return self.skill_hub
         except Exception as e:
             log.warning("Skill Hub init failed", error=str(e))
@@ -4554,7 +5186,7 @@ class AgentEngine:
         try:
             from agent.evolution.skill_audit import SkillAuditor
             self.skill_audit = SkillAuditor()
-            log.info("Skill Auditor ready")
+            log.debug("Skill Auditor ready")
             return self.skill_audit
         except Exception as e:
             log.warning("Skill Auditor init failed", error=str(e))
@@ -4565,7 +5197,7 @@ class AgentEngine:
         try:
             from agent.cli.profile_manager import ProfileManager
             self.profile_manager = ProfileManager()
-            log.info("Profile Manager ready")
+            log.debug("Profile Manager ready")
             return self.profile_manager
         except Exception as e:
             log.warning("Profile Manager init failed", error=str(e))
@@ -4576,7 +5208,7 @@ class AgentEngine:
         try:
             from agent.tools.async_delegation import AsyncDelegator
             self.async_delegator = AsyncDelegator()
-            log.info("Async Delegator ready")
+            log.debug("Async Delegator ready")
             return self.async_delegator
         except Exception as e:
             log.warning("Async Delegator init failed", error=str(e))
@@ -4587,7 +5219,7 @@ class AgentEngine:
         try:
             from agent.memory.providers import MemoryProviderFactory
             self.memory_providers = MemoryProviderFactory
-            log.info("Memory Providers ready")
+            log.debug("Memory Providers ready")
             return self.memory_providers
         except Exception as e:
             log.warning("Memory Providers init failed", error=str(e))
@@ -4598,7 +5230,7 @@ class AgentEngine:
         try:
             from agent.api.proxy_server import ProxyServer
             self.proxy_server = ProxyServer()
-            log.info("Proxy Server ready")
+            log.debug("Proxy Server ready")
             return self.proxy_server
         except Exception as e:
             log.warning("Proxy Server init failed", error=str(e))
@@ -4609,7 +5241,7 @@ class AgentEngine:
         try:
             from agent.api.dashboard_auth import DashboardAuth
             self.dashboard_auth = DashboardAuth()
-            log.info("Dashboard Auth ready")
+            log.debug("Dashboard Auth ready")
             return self.dashboard_auth
         except Exception as e:
             log.warning("Dashboard Auth init failed", error=str(e))
@@ -4620,7 +5252,7 @@ class AgentEngine:
         try:
             from agent.gateway.restart import HotReloader
             self.hot_reloader = HotReloader()
-            log.info("Hot Reloader ready")
+            log.debug("Hot Reloader ready")
             return self.hot_reloader
         except Exception as e:
             log.warning("Hot Reloader init failed", error=str(e))
@@ -4631,7 +5263,7 @@ class AgentEngine:
         try:
             from agent.gateway.forensics import ShutdownForensics
             self.shutdown_forensics = ShutdownForensics()
-            log.info("Shutdown Forensics ready")
+            log.debug("Shutdown Forensics ready")
             return self.shutdown_forensics
         except Exception as e:
             log.warning("Shutdown Forensics init failed", error=str(e))
@@ -4642,7 +5274,7 @@ class AgentEngine:
         try:
             from agent.gateway.platforms.relay_adapter import RelayAdapter
             self.relay_adapter = RelayAdapter()
-            log.info("Relay Adapter ready")
+            log.debug("Relay Adapter ready")
             return self.relay_adapter
         except Exception as e:
             log.warning("Relay Adapter init failed", error=str(e))
@@ -4655,7 +5287,7 @@ class AgentEngine:
         try:
             from agent.persistence.batch_trajectory import BatchTrajectoryGenerator
             self.batch_trajectory = BatchTrajectoryGenerator()
-            log.info("Batch Trajectory Generator ready")
+            log.debug("Batch Trajectory Generator ready")
             return self.batch_trajectory
         except Exception as e:
             log.warning("Batch Trajectory Generator init failed", error=str(e))
@@ -4666,7 +5298,7 @@ class AgentEngine:
         try:
             from agent.llm.stream_diag import StreamDiagnostics
             self.stream_diag = StreamDiagnostics()
-            log.info("Stream Diagnostics ready")
+            log.debug("Stream Diagnostics ready")
             return self.stream_diag
         except Exception as e:
             log.warning("Stream Diagnostics init failed", error=str(e))
@@ -4677,7 +5309,7 @@ class AgentEngine:
         try:
             from agent.llm.nous_rate_guard import NousRateGuard
             self.nous_rate_guard = NousRateGuard()
-            log.info("Nous Rate Guard ready")
+            log.debug("Nous Rate Guard ready")
             return self.nous_rate_guard
         except Exception as e:
             log.warning("Nous Rate Guard init failed", error=str(e))
@@ -4688,7 +5320,7 @@ class AgentEngine:
         try:
             from agent.llm.portal_tags import PortalTagManager
             self.portal_tags = PortalTagManager()
-            log.info("Portal Tag Manager ready")
+            log.debug("Portal Tag Manager ready")
             return self.portal_tags
         except Exception as e:
             log.warning("Portal Tag Manager init failed", error=str(e))
@@ -4701,7 +5333,7 @@ class AgentEngine:
         try:
             from agent.gateway.message_content import MessageContentProcessor
             self.message_content = MessageContentProcessor()
-            log.info("Message Content Processor ready")
+            log.debug("Message Content Processor ready")
             return self.message_content
         except Exception as e:
             log.warning("Message Content Processor init failed", error=str(e))
@@ -4712,7 +5344,7 @@ class AgentEngine:
         try:
             from agent.core.retry_utils import RetryExecutor
             self.retry_utils = RetryExecutor()
-            log.info("Retry Executor ready")
+            log.debug("Retry Executor ready")
             return self.retry_utils
         except Exception as e:
             log.warning("Retry Executor init failed", error=str(e))
@@ -4723,7 +5355,7 @@ class AgentEngine:
         try:
             from agent.evolution.skill_provenance import SkillProvenance
             self.skill_provenance = SkillProvenance()
-            log.info("Skill Provenance ready")
+            log.debug("Skill Provenance ready")
             return self.skill_provenance
         except Exception as e:
             log.warning("Skill Provenance init failed", error=str(e))
@@ -4734,7 +5366,7 @@ class AgentEngine:
         try:
             from agent.cli.cli_output import CliOutput
             self.cli_output = CliOutput()
-            log.info("CLI Output ready")
+            log.debug("CLI Output ready")
             return self.cli_output
         except Exception as e:
             log.warning("CLI Output init failed", error=str(e))
@@ -4745,7 +5377,7 @@ class AgentEngine:
         try:
             from agent.gateway.markdown_tables import MarkdownTables
             self.markdown_tables = MarkdownTables()
-            log.info("Markdown Tables ready")
+            log.debug("Markdown Tables ready")
             return self.markdown_tables
         except Exception as e:
             log.warning("Markdown Tables init failed", error=str(e))
@@ -4758,7 +5390,7 @@ class AgentEngine:
         try:
             from agent.cli.display_formatter import DisplayFormatter
             self.display_formatter = DisplayFormatter()
-            log.info("Display Formatter ready")
+            log.debug("Display Formatter ready")
             return self.display_formatter
         except Exception as e:
             log.warning("Display Formatter init failed", error=str(e))
@@ -4769,7 +5401,7 @@ class AgentEngine:
         try:
             from agent.cli.curses_tui import CursesTUI
             self.curses_tui = CursesTUI()
-            log.info("Curses TUI ready")
+            log.debug("Curses TUI ready")
             return self.curses_tui
         except Exception as e:
             log.warning("Curses TUI init failed", error=str(e))
@@ -4780,7 +5412,7 @@ class AgentEngine:
         try:
             from agent.cli.pty_bridge import PtyBridge
             self.pty_bridge = PtyBridge()
-            log.info("PTY Bridge ready")
+            log.debug("PTY Bridge ready")
             return self.pty_bridge
         except Exception as e:
             log.warning("PTY Bridge init failed", error=str(e))
@@ -4791,7 +5423,7 @@ class AgentEngine:
         try:
             from agent.cli.shell_completion import ShellCompletion
             self.shell_completion = ShellCompletion()
-            log.info("Shell Completion ready")
+            log.debug("Shell Completion ready")
             return self.shell_completion
         except Exception as e:
             log.warning("Shell Completion init failed", error=str(e))
@@ -4802,7 +5434,7 @@ class AgentEngine:
         try:
             from agent.cli.clipboard import Clipboard
             self.clipboard = Clipboard()
-            log.info("Clipboard ready")
+            log.debug("Clipboard ready")
             return self.clipboard
         except Exception as e:
             log.warning("Clipboard init failed", error=str(e))
@@ -4815,7 +5447,7 @@ class AgentEngine:
         try:
             from agent.llm.prompt_cache import PromptCaching
             self.prompt_caching = PromptCaching()
-            log.info("Prompt Caching ready")
+            log.debug("Prompt Caching ready")
             return self.prompt_caching
         except Exception as e:
             log.warning("Prompt Caching init failed", error=str(e))
@@ -4826,7 +5458,7 @@ class AgentEngine:
         try:
             from agent.core.turn_finalizer import TurnFinalizer
             self.turn_finalizer = TurnFinalizer()
-            log.info("Turn Finalizer ready")
+            log.debug("Turn Finalizer ready")
             return self.turn_finalizer
         except Exception as e:
             log.warning("Turn Finalizer init failed", error=str(e))
@@ -4837,7 +5469,7 @@ class AgentEngine:
         try:
             from agent.core.turn_retry_state import TurnRetryState
             self.turn_retry_state = TurnRetryState()
-            log.info("Turn Retry State ready")
+            log.debug("Turn Retry State ready")
             return self.turn_retry_state
         except Exception as e:
             log.warning("Turn Retry State init failed", error=str(e))
@@ -4848,7 +5480,7 @@ class AgentEngine:
         try:
             from agent.core.batch_runner import BatchRunner
             self.batch_runner = BatchRunner()
-            log.info("Batch Runner ready")
+            log.debug("Batch Runner ready")
             return self.batch_runner
         except Exception as e:
             log.warning("Batch Runner init failed", error=str(e))
@@ -4861,7 +5493,7 @@ class AgentEngine:
         try:
             from agent.security.write_approval import WriteApproval
             self.write_approval = WriteApproval()
-            log.info("Write Approval ready")
+            log.debug("Write Approval ready")
             return self.write_approval
         except Exception as e:
             log.warning("Write Approval init failed", error=str(e))
@@ -4872,7 +5504,7 @@ class AgentEngine:
         try:
             from agent.security.threat_patterns import ThreatPatternDetector
             self.threat_patterns = ThreatPatternDetector()
-            log.info("Threat Patterns ready")
+            log.debug("Threat Patterns ready")
             return self.threat_patterns
         except Exception as e:
             log.warning("Threat Patterns init failed", error=str(e))
@@ -4883,7 +5515,7 @@ class AgentEngine:
         try:
             from agent.memory.memory_manager import MemoryManager
             self.memory_manager = MemoryManager()
-            log.info("Memory Manager ready")
+            log.debug("Memory Manager ready")
             return self.memory_manager
         except Exception as e:
             log.warning("Memory Manager init failed", error=str(e))
@@ -4894,7 +5526,7 @@ class AgentEngine:
         try:
             from agent.memory.insights import InsightExtractor
             self.insights = InsightExtractor()
-            log.info("Insights ready")
+            log.debug("Insights ready")
             return self.insights
         except Exception as e:
             log.warning("Insights init failed", error=str(e))
@@ -4905,7 +5537,7 @@ class AgentEngine:
         try:
             from agent.memory.background_review import BackgroundReview
             self.background_review = BackgroundReview()
-            log.info("Background Review ready")
+            log.debug("Background Review ready")
             return self.background_review
         except Exception as e:
             log.warning("Background Review init failed", error=str(e))
@@ -4916,7 +5548,7 @@ class AgentEngine:
         try:
             from agent.context.conversation_compression import ConversationCompression
             self.conversation_compression = ConversationCompression()
-            log.info("Conversation Compression ready")
+            log.debug("Conversation Compression ready")
             return self.conversation_compression
         except Exception as e:
             log.warning("Conversation Compression init failed", error=str(e))
@@ -4927,7 +5559,7 @@ class AgentEngine:
         try:
             from agent.context.context_references import ContextReferences
             self.context_references = ContextReferences()
-            log.info("Context References ready")
+            log.debug("Context References ready")
             return self.context_references
         except Exception as e:
             log.warning("Context References init failed", error=str(e))
@@ -4940,7 +5572,7 @@ class AgentEngine:
         try:
             from agent.gateway.platform_manager import PlatformManager
             self.platform_manager = PlatformManager()
-            log.info("Platform Manager ready")
+            log.debug("Platform Manager ready")
             return self.platform_manager
         except Exception as e:
             log.warning("Platform Manager init failed", error=str(e))
@@ -4951,7 +5583,7 @@ class AgentEngine:
         try:
             from agent.lsp.servers import LspServerManager
             self.lsp_servers = LspServerManager()
-            log.info("LSP Servers ready")
+            log.debug("LSP Servers ready")
             return self.lsp_servers
         except Exception as e:
             log.warning("LSP Servers init failed", error=str(e))
@@ -4962,7 +5594,7 @@ class AgentEngine:
         try:
             from agent.lsp.workspace import LspWorkspace
             self.lsp_workspace = LspWorkspace()
-            log.info("LSP Workspace ready")
+            log.debug("LSP Workspace ready")
             return self.lsp_workspace
         except Exception as e:
             log.warning("LSP Workspace init failed", error=str(e))
@@ -4973,7 +5605,7 @@ class AgentEngine:
         try:
             from agent.acp.entry import ACPEntry
             self.acp_entry = ACPEntry(agent_engine=self)
-            log.info("ACP Entry ready")
+            log.debug("ACP Entry ready")
             return self.acp_entry
         except Exception as e:
             log.warning("ACP Entry init failed", error=str(e))
@@ -4984,7 +5616,7 @@ class AgentEngine:
         try:
             from agent.acp.server import ACPServer
             self.acp_server = ACPServer(agent_engine=self)
-            log.info("ACP Server ready")
+            log.debug("ACP Server ready")
             return self.acp_server
         except Exception as e:
             log.warning("ACP Server init failed", error=str(e))
@@ -4995,7 +5627,7 @@ class AgentEngine:
         try:
             from agent.acp.auth import ACPAuthManager
             self.acp_auth = ACPAuthManager()
-            log.info("ACP Auth ready")
+            log.debug("ACP Auth ready")
             return self.acp_auth
         except Exception as e:
             log.warning("ACP Auth init failed", error=str(e))
@@ -5006,7 +5638,7 @@ class AgentEngine:
         try:
             from agent.skill.skill_sync import SkillSyncManager
             self.skill_sync = SkillSyncManager()
-            log.info("Skill Sync ready")
+            log.debug("Skill Sync ready")
             return self.skill_sync
         except Exception as e:
             log.warning("Skill Sync init failed", error=str(e))
@@ -5017,7 +5649,7 @@ class AgentEngine:
         try:
             from agent.skill.skill_bundles import SkillBundler
             self.skill_bundles = SkillBundler()
-            log.info("Skill Bundles ready")
+            log.debug("Skill Bundles ready")
             return self.skill_bundles
         except Exception as e:
             log.warning("Skill Bundles init failed", error=str(e))
@@ -5030,7 +5662,7 @@ class AgentEngine:
         try:
             from agent.llm.model_cost_guard import ModelCostGuard
             self.model_cost_guard = ModelCostGuard()
-            log.info("Model Cost Guard ready")
+            log.debug("Model Cost Guard ready")
             return self.model_cost_guard
         except Exception as e:
             log.warning("Model Cost Guard init failed", error=str(e))
@@ -5041,7 +5673,7 @@ class AgentEngine:
         try:
             from agent.llm.auxiliary_client import AuxiliaryLLMClient
             self.auxiliary_client = AuxiliaryLLMClient()
-            log.info("Auxiliary LLM Client ready")
+            log.debug("Auxiliary LLM Client ready")
             return self.auxiliary_client
         except Exception as e:
             log.warning("Auxiliary LLM Client init failed", error=str(e))
@@ -5052,7 +5684,7 @@ class AgentEngine:
         try:
             from agent.llm.moa_aggregator import MoAAggregator
             self.moa_aggregator = MoAAggregator()
-            log.info("MoA Aggregator ready")
+            log.debug("MoA Aggregator ready")
             return self.moa_aggregator
         except Exception as e:
             log.warning("MoA Aggregator init failed", error=str(e))
@@ -5063,7 +5695,7 @@ class AgentEngine:
         try:
             from agent.security.streaming_scrubber import StreamingScrubber
             self.streaming_scrubber = StreamingScrubber()
-            log.info("Streaming Scrubber ready")
+            log.debug("Streaming Scrubber ready")
             return self.streaming_scrubber
         except Exception as e:
             log.warning("Streaming Scrubber init failed", error=str(e))
@@ -5074,7 +5706,7 @@ class AgentEngine:
         try:
             from agent.persistence.account_usage import AccountUsageTracker
             self.account_usage = AccountUsageTracker()
-            log.info("Account Usage Tracker ready")
+            log.debug("Account Usage Tracker ready")
             return self.account_usage
         except Exception as e:
             log.warning("Account Usage Tracker init failed", error=str(e))
@@ -5085,7 +5717,7 @@ class AgentEngine:
         try:
             from agent.evolution.learning_graph import LearningGraph
             self.learning_graph = LearningGraph()
-            log.info("Learning Graph ready")
+            log.debug("Learning Graph ready")
             return self.learning_graph
         except Exception as e:
             log.warning("Learning Graph init failed", error=str(e))
@@ -5096,7 +5728,7 @@ class AgentEngine:
         try:
             from agent.llm.rate_limit_tracker import RateLimitTracker
             self.rate_limit_tracker = RateLimitTracker()
-            log.info("Rate Limit Tracker ready")
+            log.debug("Rate Limit Tracker ready")
             return self.rate_limit_tracker
         except Exception as e:
             log.warning("Rate Limit Tracker init failed", error=str(e))
@@ -5107,7 +5739,7 @@ class AgentEngine:
         try:
             from agent.scheduler.blueprint_catalog import BlueprintCatalog
             self.blueprint_catalog = BlueprintCatalog()
-            log.info("Blueprint Catalog ready")
+            log.debug("Blueprint Catalog ready")
             return self.blueprint_catalog
         except Exception as e:
             log.warning("Blueprint Catalog init failed", error=str(e))
@@ -5118,7 +5750,7 @@ class AgentEngine:
         try:
             from agent.core.onboarding import OnboardingWizard
             self.onboarding = OnboardingWizard()
-            log.info("Onboarding Wizard ready")
+            log.debug("Onboarding Wizard ready")
             return self.onboarding
         except Exception as e:
             log.warning("Onboarding Wizard init failed", error=str(e))
@@ -5129,7 +5761,7 @@ class AgentEngine:
         try:
             from agent.gateway.hooks import HookManager as GatewayHookManager
             self.gateway_hooks = GatewayHookManager()
-            log.info("Gateway Hooks ready")
+            log.debug("Gateway Hooks ready")
             return self.gateway_hooks
         except Exception as e:
             log.warning("Gateway Hooks init failed", error=str(e))
@@ -5140,7 +5772,7 @@ class AgentEngine:
         try:
             from agent.gateway.slash_commands import SlashCommandManager
             self.slash_commands = SlashCommandManager()
-            log.info("Slash Commands ready")
+            log.debug("Slash Commands ready")
             return self.slash_commands
         except Exception as e:
             log.warning("Slash Commands init failed", error=str(e))
@@ -5172,7 +5804,7 @@ class AgentEngine:
             except Exception as _exc:
                 log_ignored(log, "engine._setup_safety_net.write_approval", _exc)
 
-            log.info("SafetyNet ready")
+            log.debug("SafetyNet ready")
             return self.safety_net
         except Exception as e:
             log.warning("SafetyNet init failed", error=str(e))
@@ -5201,9 +5833,9 @@ class AgentEngine:
             # P0-2: 延迟注入到 LoopController，启用工作流状态上下文注入
             if hasattr(self, "loop") and self.loop is not None:
                 self.loop._workflow_engine = self.workflow_engine
-                log.info("WorkflowEngine injected into LoopController")
+                log.debug("WorkflowEngine injected into LoopController")
 
-            log.info("WorkflowEngine ready")
+            log.debug("WorkflowEngine ready")
             return self.workflow_engine
         except Exception as e:
             log.warning("WorkflowEngine init failed", error=str(e))
@@ -5229,13 +5861,13 @@ class AgentEngine:
                 executor = getattr(self.loop, "executor", None)
                 if executor is not None and hasattr(executor, "set_perception_loop"):
                     executor.set_perception_loop(self.perception_loop)
-                    log.info("PerceptionActionLoop injected into Executor")
+                    log.debug("PerceptionActionLoop injected into Executor")
 
                 # P1-1: 延迟注入到 LoopController，启用感知上下文注入
                 self.loop._perception_loop = self.perception_loop
-                log.info("PerceptionActionLoop injected into LoopController")
+                log.debug("PerceptionActionLoop injected into LoopController")
 
-            log.info("PerceptionActionLoop ready")
+            log.debug("PerceptionActionLoop ready")
             return self.perception_loop
         except Exception as e:
             log.warning("PerceptionActionLoop init failed", error=str(e))
@@ -5255,13 +5887,13 @@ class AgentEngine:
             # P1-2: 延迟注入到 LoopController，启用知识上下文注入和对话后自动提取
             if hasattr(self, "loop") and self.loop is not None:
                 self.loop._knowledge_lifecycle = self.knowledge_lifecycle
-                log.info("KnowledgeLifecycle injected into LoopController")
+                log.debug("KnowledgeLifecycle injected into LoopController")
 
             # P1-2: 启动知识衰减定时任务，自动维护知识库
             await self.knowledge_lifecycle.start_decay_scheduler()
-            log.info("KnowledgeLifecycle decay scheduler started")
+            log.debug("KnowledgeLifecycle decay scheduler started")
 
-            log.info("KnowledgeLifecycle ready")
+            log.debug("KnowledgeLifecycle ready")
             return self.knowledge_lifecycle
         except Exception as e:
             log.warning("KnowledgeLifecycle init failed", error=str(e))
@@ -5294,7 +5926,7 @@ class AgentEngine:
                 try:
                     start_results = await self.mcp_lifecycle.start_all()
                     started = sum(1 for v in start_results.values() if v)
-                    log.info("MCP servers auto-started", total=len(start_results), success=started)
+                    log.debug("MCP servers auto-started", total=len(start_results), success=started)
                 except Exception as start_err:
                     log.warning("MCP auto-start failed", error=str(start_err))
 
@@ -5316,11 +5948,11 @@ class AgentEngine:
 
                     resource_sub.on_change(_on_resource_change)
                     await resource_sub.start_processor()
-                    log.info("MCP resource subscription bridge to LoopController active")
+                    log.debug("MCP resource subscription bridge to LoopController active")
             except Exception as bridge_err:
                 log.warning("MCP resource subscription bridge failed", error=str(bridge_err))
 
-            log.info("MCP Integration ready")
+            log.debug("MCP Integration ready")
             return self.mcp_client
         except Exception as e:
             log.warning("MCP Integration init failed", error=str(e))

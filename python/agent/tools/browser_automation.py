@@ -287,7 +287,8 @@ class BrowserAutomation:
         page = await self._get_or_create_page(session_id)
         try:
             return await page.text_content(selector) or ""
-        except Exception:
+        except Exception as _exc:
+            log.warning("异常降级处理", error=str(_exc))
             return ""
 
     async def get_elements(self, session_id: str, selector: str) -> list[ElementInfo]:
@@ -306,7 +307,8 @@ class BrowserAutomation:
                     ),
                 ))
             return result
-        except Exception:
+        except Exception as _exc:
+            log.warning("异常降级处理", error=str(_exc))
             return []
 
     async def execute_js(self, session_id: str, script: str) -> Any:
@@ -320,7 +322,8 @@ class BrowserAutomation:
         try:
             await page.wait_for_selector(selector, timeout=(timeout or self._config.default_timeout) * 1000)
             return True
-        except Exception:
+        except Exception as _exc:
+            log.warning("异常降级处理", error=str(_exc))
             return False
 
     async def get_page_content(self, session_id: str) -> PageContent:

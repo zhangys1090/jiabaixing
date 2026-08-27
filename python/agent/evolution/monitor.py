@@ -126,6 +126,7 @@ class PerformanceMonitor:
         self._baseline_metrics: dict[str, float] = {}
         self._baseline_samples: dict[str, int] = {}
         self._baseline_min_samples = 20
+        self._MAX_METRIC_KEYS = 500
 
         log.info(
             "PerformanceMonitor initialized",
@@ -165,6 +166,14 @@ class PerformanceMonitor:
         if name not in self._metrics:
             self._metrics[name] = deque(maxlen=self._window_size)
         self._metrics[name].append(record)
+        if len(self._metrics) > self._MAX_METRIC_KEYS:
+            oldest_keys = list(self._metrics.keys())[: len(self._metrics) - (self._MAX_METRIC_KEYS * 3 // 4)]
+            for k in oldest_keys:
+                self._metrics.pop(k, None)
+                self._consecutive_failures.pop(k, None)
+                self._consecutive_successes.pop(k, None)
+                self._baseline_metrics.pop(k, None)
+                self._baseline_samples.pop(k, None)
 
         # 更新连续计数
         if success:

@@ -5,12 +5,21 @@ from typing import Any
 
 from agent.llm.credential_pool import RotationStrategy
 from agent.llm.router import ProviderConfig, ProviderManager
+import logging
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 core_router = APIRouter()
 
 _llm_unavailable: bool = False
 _llm_unavailable_reason: str = ""
+
+_MAX_MESSAGE_LENGTH = 100000
+_MAX_HISTORY_LENGTH = 100
+_MAX_MESSAGES_LENGTH = 200
+_MAX_TOOLS_LENGTH = 100
+_MAX_CODE_CONTENT_LENGTH = 500000
+_MAX_USER_REQUEST_LENGTH = 50000
 
 
 class ChatRequest(BaseModel):
@@ -356,6 +365,10 @@ def _get_llm():
 @core_router.post("/chat")
 async def llm_chat(req: ChatRequest):
     global _llm_unavailable
+    if len(req.message) > _MAX_MESSAGE_LENGTH:
+        return {"success": False, "error": f"message too long (max {_MAX_MESSAGE_LENGTH} chars)", "content": ""}
+    if len(req.history) > _MAX_HISTORY_LENGTH:
+        return {"success": False, "error": f"history too long (max {_MAX_HISTORY_LENGTH} items)", "content": ""}
     llm = _get_llm()
     if not llm:
         return {"success": False, "error": "Engine not initialized", "content": ""}
@@ -370,6 +383,7 @@ async def llm_chat(req: ChatRequest):
                 )
                 return {"success": True, "content": result.get("content", "")}
             except Exception as e:
+                logger.warning("llm 异常处理", error=str(e))
                 return {"success": False, "error": str(e), "content": ""}
         return {"success": False, "error": _llm_unavailable_reason, "content": ""}
     messages: list[dict[str, str]] = []
@@ -382,12 +396,17 @@ async def llm_chat(req: ChatRequest):
         result = await llm.chat(messages=messages, use_cache=True)
         return {"success": True, "content": result.get("content", "")}
     except Exception as e:
+        logger.warning("llm 异常处理", error=str(e))
         _llm_unavailable = True
         return {"success": False, "error": str(e), "content": ""}
 
 
 @core_router.post("/chat-with-tools")
 async def llm_chat_with_tools(req: ChatWithToolsRequest):
+    if len(req.messages) > _MAX_MESSAGES_LENGTH:
+        return {"success": False, "error": f"messages too long (max {_MAX_MESSAGES_LENGTH} items)"}
+    if len(req.tools) > _MAX_TOOLS_LENGTH:
+        return {"success": False, "error": f"tools too long (max {_MAX_TOOLS_LENGTH} items)"}
     llm = _get_llm()
     if not llm:
         return {"success": False, "error": "Engine not initialized"}
@@ -407,6 +426,7 @@ async def llm_chat_with_tools(req: ChatWithToolsRequest):
             "finish_reason": result.get("finish_reason", "stop"),
         }
     except Exception as e:
+        logger.warning("llm 异常处理", error=str(e))
         return {"success": False, "error": str(e)}
 
 
@@ -426,6 +446,7 @@ async def llm_health():
         _llm_unavailable_reason = "Health check failed"
         return {"available": False, "message": "LLM health check failed"}
     except Exception as e:
+        logger.warning("llm 异常处理", error=str(e))
         _llm_unavailable = True
         _llm_unavailable_reason = str(e)
         return {"available": False, "message": str(e)}
@@ -482,6 +503,7 @@ async def llm_stream_chat(req: StreamChatRequest):
                     import json as _json
                     yield f"data: {_json.dumps(chunk, ensure_ascii=False)}\n\n"
         except Exception as e:
+            logger.warning("llm 异常处理", error=str(e))
             import json as _json
             yield f"data: {_json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
             yield f"data: [DONE]\n\n"
@@ -515,6 +537,7 @@ async def llm_multimodal_chat(req: MultimodalChatRequest):
         result = await llm.chat(messages=messages, use_cache=False)
         return {"success": True, "content": result.get("content", "")}
     except Exception as e:
+        logger.warning("llm 异常处理", error=str(e))
         return {"success": False, "error": str(e), "content": ""}
 
 
@@ -535,11 +558,16 @@ async def llm_multimodal_code_analysis(req: MultimodalCodeAnalysisRequest):
         result = await llm.chat(messages=messages, use_cache=False)
         return {"success": True, "content": result.get("content", "")}
     except Exception as e:
+        logger.warning("llm 异常处理", error=str(e))
         return {"success": False, "error": str(e), "content": ""}
 
 
 @core_router.post("/code-analyze")
 async def llm_code_analyze(req: CodeAnalyzeRequest):
+    if len(req.content) > _MAX_CODE_CONTENT_LENGTH:
+        return {"success": False, "error": f"content too long (max {_MAX_CODE_CONTENT_LENGTH} chars)", "content": ""}
+    if len(req.user_query) > _MAX_USER_REQUEST_LENGTH:
+        return {"success": False, "error": f"user_query too long (max {_MAX_USER_REQUEST_LENGTH} chars)", "content": ""}
     llm = _get_llm()
     if not llm:
         return {"success": False, "error": "Engine not initialized", "content": ""}
@@ -553,6 +581,7 @@ async def llm_code_analyze(req: CodeAnalyzeRequest):
         result = await llm.chat(messages=messages, use_cache=False)
         return {"success": True, "content": result.get("content", "")}
     except Exception as e:
+        logger.warning("llm 异常处理", error=str(e))
         return {"success": False, "error": str(e), "content": ""}
 
 
@@ -571,6 +600,7 @@ async def llm_code_modification_plan(req: CodeModificationPlanRequest):
         result = await llm.chat(messages=messages, use_cache=False)
         return {"success": True, "content": result.get("content", "")}
     except Exception as e:
+        logger.warning("llm 异常处理", error=str(e))
         return {"success": False, "error": str(e), "content": ""}
 
 
@@ -592,6 +622,7 @@ async def llm_code_modified_content(req: CodeModifiedContentRequest):
         result = await llm.chat(messages=messages, use_cache=False)
         return {"success": True, "content": result.get("content", "")}
     except Exception as e:
+        logger.warning("llm 异常处理", error=str(e))
         return {"success": False, "error": str(e), "content": ""}
 
 
@@ -614,4 +645,5 @@ async def llm_dev_generate_code(req: DevGenerateCodeRequest):
         result = await llm.chat(messages=messages, use_cache=False)
         return {"success": True, "content": result.get("content", "")}
     except Exception as e:
+        logger.warning("llm 异常处理", error=str(e))
         return {"success": False, "error": str(e), "content": ""}

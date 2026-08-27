@@ -16,7 +16,8 @@ import logging
 import subprocess
 from typing import Any, Sequence
 
-from agent.core.logger import log_ignored
+from agent.core.logger import log_ignored, StructuredLogger
+log = StructuredLogger("subprocess_util")
 
 log = logging.getLogger(__name__)
 
@@ -49,7 +50,8 @@ def run(
         # 超时属于「可被调用方感知并处理」的异常，不在此吞掉；仅记录便于排查。
         log.warning("subprocess_util.run timed out", cmd=" ".join(args), timeout=timeout)
         raise
-    except Exception as _exc:  # noqa: BLE001
+    except Exception as _exc:
+        log.debug("subprocess_util 异常处理", error=str(_exc))
         # 非超时异常（如 FileNotFoundError）同样透传；仅在完全无法继续时记录。
         log_ignored(log, "subprocess_util.run", _exc)
         raise

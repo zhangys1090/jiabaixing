@@ -6,6 +6,8 @@ from typing import Any, Protocol, runtime_checkable
 
 from agent.tools.mcp_tool_bridge import MCPToolBridge
 from agent.tools.registry import ToolDefinition, ToolRegistry, ToolResult
+import logging
+logger = logging.getLogger(__name__)
 
 # 默认仅桥接名称以该前缀开头的工具（MCPToolBridge 注册的工具前缀）
 _MCP_TOOL_PREFIX = "mcp_"
@@ -27,7 +29,7 @@ class ToolExecutionResult:
     success: bool
     output: str = ""
     error: str | None = None
-    metadata: dict[str, Any] = None  # type: ignore[assignment]
+    metadata: dict[str, Any] = None
 
     @classmethod
     def from_tool_result(cls, name: str, result: ToolResult) -> "ToolExecutionResult":
@@ -207,6 +209,7 @@ class MCPToolOrchestrator:
                 result = await self.registry.execute(call.tool_name, call.params)
                 results.append(ToolExecutionResult.from_tool_result(call.tool_name, result))
             except Exception as exc:
+                logger.warning("orchestrator 异常处理", error=str(exc))
                 results.append(
                     ToolExecutionResult(
                         tool_name=call.tool_name,

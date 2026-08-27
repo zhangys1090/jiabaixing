@@ -23,8 +23,8 @@ from enum import Enum
 from typing import Any, Awaitable, Callable
 
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("robotic_arm_driver")
+
 
 
 class ArmDriverType(str, Enum):
@@ -153,6 +153,7 @@ class RoboticArmDriver:
             return result
 
         except Exception as e:
+            log.debug("robotic_arm_driver 异常处理", error=str(e))
             return {
                 "success": False,
                 "error": str(e),
@@ -257,6 +258,7 @@ class RoboticArmDriver:
                 "raw_response": resp_data,
             }
         except Exception as e:
+            log.debug("robotic_arm_driver 异常处理", error=str(e))
             return {"success": False, "error": f"HTTP API 调用失败: {e}"}
 
     async def _execute_ros2(self, action: Any) -> dict[str, Any]:
@@ -284,6 +286,7 @@ class RoboticArmDriver:
         except ImportError:
             return {"success": False, "error": "pyserial 未安装"}
         except Exception as e:
+            log.debug("robotic_arm_driver 异常处理", error=str(e))
             return {"success": False, "error": f"串口通信失败: {e}"}
 
     def _check_safety(self, action: Any) -> bool:

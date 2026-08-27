@@ -22,8 +22,8 @@ from enum import Enum
 from typing import Any, Awaitable, Callable
 
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("locomotion_controller")
+
 
 
 class LocomotionType(str, Enum):
@@ -173,6 +173,7 @@ class LocomotionController:
             try:
                 return await self._backend_executor(action)
             except Exception as e:
+                log.debug("locomotion_controller 异常处理", error=str(e))
                 return LocomotionResult(
                     success=False,
                     action_type=action.action_type,

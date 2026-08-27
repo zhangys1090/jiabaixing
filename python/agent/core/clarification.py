@@ -32,8 +32,8 @@ from enum import Enum
 from typing import Any
 
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("clarification")
+
 
 
 class AmbiguityLevel(str, Enum):

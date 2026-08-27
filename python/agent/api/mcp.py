@@ -120,14 +120,14 @@ class RegisterServerRequest(BaseModel):
         denied_tools: 禁用工具列表.
     """
 
-    name: str = Field(..., description="服务器唯一名称")
-    command: str = Field(..., description="STDIO 模式可执行命令")
+    name: str = Field(..., description="服务器唯一名称", max_length=100)
+    command: str = Field(..., description="STDIO 模式可执行命令", max_length=500)
     args: list[str] = Field(default_factory=list, description="命令参数列表")
-    description: str = ""
+    description: str = Field(default="", max_length=1000)
     enabled: bool = True
     auto_start: bool = False
-    transport: str = "stdio"
-    url: str = ""
+    transport: str = Field(default="stdio", pattern="^(stdio|http\\+sse)$")
+    url: str = Field(default="", max_length=500)
     tool_filtering: bool = False
     allowed_tools: list[str] | None = None
     denied_tools: list[str] | None = None

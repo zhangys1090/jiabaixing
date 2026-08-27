@@ -59,7 +59,24 @@ const DEFAULT_SANDBOX_CONFIG: SandboxConfig = {
   auditLog: true,
 };
 
+export interface AutoBanConfig {
+  maxViolationsPerWindow: number;
+  windowMs: number;
+  banDurationMs: number;
+}
+
+const DEFAULT_AUTO_BAN: AutoBanConfig = {
+  maxViolationsPerWindow: 10,
+  windowMs: 60_000,
+  banDurationMs: 300_000,
+};
+
 export class PluginSandbox {
+  private static readonly MAX_VIOLATIONS = 2000;
+  private static readonly MAX_VIOLATIONS_TRIM_TO = 1500;
+  private static readonly MAX_AUDIT_LOG = 5000;
+  private static readonly MAX_AUDIT_LOG_TRIM_TO = 4000;
+
   private configs: Map<string, SandboxConfig> = new Map();
   private violations: SandboxViolation[] = [];
   private resourceUsage: Map<string, SandboxResourceUsage> = new Map();
@@ -70,17 +87,31 @@ export class PluginSandbox {
     timestamp: number;
     details: string;
   }> = [];
+  private bannedPlugins: Map<
+    string,
+    { reason: string; bannedAt: number; expiresAt: number }
+  > = new Map();
+  private autoBanConfig: AutoBanConfig = DEFAULT_AUTO_BAN;
 
-  constructor() {}
+  constructor(autoBanConfig?: Partial<AutoBanConfig>) {
+    if (autoBanConfig) {
+      this.autoBanConfig = { ...DEFAULT_AUTO_BAN, ...autoBanConfig };
+    }
+  }
 
-  registerPlugin(pluginId: string, descriptor: JiabaixingPluginDescriptor): void {
+  registerPlugin(
+    pluginId: string,
+    descriptor: JiabaixingPluginDescriptor
+  ): void {
     const sandboxConfig = descriptor.sandbox;
     if (!sandboxConfig?.enabled) return;
 
     const config: SandboxConfig = {
-      maxMemoryMB: sandboxConfig.maxMemoryMB ?? DEFAULT_SANDBOX_CONFIG.maxMemoryMB,
+      maxMemoryMB:
+        sandboxConfig.maxMemoryMB ?? DEFAULT_SANDBOX_CONFIG.maxMemoryMB,
       maxCpuMs: sandboxConfig.maxCpuMs ?? DEFAULT_SANDBOX_CONFIG.maxCpuMs,
-      networkAccess: sandboxConfig.networkAccess ?? DEFAULT_SANDBOX_CONFIG.networkAccess,
+      networkAccess:
+        sandboxConfig.networkAccess ?? DEFAULT_SANDBOX_CONFIG.networkAccess,
       filesystemPaths: sandboxConfig.filesystemPaths ?? [],
       allowedPermissions: sandboxConfig.permissions ?? descriptor.permissions,
       timeoutMs: DEFAULT_SANDBOX_CONFIG.timeoutMs,
@@ -113,7 +144,69 @@ export class PluginSandbox {
     return this.configs.has(pluginId);
   }
 
-  checkPermission(pluginId: string, permission: PluginPermission, operation: string): boolean {
+  isBanned(pluginId: string): boolean {
+    const ban = this.bannedPlugins.get(pluginId);
+    if (!ban) return false;
+    if (Date.now() >= ban.expiresAt) {
+      this.bannedPlugins.delete(pluginId);
+      Logger.info(`🔒 插件 ${pluginId} 封禁已到期，自动解封`, 'PluginSandbox');
+      return false;
+    }
+    return true;
+  }
+
+  getBanInfo(
+    pluginId: string
+  ): { reason: string; bannedAt: number; expiresAt: number } | null {
+    const ban = this.bannedPlugins.get(pluginId);
+    if (!ban) return null;
+    if (Date.now() >= ban.expiresAt) {
+      this.bannedPlugins.delete(pluginId);
+      return null;
+    }
+    return ban;
+  }
+
+  unbanPlugin(pluginId: string): boolean {
+    return this.bannedPlugins.delete(pluginId);
+  }
+
+  private checkAutoBan(pluginId: string): void {
+    const now = Date.now();
+    const windowStart = now - this.autoBanConfig.windowMs;
+    const recentViolations = this.violations.filter(
+      (v) => v.pluginId === pluginId && v.timestamp >= windowStart && v.blocked
+    );
+
+    if (recentViolations.length >= this.autoBanConfig.maxViolationsPerWindow) {
+      const expiresAt = now + this.autoBanConfig.banDurationMs;
+      this.bannedPlugins.set(pluginId, {
+        reason: `${recentViolations.length} 次违规在 ${this.autoBanConfig.windowMs / 1000}s 内`,
+        bannedAt: now,
+        expiresAt,
+      });
+      Logger.error(
+        `🔒 插件 ${pluginId} 已被自动封禁: ${recentViolations.length} 次违规在 ${this.autoBanConfig.windowMs / 1000}s 内，封禁 ${this.autoBanConfig.banDurationMs / 1000}s`,
+        undefined,
+        'PluginSandbox'
+      );
+    }
+  }
+
+  checkPermission(
+    pluginId: string,
+    permission: PluginPermission,
+    operation: string
+  ): boolean {
+    if (this.isBanned(pluginId)) {
+      const ban = this.bannedPlugins.get(pluginId)!;
+      Logger.warn(
+        `🔒 沙箱拦截: ${pluginId} 已被封禁 (${ban.reason})`,
+        'PluginSandbox'
+      );
+      return false;
+    }
+
     const config = this.configs.get(pluginId);
     if (!config) return true;
 
@@ -131,12 +224,14 @@ export class PluginSandbox {
     };
 
     this.violations.push(violation);
+    this.trimViolationsIfNeeded();
 
     if (!allowed) {
       Logger.warn(
         `🔒 沙箱拦截: ${pluginId} 尝试 ${operation} (需要 ${permission})`,
         'PluginSandbox'
       );
+      this.checkAutoBan(pluginId);
     }
 
     if (config.auditLog) {
@@ -146,19 +241,30 @@ export class PluginSandbox {
         timestamp: Date.now(),
         details: violation.details,
       });
+      this.trimAuditLogIfNeeded();
     }
 
     return allowed;
   }
 
-  checkFileAccess(pluginId: string, filePath: string, mode: 'read' | 'write'): boolean {
+  checkFileAccess(
+    pluginId: string,
+    filePath: string,
+    mode: 'read' | 'write'
+  ): boolean {
     const config = this.configs.get(pluginId);
     if (!config) return true;
 
-    const permission: PluginPermission = mode === 'read' ? 'file:read' : 'file:write';
+    const permission: PluginPermission =
+      mode === 'read' ? 'file:read' : 'file:write';
 
     if (!config.allowedPermissions.includes(permission)) {
-      this.recordViolation(pluginId, permission, `file_${mode}:${filePath}`, true);
+      this.recordViolation(
+        pluginId,
+        permission,
+        `file_${mode}:${filePath}`,
+        true
+      );
       return false;
     }
 
@@ -202,8 +308,13 @@ export class PluginSandbox {
   async executeInSandbox<T>(
     pluginId: string,
     fn: () => Promise<T>,
-    context?: SandboxCallContext
+    _context?: SandboxCallContext
   ): Promise<T> {
+    if (this.isBanned(pluginId)) {
+      const ban = this.bannedPlugins.get(pluginId)!;
+      throw new Error(`插件 ${pluginId} 已被封禁: ${ban.reason}`);
+    }
+
     const config = this.configs.get(pluginId);
     if (!config) {
       return fn();
@@ -267,20 +378,27 @@ export class PluginSandbox {
     return [...this.violations];
   }
 
-  getResourceUsage(pluginId?: string): SandboxResourceUsage | SandboxResourceUsage[] {
+  getResourceUsage(
+    pluginId?: string
+  ): SandboxResourceUsage | SandboxResourceUsage[] {
     if (pluginId) {
-      return this.resourceUsage.get(pluginId) ?? {
-        pluginId,
-        memoryMB: 0,
-        cpuMs: 0,
-        callCount: 0,
-        lastCallAt: 0,
-      };
+      return (
+        this.resourceUsage.get(pluginId) ?? {
+          pluginId,
+          memoryMB: 0,
+          cpuMs: 0,
+          callCount: 0,
+          lastCallAt: 0,
+        }
+      );
     }
     return Array.from(this.resourceUsage.values());
   }
 
-  getAuditLog(pluginId?: string, limit: number = 100): Array<{
+  getAuditLog(
+    pluginId?: string,
+    limit: number = 100
+  ): Array<{
     pluginId: string;
     action: string;
     timestamp: number;
@@ -322,9 +440,14 @@ export class PluginSandbox {
     this.resourceUsage.clear();
     this.activeCalls.clear();
     this.auditLog = [];
+    this.bannedPlugins.clear();
   }
 
-  private withTimeout<T>(promise: Promise<T>, ms: number, pluginId: string): Promise<T> {
+  private withTimeout<T>(
+    promise: Promise<T>,
+    ms: number,
+    pluginId: string
+  ): Promise<T> {
     if (ms <= 0) return promise;
 
     return new Promise<T>((resolve, reject) => {
@@ -345,7 +468,11 @@ export class PluginSandbox {
     });
   }
 
-  private updateResourceUsage(pluginId: string, elapsedMs: number, _memoryBeforeMB: number): void {
+  private updateResourceUsage(
+    pluginId: string,
+    elapsedMs: number,
+    _memoryBeforeMB: number
+  ): void {
     const usage = this.resourceUsage.get(pluginId);
     if (!usage) return;
 
@@ -361,10 +488,16 @@ export class PluginSandbox {
 
     const config = this.configs.get(pluginId);
     if (config && usage.memoryMB > config.maxMemoryMB) {
-      Logger.warn(
-        `🔒 沙箱警告: ${pluginId} 内存使用 ${usage.memoryMB.toFixed(1)}MB > ${config.maxMemoryMB}MB`,
+      Logger.error(
+        `🔒 沙箱内存超限: ${pluginId} 内存使用 ${usage.memoryMB.toFixed(1)}MB > ${config.maxMemoryMB}MB，触发自动封禁`,
+        undefined,
         'PluginSandbox'
       );
+      this.bannedPlugins.set(pluginId, {
+        reason: `内存超限 ${usage.memoryMB.toFixed(1)}MB > ${config.maxMemoryMB}MB`,
+        bannedAt: Date.now(),
+        expiresAt: Date.now() + this.autoBanConfig.banDurationMs,
+      });
     }
   }
 
@@ -386,6 +519,11 @@ export class PluginSandbox {
     };
 
     this.violations.push(violation);
+    if (this.violations.length > PluginSandbox.MAX_VIOLATIONS) {
+      this.violations = this.violations.slice(
+        -PluginSandbox.MAX_VIOLATIONS_TRIM_TO
+      );
+    }
 
     const config = this.configs.get(pluginId);
     if (config?.auditLog) {
@@ -395,6 +533,25 @@ export class PluginSandbox {
         timestamp: Date.now(),
         details: violation.details,
       });
+      if (this.auditLog.length > PluginSandbox.MAX_AUDIT_LOG) {
+        this.auditLog = this.auditLog.slice(
+          -PluginSandbox.MAX_AUDIT_LOG_TRIM_TO
+        );
+      }
+    }
+  }
+
+  private trimViolationsIfNeeded(): void {
+    if (this.violations.length > PluginSandbox.MAX_VIOLATIONS) {
+      this.violations = this.violations.slice(
+        -PluginSandbox.MAX_VIOLATIONS_TRIM_TO
+      );
+    }
+  }
+
+  private trimAuditLogIfNeeded(): void {
+    if (this.auditLog.length > PluginSandbox.MAX_AUDIT_LOG) {
+      this.auditLog = this.auditLog.slice(-PluginSandbox.MAX_AUDIT_LOG_TRIM_TO);
     }
   }
 }

@@ -59,7 +59,12 @@ export class DataSovereigntyPipeline {
       }
       try {
         this.auditDb.pragma('journal_mode = WAL');
-      } catch {}
+      } catch (pragmaErr) {
+        Logger.debug(
+          `数据主权审计 WAL 模式设置跳过: ${(pragmaErr as Error).message}`,
+          'DataSovereigntyPipeline'
+        );
+      }
 
       this.auditDb.exec(`
         CREATE TABLE IF NOT EXISTS data_access_audit (
@@ -152,7 +157,7 @@ export class DataSovereigntyPipeline {
     const encryptedCount = (
       this.auditDb
         .prepare(
-          "SELECT COUNT(*) as count FROM data_access_audit WHERE purpose LIKE '%encrypt%'"
+          "SELECT COUNT(*) as count FROM data_access_audit WHERE operation = 'encrypt' OR purpose LIKE '%encrypt%'"
         )
         .get() as { count: number }
     ).count;
@@ -160,12 +165,12 @@ export class DataSovereigntyPipeline {
     const writeCount = (
       this.auditDb
         .prepare(
-          "SELECT COUNT(*) as count FROM data_access_audit WHERE operation = 'write'"
+          "SELECT COUNT(*) as count FROM data_access_audit WHERE operation IN ('write', 'delete', 'export')"
         )
         .get() as { count: number }
     ).count;
 
-    const encryptionRate = writeCount > 0 ? encryptedCount / writeCount : 0;
+    const encryptionRate = writeCount > 0 ? encryptedCount / writeCount : 1;
 
     const typeRows = this.auditDb
       .prepare(

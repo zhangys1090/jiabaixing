@@ -190,6 +190,15 @@ import {
 } from './lsp/lsp_symbols';
 
 // === 元工具（动态工具自创造） ===
+import { TOOL_DEFINE_DEF, createToolDefineExecutor } from './meta/tool_define';
+import {
+  TOOL_INSPECT_DEF,
+  createToolInspectExecutor,
+} from './meta/tool_inspect';
+import {
+  TOOL_UNDEFINE_DEF,
+  createToolUndefineExecutor,
+} from './meta/tool_undefine';
 
 // === 工具执行器工厂 ===
 import {
@@ -599,7 +608,10 @@ export function registerHarnessTools(
   const metaDeps = { toolRegistry };
   toolRegistry.register(TOOL_DEFINE_DEF, createToolDefineExecutor(metaDeps));
   toolRegistry.register(TOOL_INSPECT_DEF, createToolInspectExecutor(metaDeps));
-  toolRegistry.register(TOOL_UNDEFINE_DEF, createToolUndefineExecutor(metaDeps));
+  toolRegistry.register(
+    TOOL_UNDEFINE_DEF,
+    createToolUndefineExecutor(metaDeps)
+  );
 
   Logger.info(
     `🔧 Harness 工具注册完成: ${toolRegistry.size} 个工具`,

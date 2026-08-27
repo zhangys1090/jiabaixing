@@ -61,8 +61,18 @@ async function tryReleasePort(port: number): Promise<boolean> {
       const match = line.match(/\s+(\d+)\s*$/);
       if (match) {
         const pid = match[1];
+        if (!/^\d+$/.test(pid)) {
+          Logger.warn(`⚠️ 无效的PID格式，跳过: ${pid}`);
+          continue;
+        }
         await new Promise<void>((resolve) => {
-          exec(`taskkill /F /PID ${pid}`, (error: Error | null) => {
+          const safePid = parseInt(pid, 10);
+          if (!Number.isFinite(safePid) || safePid <= 0) {
+            Logger.warn(`⚠️ PID超出有效范围，跳过: ${pid}`);
+            resolve();
+            return;
+          }
+          exec(`taskkill /F /PID ${safePid}`, (error: Error | null) => {
             if (error) {
               Logger.warn(`⚠️ 无法终止进程 ${pid}：${error.message}`);
               resolve();

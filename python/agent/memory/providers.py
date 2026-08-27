@@ -16,7 +16,7 @@
 
     from agent.memory.providers import MemoryProviderFactory
 
-    provider = MemoryProviderFactory.create("mem0", api_key="m0-...")
+    provider = MemoryProviderFactory.create("mem0", api_key=os.environ["MEM0_API_KEY"])
     await provider.store("user_123", "用户喜欢简洁的回答", memory_type="long_term")
     results = await provider.search("user_123", "用户偏好")
 """
@@ -117,6 +117,7 @@ class BuiltinMemoryProvider(MemoryProvider):
         self._dir = data_dir or DATA_ROOT / "memory"
         self._store: dict[str, list[MemoryItem]] = defaultdict(list)
         self._by_id: dict[str, MemoryItem] = {}
+        self._MAX_USERS = 5000
         self._load()
 
     def _load(self) -> None:
@@ -158,6 +159,11 @@ class BuiltinMemoryProvider(MemoryProvider):
         )
         self._store[user_id].append(m)
         self._by_id[m.id] = m
+        if len(self._store) > self._MAX_USERS:
+            oldest_users = list(self._store.keys())[: len(self._store) - (self._MAX_USERS * 3 // 4)]
+            for uid in oldest_users:
+                for item in self._store.pop(uid, []):
+                    self._by_id.pop(item.id, None)
         self._save_user(user_id)
         return m
 
@@ -211,12 +217,11 @@ class HonchoProvider(MemoryProvider):
             return await self._fallback.store(user_id, content, **kwargs)
         try:
             import httpx
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.post(
                     f"{self._base_url}/v1/memories",
                     headers={"Authorization": f"Bearer {self._api_key}"},
                     json={"user_id": user_id, "content": content, **kwargs},
-                    timeout=30,
                 )
                 if resp.status_code == 200:
                     data = resp.json()
@@ -230,12 +235,11 @@ class HonchoProvider(MemoryProvider):
             return await self._fallback.search(user_id, query, limit, **kwargs)
         try:
             import httpx
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.post(
                     f"{self._base_url}/v1/memories/search",
                     headers={"Authorization": f"Bearer {self._api_key}"},
                     json={"user_id": user_id, "query": query, "limit": limit},
-                    timeout=30,
                 )
                 if resp.status_code == 200:
                     data = resp.json()
@@ -270,12 +274,11 @@ class Mem0Provider(MemoryProvider):
             return await self._fallback.store(user_id, content, **kwargs)
         try:
             import httpx
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.post(
                     "https://api.mem0.ai/v1/memories",
                     headers={"Authorization": f"Token {self._api_key}"},
                     json={"messages": [{"role": "user", "content": content}], "user_id": user_id},
-                    timeout=30,
                 )
                 if resp.status_code in (200, 201):
                     return MemoryItem(id=str(uuid.uuid4()), user_id=user_id, content=content)
@@ -288,12 +291,11 @@ class Mem0Provider(MemoryProvider):
             return await self._fallback.search(user_id, query, limit, **kwargs)
         try:
             import httpx
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.get(
                     "https://api.mem0.ai/v1/memories",
                     headers={"Authorization": f"Token {self._api_key}"},
                     params={"user_id": user_id, "q": query, "limit": limit},
-                    timeout=30,
                 )
                 if resp.status_code == 200:
                     data = resp.json()

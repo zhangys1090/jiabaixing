@@ -5,12 +5,14 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from agent.core.types import RiskLevel
 from agent.security.sensitive_detector import (
     CheckScene,
-    RiskLevel,
     check_sensitive_info,
 )
 from agent.core.logger import log_ignored
+import logging
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -130,6 +132,7 @@ class IndependentEvaluationService:
             try:
                 llm_eval = await self._llm_deep_evaluate(input_data)
             except Exception as _exc:
+                logger.warning("independent_service 异常处理", error=str(_exc))
                 log_ignored(None, "independent_service.IndependentEvaluationService.evaluate", _exc)
 
         return self._merge_results(rule_eval, llm_eval)
@@ -519,7 +522,8 @@ class IndependentEvaluationService:
                     reasoning=parsed.get("reasoning", ""),
                     passed=parsed.get("score", 50) >= 60,
                 ))
-            except Exception:
+            except Exception as e:
+                logger.warning("independent_service.judge 评分失败", judge=getattr(judge, "name", "unknown"), error=str(e))
                 scores.append(JudgeScore(
                     judge_name=getattr(judge, "name", "unknown"),
                     score=50,

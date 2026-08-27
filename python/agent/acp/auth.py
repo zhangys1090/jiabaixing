@@ -32,6 +32,15 @@ log = StructuredLogger("acp.auth")
 
 
 class PermissionLevel(Enum):
+    """ACP 协议权限级别 — ACP 领域特化类型。
+
+    与 core.types.Permission（工具操作枚举）语义不同：
+    - core.types.Permission: 系统级工具权限（memory:read, file:write 等）
+    - PermissionLevel: ACP 协议级权限（read/write/admin）
+
+    两者不应混用。ACP 认证场景使用此类型。
+    """
+
     READ = "read"
     WRITE = "write"
     ADMIN = "admin"
