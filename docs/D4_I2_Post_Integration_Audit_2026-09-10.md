@@ -239,3 +239,48 @@ user_input: "用echo探针执行D4-I4全局回放验证"
   均为未提交重构的预存问题，建议独立任务分簇清理
 - TS 侧 jest 因 node_modules 损坏不可运行，AuthoritySignature 等 TS 测试已入库待 CI 修复后生效
 - Decision 历史仅内存态（重启即失），持久化属 D6 Memory Authority 范畴
+
+---
+
+## 七、D5 Learning Authority（同日, commit 5fa5cb0）
+
+### 现状审计（D5-A）
+
+| 层 | 现状 | 结论 |
+| --- | --- | --- |
+| TS `LearningAuthority.ts` | 算法完整且被 TS DecisionAuthority/GoalAuthority 消费 | 但按 §0.1 Learning 归 Python 主实现，不能作为权威 |
+| Python `continual_learning.py` | 有经验环（record_experience/retrieve_relevant_knowledge 注入 prompt） | prompt 级软影响，**不进权威裁决** |
+| Python `decision_authority.py` | 零学习集成 | **D5 闭环在权威层缺失** ← 本轮补齐 |
+
+### 实现（Python 主实现，语义对齐 TS + 一处有意分歧）
+
+- `agent/core/learning_authority.py`：`compute_prediction_error`（match/over/under
+  + 词重叠分类）→ `learn`（信念库，RLock 线程安全，只从意外中学习）→
+  `adjust_candidate`（置信度/进度偏移 + `[learned:]` 审计注记）；
+  `record_decision` 登记 decisionId→provenance 供证据侧回查 proposer
+- **有意分歧**：contextSignature 用 `proposer::actionName`（工具名）而非 TS 的
+  `actionType`——Python LLMProposer 的 actionType 恒为 `tool_call`，TS 粒度会把
+  全部工具折叠进同一信念，无法表达"bash 常失败"这类事实
+- 接线：`decision_authority.decide()` 裁决前对全部候选应用偏移（selectionReason
+  记 `learningAdjustments=N`）；`goal_authority.updateFromEvidence()` 写回即学习
+  （失败不阻断记账，log_ignored 可观测）
+
+### 验收（test_d5_learning_replay.py，2/2 通过）
+
+```text
+第 1 轮: Goal A → bash 胜出(conf .9) → Evidence failed
+  → PredictionError(over_prediction, 1.0) → Belief(llm::bash, confBias=-0.3)
+第 2 轮: Goal B 同上下文 → bash 被压低(0.54) → python 胜出(0.67)
+  → selectionReason 含 learningAdjustments=1, 候选含 [learned:] 注记
+```
+
+- ✅ 失败 Evidence 改变未来决策（闭环核心断言）
+- ✅ match 不更新（只从意外中学习）/ under_prediction 正向偏移
+- ✅ 无信念路径与 D4 零回归 / belief 可按 goalId replay 溯源
+- ✅ 回归：D4 33 + I4 2 + core_loop/gateway 合计 **122/122**；红线 12/12；导入扫描 PASS
+
+### D5 遗留（不阻塞闭环验收）
+
+- 信念库仍为内存态，持久化属 D6 Memory Authority 范畴
+- TS `LearningAuthority` 的 actionType 粒度问题建议后续与 Python 对齐
+- EvolutionEngine 尚未消费采样/信念结果（延续 2026-07 诚实遗留清单）
