@@ -183,6 +183,14 @@ class DecisionAuthority:
         except Exception as _lrn_exc:
             log_ignored(log, "DecisionAuthority.record_decision", _lrn_exc)
 
+        # D6: Decision 持久化（Risk 1 — TS 交叉验证数据源）。失败不阻断裁决。
+        try:
+            from agent.core.memory_authority import MemoryAuthority
+
+            MemoryAuthority.getInstance().persist_decision(decision)
+        except Exception as _persist_exc:
+            log_ignored(log, "DecisionAuthority.persist_decision", _persist_exc)
+
         return decision
 
     async def decideWithProposers(

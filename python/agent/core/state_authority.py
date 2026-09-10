@@ -49,10 +49,21 @@ class StateAuthority:
 
     def __init__(self) -> None:
         self._providers: StateReadProviders | None = None
+        self._memory_provider: Callable[[str], Any] | None = None
         self._latest_snapshot: CanonicalDecisionSnapshot | None = None
 
     def registerProviders(self, providers: StateReadProviders) -> None:
         self._providers = providers
+
+    def registerMemoryProvider(
+        self, read_memory: Callable[[str], Any]
+    ) -> None:
+        """D6: 独立注册 readMemory（coroutine(query)->MemoryView）。
+
+        允许在全量 StateReadProviders 就绪前，先接通"检索服务 Decision"
+        （D6 验收②）。幂等，后注册覆盖前者。
+        """
+        self._memory_provider = read_memory
 
     async def captureSnapshot(
         self,
@@ -68,7 +79,15 @@ class StateAuthority:
         resolvedGoalIds = [g.goalId for g in goals]
         primaryDescription = goals[0].description if goals else ""
 
+        # D6: 无全量 providers 时，独立记忆 provider 仍可服务 Decision（验收②）
         if self._providers is None:
+            memory = MemoryView(query=primaryDescription)
+            if self._memory_provider is not None and primaryDescription:
+                try:
+                    memory = await self._memory_provider(primaryDescription)
+                except Exception:
+                    memory = MemoryView(query=primaryDescription)
+
             snapshot = CanonicalDecisionSnapshot(
                 snapshotId=_gen_id("SS"),
                 timestamp=time.time(),
@@ -80,7 +99,7 @@ class StateAuthority:
                     safetyStatus="nominal",
                 ),
                 world=WorldView(),
-                memory=MemoryView(query=primaryDescription),
+                memory=memory,
                 context=ContextView(),
                 capabilities=CapabilitySet(),
             )

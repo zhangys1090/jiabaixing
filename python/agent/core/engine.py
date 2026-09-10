@@ -1073,6 +1073,24 @@ class AgentEngine:
             except Exception as _r2_exc:
                 log.warning("R2: ToolSelectionMemory injection failed", error=str(_r2_exc))
 
+            # D6: 记忆检索注入 StateAuthority（检索服务 Decision）
+            _mem = getattr(self, "memory", None)
+            if _mem is not None:
+                try:
+                    self.conversation.set_memory_engine(_mem)
+                    log.debug("D6: MemoryEngine readMemory provider wired into StateAuthority")
+                except Exception as _d6_exc:
+                    log.warning("D6 memory provider wiring failed", error=str(_d6_exc))
+
+            # D6: 信念库启动恢复（Risk 4 — 跨重启存活）
+            try:
+                from agent.core.learning_authority import LearningAuthority
+                _restored = LearningAuthority.getInstance().restore_from_store()
+                if _restored:
+                    log.info("D6: LearningAuthority beliefs restored from store", count=_restored)
+            except Exception as _d6_restore_exc:
+                log.warning("D6 belief restore failed", error=str(_d6_restore_exc))
+
         # A3: 行为边界监控初始化
         try:
             from agent.safety.behavior_monitor import BehaviorMonitor

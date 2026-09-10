@@ -185,6 +185,7 @@ class ConversationLoop:
         self._operation_rollback: Any = None
         self._world_model: Any = None
         self._continual_learning: Any = None
+        self._memory_engine: Any = None
         self._cross_device_coordinator: Any = None
 
     def set_long_task_orchestrator(self, orchestrator: Any) -> None:
@@ -257,6 +258,37 @@ class ConversationLoop:
     def set_continual_learning(self, loop: Any) -> None:
         """P2-2: 持续学习回路 — 经验采集+策略优化+知识沉淀。"""
         self._continual_learning = loop
+
+    def set_memory_engine(self, engine: Any) -> None:
+        """D6: 接通"检索服务 Decision" — MemoryEngine.search 注入 StateAuthority
+        快照的 MemoryView（D6 验收②）。幂等，engine 为 None 时忽略。"""
+        if engine is None:
+            return
+        self._memory_engine = engine
+        if self._state_authority is not None:
+            async def _read_memory(query: str) -> Any:
+                from agent.core.authority_types import MemoryView
+
+                try:
+                    hits = await engine.search(query, limit=3)
+                except Exception as _search_exc:
+                    log.warning("D6 readMemory 检索失败，返回空视图", error=str(_search_exc))
+                    return MemoryView(query=query)
+                return MemoryView(
+                    query=query,
+                    relevantMemories=[
+                        {
+                            "content": h.get("content", ""),
+                            "memoryType": h.get("memory_type", h.get("type", "")),
+                            "relevanceScore": h.get("relevance", h.get("relevanceScore", 0.0)),
+                            "timestamp": h.get("timestamp"),
+                        }
+                        for h in (hits or [])[:3]
+                        if isinstance(h, dict)
+                    ],
+                )
+
+            self._state_authority.registerMemoryProvider(_read_memory)
 
     def set_cross_device_coordinator(self, coordinator: Any) -> None:
         """P2-3: 跨设备协同 — 多设备调度+故障转移。"""

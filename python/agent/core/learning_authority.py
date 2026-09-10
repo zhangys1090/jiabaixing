@@ -296,7 +296,7 @@ class LearningAuthority:
                 decay = max(0.3, 1 / existing.sampleCount)
                 new_conf = existing.confidenceBias * (1 - decay) + update.confidenceAdjustment * decay
                 new_prog = existing.progressBias * (1 - decay) + update.progressAdjustment * decay
-                self._beliefs[update.contextSignature] = LearnedBelief(
+                belief = LearnedBelief(
                     contextSignature=update.contextSignature,
                     proposerId=update.proposerId,
                     actionName=update.actionName,
@@ -306,7 +306,7 @@ class LearningAuthority:
                     lastUpdated=time.time(),
                 )
             else:
-                self._beliefs[update.contextSignature] = LearnedBelief(
+                belief = LearnedBelief(
                     contextSignature=update.contextSignature,
                     proposerId=update.proposerId,
                     actionName=update.actionName,
@@ -315,6 +315,28 @@ class LearningAuthority:
                     sampleCount=1,
                     lastUpdated=time.time(),
                 )
+            self._beliefs[update.contextSignature] = belief
+
+        # D6: 信念持久化（Risk 4 — 信念跨进程/重启存活）。失败不阻断学习。
+        try:
+            from agent.core.memory_authority import MemoryAuthority
+
+            MemoryAuthority.getInstance().persist_belief_update(update, belief)
+        except Exception as _persist_exc:
+            log_ignored(log, "LearningAuthority.persist_belief", _persist_exc)
+
+    def restore_from_store(self) -> int:
+        """D6: 从 MemoryAuthority 恢复信念库（进程启动时显式调用，测试安全）。"""
+        try:
+            from agent.core.memory_authority import MemoryAuthority
+
+            restored = MemoryAuthority.getInstance().load_beliefs()
+        except Exception as _restore_exc:
+            log_ignored(log, "LearningAuthority.restore_from_store", _restore_exc)
+            return 0
+        with self._mu:
+            self._beliefs.update(restored)
+        return len(restored)
 
     def _confidence_adjustment(self, pe: PredictionError) -> float:
         if pe.errorType == "match":

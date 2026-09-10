@@ -28,6 +28,7 @@ from agent.api.trajectory import router as trajectory_router
 from agent.api.canary import router as canary_router
 from agent.api.multimodal import router as multimodal_router
 from agent.api.slo import router as slo_router
+from agent.api.authority import router as authority_router
 from agent.api.devices import devices_router
 from agent.api.action_verify import router as action_verify_router
 from agent.api.cognition import router as cognition_router
@@ -299,6 +300,7 @@ app.include_router(trajectory_router, prefix="/v1/trajectory")
 app.include_router(canary_router, prefix="/v1")
 app.include_router(mcp_router, prefix="/v1")
 app.include_router(slo_router, prefix="/v1")
+app.include_router(authority_router, prefix="/v1")
 app.include_router(devices_router, prefix="/v1")
 app.include_router(action_verify_router, prefix="/v1/perception")
 app.include_router(cognition_router, prefix="/v1")
