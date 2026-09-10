@@ -173,3 +173,69 @@ D4-I2 Post-Audit 发现
   → D4-I3 验收复核（OrchestratorProposer 已实现，测试已存在）
   → D4-I4 真实任务 Global Replay（现成测试升格为真实链路验收）
 ```
+
+---
+
+## 六、交接项执行记录（同日）
+
+### 1. ✅ git 分逻辑提交（工作区 1184 条变更清零）
+
+```text
+81f5ffb chore: 清理构建产物、临时脚本与过期审计报告（505 项删除 + .gitignore）
+1d01907 feat(authority): D4 Authority 落地 — Python 三权迁回 + HMAC + delegated Evidence（39 文件 +8468/-455）
+a3f07dc feat: 收敛工作区存量重构 — sandbox/网关/感知/推理/测试与文档
+<HEAD>  fix(d4-i3): 简单路径接入 DecisionAuthority + planDecisionId 下沉
+<HEAD>  test(d4-i4): 真实链路 Global Authority Replay 验收
+```
+
+注：pre-commit 的 `npx lint-staged` 因本机 node_modules 损坏无法运行（备份暂存区即失败），
+按用户要求以 pytest/导入扫描/运行时验证替代质量门禁后 `--no-verify` 提交。
+修复 node_modules 后建议 `git commit --amend` 以恢复钩子链路（或保持现状）。
+
+### 2. ✅ AGENT_AUTHORITY_HMAC_SECRET 部署配置
+
+- `.env.example` 增占位与生成示例；`deploy/kubernetes/secret.yaml` 增条目
+  （两个 deployment 均 `secretRef: jiabaixing-secrets` 全量注入，Py/TS 两端自动生效）。
+
+### 3. ✅ D4-I3 Orchestrator 验收复核 — **复核通过（修复 2 缺口后）**
+
+对照冻结方案第七节逐项裁决：
+- ✅ OrchestratorProposer 为纯 proposer（decomposeGoal → composite 计划候选）
+- ✅ Plan Decision 与 Action Decision 区分（DecisionType.PLAN/ACTION，未硬塞一个函数）
+- ✅ 复杂路径：createGoal → captureSnapshot → propose → DecisionAuthority.decide(PLAN) → FINAL
+- 🔧 **缺口1（已修）**：`processSimpleGoal` 注释声称走 Action Decision，实际直通
+  `agent.execute()/dispatch()`（无 Goal/Snapshot/Decision）→ 补 createGoal+captureSnapshot+
+  decide(ACTION) 前置 + Evidence 写回
+- 🔧 **缺口2（已修）**：plan decisionId 未下沉子任务 → parentGoalId/planDecisionId/
+  planSnapshotId 写入每个 TaskNode.metadata
+- 链路运行时验证 6/6；遗留观察：子任务执行尚未创建 sub-Goal（parentGoalId 仅在
+  metadata 层关联），建议 D5 前决定是否将 TaskNode 执行升级为子 Goal 生命周期
+
+### 4. ✅ D4-I4 真实任务 Global Replay — **验收通过**
+
+现成模块级 mock 测试升格为**真实链路验收**（`python/tests/test_d4_i4_global_replay.py`，
+2/2 通过）：真实 ConversationLoop + 真实 ToolRegistry + 真实三权（仅 LLM 网络层 stub，
+同 conftest 离线模式）离线跑通完整任务：
+
+```text
+[D4-I4 REPLAY TRACE]
+user_input: "用echo探针执行D4-I4全局回放验证"
+  → Goal      G_7bc3f038f04d   （createGoal, 身份全程稳定）
+  → Snapshot  SS_2b43bf2f20c3  （StateAuthority.captureSnapshot）
+  → Decision  D_ee9ebd468473   （DecisionAuthority FINAL, proposer=llm）
+  → Candidate C_67585955a9da   （chosen）
+  → Action    echo_probe       （真实工具经 ToolRegistry 执行）
+  → Evidence  E_7f25e7137da4   （observation 来自真实工具输出, decisionId 绑定）
+  → progress  0 → 0.3          （Evidence 驱动）
+```
+
+验收断言全过：同一 goalId 贯穿全程 / decision 可按 goalId replay / chosen 即真实
+执行动作 / Evidence.observation 含真实工具输出 / 时间序正确 / 无动作任务对照组
+（建 Goal、progress=0、无 decision）/ fail-closed 语义保留。
+
+### 残余事项（不在 authority 主线）
+
+- 全量 pytest 残余 145 失败（audit_reporter/otel/production_metrics 等 14 簇），
+  均为未提交重构的预存问题，建议独立任务分簇清理
+- TS 侧 jest 因 node_modules 损坏不可运行，AuthoritySignature 等 TS 测试已入库待 CI 修复后生效
+- Decision 历史仅内存态（重启即失），持久化属 D6 Memory Authority 范畴
