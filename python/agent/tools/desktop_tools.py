@@ -2,15 +2,18 @@
 桌面自动化工具集 - Python原生实现 + TS DesktopExecutionAgent 代理
 
 架构：
-1. 优先走 TS DesktopExecutionAgent（Codex 风格 Computer Use）
-2. TS 不可用时回退到 Python DesktopController（pyautogui/pywin32）
+1. Python 原生路径（默认）：DesktopController（pyautogui/pywin32/ctypes）
+2. TS DesktopExecutionAgent（可选）：Codex 风格 Computer Use 代理
 
+Python 原生路径为默认执行路径，TS 后端为可选增强。
 TS 后端地址可通过环境变量 TS_BACKEND_URL 配置（默认 http://localhost:3111）。
-可通过 DESKTOP_TS_ENABLED=false 禁用 TS 代理。
+可通过 DESKTOP_TS_ENABLED=true 启用 TS 代理（默认关闭）。
+可通过 DESKTOP_PREFER_TS=true+DESKTOP_TS_ENABLED=true 优先走 TS 路径。
 """
 
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 from pathlib import Path
@@ -22,9 +25,12 @@ from agent.tools.registry import (
     ToolParameterDef,
     ToolResult,
 )
+# D4-I2 Post-Audit: authority 元数据 HMAC 签名（防伪造 delegated 决策）。
+from agent.core.authority_signature import signed_authority_payload
 
 _TS_BACKEND = os.environ.get("TS_BACKEND_URL", "http://localhost:3111")
-_TS_ENABLED = os.environ.get("DESKTOP_TS_ENABLED", "true").lower() == "true"
+_TS_ENABLED = os.environ.get("DESKTOP_TS_ENABLED", "false").lower() == "true"
+_PREFER_TS = os.environ.get("DESKTOP_PREFER_TS", "false").lower() == "true"
 
 log: Any = None
 
@@ -69,7 +75,7 @@ def _convert_normalized_task(task: str, screen_width: int, screen_height: str) -
     return re.sub(r'\((\d+(?:\s*,\s*\d+){1,3})\)', _replacer, task)
 
 
-async def _call_ts_desktop(task: str, timeout: float = 60.0) -> dict[str, Any] | None:
+async def _call_ts_desktop(task: str, timeout: float = 60.0, authority_meta: dict[str, Any] | None = None) -> dict[str, Any] | None:
     """调用 TS DesktopExecutionAgent 执行桌面任务。
 
     Returns:
@@ -79,10 +85,15 @@ async def _call_ts_desktop(task: str, timeout: float = 60.0) -> dict[str, Any] |
         return None
     try:
         import httpx
+        payload: dict[str, Any] = {"task": task}
+        if authority_meta:
+            # D4-I2 Post-Audit: authority 元数据必须携带 HMAC 签名（绑定 task 内容），
+            # TS 侧校验签名通过才走 delegated 路径，防"合法 decisionId + 任意 action"。
+            payload["authority"] = signed_authority_payload(authority_meta, task)
         async with httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=3.0)) as client:
             resp = await client.post(
                 f"{_TS_BACKEND}/api/desktop/automate",
-                json={"task": task},
+                json=payload,
                 headers={"Content-Type": "application/json"},
             )
             if resp.status_code != 200:
@@ -96,6 +107,7 @@ async def _call_ts_desktop(task: str, timeout: float = 60.0) -> dict[str, Any] |
                 return data
             return None
     except Exception as e:
+        log.debug("desktop_tools 异常处理", error=str(e))
         _get_logger().info(
             "TS desktop unavailable, falling back to Python",
             error=str(e)[:60],
@@ -103,6 +115,7 @@ async def _call_ts_desktop(task: str, timeout: float = 60.0) -> dict[str, Any] |
         return None
 
 from agent.desktop.desktop_controller import get_desktop_controller
+log = _get_logger()
 
 
 # ─────────────────────────────────────────────────────────────
@@ -205,18 +218,23 @@ async def desktop_automate_executor(params: dict[str, Any]) -> ToolResult:
         sw, sh = controller.get_screen_size()
         task = _convert_normalized_task(task, sw, sh)
 
-    # ─── 优先走 TS DesktopExecutionAgent ───
-    ts_result = await _call_ts_desktop(task)
-    if ts_result is not None:
-        data = ts_result.get("data", {})
-        output = data.get("output") or ts_result.get("output", "")
-        return ToolResult(
-            success=True,
-            output=f"[TS DesktopExecutionAgent] {output}" if output else "操作完成",
-            duration=time.time() - start,
+    # ─── TS 优先路径（需 DESKTOP_PREFER_TS=true + DESKTOP_TS_ENABLED=true）───
+    if _PREFER_TS and _TS_ENABLED:
+        # D4-I1-R2: 透传 authority metadata（goalId/snapshotId/decisionId），
+        # TS 侧校验 HMAC 签名后跳过自身决策，直接执行 Python DecisionAuthority 指定的任务。
+        ts_result = await _call_ts_desktop(
+            task, authority_meta=params.get("_authority_meta")
         )
+        if ts_result is not None:
+            data = ts_result.get("data", {})
+            output = data.get("output") or ts_result.get("output", "")
+            return ToolResult(
+                success=True,
+                output=f"[TS DesktopExecutionAgent] {output}" if output else "操作完成",
+                duration=time.time() - start,
+            )
 
-    # ─── TS 不可用，回退到 Python DesktopController ───
+    # ─── Python 原生路径（默认）───
     controller = get_desktop_controller()
     task_lower = task.lower()
 
@@ -240,7 +258,7 @@ async def desktop_automate_executor(params: dict[str, Any]) -> ToolResult:
         if "打开" in task_lower and ("记事本" in task_lower or "notepad" in task_lower):
             result = controller.open_app("notepad.exe")
             if result.success:
-                time.sleep(0.5)  # 等待窗口打开
+                await asyncio.sleep(0.5)
                 return ToolResult(
                     success=True,
                     output="✅ 已打开记事本",
@@ -252,7 +270,7 @@ async def desktop_automate_executor(params: dict[str, Any]) -> ToolResult:
         if "打开" in task_lower and ("计算器" in task_lower or "calc" in task_lower):
             result = controller.open_app("calc.exe")
             if result.success:
-                time.sleep(0.5)
+                await asyncio.sleep(0.5)
                 return ToolResult(
                     success=True,
                     output="✅ 已打开计算器",
@@ -264,7 +282,7 @@ async def desktop_automate_executor(params: dict[str, Any]) -> ToolResult:
         if "打开" in task_lower and ("浏览器" in task_lower or "chrome" in task_lower):
             result = controller.open_app("chrome.exe")
             if result.success:
-                time.sleep(1)
+                await asyncio.sleep(1)
                 return ToolResult(
                     success=True,
                     output="✅ 已打开Chrome浏览器",
@@ -355,6 +373,7 @@ async def desktop_automate_executor(params: dict[str, Any]) -> ToolResult:
         return ToolResult(success=True, output=output, duration=time.time() - start)
 
     except Exception as e:
+        log.debug("desktop_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"桌面操作失败: {e}", duration=time.time() - start)
 
 
@@ -393,6 +412,7 @@ async def desktop_screenshot_executor(params: dict[str, Any]) -> ToolResult:
             return ToolResult(success=False, error=result.error, duration=time.time() - start)
 
     except Exception as e:
+        log.debug("desktop_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"截图失败: {e}", duration=time.time() - start)
 
 
@@ -466,6 +486,7 @@ async def desktop_window_executor(params: dict[str, Any]) -> ToolResult:
             return ToolResult(success=False, error=f"未知操作: {action}，支持: list, activate, close, maximize, minimize", duration=time.time() - start)
 
     except Exception as e:
+        log.debug("desktop_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"窗口操作失败: {e}", duration=time.time() - start)
 
 
@@ -502,6 +523,7 @@ async def desktop_clipboard_executor(params: dict[str, Any]) -> ToolResult:
             return ToolResult(success=False, error=f"未知操作: {action}，支持: read, write", duration=time.time() - start)
 
     except Exception as e:
+        log.debug("desktop_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"剪贴板操作失败: {e}", duration=time.time() - start)
 
 
@@ -588,6 +610,7 @@ async def desktop_uia_action_executor(params: dict[str, Any]) -> ToolResult:
         )
 
     except Exception as e:
+        log.debug("desktop_tools 异常处理", error=str(e))
         return ToolResult(
             success=False,
             error=f"UIA增强操作失败: {e}",
@@ -667,6 +690,7 @@ async def desktop_explore_executor(params: dict[str, Any]) -> ToolResult:
         )
 
     except Exception as e:
+        log.debug("desktop_tools 异常处理", error=str(e))
         return ToolResult(
             success=False,
             error=f"桌面探索失败: {e}",

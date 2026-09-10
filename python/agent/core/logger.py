@@ -3,6 +3,7 @@ import os
 import sys
 import threading
 from typing import Any
+logger = logging.getLogger(__name__)
 
 
 _LOG_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
@@ -134,7 +135,10 @@ def log_ignored(
             extra = " ".join(f"{k}={v}" for k, v in ctx.items())
             emit(f"{msg} | error={type(exc).__name__}: {exc}"
                  + (f" | {extra}" if extra else ""))
-    except Exception:  # noqa: BLE001 - 记账失败绝不影响业务路径
+    except Exception as _meta_exc:
+        # logger 为 stdlib logging.Logger，不接受任意 kwargs（error= 会 TypeError
+        # 从 log_ignored 自身逃逸，违背"绝不抛异常"硬约束）——用 %-style 参数。
+        logger.warning("log_ignored 自身异常 | error=%s", _meta_exc)
         return
 
 

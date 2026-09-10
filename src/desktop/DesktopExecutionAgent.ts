@@ -13,20 +13,28 @@
  */
 
 import { EventEmitter } from 'events';
-import { DesktopMCPServer } from './DesktopMCPServer';
 import { DesktopEventStream } from './DesktopEventStream';
+import { DesktopMCPServer } from './DesktopMCPServer';
 import { DesktopSafetyGuard } from './DesktopSafetyGuard';
-import {
-  DesktopSkillRegistry,
-  DesktopSkill,
-  SkillStep,
-} from './DesktopSkillRegistry';
+import { DesktopSkillRegistry } from './DesktopSkillRegistry';
+import { DesktopActionAuthority } from './DesktopActionAuthority';
+import type { DesktopAction } from './DesktopActionExecutor';
+import { DesktopObservation, DesktopVisionEngine } from './DesktopVisionEngine';
 import { NormalizedCoordinateSystem } from './NormalizedCoordinates';
-import { DesktopVisionEngine, DesktopObservation } from './DesktopVisionEngine';
 // F3: 桌面执行规划不再独立持有 TS LLMProvider（违反 AGENTS.md §0.1），
 // 改为路由到 Python 后端的 LLM（经 PythonAgentBridge）。
 import { getPythonBridge } from '../server/bootstrap';
 import { Logger } from '../utils/Logger';
+import { DecisionAuthority } from '../authority/DecisionAuthority';
+import { GoalAuthority } from '../authority/GoalAuthority';
+import { StateAuthority } from '../authority/StateAuthority';
+import { SkillProposer } from '../authority/SkillProposer';
+import { DesktopLLMProposer } from '../authority/DesktopLLMProposer';
+import { verifyAuthorityMeta } from '../authority/AuthoritySignature';
+import type {
+  DecisionCandidate,
+  ProposedAction,
+} from '../authority/types';
 
 export interface ExecutionAgentConfig {
   safetyLevel?: 'strict' | 'moderate' | 'permissive';
@@ -64,6 +72,7 @@ export class DesktopExecutionAgent extends EventEmitter {
   private mcpServer: DesktopMCPServer;
   private eventStream: DesktopEventStream;
   private safetyGuard: DesktopSafetyGuard;
+  private authority: DesktopActionAuthority;
   private skillRegistry: DesktopSkillRegistry;
   private coords: NormalizedCoordinateSystem;
   private visionEngine: DesktopVisionEngine;
@@ -80,6 +89,7 @@ export class DesktopExecutionAgent extends EventEmitter {
     this.mcpServer = DesktopMCPServer.getInstance();
     this.eventStream = DesktopEventStream.getInstance();
     this.safetyGuard = DesktopSafetyGuard.getInstance();
+    this.authority = DesktopActionAuthority.getInstance();
     this.skillRegistry = DesktopSkillRegistry.getInstance();
     this.coords = NormalizedCoordinateSystem.getInstance();
     this.visionEngine = DesktopVisionEngine.getInstance();
@@ -105,6 +115,7 @@ export class DesktopExecutionAgent extends EventEmitter {
     // 初始化所有子模块
     await this.mcpServer.initialize();
     await this.safetyGuard.initialize();
+    await this.authority.initialize();
     await this.visionEngine.initialize();
     this.coords.refreshScreenInfo();
 
@@ -129,7 +140,10 @@ export class DesktopExecutionAgent extends EventEmitter {
   /**
    * 执行任务（主入口）
    */
-  public async executeTask(taskDescription: string): Promise<ExecutionResult> {
+  public async executeTask(
+    taskDescription: string,
+    authorityMeta?: Record<string, unknown>
+  ): Promise<ExecutionResult> {
     this.ensureInitialized();
 
     if (this.isRunning) {
@@ -158,37 +172,45 @@ export class DesktopExecutionAgent extends EventEmitter {
     try {
       let result: ExecutionResult;
 
-      // 1. 尝试匹配技能
-      if (this.config.enableSkills) {
-        const skillMatch = this.skillRegistry.matchSkill(taskDescription);
-        if (skillMatch && skillMatch.confidence > 50) {
-          Logger.info(
-            `🎯 匹配到技能: ${skillMatch.skill.name} (置信度: ${Math.round(skillMatch.confidence)}%)`,
+      // D4-I1-R2: 当收到 Python DecisionAuthority 的 authority_decisionId 时，
+      // TS 不重新决策，直接执行 Python 指定的动作。
+      // 这证明 TS 是 executor/transport，不是独立的 FINAL Decision Authority。
+      //
+      // D4-I2 Post-Audit: delegation metadata 完整性 + HMAC 签名校验——
+      // 必须同时包含 goalId + snapshotId + decisionId 且签名有效
+      // （签名绑定 task 内容，防"合法 decisionId + 任意 action"换货）。
+      // 签名无效时 fail-safe：降级为 TS 本地 DecisionAuthority 决策链。
+      if (
+        authorityMeta &&
+        authorityMeta['authority_decisionId'] &&
+        authorityMeta['authority_goalId'] &&
+        authorityMeta['authority_snapshotId']
+      ) {
+        if (!verifyAuthorityMeta(authorityMeta, taskDescription)) {
+          Logger.warn(
+            `🚫 D4 Authority: delegated metadata 签名校验失败 (decisionId=${authorityMeta['authority_decisionId']})，拒绝委托执行，降级为 TS 本地决策链`,
             'ExecAgent'
           );
-          result = await this.executeWithSkill(
-            skillMatch.skill,
-            skillMatch.extractedParams,
+        } else {
+          Logger.info(
+            `🔗 D4 Authority: 收到 Python Decision ${authorityMeta['authority_decisionId']} (签名校验通过), 跳过 TS 侧决策`,
+            'ExecAgent'
+          );
+          result = await this.executeWithAuthorityDelegation(
+            taskDescription,
+            authorityMeta,
             observations
           );
-          result.usedSkill = skillMatch.skill.name;
           return result;
         }
       }
 
-      // 2. 使用LLM规划执行（决策经 Python LLM，F3）
-      if (this.config.enableLLMPlanning && this._bridgeLlmAvailable()) {
-        Logger.info('🧠 使用LLM规划执行', 'ExecAgent');
-        result = await this.executeWithLLMPlanning(
-          taskDescription,
-          observations
-        );
-        return result;
-      }
-
-      // 3. 降级：基础模式
-      Logger.info('⚙️  使用基础执行模式', 'ExecAgent');
-      result = await this.executeBasic(taskDescription, observations);
+      // D4-I2-3: TS 独立运行时也必须经过 DecisionAuthority。
+      // matchSkill() 和 parseLLMAction() 降级为 Proposer，不再直接决定执行。
+      result = await this.executeViaDecisionAuthority(
+        taskDescription,
+        observations
+      );
       return result;
     } catch (error) {
       const duration = Date.now() - startTime;
@@ -267,290 +289,265 @@ export class DesktopExecutionAgent extends EventEmitter {
   // ========== 内部执行方法 ==========
 
   /**
-   * 使用技能执行
+   * D4-I2-3: TS 独立运行时也必须经过 DecisionAuthority。
+   *
+   * 链路：
+   *   taskDescription
+   *     → GoalAuthority.createGoal() → goalId
+   *     → StateAuthority.captureSnapshot() → snapshotId
+   *     → SkillProposer.propose() + DesktopLLMProposer.propose() → candidates
+   *     → DecisionAuthority.decide() → Decision (FINAL)
+   *     → ActionAuthority.executeAction() → execute
+   *     → Evidence → GoalAuthority.updateFromEvidence()
+   *
+   * matchSkill() 和 parseLLMAction() 现在只是 Proposer，不再直接决定执行。
    */
-  private async executeWithSkill(
-    skill: DesktopSkill,
-    params: Record<string, string>,
-    observations: DesktopObservation[]
-  ): Promise<ExecutionResult> {
-    const startTime = Date.now();
-
-    const result = await this.skillRegistry.executeSkill(
-      skill.id,
-      params,
-      async (step: SkillStep) => {
-        // 安全检查
-        const safetyCheck = this.safetyGuard.checkAction(
-          step.type,
-          step.description
-        );
-        if (!safetyCheck.allowed) {
-          if (safetyCheck.requireConfirmation) {
-            this.eventStream.emitUserInterventionRequired(
-              safetyCheck.reason || '需要确认'
-            );
-            // 实际实现中这里会等待用户确认
-            Logger.warn(`⚠️  需要用户确认: ${safetyCheck.reason}`, 'ExecAgent');
-          }
-          throw new Error(safetyCheck.reason || '安全检查未通过');
-        }
-
-        // 执行步骤
-        this.eventStream.emitActionStart(
-          step.type,
-          step.description,
-          step.action?.params || {}
-        );
-
-        let success = true;
-
-        switch (step.type) {
-          case 'action':
-            if (step.action) {
-              const mcpResult = await this.mcpServer.callTool(
-                step.action.type,
-                step.action.params
-              );
-              success = !mcpResult.isError;
-            }
-            break;
-
-          case 'wait':
-            if (step.wait) {
-              await new Promise((resolve) =>
-                setTimeout(resolve, step.wait!.durationMs)
-              );
-            }
-            break;
-
-          case 'screenshot':
-            const observation = await this.visionEngine.observe();
-            observations.push(observation);
-            this.eventStream.emitObservation(
-              observation.screenshotBase64 ?? '',
-              observation.screenWidth ?? 0,
-              observation.screenHeight ?? 0
-            );
-            break;
-
-          case 'verify':
-            // 验证逻辑
-            success = true; // 简化实现
-            break;
-
-          case 'llm_plan':
-            // LLM动态规划
-            success = true; // 简化实现
-            break;
-        }
-
-        this.safetyGuard.recordAction();
-        this.eventStream.emitActionEnd(step.type, step.description, success);
-
-        return success;
-      }
-    );
-
-    const duration = Date.now() - startTime;
-    this.eventStream.endTask(result.success, result.skillName);
-
-    return {
-      success: result.success,
-      taskDescription: skill.description,
-      stepsCompleted: result.stepsCompleted,
-      totalSteps: result.totalSteps,
-      durationMs: duration,
-      observations,
-      report: result.success
-        ? `技能执行成功: ${skill.name}`
-        : `技能执行失败: ${result.error}`,
-      error: result.error,
-      usedSkill: skill.name,
-    };
-  }
-
-  /**
-   * 使用LLM规划执行
-   */
-  private async executeWithLLMPlanning(
+  private async executeViaDecisionAuthority(
     taskDescription: string,
     observations: DesktopObservation[]
   ): Promise<ExecutionResult> {
     const startTime = Date.now();
-    let stepsCompleted = 0;
-    const maxSteps = this.config.maxSteps;
+    const decisionAuthority = DecisionAuthority.getInstance();
+    const goalAuthority = GoalAuthority.getInstance();
+    const stateAuthority = StateAuthority.getInstance();
 
-    // 初始观察
-    const initialObs = await this.visionEngine.observe();
-    observations.push(initialObs);
-    this.eventStream.emitObservation(
-      initialObs.screenshotBase64 ?? '',
-      initialObs.screenWidth ?? 0,
-      initialObs.screenHeight ?? 0
+    const goal = goalAuthority.createGoal({
+      description: taskDescription,
+      originalInput: taskDescription,
+    });
+    const goalId = goal.goalId;
+
+    Logger.info(
+      `🔗 D4-I2: TS 独立运行 — Goal ${goalId} created, entering DecisionAuthority`,
+      'ExecAgent'
     );
 
-    // 获取可用工具列表
-    const tools = this.mcpServer.listTools();
-    const toolsDescription = tools
-      .map((t) => `- ${t.name}: ${t.description}`)
-      .join('\n');
+    const snapshot = await stateAuthority.captureSnapshot([goalId]);
 
-    // LLM规划循环
-    let currentObservation = initialObs;
-    let stepCount = 0;
+    const skillProposer = new SkillProposer();
+    const llmProposer = new DesktopLLMProposer();
 
-    while (stepCount < maxSteps) {
-      stepCount++;
+    const context = {
+      goalId,
+      snapshot,
+      candidates: [],
+    };
 
-      // 安全检查
-      if (this.safetyGuard.getStatus().isStopped) {
-        throw new Error('已触发紧急停止');
-      }
+    const allCandidates: DecisionCandidate[] = [];
 
-      // 调用LLM生成下一步动作
-      const planPrompt = this.buildPlanningPrompt(
-        taskDescription,
-        currentObservation,
-        toolsDescription,
-        stepCount,
-        stepsCompleted
-      );
-
-      this.eventStream.emitStatusChange('planning');
-
-      // F3: 决策经 Python LLM（Bridge），不再使用本地 LLMProvider。
-      const llmResponse = await this._bridgeChat(
-        planPrompt,
-        this.getSystemPrompt()
-      );
-
-      // 解析LLM响应，提取动作
-      const action = this.parseLLMAction(llmResponse);
-
-      if (!action) {
-        Logger.warn('⚠️ 无法解析LLM响应，尝试重新规划', 'ExecAgent');
-        continue;
-      }
-
-      if (action.type === 'done') {
-        // 任务完成
-        Logger.info('✅ LLM判定任务完成', 'ExecAgent');
-        break;
-      }
-
-      // 安全检查
-      const safetyCheck = this.safetyGuard.checkAction(
-        action.type,
-        action.description || action.type,
-        action.params
-      );
-
-      if (!safetyCheck.allowed) {
-        if (safetyCheck.requireConfirmation) {
-          this.eventStream.emitUserInterventionRequired(
-            safetyCheck.reason || '需要确认'
-          );
-          // 实际实现中等待用户确认
-          Logger.warn(`⚠️  需要用户确认: ${safetyCheck.reason}`, 'ExecAgent');
-        }
-        throw new Error(safetyCheck.reason || '安全检查未通过');
-      }
-
-      // 执行动作
-      this.eventStream.emitActionStart(
-        action.type,
-        action.description || action.type,
-        action.params || {}
-      );
-
-      const mcpResult = await this.mcpServer.callTool(
-        action.type,
-        action.params || {}
-      );
-
-      this.safetyGuard.recordAction();
-      stepsCompleted++;
-
-      this.eventStream.emitActionEnd(
-        action.type,
-        action.description || action.type,
-        !mcpResult.isError
-      );
-
-      // 验证：重新观察
-      if (this.config.autoVerify) {
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        currentObservation = await this.visionEngine.observe();
-        observations.push(currentObservation);
-        this.eventStream.emitObservation(
-          currentObservation.screenshotBase64 ?? '',
-          currentObservation.screenWidth ?? 0,
-          currentObservation.screenHeight ?? 0
-        );
-      }
-
-      if (mcpResult.isError) {
+    if (this.config.enableSkills) {
+      try {
+        const skillCandidates = await skillProposer.propose(context);
+        allCandidates.push(...skillCandidates);
+      } catch (e) {
         Logger.warn(
-          `⚠️ 动作执行失败: ${action.type} - ${mcpResult.content[0]?.text}`,
+          `SkillProposer failed: ${(e as Error).message}`,
           'ExecAgent'
         );
-        // 可以在这里添加重试逻辑
       }
     }
 
-    const duration = Date.now() - startTime;
-    const success = stepCount < maxSteps;
+    if (this.config.enableLLMPlanning) {
+      try {
+        const llmCandidates = await llmProposer.propose(context);
+        allCandidates.push(...llmCandidates);
+      } catch (e) {
+        Logger.warn(
+          `DesktopLLMProposer failed: ${(e as Error).message}`,
+          'ExecAgent'
+        );
+      }
+    }
 
-    this.eventStream.endTask(success, success ? '任务完成' : '达到最大步数');
+    if (allCandidates.length === 0) {
+      const duration = Date.now() - startTime;
+      this.eventStream.endTask(false, 'No candidates from any proposer');
+      return {
+        success: false,
+        taskDescription,
+        stepsCompleted: 0,
+        totalSteps: 0,
+        durationMs: duration,
+        observations,
+        report: 'DecisionAuthority: no candidates produced, action denied',
+        error: 'authority_denied',
+      };
+    }
 
-    return {
-      success,
-      taskDescription,
-      stepsCompleted,
-      totalSteps: stepCount,
-      durationMs: duration,
-      observations,
-      report: success
-        ? `任务完成，共执行 ${stepsCompleted} 步`
-        : `任务未完成，达到最大步数 ${maxSteps}`,
+    const decision = await decisionAuthority.decide({
+      goalId,
+      snapshot,
+      candidates: allCandidates,
+    });
+
+    Logger.info(
+      `🔗 D4-I2: DecisionAuthority FINAL decision ${decision.decisionId} — chosen=${decision.chosen.candidateId} proposer=${decision.chosen.proposerId}`,
+      'ExecAgent'
+    );
+
+    const chosenAction = decision.chosen.action;
+    const action = {
+      type: (chosenAction.payload as Record<string, unknown>)?.actionType as string || chosenAction.type,
+      description: (chosenAction.payload as Record<string, unknown>)?.description as string || taskDescription,
+      params: ((chosenAction.payload as Record<string, unknown>)?.params as Record<string, unknown>) || (chosenAction.payload as Record<string, unknown>),
     };
-  }
 
-  /**
-   * 基础执行模式（降级方案）
-   */
-  private async executeBasic(
-    taskDescription: string,
-    observations: DesktopObservation[]
-  ): Promise<ExecutionResult> {
-    const startTime = Date.now();
-
-    // 简单的关键词匹配执行
-    const observation = await this.visionEngine.observe();
-    observations.push(observation);
-    this.eventStream.emitObservation(
-      observation.screenshotBase64 ?? '',
-      observation.screenWidth ?? 0,
-      observation.screenHeight ?? 0
+    this.eventStream.emitActionStart(
+      action.type,
+      action.description,
+      action.params
     );
+
+    // D4 Authority: chosen action 的 type 是 proposer 提议的工具名（运行时字符串），
+    // DesktopAction.type 联合类型是静态白名单；ActionAuthority/SafetyGuard 在运行时兜底裁决。
+    const { result: actionResult, authorization } =
+      await this.authority.executeAction(action as unknown as DesktopAction);
+
+    if (!authorization.allowed) {
+      const duration = Date.now() - startTime;
+      this.eventStream.endTask(false, authorization.reason || '安全检查未通过');
+      return {
+        success: false,
+        taskDescription,
+        stepsCompleted: 0,
+        totalSteps: 1,
+        durationMs: duration,
+        observations,
+        report: `ActionAuthority denied: ${authorization.reason || '安全检查未通过'}`,
+        error: 'authority_denied',
+      };
+    }
 
     const duration = Date.now() - startTime;
+    this.eventStream.endTask(actionResult.success);
 
-    this.eventStream.endTask(
-      false,
-      '基础模式无法执行复杂任务，请启用LLM规划或使用技能'
-    );
+    goalAuthority.updateFromEvidence({
+      goalId,
+      decisionId: decision.decisionId,
+      observation: actionResult.output || '',
+      action: chosenAction,
+      expectedEffect: action.description,
+      actualEffect: actionResult.success ? 'success' : (actionResult.error || 'failed'),
+      progressDelta: actionResult.success ? 0.5 : -0.05,
+    });
 
     return {
-      success: false,
+      success: actionResult.success,
       taskDescription,
       stepsCompleted: 1,
       totalSteps: 1,
       durationMs: duration,
       observations,
-      report: '基础模式仅支持截图等简单操作，复杂任务请启用LLM规划',
-      error: 'BASIC_MODE_LIMITED',
+      report: actionResult.success
+        ? `DecisionAuthority ${decision.decisionId}: executed ${action.type} (proposer=${decision.chosen.proposerId})`
+        : `DecisionAuthority ${decision.decisionId}: execution failed — ${actionResult.error || 'unknown'}`,
+      error: actionResult.success ? undefined : actionResult.error,
+    };
+  }
+
+  /**
+   * D4-I1-R2: Authority 委托执行——TS 不重新决策，直接执行 Python DecisionAuthority 指定的动作。
+   *
+   * 这证明 TS DesktopExecutionAgent 在收到 authority_decisionId 时是 executor/transport，
+   * 不是独立的 FINAL Decision Authority。
+   *
+   * D4-I2 Post-Audit: 执行后写 Evidence 回同一 goalId（影子 Goal 注册），
+   * 使 G→S→D→A→E 链在跨进程路径也完整。
+   *
+   * 链路：
+   *   Python DecisionAuthority.decide() → Decision(chosen=X)
+   *     → ToolCall(metadata={authority_decisionId: D123, ..., authority_sig})
+   *     → HTTP POST /api/desktop/automate {task, authority}
+   *     → TS DesktopExecutionAgent.executeTask(task, authorityMeta)
+   *     → HMAC 签名校验 → executeWithAuthorityDelegation(task, authorityMeta)
+   *     → DesktopActionAuthority.executeAction(action)
+   *     → Evidence → GoalAuthority.updateFromEvidence()
+   */
+  private async executeWithAuthorityDelegation(
+    taskDescription: string,
+    authorityMeta: Record<string, unknown>,
+    observations: DesktopObservation[]
+  ): Promise<ExecutionResult> {
+    const startTime = Date.now();
+    let stepsCompleted = 0;
+
+    const initialObs = await this.visionEngine.observe();
+    observations.push(initialObs);
+
+    const action = {
+      type: 'desktop_automate',
+      description: taskDescription,
+      params: { task: taskDescription },
+    };
+
+    this.eventStream.emitActionStart(
+      action.type,
+      action.description,
+      action.params
+    );
+
+    const { result: actionResult, authorization } =
+      await this.authority.executeAction(action as unknown as DesktopAction);
+
+    if (!authorization.allowed) {
+      const duration = Date.now() - startTime;
+      this.eventStream.endTask(false, authorization.reason || '安全检查未通过');
+      return {
+        success: false,
+        taskDescription,
+        stepsCompleted: 0,
+        totalSteps: 1,
+        durationMs: duration,
+        observations,
+        report: `Authority 委托执行被拒绝: ${authorization.reason || '安全检查未通过'}`,
+        error: 'authority_denied',
+      };
+    }
+
+    stepsCompleted = 1;
+    const duration = Date.now() - startTime;
+    this.eventStream.endTask(true);
+
+    // D4-I2 Post-Audit: delegated 路径补 Evidence 写入。
+    // progressDelta 仍为结果驱动 stub（+0.5/-0.05），与 TS 独立路径一致；
+    // 真实 progress 需等待 D5 Learning 用 Evidence 的 prediction error 校准。
+    const delegatedGoalId = String(authorityMeta['authority_goalId']);
+    const delegatedDecisionId = String(authorityMeta['authority_decisionId']);
+    try {
+      const goalAuthority = GoalAuthority.getInstance();
+      goalAuthority.ensureGoal(delegatedGoalId, {
+        description: taskDescription,
+        originalInput: taskDescription,
+      });
+      goalAuthority.updateFromEvidence({
+        goalId: delegatedGoalId,
+        decisionId: delegatedDecisionId,
+        observation: actionResult.output || '',
+        action: { type: 'desktop_action', payload: action.params },
+        expectedEffect: taskDescription,
+        actualEffect: actionResult.success
+          ? 'success'
+          : actionResult.error || 'failed',
+        progressDelta: actionResult.success ? 0.5 : -0.05,
+      });
+    } catch (e) {
+      Logger.warn(
+        `D4 Authority: delegated evidence write-back failed — ${(e as Error).message}`,
+        'ExecAgent'
+      );
+    }
+
+    return {
+      success: actionResult.success,
+      taskDescription,
+      stepsCompleted,
+      totalSteps: 1,
+      durationMs: duration,
+      observations,
+      report: actionResult.success
+        ? `Authority 委托执行完成 (decisionId: ${delegatedDecisionId})`
+        : `Authority 委托执行失败: ${actionResult.error || 'unknown'}`,
+      error: actionResult.success ? undefined : actionResult.error,
     };
   }
 
@@ -564,92 +561,6 @@ export class DesktopExecutionAgent extends EventEmitter {
   }
 
   /**
-   * 构建LLM规划提示词
-   */
-  private buildPlanningPrompt(
-    task: string,
-    observation: DesktopObservation,
-    toolsDesc: string,
-    step: number,
-    completed: number
-  ): string {
-    return `你是一个桌面操作助手。你的任务是根据当前屏幕状态，决定下一步操作。
-
-任务目标: ${task}
-当前步数: ${step}
-已完成动作: ${completed}
-
-可用工具:
-${toolsDesc}
-
-坐标说明:
-- 使用归一化坐标 [0-1000] × [0-1000]
-- 屏幕左上角为 (0, 0)，右下角为 (1000, 1000)
-- 例如：屏幕中间位置是 (500, 500)
-
-当前屏幕信息:
-- 分辨率: ${observation.screenWidth} × ${observation.screenHeight}
-- 活动窗口: ${observation.activeWindow || '未知'}
-- 窗口列表: ${observation.windowTitles?.join(', ') || '无'}
-
-请分析当前屏幕状态，然后决定下一步操作。
-只返回一个JSON对象，格式如下：
-{
-  "type": "工具名称",
-  "params": { ...参数 },
-  "description": "动作描述",
-  "reasoning": "为什么选择这个动作"
-}
-
-如果认为任务已经完成，返回：
-{"type": "done", "description": "任务完成描述"}`;
-  }
-
-  /**
-   * 获取系统提示词
-   */
-  private getSystemPrompt(): string {
-    return `你是一个专业的桌面操作助手，擅长通过鼠标和键盘操作电脑。
-
-操作原则：
-1. 每一步操作前都要仔细观察屏幕状态
-2. 优先使用精确的UI元素操作，而不是盲目点击
-3. 操作后验证结果是否符合预期
-4. 遇到问题及时调整策略
-5. 保持操作节奏稳定，不要过快
-
-坐标系统：
-- 所有坐标使用归一化值，范围 [0, 1000]
-- x: 0 = 屏幕最左，1000 = 屏幕最右
-- y: 0 = 屏幕最上，1000 = 屏幕最下
-
-请始终以安全、准确、高效的方式完成任务。`;
-  }
-
-  /**
-   * 解析LLM动作响应
-   */
-  private parseLLMAction(response: string): {
-    type: string;
-    params?: Record<string, unknown>;
-    description?: string;
-    reasoning?: string;
-  } | null {
-    try {
-      // 尝试提取JSON
-      const jsonMatch = response.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const action = JSON.parse(jsonMatch[0]);
-        return action;
-      }
-    } catch {
-      // 解析失败，继续尝试其他方式
-    }
-
-    return null;
-  }
-
-  /**
    * F3: 经 PythonAgentBridge 调用 Python 端 LLM 做文本规划。
    * Bridge 不可用时抛出，由调用方 try/catch 降级为技能/基础模式（保持原有鲁棒性）。
    */
@@ -659,17 +570,6 @@ ${toolsDesc}
     } catch {
       return false;
     }
-  }
-
-  private async _bridgeChat(
-    planPrompt: string,
-    systemPrompt: string
-  ): Promise<string> {
-    const bridge = getPythonBridge();
-    if (!bridge) {
-      throw new Error('Python Bridge 不可用，无法执行 LLM 规划');
-    }
-    return await bridge.llmChat(planPrompt, [], systemPrompt);
   }
 
   private ensureInitialized(): void {

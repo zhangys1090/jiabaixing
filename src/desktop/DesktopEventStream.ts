@@ -89,18 +89,19 @@ export class DesktopEventStream extends EventEmitter {
    */
   public endTask(
     success: boolean,
-    result: string,
+    result?: string,
     details?: Record<string, unknown>
   ): void {
+    const safeResult = result ?? (success ? '任务完成' : '任务失败');
     this.emitEvent('task_end', {
       success,
-      result,
+      result: safeResult,
       endTime: Date.now(),
       ...details,
     });
 
     Logger.info(
-      `🏁 任务结束: ${success ? '成功' : '失败'} - ${result.substring(0, 50)}`,
+      `🏁 任务结束: ${success ? '成功' : '失败'} - ${safeResult.substring(0, 50)}`,
       'EventStream'
     );
   }

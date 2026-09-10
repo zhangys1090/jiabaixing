@@ -21,6 +21,9 @@ class ToolCall:
     id: str
     name: str
     arguments: str
+    # D4 Authority: 决策链审计元数据（authority_goalId/snapshotId/decisionId/...），
+    # 由 ConversationLoop 决策闸门写入，_execute_tool 注入工具参数 _authority_meta。
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def parse_arguments(self) -> dict[str, Any]:
         import json
@@ -38,6 +41,8 @@ class ToolResult:
     success: bool = True
     error: str | None = None
     duration: float = 0.0
+    # D4 Authority: 继承自对应 ToolCall 的 authority 元数据，供证据回写关联。
+    metadata: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -164,3 +169,55 @@ class ConversationResult:
     finish_reason: str = "stop"
     quality_score: float = 0.0
     metadata: dict[str, Any] = field(default_factory=dict)
+
+
+class CancellationToken:
+    """W5: 协作式取消令牌，支持从外部中断 ConversationLoop."""
+
+    def __init__(self) -> None:
+        self._cancelled = False
+
+    def cancel(self) -> None:
+        self._cancelled = True
+
+    @property
+    def is_cancelled(self) -> bool:
+        return self._cancelled
+
+
+@dataclass
+class LoopCheckpoint:
+    """W1: 对话循环检查点，支持暂停/恢复."""
+
+    turn_id: str
+    session_id: str
+    user_input: str
+    messages: list[dict[str, Any]]
+    tool_calls: list[dict[str, Any]]
+    tool_results: list[dict[str, Any]]
+    current_round: int
+    budget_data: dict[str, Any]
+    finish_reason: str = "stop"
+    timestamp: float = 0.0
+
+    def __post_init__(self) -> None:
+        if not self.timestamp:
+            self.timestamp = time.time()
+
+    def serialize(self) -> dict[str, Any]:
+        return {
+            "turn_id": self.turn_id,
+            "session_id": self.session_id,
+            "user_input": self.user_input,
+            "messages": self.messages,
+            "tool_calls": self.tool_calls,
+            "tool_results": self.tool_results,
+            "current_round": self.current_round,
+            "budget_data": self.budget_data,
+            "finish_reason": self.finish_reason,
+            "timestamp": self.timestamp,
+        }
+
+    @classmethod
+    def deserialize(cls, data: dict[str, Any]) -> "LoopCheckpoint":
+        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
