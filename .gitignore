@@ -34,6 +34,7 @@ dist-ssr
 .env.development.local
 .env.test.local
 .env.production.local
+.env.performance
 
 # Testing
 coverage
@@ -56,6 +57,9 @@ __pycache__/
 # 根目录误生成的零散 Python 文件（fix_test.py 等）
 /*.py
 /requirements.txt
+# Python 内部临时/分析脚本
+python/_*.py
+python/_*.txt
 
 # 备份目录（不参与构建）
 hermes-agent-main/
@@ -109,3 +113,40 @@ tmp/
 /.patch1.txt
 /.full_errors.txt
 /loop-test-err.txt
+
+# IDE / Tool configs (should not enter open-source repo)
+.claude/
+.codebuddy/
+.trae/
+.f1_verify/
+.p1out/
+.p1verify/
+.husky/
+
+# Audit artifacts (dev process files, not source)
+_audit*.json
+.snyk
+.coverage
+.pytest_cache/
+.ruff_cache/
+
+# Probe / debug temp files
+_ths_probe*.txt
+ws_test*.txt
+_jest_*.txt
+_pytest_*.txt
+
+# Patch files
+_*.patch
+
+# Root-level one-off scripts
+_*.py
+_*.txt
+
+# Desktop debug logs
+desktop-*.log
+server_*.log
+server-*.log
+frontend_*.log
+frontend-*.log
+windows-startup*.log
