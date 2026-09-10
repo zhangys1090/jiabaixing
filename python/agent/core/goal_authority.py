@@ -24,6 +24,9 @@ from agent.core.authority_types import (
     GoalStatusEvaluation,
     _gen_id,
 )
+from agent.core.logger import StructuredLogger, log_ignored
+
+_log = StructuredLogger("goal_authority")
 
 
 class GoalAuthority:
@@ -101,6 +104,15 @@ class GoalAuthority:
         if goalId not in self._evidence_log:
             self._evidence_log[goalId] = []
         self._evidence_log[goalId].append(evidence)
+
+        # D5: Evidence → LearningAuthority（Prediction Error → Belief update）
+        # 学习失败不阻断 Evidence 记账（progress/status 更新必须完成）。
+        try:
+            from agent.core.learning_authority import LearningAuthority
+
+            LearningAuthority.getInstance().learn(evidence)
+        except Exception as _learn_exc:
+            log_ignored(_log, "GoalAuthority.updateFromEvidence.learning", _learn_exc)
 
         clamped = max(0.0, min(1.0, goal.progress + progressDelta))
         goal.progress = clamped

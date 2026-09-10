@@ -35,6 +35,7 @@ from agent.core.authority_types import (
     _gen_id,
 )
 from agent.core.goal_authority import GoalAuthority
+from agent.core.learning_authority import LearningAuthority
 from agent.core.logger import StructuredLogger, log_ignored
 
 log = StructuredLogger("decision_authority")
@@ -135,7 +136,15 @@ class DecisionAuthority:
         if not candidates:
             raise ValueError(f"no candidates for goal {context.goalId}")
 
-        scored = [(c, self._score_candidate(c, goal.progress)) for c in candidates]
+        # D5: LearningAuthority — 依历史 Evidence 信念调整候选（Evidence→Belief→Decision 闭环）
+        learning = LearningAuthority.getInstance()
+        adjusted = [learning.adjust_candidate(c) for c in candidates]
+        learned_count = sum(
+            1 for a, o in zip(adjusted, candidates)
+            if a.confidence != o.confidence or a.estimatedGoalProgress != o.estimatedGoalProgress
+        )
+
+        scored = [(c, self._score_candidate(c, goal.progress)) for c in adjusted]
         scored.sort(key=lambda x: x[1], reverse=True)
 
         chosen = scored[0][0]
@@ -146,6 +155,8 @@ class DecisionAuthority:
         rejected = [s[0] for s in scored if s[1] < accept_threshold]
 
         selection_reason = self._build_selection_reason(chosen, chosen_score, goal.progress, len(accepted))
+        if learned_count:
+            selection_reason += f" learningAdjustments={learned_count}"
 
         decision = Decision(
             decisionId=_gen_id("D"),
@@ -165,6 +176,12 @@ class DecisionAuthority:
         if context.goalId not in self._decision_history:
             self._decision_history[context.goalId] = []
         self._decision_history[context.goalId].append(decision)
+
+        # D5: 登记 provenance（decisionId→proposer/actionName），供 Evidence 写回时学习
+        try:
+            learning.record_decision(decision)
+        except Exception as _lrn_exc:
+            log_ignored(log, "DecisionAuthority.record_decision", _lrn_exc)
 
         return decision
 
