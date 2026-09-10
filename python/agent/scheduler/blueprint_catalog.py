@@ -27,10 +27,11 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
-
 from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("blueprint_catalog")
+
+
 
 
 class BlueprintCategory(str, Enum):

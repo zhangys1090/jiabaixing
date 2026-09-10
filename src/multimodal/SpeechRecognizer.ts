@@ -289,19 +289,28 @@ export class SpeechRecognizer {
    * 防止命令注入与路径穿越。任意一项不合规即抛错，
    * 由调用方 catch 后降级为空结果（fail-closed）。
    */
-  private validateWhisperInputs(model: string, lang: string, tmpFile: string): void {
+  private validateWhisperInputs(
+    model: string,
+    lang: string,
+    tmpFile: string
+  ): void {
     // 模型名：仅允许字母/数字/下划线/连字符（tiny/base/small/medium/large-v3 等）
     if (!/^[A-Za-z0-9_-]+$/.test(model)) {
-      throw new Error(`非法的 Whisper 模型名（含非法字符）: ${JSON.stringify(model)}`);
+      throw new Error(
+        `非法的 Whisper 模型名（含非法字符）: ${JSON.stringify(model)}`
+      );
     }
     // 语言代码：仅允许字母与连字符（如 zh / en）
     if (!/^[A-Za-z-]+$/.test(lang)) {
-      throw new Error(`非法的 Whisper 语言代码（含非法字符）: ${JSON.stringify(lang)}`);
+      throw new Error(
+        `非法的 Whisper 语言代码（含非法字符）: ${JSON.stringify(lang)}`
+      );
     }
     // 临时文件路径：必须归一化落在 <cwd>/tmp 内且以 .wav 结尾，杜绝路径穿越
     const allowedDir = path.resolve(process.cwd(), 'tmp');
     const resolved = path.resolve(tmpFile);
-    const inside = resolved === allowedDir || resolved.startsWith(allowedDir + path.sep);
+    const inside =
+      resolved === allowedDir || resolved.startsWith(allowedDir + path.sep);
     if (path.extname(resolved) !== '.wav' || !inside) {
       throw new Error(
         `非法的 Whisper 临时文件路径（路径穿越或非法扩展名）: ${JSON.stringify(tmpFile)}`

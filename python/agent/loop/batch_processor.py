@@ -6,8 +6,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("batch_processor")
+
 
 
 @dataclass
@@ -141,6 +141,7 @@ class BatchProcessor:
                             duration=self._config.timeout,
                         ))
                     except Exception as err:
+                        log.debug("batch_processor 异常处理", error=str(err))
                         results.append(BatchItemResult(
                             id=p.id,
                             success=False,

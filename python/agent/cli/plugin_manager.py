@@ -41,6 +41,7 @@ from agent.core.logger import StructuredLogger
 log = StructuredLogger("plugin_manager")
 
 
+
 class PluginStatus(str, Enum):
     DISCOVERED = "discovered"
     INSTALLED = "installed"
@@ -138,7 +139,6 @@ class PluginManager:
             except Exception as e:
                 log.warning("插件清单解析失败", dir=str(plugin_dir), error=str(e))
 
-        log.info("插件发现完成", count=len(manifests))
         return manifests
 
     async def install(self, plugin_id: str) -> bool:
@@ -181,6 +181,7 @@ class PluginManager:
             log.info("插件已安装", id=plugin_id, version=instance.manifest.version)
             return True
         except Exception as e:
+            log.debug("plugin_manager 异常处理", error=str(e))
             instance.status = PluginStatus.ERROR
             instance.error_message = str(e)
             log.error("插件安装失败", id=plugin_id, error=str(e))
@@ -241,6 +242,7 @@ class PluginManager:
             log.info("插件已启用", id=plugin_id)
             return True
         except Exception as e:
+            log.debug("plugin_manager 异常处理", error=str(e))
             instance.status = PluginStatus.ERROR
             instance.error_message = str(e)
             log.error("插件启用失败", id=plugin_id, error=str(e))

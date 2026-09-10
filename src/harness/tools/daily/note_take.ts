@@ -132,7 +132,9 @@ export function createNoteTakeExecutor(deps: NoteTakeDeps) {
                   id: noteId,
                   title: title || '无标题',
                   content,
-                  tags: Array.isArray(params.tags) ? params.tags.map(String) : [],
+                  tags: Array.isArray(params.tags)
+                    ? params.tags.map(String)
+                    : [],
                   createdAt: now,
                   updatedAt: now,
                 };

@@ -33,6 +33,7 @@ from agent.a2a.types import (
 logger = logging.getLogger(__name__)
 
 
+
 # 合法的状态流转映射（防止非法状态跳转）
 _VALID_TRANSITIONS: Dict[A2ATaskStatus, List[A2ATaskStatus]] = {
     A2ATaskStatus.SUBMITTED: [

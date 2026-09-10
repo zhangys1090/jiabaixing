@@ -14,6 +14,7 @@ from typing import Any
 import httpx
 
 from agent.core.logger import StructuredLogger
+log = StructuredLogger("web_search_provider")
 
 _log = StructuredLogger("tools.web_search")
 
@@ -393,6 +394,7 @@ class WebSearchRegistry:
             try:
                 return await provider.search(query, max_results=max_results)
             except Exception as exc:
+                log.debug("web_search_provider 异常处理", error=str(exc))
                 last_error = exc
                 name = type(provider).__name__
                 _log.warning("Provider 搜索失败，尝试下一个", provider=name, error=str(exc))

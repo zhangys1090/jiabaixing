@@ -274,3 +274,19 @@ Harness六层:
 6. **错误处理** — 所有工具调用必须 try-catch
 7. **配置先行** — .env 或 providers.json 优先，不硬编码 API Key
 8. **架构师批准** — 任何接口变更、数据库迁移、依赖引入需架构师批准
+
+---
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues at `zhangys1090/jiabaixing`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Five canonical roles: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context layout: root `CONTEXT.md` + `docs/adr/`. See `docs/agents/domain.md`.

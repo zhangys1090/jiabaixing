@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import time as _time
 from typing import Any
@@ -13,7 +14,19 @@ from agent.tools.registry import (
     ToolResult,
 )
 
-log = StructuredLogger("system_tools")
+
+
+def _extract_json(text: str) -> str | None:
+    import json as _json
+    decoder = _json.JSONDecoder()
+    for i, ch in enumerate(text):
+        if ch == '{':
+            try:
+                obj, end = decoder.raw_decode(text, i)
+                return text[i:end]
+            except _json.JSONDecodeError:
+                continue
+    return None
 
 
 ASK_CLARIFICATION_DEF = ToolDefinition(
@@ -108,6 +121,7 @@ async def context_manage_executor(params: dict[str, Any]) -> ToolResult:
             if engine and hasattr(engine, "llm"):
                 llm = engine.llm
         except Exception as _exc:
+            log.debug("system_tools 异常处理", error=str(_exc))
             log_ignored(log, "system_tools.context_manage_executor", _exc)
 
         if llm:
@@ -127,6 +141,7 @@ async def context_manage_executor(params: dict[str, Any]) -> ToolResult:
                     response = await llm.chat(messages=[{"role": "user", "content": prompt}], use_cache=False)
                     return ToolResult(success=True, output=response.get("content", "摘要完成"), duration=time.time() - start)
             except Exception as _exc:
+                log.debug("system_tools 异常处理", error=str(_exc))
                 log_ignored(log, "system_tools.context_manage_executor", _exc)
 
         return ToolResult(success=True, output="上下文摘要完成", duration=time.time() - start)
@@ -154,6 +169,7 @@ async def preview_execution_executor(params: dict[str, Any]) -> ToolResult:
         if engine and hasattr(engine, "llm"):
             llm = engine.llm
     except Exception as _exc:
+        log.debug("system_tools 异常处理", error=str(_exc))
         log_ignored(log, "system_tools.preview_execution_executor", _exc)
 
     if llm:
@@ -167,6 +183,7 @@ async def preview_execution_executor(params: dict[str, Any]) -> ToolResult:
             content = response.get("content", "")
             return ToolResult(success=True, output=content, duration=time.time() - start)
         except Exception as _exc:
+            log.debug("system_tools 异常处理", error=str(_exc))
             log_ignored(log, "system_tools.preview_execution_executor", _exc)
 
     return ToolResult(success=True, output=f"执行计划预览:\n{plan}", duration=time.time() - start)
@@ -196,6 +213,7 @@ async def rollback_changes_executor(params: dict[str, Any]) -> ToolResult:
                         duration=time.time() - start,
                     )
     except Exception as _exc:
+        log.debug("system_tools 异常处理", error=str(_exc))
         log_ignored(log, "system_tools.rollback_changes_executor", _exc)
 
     return ToolResult(success=False, error="回滚失败：检查点服务不可用或无可用快照")
@@ -210,6 +228,7 @@ import hashlib
 import platform
 import re
 from pathlib import Path
+log = StructuredLogger("system_tools")
 
 
 FILE_DEDUP_DEF = ToolDefinition(
@@ -452,6 +471,7 @@ async def log_view_executor(params: dict[str, Any]) -> ToolResult:
         return ToolResult(success=True, output="\n".join(out_lines), duration=_time.time() - start)
 
     except Exception as e:
+        log.debug("system_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"读取日志失败: {e}", duration=_time.time() - start)
 
 
@@ -497,6 +517,7 @@ async def shell_generate_executor(params: dict[str, Any]) -> ToolResult:
         if engine and hasattr(engine, "llm"):
             llm = engine.llm
     except Exception as _exc:
+        log.debug("system_tools 异常处理", error=str(_exc))
         log_ignored(log, "system_tools.shell_generate_executor", _exc)
 
     if not llm:
@@ -521,11 +542,11 @@ async def shell_generate_executor(params: dict[str, Any]) -> ToolResult:
         content = response.get("content", "")
 
         import json as _json
-        json_match = re.search(r"\{[\s\S]*\}", content)
-        if not json_match:
+        json_str = _extract_json(content)
+        if not json_str:
             return ToolResult(success=False, error="LLM未返回有效JSON", duration=_time.time() - start)
 
-        parsed = _json.loads(json_match.group())
+        parsed = _json.loads(json_str)
         command = parsed.get("command", "")
         explanation = parsed.get("explanation", "")
         risk_level = parsed.get("risk_level", "medium")
@@ -545,9 +566,11 @@ async def shell_generate_executor(params: dict[str, Any]) -> ToolResult:
             metadata={"command": command, "explanation": explanation, "risk_level": risk_level, "os": os_name, "intent": intent},
         )
     except Exception as e:
+        log.debug("system_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"命令生成失败: {e}", duration=_time.time() - start)
 
 
+_voice_session_lock = asyncio.Lock()
 _voice_session: dict[str, Any] | None = None
 
 
@@ -561,39 +584,40 @@ async def voice_interact_executor(params: dict[str, Any]) -> ToolResult:
     audio_path = str(params.get("audio_path", ""))
     voice = str(params.get("voice", ""))
 
-    if action == "start_session":
-        _voice_session = {"id": f"voice_{int(_time.time())}", "status": "idle", "language": language, "startedAt": _time.time(), "turnCount": 0}
-        return ToolResult(
-            success=True,
-            output=f"语音会话已启动 (id={_voice_session['id']}, language={language})",
-            duration=_time.time() - start,
-            metadata={"sessionId": _voice_session["id"], "language": language, "status": "idle"},
-        )
-    elif action == "stop_session":
-        if not _voice_session:
-            return ToolResult(success=False, error="没有活跃的语音会话", duration=_time.time() - start)
-        turns = _voice_session.get("turnCount", 0)
-        _voice_session = None
-        return ToolResult(success=True, output=f"语音会话已停止 (轮次={turns})", duration=_time.time() - start)
-    elif action == "speak":
-        if not text:
-            return ToolResult(success=False, error="speak操作需要提供text参数", duration=_time.time() - start)
-        return await _do_tts_speak(str(text), language, emotion, voice, start)
-    elif action == "listen":
-        if not _voice_session:
-            return ToolResult(success=False, error="没有活跃的语音会话，请先使用start_session", duration=_time.time() - start)
-        return await _do_stt_listen(audio_path, language, start)
-    elif action == "status":
-        if not _voice_session:
-            return ToolResult(success=True, output="当前没有活跃的语音会话", duration=_time.time() - start, metadata={"active": False})
-        return ToolResult(
-            success=True,
-            output=f"语音会话状态: id={_voice_session['id']}, status={_voice_session['status']}, language={_voice_session['language']}, turns={_voice_session['turnCount']}",
-            duration=_time.time() - start,
-            metadata={"active": True, **_voice_session},
-        )
-    else:
-        return ToolResult(success=False, error=f"不支持的操作: {action}。支持: start_session, stop_session, speak, listen, status", duration=_time.time() - start)
+    async with _voice_session_lock:
+        if action == "start_session":
+            _voice_session = {"id": f"voice_{int(_time.time())}", "status": "idle", "language": language, "startedAt": _time.time(), "turnCount": 0}
+            return ToolResult(
+                success=True,
+                output=f"语音会话已启动 (id={_voice_session['id']}, language={language})",
+                duration=_time.time() - start,
+                metadata={"sessionId": _voice_session["id"], "language": language, "status": "idle"},
+            )
+        elif action == "stop_session":
+            if not _voice_session:
+                return ToolResult(success=False, error="没有活跃的语音会话", duration=_time.time() - start)
+            turns = _voice_session.get("turnCount", 0)
+            _voice_session = None
+            return ToolResult(success=True, output=f"语音会话已停止 (轮次={turns})", duration=_time.time() - start)
+        elif action == "speak":
+            if not text:
+                return ToolResult(success=False, error="speak操作需要提供text参数", duration=_time.time() - start)
+            return await _do_tts_speak(str(text), language, emotion, voice, start)
+        elif action == "listen":
+            if not _voice_session:
+                return ToolResult(success=False, error="没有活跃的语音会话，请先使用start_session", duration=_time.time() - start)
+            return await _do_stt_listen(audio_path, language, start)
+        elif action == "status":
+            if not _voice_session:
+                return ToolResult(success=True, output="当前没有活跃的语音会话", duration=_time.time() - start, metadata={"active": False})
+            return ToolResult(
+                success=True,
+                output=f"语音会话状态: id={_voice_session['id']}, status={_voice_session['status']}, language={_voice_session['language']}, turns={_voice_session['turnCount']}",
+                duration=_time.time() - start,
+                metadata={"active": True, **_voice_session},
+            )
+        else:
+            return ToolResult(success=False, error=f"不支持的操作: {action}。支持: start_session, stop_session, speak, listen, status", duration=_time.time() - start)
 
 
 async def _do_tts_speak(text: str, language: str, emotion: str, voice: str, start: float) -> ToolResult:
@@ -628,6 +652,7 @@ async def _do_tts_speak(text: str, language: str, emotion: str, voice: str, star
     except ImportError as _exc:
         log_ignored(log, "system_tools._do_tts_speak", _exc)
     except Exception as _exc:
+        log.debug("system_tools 异常处理", error=str(_exc))
         log_ignored(log, "system_tools._do_tts_speak", _exc)
 
     try:
@@ -709,6 +734,7 @@ async def _do_stt_listen(audio_path: str, language: str, start: float) -> ToolRe
             metadata={"simulated": True},
         )
     except Exception as e:
+        log.debug("system_tools 异常处理", error=str(e))
         return ToolResult(
             success=False,
             error=f"语音识别异常: {e}",
@@ -738,6 +764,7 @@ async def _record_audio_realtime(language: str) -> str | None:
     except ImportError as _exc:
         log_ignored(log, "system_tools._record_audio_realtime", _exc)
     except Exception as _exc:
+        log.debug("system_tools 异常处理", error=str(_exc))
         log_ignored(log, "system_tools._record_audio_realtime", _exc)
 
     try:
@@ -773,6 +800,7 @@ async def _record_audio_realtime(language: str) -> str | None:
     except ImportError as _exc:
         log_ignored(log, "system_tools._record_audio_realtime", _exc)
     except Exception as _exc:
+        log.debug("system_tools 异常处理", error=str(_exc))
         log_ignored(log, "system_tools._record_audio_realtime", _exc)
 
     return None
@@ -794,6 +822,7 @@ async def delegate_task_executor(params: dict[str, Any]) -> ToolResult:
         if engine and hasattr(engine, "llm"):
             llm = engine.llm
     except Exception as _exc:
+        log.debug("system_tools 异常处理", error=str(_exc))
         log_ignored(log, "system_tools.delegate_task_executor", _exc)
 
     if not llm:
@@ -815,6 +844,7 @@ async def delegate_task_executor(params: dict[str, Any]) -> ToolResult:
             response = await llm.chat(messages=messages_list, use_cache=False)
             content = response.get("content", "")
         except Exception as e:
+            log.debug("system_tools 异常处理", error=str(e))
             return ToolResult(
                 success=False,
                 output=f"子Agent LLM调用失败: {e}",
@@ -822,7 +852,7 @@ async def delegate_task_executor(params: dict[str, Any]) -> ToolResult:
                 metadata={"toolsUsed": tools_used, "iterations": iterations},
             )
 
-        tool_call_match = re.search(r"\[(\w+)\]\s*(\{[\s\S]*?\})", content)
+        tool_call_match = re.search(r"\[(\w+)\]\s*", content)
         if not tool_call_match:
             return ToolResult(
                 success=True,
@@ -833,8 +863,10 @@ async def delegate_task_executor(params: dict[str, Any]) -> ToolResult:
 
         tool_name = tool_call_match.group(1)
         import json as _json
+        json_start = tool_call_match.end()
+        json_str = _extract_json(content[json_start:])
         try:
-            tool_params = _json.loads(tool_call_match.group(2))
+            tool_params = _json.loads(json_str) if json_str else {}
         except (ValueError, _json.JSONDecodeError):
             tool_params = {}
 
@@ -844,6 +876,7 @@ async def delegate_task_executor(params: dict[str, Any]) -> ToolResult:
             tool_result_str = result.output or str(result.error or "")
             tools_used.append(tool_name)
         except Exception as e:
+            log.debug("system_tools 异常处理", error=str(e))
             tool_result_str = f"工具执行失败: {e}"
 
         messages_list.append({"role": "assistant", "content": content})
@@ -883,8 +916,10 @@ async def get_active_file_executor(params: dict[str, Any]) -> ToolResult:
                     duration=_time.time() - start,
                 )
         except Exception as _exc:
+            log.debug("system_tools 异常处理", error=str(_exc))
             log_ignored(log, "system_tools.get_active_file_executor", _exc)
     except Exception as _exc:
+        log.debug("system_tools 异常处理", error=str(_exc))
         log_ignored(log, "system_tools.get_active_file_executor", _exc)
 
     return ToolResult(

@@ -55,11 +55,7 @@ export class McpChannel implements ActionChannel {
         raw: result,
       };
     } catch (err) {
-      Logger.error(
-        `McpChannel 调用失败: ${tool}`,
-        err as Error,
-        'McpChannel'
-      );
+      Logger.error(`McpChannel 调用失败: ${tool}`, err as Error, 'McpChannel');
       return {
         channel: 'mcp',
         success: false,

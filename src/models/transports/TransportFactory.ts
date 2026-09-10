@@ -12,14 +12,15 @@ import { Logger } from '../../utils/Logger';
 import { AnthropicMessagesTransport } from './AnthropicMessagesTransport';
 import { BaseTransport, type TransportConfig } from './BaseTransport';
 import { ChatCompletionsTransport } from './ChatCompletionsTransport';
+import { ResponsesTransport } from './ResponsesTransport';
 
 /** 支持的传输层类型 */
 export type TransportType =
   | 'openai_compatible'
+  | 'openai_responses'
   | 'anthropic'
   | 'gemini'
-  | 'bedrock'
-  | 'codex';
+  | 'bedrock';
 
 export class TransportFactory {
   /**
@@ -29,6 +30,8 @@ export class TransportFactory {
     switch (type) {
       case 'openai_compatible':
         return new ChatCompletionsTransport(config);
+      case 'openai_responses':
+        return new ResponsesTransport(config);
       case 'anthropic':
         return new AnthropicMessagesTransport(config);
       default:
@@ -53,7 +56,11 @@ export class TransportFactory {
       return explicit as TransportType;
     }
 
-    // 根据 baseUrl 推断
+    const wireApi = config.extra?.wire_api as string | undefined;
+    if (wireApi === 'responses') {
+      return 'openai_responses';
+    }
+
     const url = (config.baseUrl || '').toLowerCase();
     if (url.includes('anthropic.com')) {
       return 'anthropic';

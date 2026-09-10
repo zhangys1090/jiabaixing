@@ -140,6 +140,7 @@ class InfrastructureLockProvider(LockProvider):
                     handle.expires_at = time.time() + ttl
                     return True
             except Exception as _exc:
+                log.debug("distributed_lock 异常处理", error=str(_exc))
                 log_ignored(log, "distributed_lock.InMemoryDistributedLockProvider.extend", _exc)
         if hasattr(lock, "acquire") and hasattr(lock, "_acquired") and lock._acquired:
             handle.expires_at = time.time() + ttl
@@ -206,6 +207,7 @@ class CoreDistributedLockProvider(LockProvider):
                     handle.expires_at = time.time() + ttl
                     return True
             except Exception as _exc:
+                log.debug("distributed_lock 异常处理", error=str(_exc))
                 log_ignored(log, "distributed_lock.CoreDistributedLockProvider.extend", _exc)
         return False
 
@@ -235,21 +237,22 @@ def create_lock_provider(
     """
     if backend == "core":
         provider = CoreDistributedLockProvider()
-        log.info("锁提供者选择", backend="CoreDistributed (SQLite)")
+        log.debug("锁提供者选择", backend="CoreDistributed (SQLite)")
         return provider
 
     if backend == "infrastructure":
         provider = InfrastructureLockProvider()
-        log.info("锁提供者选择", backend="Infrastructure (Redis/Local)")
+        log.debug("锁提供者选择", backend="Infrastructure (Redis/Local)")
         return provider
 
     try:
         provider = InfrastructureLockProvider()
-        log.info("锁提供者选择", backend="Infrastructure (auto)")
+        log.debug("锁提供者选择", backend="Infrastructure (auto)")
         return provider
     except Exception as _exc:
+        log.debug("distributed_lock 异常处理", error=str(_exc))
         log_ignored(log, "distributed_lock.create_lock_provider", _exc)
 
     provider = CoreDistributedLockProvider()
-    log.info("锁提供者选择", backend="CoreDistributed (fallback)")
+    log.debug("锁提供者选择", backend="CoreDistributed (fallback)")
     return provider

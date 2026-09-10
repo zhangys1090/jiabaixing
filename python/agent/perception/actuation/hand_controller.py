@@ -21,8 +21,8 @@ from enum import Enum
 from typing import Any, Awaitable, Callable
 
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("hand_controller")
+
 
 
 class HandActionType(str, Enum):
@@ -143,6 +143,7 @@ class HandController:
             try:
                 return await self._backend_executor(action)
             except Exception as e:
+                log.debug("hand_controller 异常处理", error=str(e))
                 return HandActionResult(
                     success=False,
                     action_type=action.action_type,
@@ -225,6 +226,7 @@ class HandController:
                 error="DesktopController 不可用",
             )
         except Exception as e:
+            log.debug("hand_controller 异常处理", error=str(e))
             return HandActionResult(
                 success=False,
                 action_type=action.action_type,

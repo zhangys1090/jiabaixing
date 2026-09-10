@@ -12,8 +12,9 @@ from typing import Any
 from agent.config import DATA_DIR
 from agent.persistence.database import get_sync_connection
 from agent.core.logger import StructuredLogger
-
+from agent.infrastructure.safe_json import safe_json_loads
 log = StructuredLogger("episodic_memory")
+
 
 _MAX_EPISODES = 500
 _DEFAULT_DECAY_HOURS = 24.0
@@ -357,6 +358,7 @@ class EpisodicMemoryStore:
                 "FROM episodes ORDER BY timestamp DESC LIMIT ?",
                 (_MAX_EPISODES,),
             )
+            skipped = 0
             for row in cur:
                 try:
                     ep = EpisodicMemory(
@@ -374,10 +376,12 @@ class EpisodicMemoryStore:
                     )
                     self._episodes.append(ep)
                 except Exception as e:
-                    log.warning("跳过损坏的 episode 记录", error=str(e))
+                    skipped += 1
                     continue
+            if skipped > 0:
+                log.warning("跳过损坏的 episode 记录", count=skipped)
             conn.close()
-            log.info("Loaded episodes from DB", count=len(self._episodes))
+            log.debug("Loaded episodes from DB", count=len(self._episodes))
         except Exception as e:
             log.warning("Failed to load episodes from DB", error=str(e))
 

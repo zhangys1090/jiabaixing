@@ -32,8 +32,8 @@ from enum import Enum
 from typing import Any
 
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("task_aware_model_router")
+
 
 
 class TaskType(str, Enum):
@@ -388,7 +388,7 @@ class TaskAwareModelRouter:
         elif profile.cost_preference == CostPreference.QUALITY_FIRST:
             req.max_cost_tier = None
 
-        scored = self._capability_router.route(req)  # type: ignore[union-attr]
+        scored = self._capability_router.route(req)
 
         if not scored:
             raise RuntimeError("No providers available")

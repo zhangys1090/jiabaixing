@@ -4,12 +4,12 @@
  * 专注于文本对话和工具调用，不含模型选择/降级逻辑
  */
 
-import { getPromptTemplate } from './prompt-templates';
 import { injectPreferences } from '../memory/PreferenceInjector';
 import { Logger } from '../utils/Logger';
 import { LLMResponseCache } from './LLMResponseCache';
 import { MessageSanitizer } from './MessageSanitizer';
 import { Model, ModelInput } from './ModelInterface';
+import { getPromptTemplate } from './prompt-templates';
 import { PromptOptimizer } from './PromptOptimizer';
 import { RequestQueue } from './RequestQueue';
 
@@ -32,6 +32,15 @@ export class ChatProvider {
     'fetch failed',
     'abort',
     '超时',
+  ];
+
+  private static readonly RATE_LIMIT_ERRORS: ReadonlyArray<string> = [
+    '429',
+    'rate limit',
+    'rate_limit',
+    'too many requests',
+    '请求频率',
+    '限流',
   ];
 
   constructor(model: Model, modelName: string) {
@@ -79,11 +88,18 @@ export class ChatProvider {
           break;
         }
 
+        const isRateLimitError = ChatProvider.RATE_LIMIT_ERRORS.some((e) =>
+          errorMsg.includes(e)
+        );
+
         // 连接错误或其他错误：按指数退避重试
         if (attempt < maxRetries) {
-          const delay = this.baseRetryInterval * Math.pow(2, attempt - 1);
+          const baseDelay = isRateLimitError
+            ? this.baseRetryInterval * 4
+            : this.baseRetryInterval;
+          const delay = baseDelay * Math.pow(2, attempt - 1);
           Logger.warn(
-            `${operationName} 第${attempt}次失败，${delay}ms后重试: ${lastError.message}`,
+            `${operationName} 第${attempt}次失败${isRateLimitError ? '（速率限制）' : ''}，${delay}ms后重试: ${lastError.message}`,
             'ChatProvider'
           );
           await new Promise((resolve) => setTimeout(resolve, delay));
@@ -151,7 +167,8 @@ export class ChatProvider {
       }
 
       if (!response.text) {
-        throw new Error('模型未返回内容');
+        Logger.warn('⚠️ LLM返回空内容，使用降级回复', 'ChatProvider');
+        return '抱歉，我暂时无法生成有效回复，请稍后重试。';
       }
 
       this.responseCache.set(cacheKey, response.text);
@@ -218,6 +235,10 @@ export class ChatProvider {
         temperature: 0.8,
         toolChoice,
       } as ModelInput);
+
+      if (!response.text && !response.toolCalls?.length) {
+        Logger.warn('⚠️ LLM工具聊天返回空内容且无tool_calls', 'ChatProvider');
+      }
 
       return {
         content: response.text || '',

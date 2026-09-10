@@ -7,9 +7,9 @@
  */
 
 import type {
-    ACPFileDiff,
-    ACPTerminalCommand,
-    ACPToolActivity,
+  ACPFileDiff,
+  ACPTerminalCommand,
+  ACPToolActivity,
 } from '../ide/ACPServer';
 import { Logger } from '../utils/Logger';
 

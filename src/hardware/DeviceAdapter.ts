@@ -62,7 +62,7 @@ export class SimulatedDeviceAdapter implements DeviceAdapter {
     return;
   }
 
-  private simulateStatus(device: Device): Device['status'] {
+  private simulateStatus(_device: Device): Device['status'] {
     const random = this.rng();
     if (random < 0.1) return 'offline';
     if (random < 0.2) return 'warning';
@@ -110,9 +110,12 @@ export class HttpDeviceAdapter implements DeviceAdapter {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
-      const res = await fetch(`${this.baseUrl}/${encodeURIComponent(device.id)}/status`, {
-        signal: controller.signal,
-      });
+      const res = await fetch(
+        `${this.baseUrl}/${encodeURIComponent(device.id)}/status`,
+        {
+          signal: controller.signal,
+        }
+      );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as Partial<DeviceStatus>;
       this.cache.set(device.id, {

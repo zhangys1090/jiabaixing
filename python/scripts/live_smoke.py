@@ -28,13 +28,13 @@ from agent.main import app
 
 
 @asynccontextmanager
-async def _noop_lifespan(app):  # noqa: ANN001
+async def _noop_lifespan(app):
     # 跳过 engine/litellm 初始化：本探针只验证 HTTP 层（SLO + 中间件）
     yield
 
 
 # 用空 lifespan 替换原 lifespan，避免 engine.initialize() 因缺依赖失败
-app.router.lifespan_context = _noop_lifespan  # type: ignore[attr-defined]
+app.router.lifespan_context = _noop_lifespan
 
 
 if __name__ == "__main__":

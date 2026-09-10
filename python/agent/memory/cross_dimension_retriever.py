@@ -27,8 +27,8 @@ from typing import Any
 
 from agent.core.logger import StructuredLogger
 from agent.core.logger import log_ignored
-
 log = StructuredLogger("cross_dimension_retriever")
+
 
 
 @dataclass

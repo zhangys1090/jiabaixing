@@ -9,10 +9,10 @@
  */
 
 import {
-    EventStore,
-    type EventStoreEvent,
-    type EventStoreEventType,
-    type ProjectionResult,
+  EventStore,
+  type EventStoreEvent,
+  type EventStoreEventType,
+  type ProjectionResult,
 } from './EventStore';
 
 export interface ReplayStep {
@@ -98,7 +98,8 @@ export class SessionReplay {
     let currentState: Record<string, unknown> = {};
 
     if (options.fromSequence && options.fromSequence > 1) {
-      const priorProjection = this.eventStore.projectConversationState(sessionId);
+      const priorProjection =
+        this.eventStore.projectConversationState(sessionId);
       if (priorProjection.lastSequenceNum < options.fromSequence) {
         currentState = priorProjection.state as Record<string, unknown>;
       }
@@ -133,12 +134,8 @@ export class SessionReplay {
     };
   }
 
-  diff(
-    sessionId: string,
-    sequenceA: number,
-    sequenceB: number
-  ): DiffResult {
-    const projectionA = this.eventStore.projectConversationState(sessionId);
+  diff(sessionId: string, sequenceA: number, sequenceB: number): DiffResult {
+    const _projectionA = this.eventStore.projectConversationState(sessionId);
     const stateA = this.rebuildStateAtSequence(sessionId, sequenceA);
     const stateB = this.rebuildStateAtSequence(sessionId, sequenceB);
 
@@ -146,10 +143,7 @@ export class SessionReplay {
     const removed: Record<string, unknown> = {};
     const changed: Record<string, { before: unknown; after: unknown }> = {};
 
-    const allKeys = new Set([
-      ...Object.keys(stateA),
-      ...Object.keys(stateB),
-    ]);
+    const allKeys = new Set([...Object.keys(stateA), ...Object.keys(stateB)]);
 
     for (const key of allKeys) {
       const inA = key in stateA;
@@ -168,7 +162,10 @@ export class SessionReplay {
       }
     }
 
-    const changeCount = Object.keys(added).length + Object.keys(removed).length + Object.keys(changed).length;
+    const changeCount =
+      Object.keys(added).length +
+      Object.keys(removed).length +
+      Object.keys(changed).length;
 
     return {
       sessionId,
@@ -205,7 +202,7 @@ export class SessionReplay {
     sessionId: string,
     targetSequence: number
   ): Record<string, unknown> {
-    const result = this.eventStore.project(
+    const _result = this.eventStore.project(
       sessionId,
       (state, event) => {
         this.applyEventToState(state as Record<string, unknown>, event);
@@ -234,7 +231,12 @@ export class SessionReplay {
   ): void {
     switch (event.eventType) {
       case 'user_input': {
-        const messages = (state.messages as Array<{ role: string; content: string; timestamp: number }>) ?? [];
+        const messages =
+          (state.messages as Array<{
+            role: string;
+            content: string;
+            timestamp: number;
+          }>) ?? [];
         messages.push({
           role: 'user',
           content: String(event.payload.content ?? event.payload.input ?? ''),
@@ -245,10 +247,17 @@ export class SessionReplay {
       }
 
       case 'agent_thinking': {
-        const messages = (state.messages as Array<{ role: string; content: string; timestamp: number }>) ?? [];
+        const messages =
+          (state.messages as Array<{
+            role: string;
+            content: string;
+            timestamp: number;
+          }>) ?? [];
         messages.push({
           role: 'assistant',
-          content: String(event.payload.thinking ?? event.payload.content ?? ''),
+          content: String(
+            event.payload.thinking ?? event.payload.content ?? ''
+          ),
           timestamp: event.timestamp,
         });
         state.messages = messages;
@@ -256,7 +265,12 @@ export class SessionReplay {
       }
 
       case 'tool_result': {
-        const toolCalls = (state.toolCalls as Array<{ toolName: string; success: boolean; duration: number }>) ?? [];
+        const toolCalls =
+          (state.toolCalls as Array<{
+            toolName: string;
+            success: boolean;
+            duration: number;
+          }>) ?? [];
         toolCalls.push({
           toolName: String(event.payload.toolName ?? 'unknown'),
           success: Boolean(event.payload.success),
@@ -333,7 +347,9 @@ export class SessionReplay {
           if (options.includeThinking !== false) {
             messages.push({
               role: 'assistant',
-              content: String(event.payload.thinking ?? event.payload.content ?? ''),
+              content: String(
+                event.payload.thinking ?? event.payload.content ?? ''
+              ),
             });
           }
           break;
@@ -353,7 +369,9 @@ export class SessionReplay {
             if (Boolean(event.payload.success)) successCount++;
             messages.push({
               role: 'tool',
-              content: String(event.payload.output ?? event.payload.result ?? ''),
+              content: String(
+                event.payload.output ?? event.payload.result ?? ''
+              ),
             });
           }
           break;
@@ -374,9 +392,10 @@ export class SessionReplay {
       metadata: {
         sessionId: events[0]?.sessionId ?? '',
         eventCount: events.length,
-        duration: events.length > 0
-          ? events[events.length - 1].timestamp - events[0].timestamp
-          : 0,
+        duration:
+          events.length > 0
+            ? events[events.length - 1].timestamp - events[0].timestamp
+            : 0,
         toolCallCount,
         successRate: toolCallCount > 0 ? successCount / toolCallCount : 0,
       },
@@ -387,11 +406,13 @@ export class SessionReplay {
 
   private exportDPO(
     events: EventStoreEvent[],
-    projection: ProjectionResult<unknown>,
-    options: TrajectoryExportOptions
+    _projection: ProjectionResult<unknown>,
+    _options: TrajectoryExportOptions
   ): string[] {
     const userEvents = events.filter((e) => e.eventType === 'user_input');
-    const assistantEvents = events.filter((e) => e.eventType === 'agent_thinking');
+    const assistantEvents = events.filter(
+      (e) => e.eventType === 'agent_thinking'
+    );
     const errorEvents = events.filter((e) => e.eventType === 'error_occurred');
 
     if (userEvents.length === 0 || assistantEvents.length === 0) {
@@ -403,11 +424,15 @@ export class SessionReplay {
 
     for (const event of events) {
       if (event.eventType === 'user_input') {
-        const content = String(event.payload.content ?? event.payload.input ?? '');
+        const content = String(
+          event.payload.content ?? event.payload.input ?? ''
+        );
         chosen.push({ role: 'user', content });
         rejected.push({ role: 'user', content });
       } else if (event.eventType === 'agent_thinking') {
-        const content = String(event.payload.thinking ?? event.payload.content ?? '');
+        const content = String(
+          event.payload.thinking ?? event.payload.content ?? ''
+        );
         chosen.push({ role: 'assistant', content });
       }
     }
@@ -424,7 +449,10 @@ export class SessionReplay {
       });
     }
 
-    const qualityScore = errorEvents.length === 0 ? 1.0 : Math.max(0, 1 - errorEvents.length / events.length);
+    const qualityScore =
+      errorEvents.length === 0
+        ? 1.0
+        : Math.max(0, 1 - errorEvents.length / events.length);
 
     const entry: DPOEntry = {
       chosen,
@@ -473,9 +501,11 @@ export class SessionReplay {
     const messageEvents = events.filter(
       (e) => e.eventType === 'user_input' || e.eventType === 'agent_thinking'
     );
-    const toolResultEvents = events.filter((e) => e.eventType === 'tool_result');
-    const successTools = toolResultEvents.filter(
-      (e) => Boolean(e.payload.success)
+    const toolResultEvents = events.filter(
+      (e) => e.eventType === 'tool_result'
+    );
+    const successTools = toolResultEvents.filter((e) =>
+      Boolean(e.payload.success)
     );
     const errorEvents = events.filter((e) => e.eventType === 'error_occurred');
 

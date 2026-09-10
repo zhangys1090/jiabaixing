@@ -96,8 +96,7 @@ export class LocalBackend implements ITerminalBackend {
       return this.executePython(code, options);
     }
 
-    // javascript: 本地无沙箱，降级为 node -e
-    return this.execute(`node -e "${code.replace(/"/g, '\\"')}"`, options);
+    return this.executeJavaScript(code, options);
   }
 
   async isAvailable(): Promise<boolean> {
@@ -214,6 +213,54 @@ export class LocalBackend implements ITerminalBackend {
         durationMs: Date.now() - startTime,
         backend: 'local',
         metadata: { language: 'python', file: tmpFile, error: e.message },
+      };
+    } finally {
+      try {
+        fs.unlinkSync(tmpFile);
+      } catch {
+        // 忽略清理失败
+      }
+    }
+  }
+
+  private async executeJavaScript(
+    code: string,
+    options?: ExecuteOptions
+  ): Promise<BackendResult> {
+    const startTime = Date.now();
+    const timeout = options?.timeout ?? this.config.timeout ?? 30000;
+    const cwd = this.resolveCwd(options?.cwd);
+    const tmpFile = path.join(
+      os.tmpdir(),
+      `jbx_exec_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.js`
+    );
+
+    try {
+      fs.writeFileSync(tmpFile, code, 'utf-8');
+      const result = await this.execAsync(`node "${tmpFile}"`, {
+        timeout,
+        cwd,
+        maxBuffer: 1024 * 1024,
+      });
+      return {
+        success: result.exitCode === 0,
+        stdout: result.stdout || '(无输出)',
+        stderr: result.stderr,
+        exitCode: result.exitCode,
+        durationMs: Date.now() - startTime,
+        backend: 'local',
+        metadata: { language: 'javascript', file: tmpFile },
+      };
+    } catch (err) {
+      const e = err as Error;
+      return {
+        success: false,
+        stdout: '',
+        stderr: e.message,
+        exitCode: 1,
+        durationMs: Date.now() - startTime,
+        backend: 'local',
+        metadata: { language: 'javascript', file: tmpFile, error: e.message },
       };
     } finally {
       try {

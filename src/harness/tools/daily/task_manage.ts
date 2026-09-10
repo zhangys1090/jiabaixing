@@ -251,7 +251,8 @@ export function createTaskManageExecutor(deps: TaskManageDeps) {
               };
             }
             if (params.title) task.title = String(params.title);
-            if (params.description) task.description = String(params.description);
+            if (params.description)
+              task.description = String(params.description);
             if (params.priority) task.priority = String(params.priority);
             if (params.due_date) task.dueDate = String(params.due_date);
             if (Array.isArray(params.tags)) task.tags = params.tags.map(String);

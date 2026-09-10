@@ -89,7 +89,12 @@ export class AuditLogger {
     }
     try {
       this.db.pragma('journal_mode = WAL');
-    } catch {}
+    } catch (pragmaErr) {
+      AppLogger.debug(
+        `审计日志 WAL 模式设置跳过: ${(pragmaErr as Error).message}`,
+        'AuditLogger'
+      );
+    }
 
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS audit_logs (

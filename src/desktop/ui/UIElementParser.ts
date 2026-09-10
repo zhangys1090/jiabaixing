@@ -1,10 +1,10 @@
 import { Logger } from '../../utils/Logger';
 import {
-    CONTROL_TYPE_NAMES,
-    ElementQueryResult,
-    UIAControlType,
-    UIElement,
-    UIElementNode,
+  CONTROL_TYPE_NAMES,
+  ElementQueryResult,
+  UIAControlType,
+  UIElement,
+  UIElementNode,
 } from './types';
 
 export class UIElementParser {

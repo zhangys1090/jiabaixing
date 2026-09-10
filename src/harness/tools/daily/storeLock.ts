@@ -25,6 +25,12 @@ export function withStoreLock<T>(
   const run = () => critical();
   const next = prev.then(run, run);
   // 维持锁链但不因单次失败而断裂。
-  lockChains.set(store, next.then(() => undefined, () => undefined));
+  lockChains.set(
+    store,
+    next.then(
+      () => undefined,
+      () => undefined
+    )
+  );
   return next;
 }

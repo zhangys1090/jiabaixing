@@ -8,25 +8,57 @@
  */
 
 export type {
-    IConstraintsLayer,
-    IConstraintsLayerDeps,
-    IConstraintsResultPort, IContextInputPort, IContextLayer,
-    IContextLayerDeps, IContextOutputPort, IEventBusPort, IEventQueryPort, IEventStoreEventPort, IEventStorePort, IHistoryProviderPort, ILayerPort,
-    ILayerRegistry, ILLMPort, ILoopInputPort, ILoopLayer,
-    ILoopLayerDeps, ILoopResultPort, IMemoryEnginePort, IParamDefPort, IPermissionGuardPort, IPersistenceLayer,
-    IPersistenceLayerDeps, IPersonaCorePort, ISchemaValidatorPort, ISessionReplayPort, IToolContextPort, IToolDefinitionPort, IToolEntryPort, IToolExecutorPort, IToolLayer,
-    IToolLayerDeps,
-    IToolRegistry, IToolResultPort, IVerificationLayer,
-    IVerificationLayerDeps,
-    IVerificationResultPort, LayerName
+  IConstraintsLayer,
+  IConstraintsLayerDeps,
+  IConstraintsResultPort,
+  IContextInputPort,
+  IContextLayer,
+  IContextLayerDeps,
+  IContextOutputPort,
+  IEventBusPort,
+  IEventQueryPort,
+  IEventStoreEventPort,
+  IEventStorePort,
+  IHistoryProviderPort,
+  ILayerPort,
+  ILayerRegistry,
+  ILLMPort,
+  ILoopInputPort,
+  ILoopLayer,
+  ILoopLayerDeps,
+  ILoopResultPort,
+  IMemoryEnginePort,
+  IParamDefPort,
+  IPermissionGuardPort,
+  IPersistenceLayer,
+  IPersistenceLayerDeps,
+  IPersonaCorePort,
+  ISchemaValidatorPort,
+  ISessionReplayPort,
+  IToolContextPort,
+  IToolDefinitionPort,
+  IToolEntryPort,
+  IToolExecutorPort,
+  IToolLayer,
+  IToolLayerDeps,
+  IToolRegistry,
+  IToolResultPort,
+  IVerificationLayer,
+  IVerificationLayerDeps,
+  IVerificationResultPort,
+  LayerName,
 } from './interfaces';
 
 export {
-    HarnessConfigManager, type HarnessConfigFile, type LayerConfig,
-    type LayerImplementation,
-    type PluginConfig
+  HarnessConfigManager,
+  type HarnessConfigFile,
+  type LayerConfig,
+  type LayerImplementation,
+  type PluginConfig,
 } from './HarnessConfigManager';
 
 export {
-    HarnessComposer, type ComposerDeps, type LayerInstance
+  HarnessComposer,
+  type ComposerDeps,
+  type LayerInstance,
 } from './HarnessComposer';

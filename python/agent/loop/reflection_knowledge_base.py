@@ -11,8 +11,8 @@ from pathlib import Path
 from typing import Any, Optional
 
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("reflection_knowledge_base")
+
 
 
 class ExperienceType(str, Enum):
@@ -213,7 +213,7 @@ class ReflectionKnowledgeBase:
     def close(self) -> None:
         if self._conn:
             self._conn.close()
-            self._conn = None  # type: ignore[assignment]
+            self._conn = None
 
     def get_experience(self, exp_id: str) -> ReflectionExperience | None:
         if exp_id in self._cache:
@@ -309,6 +309,7 @@ class ReflectionKnowledgeBase:
         valid_sort = ("usage_count", "success_rate", "created_at")
         if sort_by not in valid_sort:
             raise ValueError(f"Invalid sort_by: {sort_by}. Must be one of {valid_sort}")
+        sort_col = {"usage_count": "usage_count", "success_rate": "success_rate", "created_at": "created_at"}[sort_by]
         if limit <= 0:
             return []
         conditions = []
@@ -318,7 +319,7 @@ class ReflectionKnowledgeBase:
             params.append(type)
         where = " WHERE " + " AND ".join(conditions) if conditions else ""
         params.append(limit)
-        sql = f"SELECT * FROM experiences{where} ORDER BY {sort_by} DESC LIMIT ?"
+        sql = f"SELECT * FROM experiences{where} ORDER BY {sort_col} DESC LIMIT ?"
         cur = self._conn.execute(sql, params)
         results = []
         for row in cur:

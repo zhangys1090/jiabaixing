@@ -25,15 +25,15 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Awaitable
 
-from agent.core.logger import StructuredLogger
 from agent.tools.registry import (
     ToolCategory,
     ToolDefinition,
     ToolParameterDef,
     ToolResult,
 )
-
+from agent.core.logger import StructuredLogger
 log = StructuredLogger("cronjob_tools")
+
 
 
 class CronjobStatus(str, Enum):
@@ -102,6 +102,7 @@ class CronjobManager:
         self._executor: Callable[..., Awaitable[str]] | None = None
         self._scheduler_task: asyncio.Task[None] | None = None
         self._stats = {"total_runs": 0, "total_success": 0, "total_failure": 0}
+        self._MAX_STATS = 500
 
     def set_executor(self, executor: Callable[..., Awaitable[str]]) -> None:
         """设置任务执行器（Agent 核心）。"""
@@ -109,7 +110,7 @@ class CronjobManager:
 
     def register(self, blueprint: CronjobBlueprint) -> str:
         self._blueprints[blueprint.id] = blueprint
-        log.info("定时任务已注册", name=blueprint.name, schedule=blueprint.schedule)
+        log.debug("定时任务已注册", name=blueprint.name, schedule=blueprint.schedule)
         return blueprint.id
 
     def unregister(self, blueprint_id: str) -> bool:
@@ -182,6 +183,7 @@ class CronjobManager:
                     run.completed_at = time.time()
                     self._stats["total_failure"] += 1
             except Exception as e:
+                log.debug("cronjob_tools 异常处理", error=str(e))
                 run.retry_count = attempt + 1
                 if attempt < bp.max_retries:
                     log.warning("定时任务失败，重试中", name=bp.name, error=str(e))

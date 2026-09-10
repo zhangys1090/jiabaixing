@@ -4,8 +4,8 @@ import json
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Protocol
-
 logger = logging.getLogger(__name__)
+
 
 
 class EngineProtocol(Protocol):
@@ -158,6 +158,7 @@ class ABComparator:
                 if not passed:
                     details = f"score={score:.2f} < threshold"
             except Exception as e:
+                logger.debug("ab_comparator 异常处理", error=str(e))
                 output = ""
                 score = 0.0
                 passed = False

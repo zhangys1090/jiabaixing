@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
+import logging
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -91,7 +93,7 @@ class LLMContextBuilder:
         raw_memories = [{"content": "...", "relevance": 0.8}, ...]
         result = builder.build(raw_memories, scene="coding", max_tokens=2000)
         for mem in result.memories:
-            print(f"[{mem.relevance:.2f}] {mem.content}")
+            logger.info("[{mem.relevance:.2f}] {mem.content}")
     """
 
     _SCENE_WEIGHTS: dict[str, float] = {

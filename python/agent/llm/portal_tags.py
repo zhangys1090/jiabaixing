@@ -35,10 +35,11 @@ import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
-
 from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("portal_tags")
+
+
 
 
 class TokenStatus(str, Enum):
@@ -206,7 +207,7 @@ class PortalTagManager:
             acl=acl or {},
         )
         self._portals[portal_id] = portal
-        log.info("Portal registered", portal_id=portal_id, tags=portal.tags)
+        log.debug("Portal registered", portal_id=portal_id, tags=portal.tags)
         return portal
 
     def unregister_portal(self, portal_id: str) -> None:

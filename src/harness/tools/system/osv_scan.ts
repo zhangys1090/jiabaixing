@@ -101,10 +101,7 @@ async function parsePackageJson(
     try {
       pkg = JSON.parse(content);
     } catch (_err) {
-      return {
-        success: false,
-        error: `package.json 不是合法 JSON: ${path.join(projectRoot, 'package.json')}`,
-      } as ToolResult;
+      return [];
     }
     const deps: Array<{ name: string; version: string }> = [];
 

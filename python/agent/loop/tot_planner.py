@@ -7,6 +7,8 @@ from typing import Any, Protocol
 
 from agent.loop.types import ExecutionPlan, LoopContext, PlanStep
 from agent.core.logger import log_ignored
+import logging
+logger = logging.getLogger(__name__)
 
 
 class LLMProtocol(Protocol):
@@ -127,6 +129,7 @@ class TreeOfThoughtsPlanner:
                     complexity=parsed.get("complexity", "moderate"),
                 )
         except Exception as _exc:
+            logger.warning("tot_planner 异常处理", error=str(_exc))
             log_ignored(None, "tot_planner.TreeOfThoughtsPlanner._analyze_task_nature", _exc)
         return TaskNature()
 
@@ -198,7 +201,8 @@ class TreeOfThoughtsPlanner:
                     estimated_rounds=raw.get("estimatedRounds", 3),
                 ))
             return candidates
-        except Exception:
+        except Exception as e:
+            logger.warning("tot_planner._generate_candidates 候选生成失败", error=str(e))
             return []
 
     async def _evaluate_candidates(
@@ -240,6 +244,7 @@ class TreeOfThoughtsPlanner:
                 if evals:
                     return [{"score": e.get("feasibilityScore", 0.5), "reasoning": e.get("reasoning", "")} for e in evals]
         except Exception as _exc:
+            logger.warning("tot_planner 异常处理", error=str(_exc))
             log_ignored(None, "tot_planner.TreeOfThoughtsPlanner._evaluate_candidates", _exc)
 
         return [{"score": 0.5} for _ in candidates]

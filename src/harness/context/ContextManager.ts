@@ -171,6 +171,9 @@ export class ContextManager {
   private entries: ContextEntry[] = [];
   private offloadedHistory: ChatMessage[] = [];
   private offloadIndex: OffloadIndexEntry[] = [];
+  private static readonly MAX_OFFLOADED_HISTORY = 5000;
+  private static readonly MAX_OFFLOAD_INDEX = 10000;
+  private static readonly MAX_LRU_MAP = 10000;
   private compressionConfig: CompressionThresholdConfig;
   private lruAccessMap: Map<string, number> = new Map();
 
@@ -233,6 +236,7 @@ export class ContextManager {
     }
 
     // 2. Persona Tone Instruction (priority: 9) — 进化闭环：语气参数真实注入
+    // 注意：不再重复注入 personaSummary，因为 constitutional prompt 已包含完整人格定义
     if (this.deps.personaCore) {
       try {
         const scene = this.deps.sceneRecognizer
@@ -241,10 +245,8 @@ export class ContextManager {
         const toneInstruction =
           this.deps.personaCore.buildSceneToneInstruction(scene);
         if (toneInstruction) {
-          const personaSummary = this.deps.personaCore.buildPersonaSummary();
-          const personaContent = `${personaSummary}\n\n${toneInstruction}`;
           const truncated = this.allocator.truncateToBudget(
-            personaContent,
+            toneInstruction,
             allocation.dynamicContext
           );
           messages.push({ role: 'system', content: truncated });
@@ -536,10 +538,18 @@ export class ContextManager {
           await this.deps.constitutionalBuilder.buildConstitutionPrompt();
         messages.push({ role: 'system', content: constitution });
       } catch {
-        messages.push({ role: 'system', content: '你是一个智能助手。' });
+        messages.push({
+          role: 'system',
+          content:
+            '你是家百星，28岁私人秘书。成熟、专业、从容。只使用已有工具，不编造工具和结果。',
+        });
       }
     } else {
-      messages.push({ role: 'system', content: '你是一个智能助手。' });
+      messages.push({
+        role: 'system',
+        content:
+          '你是家百星，28岁私人秘书。成熟、专业、从容。只使用已有工具，不编造工具和结果。',
+      });
     }
 
     if (phase === 'execution') {
@@ -698,10 +708,15 @@ export class ContextManager {
     return [...this.entries];
   }
 
-  setDelegatePipeline(pipeline: { buildContext(input: UserInput): Promise<ChatMessage[]> } | null): void {
+  setDelegatePipeline(
+    pipeline: { buildContext(input: UserInput): Promise<ChatMessage[]> } | null
+  ): void {
     this.delegatePipeline = pipeline;
     if (pipeline) {
-      Logger.info('ContextManager: 已设置 UnifiedContextPipeline 委托', 'ContextManager');
+      Logger.info(
+        'ContextManager: 已设置 UnifiedContextPipeline 委托',
+        'ContextManager'
+      );
     }
   }
 
@@ -940,6 +955,11 @@ ${conversationText.substring(0, 4000)}
     }
 
     this.offloadedHistory.push(...offloaded);
+    if (this.offloadedHistory.length > ContextManager.MAX_OFFLOADED_HISTORY) {
+      this.offloadedHistory = this.offloadedHistory.slice(
+        -ContextManager.MAX_OFFLOADED_HISTORY
+      );
+    }
 
     if (this.deps.offloadDir) {
       this.persistOffloadedMessages(offloaded);
@@ -1259,6 +1279,23 @@ ${keyPoints.slice(-5).join('\n')}`;
         });
 
         this.lruAccessMap.set(messageId, Date.now());
+      }
+
+      if (this.lruAccessMap.size > ContextManager.MAX_LRU_MAP) {
+        const sorted = [...this.lruAccessMap.entries()].sort(
+          (a, b) => a[1] - b[1]
+        );
+        const toDelete = sorted.slice(
+          0,
+          sorted.length - ContextManager.MAX_LRU_MAP
+        );
+        for (const [key] of toDelete) this.lruAccessMap.delete(key);
+      }
+
+      if (this.offloadIndex.length > ContextManager.MAX_OFFLOAD_INDEX) {
+        this.offloadIndex = this.offloadIndex.slice(
+          -ContextManager.MAX_OFFLOAD_INDEX
+        );
       }
 
       this.saveOffloadIndex();

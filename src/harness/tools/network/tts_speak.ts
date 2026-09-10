@@ -86,7 +86,7 @@ export function createTTSSpeakExecutor(deps: TTSSpeakDeps = {}) {
     const rawSpeed = (params.speed as number) || 1.0;
     const speed = Math.min(2.0, Math.max(0.5, rawSpeed));
     const rawPitch = (params.pitch as number) || 1.0;
-    const pitch = Math.min(2.0, Math.max(0.5, rawPitch));
+    const _pitch = Math.min(2.0, Math.max(0.5, rawPitch));
 
     try {
       if (!text || text.trim().length === 0) {

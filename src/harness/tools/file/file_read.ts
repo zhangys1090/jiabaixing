@@ -74,7 +74,10 @@ function normalizePath(rawPath: string): string {
  * 防止 file_read 越界读取项目根之外的任意文件（沙箱逃逸）。
  * 越界时抛出 Error，由上层 catch 转为失败结果。
  */
-export function resolveWithinRoot(rawPath: string, projectRoot?: string): string {
+export function resolveWithinRoot(
+  rawPath: string,
+  projectRoot?: string
+): string {
   const roots = [
     projectRoot || process.cwd(),
     os.tmpdir(),
@@ -93,9 +96,7 @@ export function resolveWithinRoot(rawPath: string, projectRoot?: string): string
   });
 
   if (!within) {
-    throw new Error(
-      `路径越界: 拒绝访问项目根目录之外的路径 "${rawPath}"`
-    );
+    throw new Error(`路径越界: 拒绝访问项目根目录之外的路径 "${rawPath}"`);
   }
 
   // 二级防护: 词法判定在根内, 但允许根内的符号链接可能指向根外。

@@ -20,11 +20,11 @@
 
     @hooks.register(HookPoint.PRE_DISPATCH)
     async def log_incoming(message, **kwargs):
-        print(f"[IN] {message.platform}: {message.content[:50]}")
+        logger.info("[IN] {message.platform}: {message.content[:50]}")
 
     @hooks.register(HookPoint.POST_DISPATCH)
     async def log_outgoing(message, result, **kwargs):
-        print(f"[OUT] result: {result[:50]}")
+        logger.info("[OUT] result: {result[:50]}")
 """
 
 from __future__ import annotations
@@ -116,7 +116,7 @@ class HookManager:
             self._hooks[point].append(info)
             self._by_name[hook_name] = info
             self._hooks[point].sort(key=lambda h: h.priority)
-            log.info("Hook 已注册", name=hook_name, point=point.value, priority=priority)
+            log.debug("Hook 已注册", name=hook_name, point=point.value, priority=priority)
             return func
         return decorator
 
@@ -188,6 +188,7 @@ class HookManager:
                     elif isinstance(result, HookContext):
                         ctx = result
             except Exception as e:
+                log.debug("hooks 异常处理", error=str(e))
                 duration = (time.monotonic() - start) * 1000
                 info.last_error = str(e)
                 info.call_count += 1

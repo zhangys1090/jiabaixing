@@ -13,6 +13,8 @@ from agent.tools.registry import (
     ToolResult,
 )
 from agent.core.logger import log_ignored
+import logging
+logger = logging.getLogger(__name__)
 
 
 IMAGE_GENERATE_DEF = ToolDefinition(
@@ -88,6 +90,7 @@ class _SkillStore:
                 name = data.get("name", f.stem)
                 self._skills[name] = data
             except Exception as _exc:
+                logger.warning("network_enhanced_tools 异常处理", error=str(_exc))
                 log_ignored(None, "network_enhanced_tools._SkillStore._load", _exc)
 
     def _save(self, name: str) -> None:
@@ -177,6 +180,7 @@ async def image_generate_executor(params: dict[str, Any]) -> ToolResult:
                     duration=time.time() - start,
                 )
     except Exception as _exc:
+        logger.warning("network_enhanced_tools 异常处理", error=str(_exc))
         log_ignored(None, "network_enhanced_tools.image_generate_executor", _exc)
 
     return ToolResult(
@@ -329,4 +333,5 @@ async def message_push_executor(params: dict[str, Any]) -> ToolResult:
             return ToolResult(success=False, error=f"不支持的推送渠道: {channel}", duration=time.time() - start)
 
     except Exception as e:
+        logger.warning("network_enhanced_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"推送失败: {e}", duration=time.time() - start)

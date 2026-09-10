@@ -3,6 +3,14 @@
   "version": "5.0.0",
   "description": "Jiabaixing V5.0 — Harness Agent Framework 六维管控智能体系统",
   "main": "index.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zhangys1090/jiabaixing.git"
+  },
+  "bugs": {
+    "url": "https://github.com/zhangys1090/jiabaixing/issues"
+  },
+  "homepage": "https://github.com/zhangys1090/jiabaixing#readme",
   "directories": {
     "doc": "docs",
     "test": "tests"
@@ -46,6 +54,7 @@
     "ws": "8.20.1"
   },
   "devDependencies": {
+    "@jest/core": "29.7.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/busboy": "1.5.4",
     "@types/cors": "^2.8.17",
@@ -68,7 +77,7 @@
     "ts-jest": "^29.4.9",
     "ts-node": "^10.9.2",
     "tsx": "4.22.4",
-    "typescript": "^5.7.0"
+    "typescript": "5.9.3"
   },
   "scripts": {
     "setup": "tsx --env-file=.env src/config/setup.ts",
@@ -77,12 +86,12 @@
     "start": "concurrently \"npm run start:backend\" \"npm run start:frontend\"",
     "fix:native": "npm rebuild better-sqlite3",
     "postinstall": "npm rebuild better-sqlite3 || node -e \"console.warn('[postinstall] better-sqlite3 rebuild skipped; run npm run fix:native if startup fails')\"",
-    "start:backend": "tsx --env-file=.env src/main.ts",
+    "start:backend": "cross-env NODE_OPTIONS=--max-old-space-size=512 tsx --env-file=.env src/main.ts",
     "start:frontend": "cd src/frontend && cross-env BROWSER=none npm start",
-    "start:main": "tsx --env-file=.env src/main.ts",
+    "start:main": "cross-env NODE_OPTIONS=--max-old-space-size=512 tsx --env-file=.env src/main.ts",
     "start:full": "concurrently --kill-others-on-fail \"npm run start:backend\" \"npm run start:frontend\"",
-    "cli": "tsx --env-file=.env src/cli.ts",
-    "daemon": "tsx --env-file=.env src/cli.ts daemon",
+    "cli": "cross-env NODE_OPTIONS=--max-old-space-size=512 tsx --env-file=.env src/cli.ts",
+    "daemon": "cross-env NODE_OPTIONS=--max-old-space-size=512 tsx --env-file=.env src/cli.ts daemon",
     "build": "tsc",
     "build:fast": "tsc --project tsconfig.fast.json",
     "test": "jest",
@@ -91,10 +100,10 @@
     "test:integration": "jest tests/integration",
     "test:e2e": "cd tests/e2e && npx cypress run",
     "test:e2e:capabilities": "jest tests/e2e/capabilities/ --coverage=false",
-    "lint": "eslint",
+    "lint": "eslint src --ext .ts",
     "format": "prettier --write src/**/*.ts",
     "format:check": "prettier --check src/**/*.ts",
-    "lint:fix": "eslint --fix",
+    "lint:fix": "eslint src --ext .ts --fix",
     "prepare": "node scripts/pre-commit.js || true",
     "precommit": "node scripts/pre-commit.js",
     "check": "npm run lint && npm run format:check && npm run test",
@@ -118,12 +127,20 @@
   },
   "keywords": [
     "ai",
+    "ai-agent",
     "assistant",
     "agent",
-    "harness"
+    "harness",
+    "llm",
+    "chatbot",
+    "agent-framework",
+    "tool-calling",
+    "memory",
+    "evolution",
+    "multi-model"
   ],
-  "author": "",
-  "license": "ISC",
+  "author": "Jiabaixing Team",
+  "license": "MIT",
   "type": "commonjs",
   "engines": {
     "node": ">=20.x"

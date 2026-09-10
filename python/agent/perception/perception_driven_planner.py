@@ -26,6 +26,7 @@ from enum import Enum
 from typing import Any
 
 from agent.core.logger import StructuredLogger
+from agent.core.types import RiskLevel
 
 log = StructuredLogger("perception_driven_planner")
 
@@ -35,13 +36,6 @@ class ExecutionStrategy(str, Enum):
     BALANCED = "balanced"
     AGGRESSIVE = "aggressive"
     INTERACTIVE = "interactive"
-
-
-class RiskLevel(str, Enum):
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-    CRITICAL = "critical"
 
 
 @dataclass

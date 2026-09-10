@@ -130,9 +130,7 @@ export class MultiModelProvider {
   }
 
   /** 根据 ProviderManager 的路由规则获取模型列表（按优先级排序） */
-  private getModelsForInput(
-    input: string
-  ): { name: string; model: Model }[] {
+  private getModelsForInput(input: string): { name: string; model: Model }[] {
     const pm = getProviderManager();
     const providers = pm.getProvidersForInput(input);
 

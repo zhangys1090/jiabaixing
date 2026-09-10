@@ -25,8 +25,10 @@ from agent.gateway.mirror import MessageMirror
 from agent.gateway.pairing import PairingAuth
 from agent.gateway.restart import HotReloader
 from agent.gateway.forensics import ShutdownForensics
+from agent.gateway.platforms.feishu_adapter import FeishuAdapter
 
 __all__ = [
+    "FeishuAdapter",
     "GatewayConfig",
     "Message",
     "MessageDispatcher",

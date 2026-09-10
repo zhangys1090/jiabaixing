@@ -23,8 +23,8 @@ from enum import IntEnum
 from typing import Any
 
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("dynamic_priority")
+
 
 
 class Priority(IntEnum):
@@ -117,14 +117,22 @@ class DynamicPriorityScorer:
         ranked = scorer.rank([task1, task2, task3])
     """
 
-    def __init__(self, config: ScorerConfig | None = None) -> None:
-        """初始化评分器。
+    _CACHE_MAX = 500
 
-        Args:
-            config: 评分器配置，None 时使用默认权重。
-        """
+    def __init__(self, config: ScorerConfig | None = None) -> None:
         self._config = config or ScorerConfig()
         self._score_cache: dict[str, PriorityScore] = {}
+
+    def _trim_cache(self) -> None:
+        if len(self._score_cache) <= self._CACHE_MAX:
+            return
+        sorted_items = sorted(
+            self._score_cache.items(),
+            key=lambda x: x[1].total,
+        )
+        to_remove = sorted_items[: len(self._score_cache) - (self._CACHE_MAX * 3 // 4)]
+        for key, _ in to_remove:
+            del self._score_cache[key]
 
     def _calc_urgency(self, task: TaskInfo) -> float:
         """计算紧急度因子（0-1）。
@@ -238,6 +246,7 @@ class DynamicPriorityScorer:
             priority_level=self._determine_level(total),
         )
         self._score_cache[task.title] = ps
+        self._trim_cache()
         return ps
 
     def rank(self, tasks: list[TaskInfo]) -> list[PriorityScore]:

@@ -16,7 +16,7 @@ import os
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from agent.plugins.trust import TrustLevel, parse_trust_level
 from agent.security.runtime_control import get_controller
@@ -59,7 +59,7 @@ def _require_admin(
 
 
 class PostureSetRequest(BaseModel):
-    posture: str
+    posture: str = Field(max_length=50)
 
 
 @router.get("/runtime/posture")
@@ -113,8 +113,8 @@ async def list_trust() -> dict[str, Any]:
 
 
 class TrustSetRequest(BaseModel):
-    plugin: str
-    trust_level: str
+    plugin: str = Field(max_length=200)
+    trust_level: str = Field(max_length=50)
 
 
 @router.post("/plugins/trust", dependencies=[Depends(_require_admin)])
@@ -125,3 +125,90 @@ async def set_trust(req: TrustSetRequest) -> dict[str, Any]:
     except RuntimeError as e:
         raise HTTPException(status_code=409, detail=str(e))
     return entry
+
+
+# ── 审批管理 ──
+
+
+class BatchApproveRequest(BaseModel):
+    request_ids: list[str] = Field(..., min_length=1)
+    approved: bool
+    reason: str = ""
+
+
+class BatchAutoApproveRequest(BaseModel):
+    threshold: str = Field("medium", pattern="^(read-only|low|medium|high|critical)$")
+
+
+@router.get("/approval/pending")
+async def get_pending_approvals() -> dict[str, Any]:
+    from agent.main import engine
+    if not engine or not getattr(engine, "approval_manager", None):
+        return {"pending": [], "total": 0}
+    mgr = engine.approval_manager
+    pending = mgr.get_pending_requests()
+    summary = mgr.get_risk_summary()
+    return {
+        "pending": [
+            {
+                "id": r.id,
+                "tool_name": r.tool_name,
+                "risk_level": r.risk_level,
+                "status": r.status,
+                "timestamp": r.timestamp,
+            }
+            for r in pending
+        ],
+        "summary": summary,
+    }
+
+
+@router.get("/approval/grouped")
+async def get_grouped_approvals() -> dict[str, Any]:
+    from agent.main import engine
+    if not engine or not getattr(engine, "approval_manager", None):
+        return {"groups": {}}
+    mgr = engine.approval_manager
+    grouped = mgr.get_pending_grouped_by_risk()
+    return {
+        "groups": {
+            risk: [
+                {"id": r.id, "tool_name": r.tool_name, "timestamp": r.timestamp}
+                for r in requests
+            ]
+            for risk, requests in grouped.items()
+        },
+    }
+
+
+@router.post("/approval/batch", dependencies=[Depends(_require_admin)])
+async def batch_approve(req: BatchApproveRequest) -> dict[str, Any]:
+    from agent.main import engine
+    if not engine or not getattr(engine, "approval_manager", None):
+        raise HTTPException(status_code=503, detail="ApprovalManager not available")
+    mgr = engine.approval_manager
+    result = mgr.batch_respond(req.request_ids, req.approved, req.reason)
+    return {
+        "total": result.total,
+        "approved": result.approved,
+        "rejected": result.rejected,
+        "skipped": result.skipped,
+        "aggregated_risk": result.aggregated_risk,
+        "details": result.details,
+    }
+
+
+@router.post("/approval/batch-auto", dependencies=[Depends(_require_admin)])
+async def batch_auto_approve(req: BatchAutoApproveRequest) -> dict[str, Any]:
+    from agent.main import engine
+    if not engine or not getattr(engine, "approval_manager", None):
+        raise HTTPException(status_code=503, detail="ApprovalManager not available")
+    mgr = engine.approval_manager
+    result = mgr.batch_auto_approve_below_risk(req.threshold)
+    return {
+        "total": result.total,
+        "approved": result.approved,
+        "rejected": result.rejected,
+        "skipped": result.skipped,
+        "aggregated_risk": result.aggregated_risk,
+    }

@@ -19,7 +19,7 @@ Usage:
     sg = SecurityGuidance()
     advisory = sg.evaluate_action("删除文件", "/etc/passwd")
     if advisory.should_confirm:
-        print(f"⚠️ 需要用户确认: {advisory.guidance}")
+        logger.info("⚠️ 需要用户确认: {advisory.guidance}")
 """
 
 from __future__ import annotations
@@ -28,22 +28,10 @@ import fnmatch
 import re
 from dataclasses import dataclass, field
 from enum import Enum
+import logging
+from agent.core.types import RiskLevel
 
-
-class RiskLevel(str, Enum):
-    """风险等级枚举。
-
-    Attributes:
-        LOW: 低风险，无需特殊处理。
-        MEDIUM: 中等风险，需注意。
-        HIGH: 高风险，建议确认后再执行。
-        CRITICAL: 严重风险，必须确认后方可执行。
-    """
-
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-    CRITICAL = "critical"
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -235,7 +223,7 @@ class SecurityGuidance:
         sg = SecurityGuidance()
         advisory = sg.evaluate_action("删除文件", "/tmp/old.log")
         if advisory.should_confirm:
-            print(f"需要确认: {advisory.guidance}")
+            logger.info("需要确认: {advisory.guidance}")
     """
 
     def __init__(self, rules: list[_SecurityRule] | None = None) -> None:

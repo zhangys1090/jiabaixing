@@ -16,8 +16,8 @@ import threading
 from typing import Any
 
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("semantic_selector")
+
 
 
 class SemanticToolSelector:
@@ -121,7 +121,11 @@ class SemanticToolSelector:
                 self._embeddings = self._model.encode(
                     descriptions, show_progress_bar=False,
                 ).tolist()
+                if len(self._embeddings) > self._MAX_EMBEDDINGS:
+                    self._embeddings = self._embeddings[-self._MAX_EMBEDDINGS * 3 // 4:]
                 self._tool_names = names
+                if len(self._tool_names) > self._MAX_TOOL_NAMES:
+                    self._tool_names = self._tool_names[-self._MAX_TOOL_NAMES * 3 // 4:]
                 self._tool_count_at_init = tool_count
                 self._initialized = True
                 log.info(

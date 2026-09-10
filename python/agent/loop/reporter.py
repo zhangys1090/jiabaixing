@@ -11,8 +11,8 @@ from agent.loop.types import (
     LoopContext,
     ReporterOutput,
 )
-
 log = StructuredLogger("reporter")
+
 
 
 class Reporter:
@@ -161,6 +161,7 @@ class Reporter:
                 breakdown["context_relevance"] = round(extra_report.dimensions.context_relevance, 4)
                 quality = quality * 0.85 + extra_report.overall_score * 0.15
         except Exception as _exc:
+            log.debug("reporter 异常处理", error=str(_exc))
             log_ignored(log, "reporter.Reporter._compute_quality_score", _exc)
 
         log.debug(

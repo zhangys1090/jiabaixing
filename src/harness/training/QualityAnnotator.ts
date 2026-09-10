@@ -111,14 +111,20 @@ export class QualityAnnotator {
     const result: AnnotatedTrajectory[] = [];
 
     for (const [, group] of sequenceGroups) {
-      const sampled = this.sampleFromGroup(group, Math.min(maxSimilar, group.length), strategy);
+      const sampled = this.sampleFromGroup(
+        group,
+        Math.min(maxSimilar, group.length),
+        strategy
+      );
       result.push(...sampled);
     }
 
     return result;
   }
 
-  batchAnnotate(eventsBySession: Map<string, EventStoreEvent[]>): Map<string, AnnotatedTrajectory> {
+  batchAnnotate(
+    eventsBySession: Map<string, EventStoreEvent[]>
+  ): Map<string, AnnotatedTrajectory> {
     const result = new Map<string, AnnotatedTrajectory>();
 
     for (const [sessionId, events] of eventsBySession) {
@@ -152,7 +158,16 @@ export class QualityAnnotator {
 
     const histogram: Record<string, number> = {};
     for (const q of qualities) {
-      const bucket = q >= 0.8 ? '0.8-1.0' : q >= 0.6 ? '0.6-0.8' : q >= 0.4 ? '0.4-0.6' : q >= 0.2 ? '0.2-0.4' : '0.0-0.2';
+      const bucket =
+        q >= 0.8
+          ? '0.8-1.0'
+          : q >= 0.6
+            ? '0.6-0.8'
+            : q >= 0.4
+              ? '0.4-0.6'
+              : q >= 0.2
+                ? '0.2-0.4'
+                : '0.0-0.2';
       histogram[bucket] = (histogram[bucket] ?? 0) + 1;
     }
 
@@ -163,7 +178,12 @@ export class QualityAnnotator {
 
     return {
       histogram,
-      percentiles: { p25: percentile(25), p50: percentile(50), p75: percentile(75), p90: percentile(90) },
+      percentiles: {
+        p25: percentile(25),
+        p50: percentile(50),
+        p75: percentile(75),
+        p90: percentile(90),
+      },
       mean,
       stdDev,
     };
@@ -172,26 +192,43 @@ export class QualityAnnotator {
   private computeLabels(events: EventStoreEvent[]): QualityLabels {
     const userEvents = events.filter((e) => e.eventType === 'user_input');
     const toolCallEvents = events.filter((e) => e.eventType === 'tool_call');
-    const toolResultEvents = events.filter((e) => e.eventType === 'tool_result');
+    const toolResultEvents = events.filter(
+      (e) => e.eventType === 'tool_result'
+    );
     const errorEvents = events.filter((e) => e.eventType === 'error_occurred');
-    const thinkingEvents = events.filter((e) => e.eventType === 'agent_thinking');
+    const thinkingEvents = events.filter(
+      (e) => e.eventType === 'agent_thinking'
+    );
 
-    const successTools = toolResultEvents.filter((e) => Boolean(e.payload.success));
-    const taskCompletion = userEvents.length > 0
-      ? Math.min(1, (toolResultEvents.length + thinkingEvents.length) / userEvents.length)
-      : 0.5;
+    const successTools = toolResultEvents.filter((e) =>
+      Boolean(e.payload.success)
+    );
+    const taskCompletion =
+      userEvents.length > 0
+        ? Math.min(
+            1,
+            (toolResultEvents.length + thinkingEvents.length) /
+              userEvents.length
+          )
+        : 0.5;
 
-    const toolEfficiency = toolResultEvents.length > 0
-      ? successTools.length / toolResultEvents.length
-      : toolCallEvents.length === 0 ? 0.8 : 0.3;
+    const toolEfficiency =
+      toolResultEvents.length > 0
+        ? successTools.length / toolResultEvents.length
+        : toolCallEvents.length === 0
+          ? 0.8
+          : 0.3;
 
-    const errorRate = events.length > 0
-      ? errorEvents.length / events.length
-      : 0;
+    const errorRate =
+      events.length > 0 ? errorEvents.length / events.length : 0;
 
     const coherence = this.computeCoherence(events);
 
-    const usefulness = this.computeUsefulness(events, taskCompletion, toolEfficiency);
+    const usefulness = this.computeUsefulness(
+      events,
+      taskCompletion,
+      toolEfficiency
+    );
 
     return {
       taskCompletion: Math.min(1, Math.max(0, taskCompletion)),
@@ -222,28 +259,36 @@ export class QualityAnnotator {
     return consecutivePairs > 0 ? coherentPairs / consecutivePairs : 0.5;
   }
 
-  private isCoherentPair(prev: EventStoreEvent, curr: EventStoreEvent): boolean {
+  private isCoherentPair(
+    prev: EventStoreEvent,
+    curr: EventStoreEvent
+  ): boolean {
     const validTransitions: Record<string, string[]> = {
-      'user_input': ['agent_thinking', 'tool_call', 'tool_result'],
-      'agent_thinking': ['tool_call', 'tool_result', 'agent_thinking'],
-      'tool_call': ['tool_result', 'error_occurred'],
-      'tool_result': ['agent_thinking', 'tool_call', 'user_input'],
-      'error_occurred': ['agent_thinking', 'tool_call'],
+      user_input: ['agent_thinking', 'tool_call', 'tool_result'],
+      agent_thinking: ['tool_call', 'tool_result', 'agent_thinking'],
+      tool_call: ['tool_result', 'error_occurred'],
+      tool_result: ['agent_thinking', 'tool_call', 'user_input'],
+      error_occurred: ['agent_thinking', 'tool_call'],
     };
 
     const allowed = validTransitions[prev.eventType];
     return allowed ? allowed.includes(curr.eventType) : true;
   }
 
-  private computeUsefulness(events: EventStoreEvent[], taskCompletion: number, toolEfficiency: number): number {
-    const hasFinalAnswer = events.some((e) =>
-      e.eventType === 'agent_thinking' &&
-      typeof e.payload.content === 'string' &&
-      e.payload.content.length > 50
+  private computeUsefulness(
+    events: EventStoreEvent[],
+    taskCompletion: number,
+    toolEfficiency: number
+  ): number {
+    const hasFinalAnswer = events.some(
+      (e) =>
+        e.eventType === 'agent_thinking' &&
+        typeof e.payload.content === 'string' &&
+        e.payload.content.length > 50
     );
 
-    const hasSuccessfulToolUse = events.some((e) =>
-      e.eventType === 'tool_result' && Boolean(e.payload.success)
+    const hasSuccessfulToolUse = events.some(
+      (e) => e.eventType === 'tool_result' && Boolean(e.payload.success)
     );
 
     let usefulness = 0;
@@ -256,11 +301,18 @@ export class QualityAnnotator {
     return Math.min(1, usefulness);
   }
 
-  private generateAnnotations(events: EventStoreEvent[], labels: QualityLabels): QualityAnnotation[] {
+  private generateAnnotations(
+    events: EventStoreEvent[],
+    labels: QualityLabels
+  ): QualityAnnotation[] {
     const annotations: QualityAnnotation[] = [];
 
     for (const [dimension, score] of Object.entries(labels)) {
-      const reason = this.explainScore(dimension as keyof QualityLabels, score, events);
+      const reason = this.explainScore(
+        dimension as keyof QualityLabels,
+        score,
+        events
+      );
       annotations.push({
         dimension: dimension as keyof QualityLabels,
         score,
@@ -272,28 +324,42 @@ export class QualityAnnotator {
     return annotations;
   }
 
-  private explainScore(dimension: keyof QualityLabels, score: number, events: EventStoreEvent[]): string {
+  private explainScore(
+    dimension: keyof QualityLabels,
+    score: number,
+    _events: EventStoreEvent[]
+  ): string {
     const explanations: Record<keyof QualityLabels, (s: number) => string> = {
       taskCompletion: (s) =>
-        s >= 0.8 ? '任务完成度高，有充分的响应和工具调用' :
-        s >= 0.5 ? '任务部分完成，可能缺少最终回答' :
-        '任务完成度低，缺少有效响应',
+        s >= 0.8
+          ? '任务完成度高，有充分的响应和工具调用'
+          : s >= 0.5
+            ? '任务部分完成，可能缺少最终回答'
+            : '任务完成度低，缺少有效响应',
       toolEfficiency: (s) =>
-        s >= 0.8 ? '工具调用效率高，大部分调用成功' :
-        s >= 0.5 ? '工具调用效率中等，部分调用失败' :
-        '工具调用效率低，大量失败调用',
+        s >= 0.8
+          ? '工具调用效率高，大部分调用成功'
+          : s >= 0.5
+            ? '工具调用效率中等，部分调用失败'
+            : '工具调用效率低，大量失败调用',
       errorRate: (s) =>
-        s <= 0.05 ? '几乎无错误' :
-        s <= 0.2 ? '少量错误，可接受' :
-        '错误率较高，影响质量',
+        s <= 0.05
+          ? '几乎无错误'
+          : s <= 0.2
+            ? '少量错误，可接受'
+            : '错误率较高，影响质量',
       coherence: (s) =>
-        s >= 0.8 ? '事件流连贯，逻辑清晰' :
-        s >= 0.5 ? '事件流基本连贯，偶有跳跃' :
-        '事件流不连贯，逻辑混乱',
+        s >= 0.8
+          ? '事件流连贯，逻辑清晰'
+          : s >= 0.5
+            ? '事件流基本连贯，偶有跳跃'
+            : '事件流不连贯，逻辑混乱',
       usefulness: (s) =>
-        s >= 0.8 ? '输出有用，包含最终答案和有效工具使用' :
-        s >= 0.5 ? '输出部分有用' :
-        '输出缺乏有用信息',
+        s >= 0.8
+          ? '输出有用，包含最终答案和有效工具使用'
+          : s >= 0.5
+            ? '输出部分有用'
+            : '输出缺乏有用信息',
     };
 
     return explanations[dimension](score);
@@ -319,7 +385,8 @@ export class QualityAnnotator {
   private passesFilter(trajectory: AnnotatedTrajectory): boolean {
     const { labels, quality } = trajectory;
 
-    if (labels.taskCompletion < this.filterConfig.minTaskCompletion) return false;
+    if (labels.taskCompletion < this.filterConfig.minTaskCompletion)
+      return false;
     if (labels.errorRate > this.filterConfig.maxErrorRate) return false;
     if (labels.coherence < this.filterConfig.minCoherence) return false;
     if (labels.usefulness < this.filterConfig.minUsefulness) return false;
@@ -369,9 +436,7 @@ export class QualityAnnotator {
         return this.shuffleArray(group).slice(0, count);
 
       case 'quality_weighted':
-        return [...group]
-          .sort((a, b) => b.quality - a.quality)
-          .slice(0, count);
+        return [...group].sort((a, b) => b.quality - a.quality).slice(0, count);
 
       case 'diversity_maximizing': {
         const selected: AnnotatedTrajectory[] = [group[0]];
@@ -383,9 +448,7 @@ export class QualityAnnotator {
 
           for (let i = 0; i < remaining.length; i++) {
             const minDist = Math.min(
-              ...selected.map((s) =>
-                Math.abs(s.quality - remaining[i].quality)
-              )
+              ...selected.map((s) => Math.abs(s.quality - remaining[i].quality))
             );
             if (minDist > maxDist) {
               maxDist = minDist;

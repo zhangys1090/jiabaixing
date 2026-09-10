@@ -24,12 +24,20 @@ export interface SpeechSynthesisResult {
 export type RealSpeakFn = (
   text: string,
   emotion?: string
-) => Promise<{ success: boolean; audioData?: Buffer; duration?: number; error?: string }>;
+) => Promise<{
+  success: boolean;
+  audioData?: Buffer;
+  duration?: number;
+  error?: string;
+}>;
 
 export class SpeechSynthesizer {
   private backend: TTSBackend;
 
-  constructor(backend?: TTSBackend, private readonly realSpeak?: RealSpeakFn) {
+  constructor(
+    backend?: TTSBackend,
+    private readonly realSpeak?: RealSpeakFn
+  ) {
     this.backend =
       backend ?? ((process.env.TTS_BACKEND as TTSBackend) || 'mock');
   }

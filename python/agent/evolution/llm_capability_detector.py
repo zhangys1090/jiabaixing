@@ -8,8 +8,8 @@ from typing import Any, Protocol
 
 from agent.core.logger import StructuredLogger
 from agent.core.logger import log_ignored
-
 log = StructuredLogger("llm_capability_detector")
+
 
 _STORAGE_KEY = "llm_capabilities"
 _CACHE_TTL_SECONDS = 24 * 60 * 60
@@ -248,7 +248,7 @@ class LLMCapabilityDetector:
                 if time.time() - caps.detected_at < _CACHE_TTL_SECONDS:
                     self._cached_capabilities[provider] = caps
             if self._cached_capabilities:
-                log.info("Loaded cached LLM capabilities", count=len(self._cached_capabilities))
+                log.debug("Loaded cached LLM capabilities", count=len(self._cached_capabilities))
         except Exception as e:
             log.warning("Failed to load LLM capabilities cache", error=str(e))
 
@@ -327,6 +327,7 @@ class LLMCapabilityDetector:
                 try:
                     cb(caps)
                 except Exception as _exc:
+                    log.debug("llm_capability_detector 异常处理", error=str(_exc))
                     log_ignored(log, "llm_capability_detector.LLMCapabilityDetector.detect", _exc)
 
             duration = time.time() - start
@@ -356,6 +357,7 @@ class LLMCapabilityDetector:
                 try:
                     cb(provider, diff)
                 except Exception as _exc:
+                    log.debug("llm_capability_detector 异常处理", error=str(_exc))
                     log_ignored(log, "llm_capability_detector.LLMCapabilityDetector.check_drift", _exc)
             log.info(
                 "LLM capability drift detected",
@@ -383,7 +385,7 @@ class LLMCapabilityDetector:
         async def _cancel() -> None:
             task.cancel()
 
-        self._drift_task = task  # type: ignore[attr-defined]
+        self._drift_task = task
         return task
 
     async def _drift_loop(self, providers: list[str], interval_seconds: float) -> None:
@@ -393,6 +395,7 @@ class LLMCapabilityDetector:
                     try:
                         await self.check_drift(p)
                     except Exception as _exc:
+                        log.debug("llm_capability_detector 异常处理", error=str(_exc))
                         log_ignored(log, "llm_capability_detector.drift_loop", _exc)
                 await asyncio.sleep(interval_seconds)
         except asyncio.CancelledError as _exc:
@@ -435,6 +438,7 @@ class LLMCapabilityDetector:
             if match:
                 return max(1.0, min(10.0, float(match.group(1))))
         except Exception as _exc:
+            log.debug("llm_capability_detector 异常处理", error=str(_exc))
             log_ignored(log, "llm_capability_detector.LLMCapabilityDetector._llm_judge_score", _exc)
         return 5.0
 
@@ -445,7 +449,8 @@ class LLMCapabilityDetector:
             text = str(resp.get("content", resp.get("text", "")))
             score = await self._llm_judge_score(_REASONING_EVAL_PROMPT, text)
             return max(1, min(9, round(score)))
-        except Exception:
+        except Exception as _exc:
+            log.debug("llm_capability_detector 异常处理", error=str(_exc))
             return 3
 
     async def _probe_tool_calling(self) -> float:
@@ -455,7 +460,8 @@ class LLMCapabilityDetector:
             text = str(resp.get("content", resp.get("text", "")))
             score = await self._llm_judge_score(_TOOL_CALLING_EVAL_PROMPT, text)
             return round(max(0.1, min(0.95, score / 10.0)), 2)
-        except Exception:
+        except Exception as _exc:
+            log.warning("异常降级处理", error=str(_exc))
             return 0.4
 
     async def _probe_code_generation(self) -> int:
@@ -465,7 +471,8 @@ class LLMCapabilityDetector:
             text = str(resp.get("content", resp.get("text", "")))
             score = await self._llm_judge_score(_CODE_GEN_EVAL_PROMPT, text)
             return max(1, min(9, round(score)))
-        except Exception:
+        except Exception as _exc:
+            log.debug("llm_capability_detector 异常处理", error=str(_exc))
             return 3
 
     async def _probe_structured_output(self) -> float:
@@ -475,7 +482,8 @@ class LLMCapabilityDetector:
             text = str(resp.get("content", resp.get("text", "")))
             score = await self._llm_judge_score(_STRUCTURED_OUTPUT_EVAL_PROMPT, text)
             return round(max(0.1, min(0.95, score / 10.0)), 2)
-        except Exception:
+        except Exception as _exc:
+            log.warning("异常降级处理", error=str(_exc))
             return 0.4
 
     async def _probe_vision(self) -> float:
@@ -487,7 +495,8 @@ class LLMCapabilityDetector:
                 return 0.0
             score = await self._llm_judge_score(_VISION_EVAL_PROMPT, text)
             return round(max(0.0, min(0.95, score / 10.0)), 2)
-        except Exception:
+        except Exception as _exc:
+            log.warning("异常降级处理", error=str(_exc))
             return 0.0
 
     @staticmethod

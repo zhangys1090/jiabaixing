@@ -10,8 +10,8 @@
  */
 
 import { EventEmitter } from 'events';
-import { DesktopEventStream } from './DesktopEventStream';
 import { Logger } from '../utils/Logger';
+import { DesktopEventStream } from './DesktopEventStream';
 
 export type SafetyLevel = 'strict' | 'moderate' | 'permissive';
 
@@ -148,6 +148,7 @@ export class DesktopSafetyGuard extends EventEmitter {
 
   // 紧急停止回调
   private emergencyStopCallbacks: Array<() => void> = [];
+  private static readonly MAX_EMERGENCY_CALLBACKS = 50;
 
   private constructor(config?: SafetyConfig) {
     super();
@@ -346,6 +347,16 @@ export class DesktopSafetyGuard extends EventEmitter {
    * 注册紧急停止回调
    */
   public onEmergencyStop(callback: () => void): () => void {
+    if (
+      this.emergencyStopCallbacks.length >=
+      DesktopSafetyGuard.MAX_EMERGENCY_CALLBACKS
+    ) {
+      Logger.warn(
+        `⚠️ 紧急停止回调数已达上限 (${DesktopSafetyGuard.MAX_EMERGENCY_CALLBACKS})`,
+        'SafetyGuard'
+      );
+      return () => {};
+    }
     this.emergencyStopCallbacks.push(callback);
     return () => {
       const index = this.emergencyStopCallbacks.indexOf(callback);

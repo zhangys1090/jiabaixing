@@ -20,7 +20,7 @@
     extractor = InsightExtractor()
     insights = await extractor.extract("user_1", messages)
     for insight in insights:
-        print(f"{insight.category}: {insight.content} (conf={insight.confidence})")
+        logger.info("{insight.category}: {insight.content} (conf={insight.confidence})")
 """
 
 from __future__ import annotations
@@ -30,10 +30,11 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
-
 from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("insights")
+
+
 
 
 class InsightCategory(str, Enum):
@@ -114,6 +115,8 @@ class InsightExtractor:
         self._min_confidence = min_confidence
         self._insights: dict[str, Insight] = {}
         self._next_id = 1
+        self._MAX_INSIGHTS = 5000
+        self._TRIM_INSIGHTS_TO = 3500
 
     async def extract(
         self,
@@ -243,7 +246,16 @@ class InsightExtractor:
             metadata={"user_id": user_id},
         )
         self._insights[full_key] = insight
+        self._trim_insights()
         return insight
+
+    def _trim_insights(self) -> None:
+        if len(self._insights) <= self._MAX_INSIGHTS:
+            return
+        sorted_items = sorted(self._insights.items(), key=lambda x: x[1].updated_at)
+        to_remove = sorted_items[: len(self._insights) - self._TRIM_INSIGHTS_TO]
+        for key, _ in to_remove:
+            del self._insights[key]
 
     def _find_similar(self, insight: Insight) -> Insight | None:
         """查找相似洞察。"""

@@ -9,6 +9,7 @@
  * PUT    /api/approvals/policy      — 更新审批策略
  */
 
+import crypto from 'crypto';
 import express from 'express';
 import {
   ApprovalPolicy,
@@ -17,6 +18,22 @@ import {
 import { Logger } from '../../utils/Logger';
 
 const router = express.Router();
+
+const APPROVAL_ADMIN_TOKEN = process.env.JBX_APPROVAL_ADMIN_TOKEN || '';
+
+function requireApprovalAuth(req: express.Request): boolean {
+  if (!APPROVAL_ADMIN_TOKEN) return true;
+  const token = req.headers['x-admin-token'] as string | undefined;
+  if (!token) return false;
+  try {
+    return crypto.timingSafeEqual(
+      Buffer.from(token),
+      Buffer.from(APPROVAL_ADMIN_TOKEN)
+    );
+  } catch {
+    return false;
+  }
+}
 
 /** 获取待审批请求列表 */
 router.get('/pending', (_req: express.Request, res: express.Response) => {
@@ -32,7 +49,13 @@ router.get('/pending', (_req: express.Request, res: express.Response) => {
 /** 响应审批请求 */
 router.post('/:id/respond', (req: express.Request, res: express.Response) => {
   try {
+    if (!requireApprovalAuth(req)) {
+      return res.status(403).json({ error: '无效的管理令牌' });
+    }
     const { approved, batchApprove } = req.body;
+    if (typeof approved !== 'boolean') {
+      return res.status(400).json({ error: 'approved 必须为布尔值' });
+    }
     const success = getApprovalEngine().respondToApproval(
       req.params.id,
       Boolean(approved),
@@ -52,7 +75,7 @@ router.post('/:id/respond', (req: express.Request, res: express.Response) => {
 /** 获取审批历史 */
 router.get('/history', (req: express.Request, res: express.Response) => {
   try {
-    const limit = parseInt(req.query.limit as string) || 100;
+    const limit = Math.min(parseInt(req.query.limit as string) || 100, 500);
     const history = getApprovalEngine().getDecisionLog(limit);
     res.json({ data: history, count: history.length });
   } catch (err) {
@@ -97,7 +120,13 @@ router.get('/policy', (_req: express.Request, res: express.Response) => {
 /** 更新审批策略 */
 router.put('/policy', (req: express.Request, res: express.Response) => {
   try {
+    if (!requireApprovalAuth(req)) {
+      return res.status(403).json({ error: '无效的管理令牌' });
+    }
     const updates: Partial<ApprovalPolicy> = req.body;
+    if (!updates || typeof updates !== 'object') {
+      return res.status(400).json({ error: '无效的策略更新' });
+    }
     getApprovalEngine().updatePolicy(updates);
     res.json({ success: true });
   } catch (err) {

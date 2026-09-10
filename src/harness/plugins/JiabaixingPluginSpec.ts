@@ -10,9 +10,22 @@
 
 import type { PluginPermission, PluginSettingDefinition } from './pluginTypes';
 
-export type PluginSource = 'local' | 'npm' | 'git' | 'url' | 'marketplace' | 'builtin';
+export type PluginSource =
+  | 'local'
+  | 'npm'
+  | 'git'
+  | 'url'
+  | 'marketplace'
+  | 'builtin';
 
-export type PluginStatus = 'uninstalled' | 'installed' | 'loaded' | 'active' | 'error' | 'disabled' | 'sandboxed';
+export type PluginStatus =
+  | 'uninstalled'
+  | 'installed'
+  | 'loaded'
+  | 'active'
+  | 'error'
+  | 'disabled'
+  | 'sandboxed';
 
 export interface JiabaixingPluginDescriptor {
   specVersion: 1;
@@ -156,9 +169,16 @@ export class JiabaixingPluginSpec {
 
     if (desc.permissions && Array.isArray(desc.permissions)) {
       const validPermissions = new Set<PluginPermission>([
-        'file:read', 'file:write', 'network:request', 'system:exec',
-        'memory:read', 'memory:write', 'tool:register', 'tool:call',
-        'ui:panel', 'ui:notification',
+        'file:read',
+        'file:write',
+        'network:request',
+        'system:exec',
+        'memory:read',
+        'memory:write',
+        'tool:register',
+        'tool:call',
+        'ui:panel',
+        'ui:notification',
       ]);
 
       for (const perm of desc.permissions) {
@@ -186,7 +206,11 @@ export class JiabaixingPluginSpec {
             severity: 'error',
           });
         }
-        if (dep.minVersion && typeof dep.minVersion === 'string' && !VERSION_REGEX.test(dep.minVersion)) {
+        if (
+          dep.minVersion &&
+          typeof dep.minVersion === 'string' &&
+          !VERSION_REGEX.test(dep.minVersion)
+        ) {
           errors.push({
             path: `dependencies[${i}].minVersion`,
             message: '依赖版本号必须为 semver 格式',
@@ -259,7 +283,9 @@ export class JiabaixingPluginSpec {
     };
   }
 
-  static createBuiltin(descriptor: Partial<JiabaixingPluginDescriptor>): JiabaixingPluginDescriptor {
+  static createBuiltin(
+    descriptor: Partial<JiabaixingPluginDescriptor>
+  ): JiabaixingPluginDescriptor {
     return {
       specVersion: 1,
       id: descriptor.id ?? 'unknown',

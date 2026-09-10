@@ -13,7 +13,10 @@ from agent.tools.registry import (
     ToolParameterDef,
     ToolResult,
 )
-from agent.core.logger import log_ignored
+from agent.core.logger import StructuredLogger, log_ignored
+import logging
+logger = logging.getLogger(__name__)
+log = StructuredLogger("daily_enhanced_tools")
 
 
 MORNING_BRIEF_DEF = ToolDefinition(
@@ -84,6 +87,7 @@ class _ScheduleStore:
                 tid = data.get("id", f.stem)
                 self._tasks[tid] = data
             except Exception as _exc:
+                logger.warning("daily_enhanced_tools 异常处理", error=str(_exc))
                 log_ignored(None, "daily_enhanced_tools._ScheduleStore._load", _exc)
 
     def _save(self, tid: str) -> None:
@@ -184,6 +188,7 @@ async def morning_brief_executor(params: dict[str, Any]) -> ToolResult:
         brief = f"📰 每日简报 — {time.strftime('%Y年%m月%d日')}\n\n" + "\n\n".join(sections)
         return ToolResult(success=True, output=brief, duration=time.time() - start)
     except Exception as e:
+        logger.warning("daily_enhanced_tools 异常处理", error=str(e))
         return ToolResult(
             success=True,
             output=f"📰 每日简报 — {time.strftime('%Y年%m月%d日')}\n\n关注主题: {', '.join(topics)}\n⚠️ 简报生成需要网络搜索支持: {e}",
@@ -237,6 +242,7 @@ async def skill_share_executor(params: dict[str, Any]) -> ToolResult:
             export_path.write_text(json.dumps(export_data, ensure_ascii=False, indent=2), encoding="utf-8")
             return ToolResult(success=True, output=f"📤 技能已导出: {name}\n路径: {export_path}", duration=time.time() - start)
         except Exception as e:
+            logger.warning("daily_enhanced_tools 异常处理", error=str(e))
             return ToolResult(success=False, error=f"导出失败: {e}", duration=time.time() - start)
 
     elif action == "import":
@@ -253,6 +259,7 @@ async def skill_share_executor(params: dict[str, Any]) -> ToolResult:
             skill = store.create(data["name"], data.get("description", ""), data.get("template", ""))
             return ToolResult(success=True, output=f"📥 技能已导入: {skill['name']}\n描述: {skill.get('description', '无')}", duration=time.time() - start)
         except Exception as e:
+            logger.warning("daily_enhanced_tools 异常处理", error=str(e))
             return ToolResult(success=False, error=f"导入失败: {e}", duration=time.time() - start)
 
     elif action == "run":
@@ -272,6 +279,7 @@ async def skill_share_executor(params: dict[str, Any]) -> ToolResult:
                 template = template.replace("{{prompt}}", prompt).replace("{{input}}", prompt)
             return ToolResult(success=True, output=f"▶️ 运行技能: {name}\n结果:\n{template}", duration=time.time() - start)
         except Exception as e:
+            logger.warning("daily_enhanced_tools 异常处理", error=str(e))
             return ToolResult(success=False, error=f"运行失败: {e}", duration=time.time() - start)
 
     elif action == "list":

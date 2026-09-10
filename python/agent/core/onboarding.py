@@ -32,10 +32,11 @@ from pathlib import Path
 from typing import Any
 
 from agent.config import DATA_DIR, ENV_FILE, PROJECT_ROOT
+from agent.core.logger import StructuredLogger, log_ignored
 from agent.core.logger import StructuredLogger
-from agent.core.logger import log_ignored
 
 log = StructuredLogger("onboarding")
+
 
 
 class OnboardingStep(str, Enum):
@@ -167,6 +168,7 @@ class OnboardingWizard:
                     installed_skills=data.get("installed_skills", []),
                 )
             except Exception as _exc:
+                log.debug("onboarding 异常处理", error=str(_exc))
                 log_ignored(log, "onboarding.OnboardingWizard._load_state", _exc)
         return OnboardingState()
 
@@ -202,7 +204,8 @@ class OnboardingWizard:
             if node_result.returncode == 0:
                 result.node_available = True
                 result.node_version = node_result.stdout.strip()
-        except Exception:
+        except Exception as _exc:
+            log.debug("onboarding 异常处理", error=str(_exc))
             result.issues.append("Node.js 未安装，部分功能不可用")
 
         llm_key = os.getenv("LLM_API_KEY", "")
@@ -219,6 +222,7 @@ class OnboardingWizard:
             r.ping()
             result.redis_available = True
         except Exception as _exc:
+            log.debug("onboarding 异常处理", error=str(_exc))
             log_ignored(log, "onboarding.OnboardingWizard.check_environment", _exc)
 
         self._state.env_result = result

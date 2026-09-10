@@ -9,7 +9,10 @@ from agent.persistence.trajectory import (
     ToolInvocationRecord,
     TrajectoryDatabase,
 )
-from agent.core.logger import log_ignored
+from agent.core.logger import StructuredLogger, log_ignored
+import logging
+logger = logging.getLogger(__name__)
+log = StructuredLogger("flywheel")
 
 
 @dataclass
@@ -66,6 +69,7 @@ class TrajectoryFlywheel:
         self.config = config or FlywheelConfig()
         self._recent_analyses: list[TrajectoryAnalysis] = []
         self._applied_optimizations: dict[str, dict[str, Any]] = {}
+        self._MAX_APPLIED_OPTIMIZATIONS = 200
 
     def analyze(self) -> TrajectoryAnalysis:
         cutoff_ms = int((time.time() - self.config.analysis_window_hours * 3600) * 1000)
@@ -134,6 +138,7 @@ class TrajectoryFlywheel:
                                 engine._update_tool_weight(tool_name, new_weight)
                                 applied = True
         except Exception as _exc:
+            logger.warning("flywheel 异常处理", error=str(_exc))
             log_ignored(None, "flywheel.TrajectoryFlywheel.apply_suggestion", _exc)
 
         self._applied_optimizations[suggestion_id] = {
@@ -141,6 +146,11 @@ class TrajectoryFlywheel:
             "impact": suggestion.estimated_improvement,
             "actually_applied": applied,
         }
+        if len(self._applied_optimizations) > self._MAX_APPLIED_OPTIMIZATIONS:
+            sorted_opts = sorted(self._applied_optimizations.items(), key=lambda x: x[1].get("timestamp", 0))
+            to_remove = sorted_opts[: len(self._applied_optimizations) - (self._MAX_APPLIED_OPTIMIZATIONS * 3 // 4)]
+            for key, _ in to_remove:
+                del self._applied_optimizations[key]
         return {"success": True, "message": f"已应用建议: {suggestion.description}", "applied_to_engine": applied}
 
     def get_improvement_trend(self) -> dict[str, Any]:

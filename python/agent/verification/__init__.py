@@ -1,1 +1,1 @@
-from agent.verification.service import VerificationService, VerificationServiceDeps
+from __future__ import annotations

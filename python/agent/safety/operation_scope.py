@@ -27,10 +27,11 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-
 from agent.core.logger import StructuredLogger, log_ignored
 
 log = StructuredLogger("operation_scope")
+
+
 
 
 @dataclass
@@ -204,3 +205,54 @@ class OperationScope:
             "elapsed_seconds": time.time() - self._start_time,
             "timeout_seconds": self._def.timeout_seconds,
         }
+
+    # ─── A2: 权限动态收缩 ───
+
+    _HIGH_RISK_PERMISSIONS = {"file:write", "code:execute", "network:access", "system:modify"}
+    _MEDIUM_RISK_PERMISSIONS = {"file:read", "memory:write"}
+
+    def shrink_permissions(self, task_phase: str = "executing") -> list[str]:
+        """A2: 根据任务阶段动态收缩权限，实现最小权限原则.
+
+        任务完成后逐步收回已授予的工具权限，防止权限滥用。
+
+        Args:
+            task_phase: "planning"(规划), "executing"(执行), "verifying"(验证), "completed"(完成)
+
+        Returns:
+            被收回的权限列表
+        """
+        _PHASE_PERMISSIONS = {
+            "planning": {"memory:read", "memory:write", "file:read"},
+            "executing": None,
+            "verifying": {"memory:read", "file:read", "code:execute"},
+            "completed": {"memory:read", "file:read"},
+        }
+        target = _PHASE_PERMISSIONS.get(task_phase)
+        if target is None:
+            return []
+
+        removed: list[str] = []
+        for perm in list(self._def.allowed_permissions):
+            if perm not in target:
+                self._def.allowed_permissions.remove(perm)
+                removed.append(perm)
+
+        if removed:
+            log.info("A2: permissions shrunk", phase=task_phase, removed=removed, remaining=self._def.allowed_permissions)
+        return removed
+
+    def expand_permissions(self, required: list[str]) -> list[str]:
+        """A2: 按需临时扩展权限（任务需要时）.
+
+        Returns:
+            新增的权限列表
+        """
+        added: list[str] = []
+        for perm in required:
+            if perm not in self._def.allowed_permissions:
+                self._def.allowed_permissions.append(perm)
+                added.append(perm)
+        if added:
+            log.info("A2: permissions expanded", added=added)
+        return added

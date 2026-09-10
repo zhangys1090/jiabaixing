@@ -20,7 +20,7 @@
         models=["openai/gpt-4o-mini", "anthropic/claude-3-haiku-20240307"],
         strategy=AggregationStrategy.CONSENSUS,
     )
-    print(result.best_answer)
+    logger.info(result.best_answer)
 """
 
 from __future__ import annotations
@@ -31,13 +31,14 @@ from collections import Counter
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, TYPE_CHECKING
-
 from agent.core.logger import StructuredLogger
+
 
 if TYPE_CHECKING:
     from agent.llm.provider import LLMProvider
 
 log = StructuredLogger("moa_aggregator")
+
 
 
 class AggregationStrategy(str, Enum):
@@ -142,6 +143,7 @@ class MoAAggregator:
                 success=True,
             )
         except Exception as e:
+            log.debug("moa_aggregator 异常处理", error=str(e))
             duration = (time.monotonic() - start) * 1000
             log.error("MoA 模型调用失败", model=model, error=str(e))
             return ModelResponse(model=model, content="", duration_ms=duration, success=False, error=str(e))
@@ -154,7 +156,8 @@ class MoAAggregator:
         temperature: float = 0.7,
     ) -> list[ModelResponse]:
         tasks = [self._call_model(messages, m, max_tokens, temperature) for m in models]
-        return await asyncio.gather(*tasks)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        return [r if isinstance(r, ModelResponse) else ModelResponse(success=False, content="", error=str(r)) for r in results]
 
     def _compute_consensus(self, responses: list[ModelResponse]) -> tuple[float, str]:
         successful = [r for r in responses if r.success and r.content.strip()]

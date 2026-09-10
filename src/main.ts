@@ -55,8 +55,8 @@ import orchestrateRoutes, { setOrchestrateCore } from './routes/orchestrate';
 import taskRoutes, { setHarnessInstance } from './routes/tasks';
 import integrationRoutes from './server/routes/integrationRoutes';
 import {
-    setSystemStateCore,
-    systemStateRoutes,
+  setSystemStateCore,
+  systemStateRoutes,
 } from './server/routes/systemStateRoutes';
 
 import { registerA2ARoutes } from './a2a/A2ARouter';
@@ -75,7 +75,9 @@ import { registerMCPRoutes } from './server/routes/mcpRoutes';
 import { registerMemoryRoutes } from './server/routes/memoryRoutes';
 import { registerOpenAIRoutes } from './server/routes/openaiCompatibleRoutes';
 import { registerPerformanceRoutes } from './server/routes/performanceRoutes';
+import { registerPlanRoutes } from './server/routes/planRoutes';
 import { registerSecurityRoutes } from './server/routes/securityRoutes';
+import { registerSessionRoutes } from './server/routes/sessionRoutes';
 import { registerSkillRoutes } from './server/routes/skillRoutes';
 import { registerToolRoutes } from './server/routes/toolRoutes';
 import { registerTraeRoutes } from './server/routes/traeRoutes';
@@ -83,6 +85,7 @@ import { registerTrajectoryRoutes } from './server/routes/trajectoryRoutes';
 
 import { bootstrap } from './server/bootstrap';
 import { setupEventBus } from './server/eventBusSetup';
+import { gracefulShutdown } from './server/shutdown';
 import { setupWebSocket } from './server/websocket/index';
 
 let PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3111;
@@ -94,10 +97,23 @@ const app = express();
 function setupRoutes(broadcast: (data: Record<string, unknown>) => void): void {
   app.use(
     cors({
-      origin:
-        process.env.NODE_ENV === 'production'
-          ? false
-          : ['http://localhost:3100'],
+      // P1-1 修复: CORS origin 从环境变量读取，生产环境禁止 *
+      origin: (() => {
+        const envOrigin = process.env.CORS_ORIGIN;
+        if (process.env.NODE_ENV === 'production') {
+          if (!envOrigin || envOrigin === '*') {
+            Logger.warn(
+              '⚠️ 生产环境 CORS_ORIGIN 未配置或为 *，已禁用跨域0',
+              'Main'
+            );
+            return false;
+          }
+          return envOrigin.split(',').map((s) => s.trim());
+        }
+        return envOrigin
+          ? envOrigin.split(',').map((s) => s.trim())
+          : ['http://localhost:3100'];
+      })(),
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
       allowedHeaders: ['Content-Type', 'Authorization'],
@@ -184,6 +200,8 @@ function setupRoutes(broadcast: (data: Record<string, unknown>) => void): void {
     process.env.RATE_LIMIT_MAX || '100',
     10
   );
+  // P0-3 修复: 限流 Map 最大容量，防止 IP 爆破导致 OOM
+  const RATE_LIMIT_MAX_ENTRIES = 10000;
 
   app.use(
     '/api',
@@ -197,6 +215,20 @@ function setupRoutes(broadcast: (data: Record<string, unknown>) => void): void {
 
       let bucket = rateLimitMap.get(clientIp);
       if (!bucket) {
+        // P0-3: 超过最大条目时淘汰最旧的条目（LRU），而非无限增长
+        if (rateLimitMap.size >= RATE_LIMIT_MAX_ENTRIES) {
+          let oldestKey: string | null = null;
+          let oldestTime = Infinity;
+          for (const [ip, b] of rateLimitMap) {
+            if (b.lastRefill < oldestTime) {
+              oldestTime = b.lastRefill;
+              oldestKey = ip;
+            }
+          }
+          if (oldestKey !== null) {
+            rateLimitMap.delete(oldestKey);
+          }
+        }
         bucket = { tokens: RATE_LIMIT_MAX_REQUESTS, lastRefill: now };
         rateLimitMap.set(clientIp, bucket);
       }
@@ -348,20 +380,7 @@ function listenServer(): Promise<void> {
             ? '\\\\.\\pipe\\jiabaixing'
             : '/tmp/jiabaixing.sock');
         console.log(
-          '  ==========================================================='
-        );
-        console.log('  [READY] jiabaixing\n');
-        console.log(`  API:       http://localhost:${PORT}`);
-        console.log(`  WebSocket: ws://localhost:${PORT}`);
-        console.log(`  IPC:       ${ipcPath}`);
-        console.log(
-          `  Model:     ${process.env.LLM_MODEL || 'deepseek-v4-flash'}`
-        );
-        console.log(
-          `  Auto Opt:  ${process.env.ENABLE_AUTO_OPTIMIZE !== 'false' ? 'ON' : 'OFF'}`
-        );
-        console.log(
-          '\n  ===========================================================\n'
+          `\n  [READY] jiabaixing v5.0 | API :${PORT} | WS :${PORT} | IPC ${ipcPath} | Model ${process.env.LLM_MODEL || 'deepseek-v4-flash'}\n`
         );
         resolve();
       })
@@ -446,18 +465,44 @@ process.on('uncaughtException', (error) => {
     Logger.warn(`WS帧解析错误（已忽略）: ${error.message}`, 'Main');
     return;
   }
+  const errCode = (error as Error & { code?: string }).code;
+  if (
+    errCode === 'ECONNRESET' ||
+    errCode === 'EPIPE' ||
+    errCode === 'ERR_STREAM_WRITE_AFTER_END' ||
+    errCode === 'EADDRINUSE'
+  ) {
+    Logger.warn(
+      `可恢复的I/O错误（已忽略）: ${errCode} ${error.message}`,
+      'Main'
+    );
+    return;
+  }
   Logger.error('未捕获异常，进程将退出', error as Error, 'Main');
   process.exit(1);
 });
 
-process.on('unhandledRejection', (reason) => {
+process.on('unhandledRejection', (reason, _promise) => {
   Logger.error(
     `未处理的Promise拒绝: ${reason}`,
     new Error(String(reason)),
     'Main'
   );
-  // 未处理的 Promise 拒绝代表未被 await/catch 覆盖的逻辑缺陷，进程已处于
-  // 不可预期的损坏状态，必须退出（与 uncaughtException 一致），避免僵尸进程
-  // 继续处理请求（审计 S-02：原仅记录不退出）。
+
+  // P0-2 修复: 区分致命与可恢复的 Promise 拒绝。
+  // - 网络类错误（ECONNRESET/ETIMEDOUT/ENOTFOUND 等）为瞬时故障，仅告警不退出，
+  //   避免单次网络抖动杀死整个进程。
+  // - 其他未捕获拒绝仍代表逻辑缺陷，进程退出（fail-fast）。
+  const reasonStr = String(reason);
+  const isTransientNetworkError =
+    /ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ENETUNREACH|EPIPE|socket hang up|fetch failed/i.test(
+      reasonStr
+    );
+  if (isTransientNetworkError) {
+    Logger.warn(`瞬态网络错误（不退出）: ${reasonStr}`, 'Main');
+    return;
+  }
+
+  // 非瞬态错误：进程已处于不可预期的损坏状态，必须退出
   process.exit(1);
 });

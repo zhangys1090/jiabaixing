@@ -7,8 +7,8 @@ from pathlib import Path
 from typing import Any
 
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("skill_usage_tracker")
+
 
 _STALE_AFTER_DAYS = 30
 _MAX_RECENT_QUALITY_SCORES = 10
@@ -81,6 +81,7 @@ class SkillUsageTracker:
         self._usage_path = self._data_dir / "skill-usage.json"
         self._skills: dict[str, SkillUsageRecord] = {}
         self._integration_history: list[dict[str, Any]] = []
+        self._MAX_SKILLS = 5000
         self._load()
 
     @classmethod
@@ -102,7 +103,7 @@ class SkillUsageTracker:
             skills_data = data.get("skills", {})
             for name, record_data in skills_data.items():
                 self._skills[name] = SkillUsageRecord.from_dict(record_data)
-            log.info("Loaded skill usage data", count=len(self._skills))
+            log.debug("Loaded skill usage data", count=len(self._skills))
         except Exception as e:
             log.warning("Failed to load skill usage data", error=str(e))
 
@@ -128,6 +129,11 @@ class SkillUsageTracker:
             created_at=time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime()),
             quality_score=quality_score,
         )
+        if len(self._skills) > self._MAX_SKILLS:
+            sorted_skills = sorted(self._skills.items(), key=lambda x: x[1].last_used_at if hasattr(x[1], 'last_used_at') and x[1].last_used_at else x[1].created_at)
+            to_remove = sorted_skills[: len(self._skills) - (self._MAX_SKILLS * 3 // 4)]
+            for sn, _ in to_remove:
+                del self._skills[sn]
         self._save()
         log.info(f"Skill registered: {name}")
 

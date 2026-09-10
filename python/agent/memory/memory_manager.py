@@ -20,7 +20,7 @@
     mgr = MemoryManager()
     await mgr.store("user_1", "用户喜欢 Python", memory_type="ltm")
     results = await mgr.retrieve("user_1", query="编程偏好", memory_type="ltm")
-    print(results[0].content)
+    logger.info(results[0].content)
 """
 
 from __future__ import annotations
@@ -29,10 +29,11 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
-
 from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("memory_manager")
+
+
 
 
 class MemoryType(str, Enum):
@@ -132,6 +133,8 @@ class MemoryManager:
         self._ltm: dict[str, list[MemoryItem]] = {}
         self._episodic: dict[str, list[MemoryItem]] = {}
         self._next_id = 1
+        self._MAX_USERS = 5000
+        self._MAX_ITEMS_PER_USER = 10000
 
     async def store(
         self,
@@ -170,6 +173,10 @@ class MemoryManager:
 
         store = self._get_store(memory_type)
         user_items = store.setdefault(user_id, [])
+        if len(store) > self._MAX_USERS:
+            oldest_users = list(store.keys())[: len(store) - (self._MAX_USERS * 3 // 4)]
+            for uid in oldest_users:
+                del store[uid]
         user_items.append(item)
 
         max_count = MAX_STM_PER_USER if memory_type == MemoryType.STM else MAX_LTM_PER_USER

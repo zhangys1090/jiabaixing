@@ -34,8 +34,8 @@ export const PREVIEW_EXECUTION_DEF: ToolDefinition = {
     risk_level: {
       type: 'string',
       description:
-        '风险等级: low=低风险(可自动执行), medium=中风险(建议确认), high=高风险(必须确认)',
-      enum: ['low', 'medium', 'high'],
+        '风险等级: low=低风险(可自动执行), medium=中风险(建议确认), high=高风险(必须确认), critical=严重风险(必须确认且需多因素认证)',
+      enum: ['low', 'medium', 'high', 'critical'],
     },
     summary: {
       type: 'string',
@@ -75,12 +75,12 @@ export function createPreviewExecutionExecutor() {
       };
     }
 
-    const validRiskLevels: RiskLevel[] = ['low', 'medium', 'high'];
+    const validRiskLevels: RiskLevel[] = ['low', 'medium', 'high', 'critical'];
     if (!validRiskLevels.includes(riskLevel)) {
       return {
         success: false,
         output: null,
-        error: `无效的风险等级: ${riskLevel}，必须是 low/medium/high`,
+        error: `无效的风险等级: ${riskLevel}，必须是 low/medium/high/critical`,
         duration: 0,
         validated: false,
       };
@@ -93,7 +93,7 @@ export function createPreviewExecutionExecutor() {
         type: 'file' as const,
         target: a.file || '',
         action: a.action || '',
-        risk: riskLevel as 'low' | 'medium' | 'high',
+        risk: riskLevel as 'low' | 'medium' | 'high' | 'critical',
       })),
       timestamp: new Date().toISOString(),
     });

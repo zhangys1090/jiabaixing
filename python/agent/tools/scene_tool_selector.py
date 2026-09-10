@@ -27,8 +27,8 @@ from typing import Any
 
 from agent.core.logger import StructuredLogger
 from agent.tools.registry import ToolCategory, ToolRegistry
-
 log = StructuredLogger("scene_tool_selector")
+
 
 
 @dataclass

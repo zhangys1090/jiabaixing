@@ -10,9 +10,8 @@
 import { EventEmitter } from 'events';
 import { Logger } from '../utils/Logger';
 import {
-    DesktopAction,
-    DesktopActionExecutor,
-    DesktopActionResult,
+  DesktopAction,
+  DesktopActionResult,
 } from './DesktopActionExecutor';
 import { NormalizedCoordinateSystem } from './NormalizedCoordinates';
 
@@ -38,7 +37,7 @@ export interface MCPToolResult {
 
 export class DesktopMCPServer extends EventEmitter {
   private static instance: DesktopMCPServer | null = null;
-  private executor: DesktopActionExecutor;
+  private authority: DesktopActionAuthority;
   private coords: NormalizedCoordinateSystem;
   private initialized: boolean = false;
 
@@ -348,7 +347,7 @@ export class DesktopMCPServer extends EventEmitter {
 
   private constructor() {
     super();
-    this.executor = DesktopActionExecutor.getInstance();
+    this.authority = DesktopActionAuthority.getInstance();
     this.coords = NormalizedCoordinateSystem.getInstance();
   }
 
@@ -366,7 +365,7 @@ export class DesktopMCPServer extends EventEmitter {
   public async initialize(): Promise<void> {
     if (this.initialized) return;
     Logger.info('🔧 DesktopMCP Server 初始化', 'DesktopMCP');
-    await this.executor.initialize();
+    await this.authority.initialize();
     this.initialized = true;
   }
 
@@ -465,7 +464,7 @@ export class DesktopMCPServer extends EventEmitter {
       params: { monitor: args.monitor || 0 },
       description: '截图',
     };
-    const result = await this.executor.executeAction(action);
+    const { result } = await this.authority.executeAction(action);
     return this.actionResultToMCP(result);
   }
 
@@ -489,7 +488,7 @@ export class DesktopMCPServer extends EventEmitter {
       },
       description: `点击 (${args.x}, ${args.y}) [${pixel.x}, ${pixel.y}]`,
     };
-    const result = await this.executor.executeAction(action);
+    const { result } = await this.authority.executeAction(action);
     return this.actionResultToMCP(result);
   }
 
@@ -510,7 +509,7 @@ export class DesktopMCPServer extends EventEmitter {
       },
       description: `双击 (${args.x}, ${args.y})`,
     };
-    const result = await this.executor.executeAction(action);
+    const { result } = await this.authority.executeAction(action);
     return this.actionResultToMCP(result);
   }
 
@@ -522,7 +521,7 @@ export class DesktopMCPServer extends EventEmitter {
       params: { text: args.text },
       description: `输入文字: ${args.text}`,
     };
-    const result = await this.executor.executeAction(action);
+    const { result } = await this.authority.executeAction(action);
     return this.actionResultToMCP(result);
   }
 
@@ -534,7 +533,7 @@ export class DesktopMCPServer extends EventEmitter {
       params: { key: args.key },
       description: `按键: ${args.key}`,
     };
-    const result = await this.executor.executeAction(action);
+    const { result } = await this.authority.executeAction(action);
     return this.actionResultToMCP(result);
   }
 
@@ -546,7 +545,7 @@ export class DesktopMCPServer extends EventEmitter {
       params: { keys: args.keys },
       description: `组合键: ${(args.keys as string[]).join('+')}`,
     };
-    const result = await this.executor.executeAction(action);
+    const { result } = await this.authority.executeAction(action);
     return this.actionResultToMCP(result);
   }
 
@@ -566,7 +565,7 @@ export class DesktopMCPServer extends EventEmitter {
       },
       description: `滚动: ${args.delta}`,
     };
-    const result = await this.executor.executeAction(action);
+    const { result } = await this.authority.executeAction(action);
     return this.actionResultToMCP(result);
   }
 
@@ -593,7 +592,7 @@ export class DesktopMCPServer extends EventEmitter {
       },
       description: `拖拽 (${args.from_x}, ${args.from_y}) → (${args.to_x}, ${args.to_y})`,
     };
-    const result = await this.executor.executeAction(action);
+    const { result } = await this.authority.executeAction(action);
     return this.actionResultToMCP(result);
   }
 
@@ -610,7 +609,7 @@ export class DesktopMCPServer extends EventEmitter {
       },
       description: '获取窗口列表',
     };
-    const result = await this.executor.executeAction(action);
+    const { result } = await this.authority.executeAction(action);
     return this.actionResultToMCP(result);
   }
 
@@ -622,7 +621,7 @@ export class DesktopMCPServer extends EventEmitter {
       params: { title: args.title },
       description: `激活窗口: ${args.title}`,
     };
-    const result = await this.executor.executeAction(action);
+    const { result } = await this.authority.executeAction(action);
     return this.actionResultToMCP(result);
   }
 
@@ -637,7 +636,7 @@ export class DesktopMCPServer extends EventEmitter {
       },
       description: `打开应用: ${args.app}`,
     };
-    const result = await this.executor.executeAction(action);
+    const { result } = await this.authority.executeAction(action);
     return this.actionResultToMCP(result);
   }
 
@@ -649,7 +648,7 @@ export class DesktopMCPServer extends EventEmitter {
       params: { ms: args.ms || 1000 },
       description: `等待 ${args.ms || 1000}ms`,
     };
-    const result = await this.executor.executeAction(action);
+    const { result } = await this.authority.executeAction(action);
     return this.actionResultToMCP(result);
   }
 
@@ -661,7 +660,7 @@ export class DesktopMCPServer extends EventEmitter {
       params: {},
       description: '读取剪贴板',
     };
-    const result = await this.executor.executeAction(action);
+    const { result } = await this.authority.executeAction(action);
     return this.actionResultToMCP(result);
   }
 
@@ -673,7 +672,7 @@ export class DesktopMCPServer extends EventEmitter {
       params: { text: args.text },
       description: `设置剪贴板: ${args.text}`,
     };
-    const result = await this.executor.executeAction(action);
+    const { result } = await this.authority.executeAction(action);
     return this.actionResultToMCP(result);
   }
 
@@ -709,7 +708,7 @@ export class DesktopMCPServer extends EventEmitter {
       params: { title: args.title },
       description: `最大化窗口: ${args.title || '当前窗口'}`,
     };
-    const result = await this.executor.executeAction(action);
+    const { result } = await this.authority.executeAction(action);
     return this.actionResultToMCP(result);
   }
 
@@ -721,7 +720,7 @@ export class DesktopMCPServer extends EventEmitter {
       params: { title: args.title },
       description: `最小化窗口: ${args.title || '当前窗口'}`,
     };
-    const result = await this.executor.executeAction(action);
+    const { result } = await this.authority.executeAction(action);
     return this.actionResultToMCP(result);
   }
 
@@ -733,7 +732,7 @@ export class DesktopMCPServer extends EventEmitter {
       params: { title: args.title },
       description: `关闭窗口: ${args.title}`,
     };
-    const result = await this.executor.executeAction(action);
+    const { result } = await this.authority.executeAction(action);
     return this.actionResultToMCP(result);
   }
 

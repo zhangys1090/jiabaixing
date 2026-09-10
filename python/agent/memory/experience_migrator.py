@@ -71,20 +71,21 @@ class Experience:
 class ExperienceMigrator:
     """
     经验迁移引擎
-    
+
     功能:
     - 从轨迹数据库提取可复用经验
     - 基于关键词+语义相似度匹配历史经验
     - 自动推荐相关经验到新任务
     - 经验去重和质量维护
     """
-    
+
     def __init__(self, experiences_dir: Optional[Path] = None):
         self._experiences_dir = experiences_dir or Path(__file__).parent.parent.parent / "data" / "experiences"
         self._experiences_dir.mkdir(parents=True, exist_ok=True)
         self._experiences: Dict[str, Experience] = {}
+        self._MAX_EXPERIENCES = 10000
         self._load_experiences()
-    
+
     def _load_experiences(self) -> None:
         """加载所有经验文件"""
         exp_file = self._experiences_dir / "experiences.json"
@@ -97,12 +98,12 @@ class ExperienceMigrator:
                 logger.info(f"Loaded {len(self._experiences)} experiences")
             except Exception as e:
                 logger.error(f"Failed to load experiences: {e}")
-    
+
     def _save_experiences(self) -> None:
         """保存经验到文件"""
         if not self._experiences:
             return
-        
+
         exp_file = self._experiences_dir / "experiences.json"
         data = {
             "experiences": [exp.to_dict() for exp in self._experiences.values()],
@@ -112,36 +113,36 @@ class ExperienceMigrator:
             exp_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
         except Exception as e:
             logger.error(f"Failed to save experiences: {e}")
-    
+
     def extract_experiences_from_trajectory(
         self,
         trajectory_data: List[Dict[str, Any]],
     ) -> List[str]:
         """
         从轨迹数据中提取可复用经验
-        
+
         Args:
             trajectory_data: 轨迹数据列表,包含任务描述、执行步骤、结果等
-        
+
         Returns:
             新创建的经验ID列表
         """
         new_experience_ids = []
-        
+
         for traj in trajectory_data:
             # 只处理成功的任务
             success = traj.get("success", False)
             if not success:
                 continue
-            
+
             task_desc = traj.get("task_description", "")
             solution = traj.get("steps_summary", "")
             tools_used = traj.get("tools_used", [])
             quality_score = traj.get("quality_score", 0.7)
-            
+
             if not task_desc or not solution:
                 continue
-            
+
             # 检查是否已存在相似经验(去重)
             existing_exp = self._find_similar_experience(task_desc)
             if existing_exp:
@@ -154,11 +155,11 @@ class ExperienceMigrator:
                 )
                 new_experience_ids.append(existing_exp.id)
                 continue
-            
+
             # 创建新经验
             exp_id = f"exp_{int(time.time())}_{len(self._experiences)}"
             categories = self._categorize_task(task_desc)
-            
+
             exp = Experience(
                 id=exp_id,
                 task_description=task_desc,
@@ -171,14 +172,19 @@ class ExperienceMigrator:
                 usage_count=1,
                 last_used=time.time(),
             )
-            
+
             self._experiences[exp_id] = exp
+            if len(self._experiences) > self._MAX_EXPERIENCES:
+                sorted_exps = sorted(self._experiences.items(), key=lambda x: x[1].last_used if hasattr(x[1], 'last_used') else 0)
+                to_remove = sorted_exps[: len(self._experiences) - (self._MAX_EXPERIENCES * 3 // 4)]
+                for eid, _ in to_remove:
+                    del self._experiences[eid]
             new_experience_ids.append(exp_id)
-        
+
         self._save_experiences()
         logger.info(f"Extracted {len(new_experience_ids)} new experiences")
         return new_experience_ids
-    
+
     def recommend_experiences(
         self,
         task_description: str,
@@ -187,58 +193,58 @@ class ExperienceMigrator:
     ) -> List[Experience]:
         """
         推荐相关经验
-        
+
         Args:
             task_description: 任务描述
             limit: 最大返回数量
             min_quality: 最低质量门槛
-        
+
         Returns:
             相关经验列表(按相似度排序)
         """
         if not self._experiences:
             return []
-        
+
         # 1. 关键词匹配
         keywords = self._extract_keywords(task_description)
         scored_experiences = []
-        
+
         for exp in self._experiences.values():
             if exp.quality_score < min_quality:
                 continue
-            
+
             # 计算关键词重叠度
             exp_keywords = set(self._extract_keywords(exp.task_description))
             keyword_overlap = len(keywords & exp_keywords)
-            
+
             # 计算类别重叠度
             category_overlap = len(set(exp.categories) & set(keywords))
-            
+
             # 综合评分 = 关键词重叠 * 0.6 + 类别重叠 * 0.4
             max_possible_overlap = max(len(keywords | exp_keywords), 1)
             similarity = (
                 (keyword_overlap / max_possible_overlap) * 0.6 +
                 (category_overlap / max(len(exp.categories), 1)) * 0.4
             )
-            
+
             # 使用次数加成
             usage_bonus = min(exp.usage_count * 0.05, 0.2)
-            
+
             # 质量加权
             final_score = similarity * exp.quality_score + usage_bonus
-            
+
             if final_score > 0.1:
                 scored_experiences.append((exp, final_score))
-        
+
         # 按评分排序
         scored_experiences.sort(key=lambda x: x[1], reverse=True)
-        
+
         # 更新最后使用时间
         for exp, _ in scored_experiences[:limit]:
             exp.last_used = time.time()
-        
+
         return [exp for exp, _ in scored_experiences[:limit]]
-    
+
     def _find_similar_experience(
         self,
         task_description: str,
@@ -246,37 +252,37 @@ class ExperienceMigrator:
     ) -> Optional[Experience]:
         """查找相似经验(用于去重)"""
         keywords = set(self._extract_keywords(task_description))
-        
+
         if not keywords:
             return None
-        
+
         best_match = None
         best_score = 0.0
-        
+
         for exp in self._experiences.values():
             exp_keywords = set(self._extract_keywords(exp.task_description))
             if not exp_keywords:
                 continue
-            
+
             overlap = len(keywords & exp_keywords)
             max_overlap = len(keywords | exp_keywords)
-            
+
             if max_overlap > 0:
                 similarity = overlap / max_overlap
                 if similarity > best_score:
                     best_score = similarity
                     best_match = exp
-        
+
         if best_score >= threshold:
             return best_match
-        
+
         return None
-    
+
     def _extract_keywords(self, text: str) -> set:
         """提取关键词(简单的中文分词+英文分词)"""
         # 移除特殊字符
         text = re.sub(r'[^\w\s\u4e00-\u9fff]', ' ', text)
-        
+
         # 中文按字分割,英文按空格分割
         words = set()
         for char in text:
@@ -284,43 +290,43 @@ class ExperienceMigrator:
                 words.add(char)
             elif char.isalnum():
                 words.add(char)
-        
+
         # 常见停用词过滤
         stop_words = {'的', '了', '在', '是', '我', '有', '和', '就', '不', '人', '都', '一', '一个', '上', '也', '很', '到', '说', '要', '去', '你', '会', '着', '没有', '看', '好', '自己', '这'}
         words -= stop_words
-        
+
         return words
-    
+
     def _categorize_task(self, task_description: str) -> List[str]:
         """根据任务描述分类"""
         categories = []
-        
+
         desc_lower = task_description.lower()
-        
+
         # 文件操作
         if any(kw in desc_lower for kw in ['文件', '读取', '写入', '保存', '下载', '上传']):
             categories.append('file_operation')
-        
+
         # 代码生成
         if any(kw in desc_lower for kw in ['生成代码', '编写', '实现', '创建', 'function', 'class']):
             categories.append('code_generation')
-        
+
         # 数据分析
         if any(kw in desc_lower for kw in ['分析', '数据', '统计', '报表', '计算']):
             categories.append('data_analysis')
-        
+
         # 搜索
         if any(kw in desc_lower for kw in ['搜索', '查找', '查询', 'find', 'search']):
             categories.append('search')
-        
+
         # 调试
         if any(kw in desc_lower for kw in ['debug', '调试', '错误', 'bug', 'fix']):
             categories.append('debugging')
-        
+
         # 配置
         if any(kw in desc_lower for kw in ['配置', '设置', 'install', '安装']):
             categories.append('configuration')
-        
+
         return categories if categories else ['general']
 
 
@@ -339,7 +345,7 @@ def get_experience_migrator() -> ExperienceMigrator:
 if __name__ == "__main__":
     # 测试经验迁移
     migrator = get_experience_migrator()
-    
+
     # 模拟轨迹数据
     sample_trajectories = [
         {
@@ -364,17 +370,17 @@ if __name__ == "__main__":
             "quality_score": 0.75,
         },
     ]
-    
+
     # 提取经验
     exp_ids = migrator.extract_experiences_from_trajectory(sample_trajectories)
-    print(f"Extracted {len(exp_ids)} experiences")
-    
+    logger.info("Extracted {len(exp_ids)} experiences")
+
     # 推荐经验
     test_query = "帮我创建一个Node.js Express项目,包含REST API端点"
     recommended = migrator.recommend_experiences(test_query, limit=3)
-    
-    print(f"\nRecommended experiences for: '{test_query}'")
+
+    logger.info("\nRecommended experiences for: '{test_query}'")
     for i, exp in enumerate(recommended, 1):
-        print(f"{i}. [{exp.quality_score:.2f}] {exp.task_description[:50]}...")
-        print(f"   Categories: {', '.join(exp.categories)}")
-        print(f"   Tools: {', '.join(exp.tools_used)}")
+        logger.info("{i}. [{exp.quality_score:.2f}] {exp.task_description[:50]}...")
+        logger.info("   Categories: {', '.join(exp.categories)}")
+        logger.info("   Tools: {', '.join(exp.tools_used)}")

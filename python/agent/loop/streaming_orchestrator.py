@@ -22,8 +22,8 @@ from enum import Enum
 from typing import Any, Callable, Awaitable
 
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("streaming_orchestrator")
+
 
 
 class StreamPhase(str, Enum):
@@ -120,6 +120,9 @@ class StreamingOrchestrator:
         self._planner_fn: Callable[[list[StreamResult], int], Awaitable[list[StreamStep]]] | None = None
         self._cancel_event = asyncio.Event()
         self._checkpoints: list[StreamCheckpoint] = []
+        self._MAX_PLANNED_STEPS = 5000
+        self._MAX_EXECUTED_STEPS = 5000
+        self._MAX_CHECKPOINTS = 200
 
     @classmethod
     def get_instance(cls) -> StreamingOrchestrator:
@@ -154,6 +157,10 @@ class StreamingOrchestrator:
         if initial_steps:
             for step in initial_steps:
                 self._planned_steps[step.step_id] = step
+                if len(self._planned_steps) > self._MAX_PLANNED_STEPS:
+                    oldest_keys = list(self._planned_steps.keys())[: len(self._planned_steps) - (self._MAX_PLANNED_STEPS * 3 // 4)]
+                    for k in oldest_keys:
+                        del self._planned_steps[k]
                 await self._plan_queue.put(step)
                 self._metrics.total_steps_planned += 1
 
@@ -181,6 +188,7 @@ class StreamingOrchestrator:
             self._phase = StreamPhase.CANCELLED
             log.info("Streaming orchestration cancelled")
         except Exception as e:
+            log.debug("streaming_orchestrator 异常处理", error=str(e))
             self._phase = StreamPhase.FAILED
             log.error("Streaming orchestration failed", error=str(e))
 
@@ -220,6 +228,10 @@ class StreamingOrchestrator:
                 for step in new_steps:
                     if step.step_id not in self._planned_steps:
                         self._planned_steps[step.step_id] = step
+                        if len(self._planned_steps) > self._MAX_PLANNED_STEPS:
+                            oldest_keys = list(self._planned_steps.keys())[: len(self._planned_steps) - (self._MAX_PLANNED_STEPS * 3 // 4)]
+                            for k in oldest_keys:
+                                del self._planned_steps[k]
                         await self._plan_queue.put(step)
                         self._metrics.total_steps_planned += 1
 
@@ -304,6 +316,10 @@ class StreamingOrchestrator:
             step.duration_ms = (time.time() - exec_start) * 1000
 
             self._executed_steps[step.step_id] = step
+            if len(self._executed_steps) > self._MAX_EXECUTED_STEPS:
+                oldest_keys = list(self._executed_steps.keys())[: len(self._executed_steps) - (self._MAX_EXECUTED_STEPS * 3 // 4)]
+                for k in oldest_keys:
+                    del self._executed_steps[k]
             await self._result_queue.put(result)
 
             if result.success:
@@ -328,6 +344,7 @@ class StreamingOrchestrator:
             await self._result_queue.put(result)
 
         except Exception as e:
+            log.debug("streaming_orchestrator 异常处理", error=str(e))
             step.status = "error"
             step.error = str(e)
             step.duration_ms = (time.time() - exec_start) * 1000

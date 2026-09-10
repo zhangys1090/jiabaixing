@@ -1,4 +1,25 @@
 /**
+ * D6: ROGUE STORE — 情景记忆的 canonical owner 是 Python EpisodicMemoryStore。
+ *
+ * 本地 JSON 文件存储绕过了 Python canonical owner，属于 rogue store。
+ * MemoryAuthority 审计标记为 bridge_to_python。
+ *
+ * 新代码应通过 MemoryAuthority.write({ memoryType: 'episodic' }) 写入，
+ * 由 MemoryAuthority 桥接到 Python。
+ *
+ * @deprecated Use MemoryAuthority.write({ memoryType: 'episodic' }) instead.
+ * See docs/AUTHORITY_RECONSTRUCTION.md §4 D6.
+ */
+
+import { emitDeprecationWarning } from '../shared/deprecationWarning';
+emitDeprecationWarning(
+  'EpisodicMemoryStore',
+  'MemoryAuthority (memoryType: episodic -> Python)',
+  'V6.0',
+  'EpisodicMemoryStore is a rogue store. Use MemoryAuthority.write({ memoryType: "episodic" }) instead.'
+);
+
+/**
  * P1-2: 情景记忆存储 — 从 Python EpisodicMemoryStore 迁移
  *
  * 存储带有场景(scene)、情绪(emotion)、重要性(importance)等

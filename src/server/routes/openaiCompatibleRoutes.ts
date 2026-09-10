@@ -10,9 +10,64 @@
  * - 多轮对话 (messages 上下文)
  */
 
+import crypto from 'crypto';
 import express from 'express';
 import type { JiabaixingCore } from '../../core/JiabaixingCore';
 import { Logger } from '../../utils/Logger';
+
+const API_KEY = process.env.OPENAI_COMPAT_API_KEY || '';
+const RATE_LIMIT_MAP = new Map<string, { count: number; resetAt: number }>();
+const RATE_LIMIT_MAX = Number(process.env.OPENAI_COMPAT_RATE_LIMIT) || 60;
+const RATE_LIMIT_WINDOW_MS = 60_000;
+
+function validateApiKey(req: express.Request): boolean {
+  if (!API_KEY) return true;
+
+  const auth = req.headers.authorization;
+  if (!auth) return false;
+
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : auth;
+  return crypto.timingSafeEqual(Buffer.from(token), Buffer.from(API_KEY));
+}
+
+function checkRateLimit(clientIp: string): {
+  allowed: boolean;
+  remaining: number;
+  resetIn: number;
+} {
+  const now = Date.now();
+  const entry = RATE_LIMIT_MAP.get(clientIp);
+
+  if (!entry || now >= entry.resetAt) {
+    RATE_LIMIT_MAP.set(clientIp, {
+      count: 1,
+      resetAt: now + RATE_LIMIT_WINDOW_MS,
+    });
+    return {
+      allowed: true,
+      remaining: RATE_LIMIT_MAX - 1,
+      resetIn: RATE_LIMIT_WINDOW_MS,
+    };
+  }
+
+  if (entry.count >= RATE_LIMIT_MAX) {
+    return { allowed: false, remaining: 0, resetIn: entry.resetAt - now };
+  }
+
+  entry.count++;
+  return {
+    allowed: true,
+    remaining: RATE_LIMIT_MAX - entry.count,
+    resetIn: entry.resetAt - now,
+  };
+}
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, entry] of RATE_LIMIT_MAP) {
+    if (now >= entry.resetAt) RATE_LIMIT_MAP.delete(ip);
+  }
+}, 120_000);
 
 export interface OpenAICompatibleModelInfo {
   id: string;
@@ -38,6 +93,29 @@ export function registerOpenAIRoutes(
   core: JiabaixingCore | null
 ): void {
   app.post('/v1/chat/completions', async (req, res) => {
+    if (!validateApiKey(req)) {
+      return res.status(401).json({
+        error: {
+          message: '无效的API密钥',
+          type: 'authentication_error',
+          code: 'invalid_api_key',
+        },
+      });
+    }
+
+    const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
+    const rateLimit = checkRateLimit(clientIp);
+    if (!rateLimit.allowed) {
+      res.setHeader('Retry-After', Math.ceil(rateLimit.resetIn / 1000));
+      return res.status(429).json({
+        error: {
+          message: '请求过于频繁',
+          type: 'rate_limit_error',
+          code: 'rate_limit_exceeded',
+        },
+      });
+    }
+
     if (!core) {
       return res.status(503).json({
         error: {
@@ -162,7 +240,16 @@ export function registerOpenAIRoutes(
     }
   });
 
-  app.get('/v1/models', (_req, res) => {
+  app.get('/v1/models', (req, res) => {
+    if (!validateApiKey(req)) {
+      return res.status(401).json({
+        error: {
+          message: '无效的API密钥',
+          type: 'authentication_error',
+          code: 'invalid_api_key',
+        },
+      });
+    }
     res.json({
       object: 'list',
       data: [
@@ -178,6 +265,29 @@ export function registerOpenAIRoutes(
 
   // P2 #11: Function Calling 端点 — LangChain/LlamaIndex 工具调用
   app.post('/v1/chat/completions/tools', async (req, res) => {
+    if (!validateApiKey(req)) {
+      return res.status(401).json({
+        error: {
+          message: '无效的API密钥',
+          type: 'authentication_error',
+          code: 'invalid_api_key',
+        },
+      });
+    }
+
+    const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
+    const rateLimit = checkRateLimit(clientIp);
+    if (!rateLimit.allowed) {
+      res.setHeader('Retry-After', Math.ceil(rateLimit.resetIn / 1000));
+      return res.status(429).json({
+        error: {
+          message: '请求过于频繁',
+          type: 'rate_limit_error',
+          code: 'rate_limit_exceeded',
+        },
+      });
+    }
+
     if (!core) {
       return res.status(503).json({
         error: { message: '服务尚未初始化完成', type: 'service_unavailable' },
@@ -274,7 +384,16 @@ export function registerOpenAIRoutes(
   });
 
   // P2 #11: 框架集成发现端点
-  app.get('/v1/integration/info', (_req, res) => {
+  app.get('/v1/integration/info', (req, res) => {
+    if (!validateApiKey(req)) {
+      return res.status(401).json({
+        error: {
+          message: '无效的API密钥',
+          type: 'authentication_error',
+          code: 'invalid_api_key',
+        },
+      });
+    }
     res.json({
       service: 'jiabaixing',
       version: '1.0.0',

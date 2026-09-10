@@ -35,6 +35,9 @@ class AttentionFocusManager:
     def __init__(self, max_messages: int = 15, max_total_tokens: int = 4000) -> None:
         self.max_messages = max_messages
         self.max_total_tokens = max_total_tokens
+        self._MAX_REFLECTION_PATTERNS = 200
+        self._MAX_FAILURE_PATTERNS = 200
+        self._MAX_SYSTEM_PATTERNS = 200
         self._system_patterns = [
             re.compile(r"【执行计划】|【反思结论】|【经验提示】|【因果影响分析】|【经验迁移】", re.UNICODE),
         ]
@@ -173,4 +176,4 @@ class AttentionFocusManager:
             return
 
         focused = self.focus(messages, max_messages, max_tokens)
-        context.messages = focused  # type: ignore[attr-defined]
+        context.messages = focused

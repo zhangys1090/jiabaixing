@@ -3,9 +3,9 @@
  * 根据任务执行过程中的实际情况动态调整任务计划
  */
 
-import { TaskDecomposition, SubTask } from './TaskComplexityAnalyzer';
-import { DAGTask } from './DAGTask';
 import Logger from '../utils/Logger';
+import { DAGTask } from './DAGTask';
+import { SubTask, TaskDecomposition } from './TaskComplexityAnalyzer';
 
 export interface TaskExecutionState {
   taskId: string;
@@ -66,6 +66,8 @@ export class DynamicTaskAdjuster {
   private adjustmentHistory: AdjustmentDecision[] = [];
   private isMonitoring: boolean = false;
   private monitoringInterval?: NodeJS.Timeout;
+
+  private static readonly ADJUSTMENT_HISTORY_MAX = 500;
 
   constructor(config?: Partial<MonitoringConfig>) {
     this.monitoringConfig = {
@@ -258,6 +260,15 @@ export class DynamicTaskAdjuster {
     );
 
     this.adjustmentHistory.push(decision);
+    if (
+      this.adjustmentHistory.length > DynamicTaskAdjuster.ADJUSTMENT_HISTORY_MAX
+    ) {
+      this.adjustmentHistory.splice(
+        0,
+        this.adjustmentHistory.length -
+          DynamicTaskAdjuster.ADJUSTMENT_HISTORY_MAX
+      );
+    }
 
     switch (decision.type) {
       case 'retry':

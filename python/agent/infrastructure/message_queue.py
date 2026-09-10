@@ -152,6 +152,8 @@ class RedisStreamsQueue:
         self._failed_count: int = 0
         self._dead_letter_count: int = 0
         self._redis_workers: dict[str, asyncio.Task] = {}
+        self._MAX_TOPICS = 100
+        self._MAX_HANDLERS_PER_TOPIC = 50
 
     async def start(self) -> None:
         """启动消息队列，尝试连接 Redis，失败则降级为进程内队列."""
@@ -176,7 +178,7 @@ class RedisStreamsQueue:
                 self._use_redis = False
                 self._redis = None
         else:
-            log.info("MQ_ENABLED=false，使用进程内队列")
+            log.debug("MQ_ENABLED=false，使用进程内队列")
             self._use_redis = False
 
         self._running = True
@@ -202,6 +204,7 @@ class RedisStreamsQueue:
             try:
                 await self._redis.aclose()
             except Exception as _exc:
+                log.debug("message_queue 异常处理", error=str(_exc))
                 log_ignored(log, "message_queue.RedisStreamsQueue.stop", _exc)
             self._redis = None
 
@@ -245,7 +248,7 @@ class RedisStreamsQueue:
     async def subscribe(
         self, topic: str, handler: Callable[[Message], Coroutine]
     ) -> None:
-        """订阅主题，注册消息处理函数.
+        """订阅主题.
 
         Args:
             topic: 主题/队列名.
@@ -254,7 +257,14 @@ class RedisStreamsQueue:
         if topic not in self._handlers:
             self._handlers[topic] = []
             self._stats[topic] = QueueStats(topic=topic)
+            if len(self._handlers) > self._MAX_TOPICS:
+                oldest_topics = list(self._handlers.keys())[: len(self._handlers) - (self._MAX_TOPICS * 3 // 4)]
+                for t in oldest_topics:
+                    self._handlers.pop(t, None)
+                    self._stats.pop(t, None)
         self._handlers[topic].append(handler)
+        if len(self._handlers[topic]) > self._MAX_HANDLERS_PER_TOPIC:
+            self._handlers[topic] = self._handlers[topic][-self._MAX_HANDLERS_PER_TOPIC * 3 // 4:]
 
         if self._running:
             self._ensure_fallback_worker(topic)
@@ -262,7 +272,7 @@ class RedisStreamsQueue:
             if self._use_redis and self._redis:
                 self._ensure_redis_worker(topic)
 
-        log.info(f"订阅主题: {topic} (handler_count={len(self._handlers[topic])})")
+        log.debug(f"订阅主题: {topic} (handler_count={len(self._handlers[topic])})")
 
     async def unsubscribe(self, topic: str) -> None:
         """取消订阅主题."""
@@ -288,6 +298,7 @@ class RedisStreamsQueue:
                     stream_key, self._consumer_group, id="0", mkstream=True
                 )
             except Exception as _exc:
+                log.debug("message_queue 异常处理", error=str(_exc))
                 log_ignored(log, "message_queue.RedisStreamsQueue._publish_redis", _exc)
 
             entry_id = await self._redis.xadd(
@@ -347,6 +358,7 @@ class RedisStreamsQueue:
                             stats.processing_count = max(0, stats.processing_count - 1)
                             stats.completed_count += 1
                     except Exception as exc:
+                        log.debug("message_queue 异常处理", error=str(exc))
                         msg.retry_count += 1
                         msg.error = str(exc)
                         if msg.retry_count >= msg.max_retries:
@@ -402,8 +414,9 @@ class RedisStreamsQueue:
             try:
                 await self._redis.xgroup_create(sk, self._consumer_group, id="0", mkstream=True)
             except Exception as _exc:
+                log.debug("message_queue 异常处理", error=str(_exc))
                 log_ignored(log, "message_queue.RedisStreamsQueue._redis_worker", _exc)
-        log.info("redis worker started", topic=topic, streams=list(streams.keys()))
+        log.debug("redis worker started", topic=topic, streams=list(streams.keys()))
         while self._running and self._use_redis and self._redis:
             try:
                 resp = await self._redis.xreadgroup(
@@ -447,6 +460,7 @@ class RedisStreamsQueue:
             stats.completed_count += 1
             self._completed_count += 1
         except Exception as exc:
+            log.debug("message_queue 异常处理", error=str(exc))
             msg.retry_count += 1
             msg.error = str(exc)
             if msg.retry_count >= msg.max_retries:
@@ -471,12 +485,14 @@ class RedisStreamsQueue:
                         },
                     )
                 except Exception as _exc:
+                    log.debug("message_queue 异常处理", error=str(_exc))
                     log_ignored(log, "message_queue.RedisStreamsQueue._handle_redis", _exc)
                 log.warning("redis msg retry", topic=msg.topic, id=msg.id, retry=msg.retry_count)
         finally:
             try:
                 await self._redis.xack(stream_key, self._consumer_group, entry_id)
             except Exception as _exc:
+                log.debug("message_queue 异常处理", error=str(_exc))
                 log_ignored(log, "message_queue.RedisStreamsQueue._handle_redis", _exc)
 
 
@@ -496,6 +512,8 @@ class InMemoryMessageQueue:
         self._running: bool = False
         self._stats: dict[str, QueueStats] = {}
         self._max_queue_size: int = max_queue_size
+        self._MAX_TOPICS = 100
+        self._MAX_HANDLERS_PER_TOPIC = 50
 
     async def start(self) -> None:
         if self._running:
@@ -540,7 +558,14 @@ class InMemoryMessageQueue:
         if topic not in self._handlers:
             self._handlers[topic] = []
             self._stats[topic] = QueueStats(topic=topic)
+            if len(self._handlers) > self._MAX_TOPICS:
+                oldest_topics = list(self._handlers.keys())[: len(self._handlers) - (self._MAX_TOPICS * 3 // 4)]
+                for t in oldest_topics:
+                    self._handlers.pop(t, None)
+                    self._stats.pop(t, None)
         self._handlers[topic].append(handler)
+        if len(self._handlers[topic]) > self._MAX_HANDLERS_PER_TOPIC:
+            self._handlers[topic] = self._handlers[topic][-self._MAX_HANDLERS_PER_TOPIC * 3 // 4:]
         if self._running:
             self._ensure_worker(topic)
 
@@ -571,7 +596,8 @@ class InMemoryMessageQueue:
                     msg = await queue.get()
                 except asyncio.CancelledError:
                     break
-                except Exception:
+                except Exception as _exc:
+                    log.warning("异常被静默捕获", error=str(_exc))
                     continue
 
                 msg.status = MessageStatus.PROCESSING
@@ -588,6 +614,7 @@ class InMemoryMessageQueue:
                             stats.processing_count = max(0, stats.processing_count - 1)
                             stats.completed_count += 1
                     except Exception as exc:
+                        log.debug("message_queue 异常处理", error=str(exc))
                         msg.retry_count += 1
                         msg.error = str(exc)
                         if msg.retry_count >= msg.max_retries:

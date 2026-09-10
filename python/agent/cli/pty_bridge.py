@@ -35,10 +35,11 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from agent.core.logger import StructuredLogger, log_ignored
 from agent.core.logger import StructuredLogger
-from agent.core.logger import log_ignored
 
 log = StructuredLogger("pty_bridge")
+
 
 
 class PtyBackend(str, Enum):
@@ -295,4 +296,5 @@ class PtyBridge:
                 text = data.decode(errors="replace")
                 buf.append(text)
         except Exception as _exc:
+            log.debug("pty_bridge 异常处理", error=str(_exc))
             log_ignored(log, "pty_bridge.PtyBridge._capture_output", _exc)

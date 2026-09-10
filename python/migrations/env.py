@@ -19,7 +19,7 @@ if config.config_file_name:
         pass
 
 # 默认指向记忆库：DATA_ROOT/memory.db == python/data/memory.db（MemoryStore 默认）
-from agent.config import DATA_ROOT  # noqa: E402
+from agent.config import DATA_ROOT
 
 _default_url = f"sqlite:///{DATA_ROOT / 'memory.db'}"
 url = os.environ.get("AGENT_DB_URL") or config.get_main_option("sqlalchemy.url") or _default_url

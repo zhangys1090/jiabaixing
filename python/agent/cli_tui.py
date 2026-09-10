@@ -213,6 +213,7 @@ class ChatTUI:
             self._status.turn_count += 1
             self._status.total_tokens += tokens
         except Exception as e:
+            log.debug("cli_tui 异常处理", error=str(e))
             error_msg = ChatMessage(role="system", content=f"错误: {e}")
             self._messages.append(error_msg)
             self._render_message(error_msg)

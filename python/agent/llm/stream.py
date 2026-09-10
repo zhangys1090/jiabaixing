@@ -10,6 +10,8 @@ import httpx
 
 from agent.llm.transports import BaseTransport
 from agent.core.logger import log_ignored
+import logging
+logger = logging.getLogger(__name__)
 
 
 CHUNK_SIZE = 6
@@ -61,6 +63,7 @@ class StreamResponseService:
             try:
                 cb(event)
             except Exception as _exc:
+                logger.warning("stream 异常处理", error=str(_exc))
                 log_ignored(None, "stream.StreamResponseService._emit", _exc)
 
     async def stream(self, full_text: str, trace_id: str) -> None:
@@ -307,6 +310,7 @@ async def stream_via_litellm(
                     "output_tokens": int(output_tokens),
                 }
             except Exception as _exc:
+                logger.warning("stream 异常处理", error=str(_exc))
                 log_ignored(None, "stream.stream_via_litellm", _exc)
         yield data
         if chunk.choices[0].finish_reason:

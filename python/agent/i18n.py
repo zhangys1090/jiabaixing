@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import Any
 
 from agent.core.logger import get_logger
+import logging
+logger = logging.getLogger(__name__)
 
 logger = get_logger("i18n")
 

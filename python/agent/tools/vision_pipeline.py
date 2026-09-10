@@ -19,10 +19,11 @@ import hashlib
 import io
 from dataclasses import dataclass, field
 from typing import Any
-
 from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("vision_pipeline")
+
+
 
 try:
     from PIL import Image
@@ -275,6 +276,7 @@ class VisionPipeline:
             )
             return result.text if result.success else f"[Vision 失败: {result.error}]"
         except Exception as exc:
+            log.debug("vision_pipeline 异常处理", error=str(exc))
             return f"[Vision 调用异常: {exc}]"
 
     async def try_store_memory(

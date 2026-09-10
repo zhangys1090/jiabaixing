@@ -10,6 +10,7 @@ from typing import Any, Protocol
 
 from agent.core.logger import StructuredLogger
 from agent.core.logger import log_ignored
+from agent.core.types import RiskLevel as CoreRiskLevel, BaseCheckpoint
 
 log = StructuredLogger("evolution_v2")
 
@@ -45,11 +46,33 @@ class V2ActionType(str, Enum):
     UPDATE_CONFIG = "UPDATE_CONFIG"
 
 
-class RiskLevel(str, Enum):
+class EvolutionRiskLevel(str, Enum):
+    """进化引擎领域风险等级 — 与 core.types.RiskLevel 语义不同。
+
+    SAFE/CAUTIOUS/RESTRICTED/FORBIDDEN 描述自修改安全边界，
+    通过 to_core_risk_level() 映射到统一 RiskLevel。
+    """
+
     SAFE = "safe"
     CAUTIOUS = "cautious"
     RESTRICTED = "restricted"
     FORBIDDEN = "forbidden"
+
+
+_EVOLUTION_TO_CORE_RISK: dict[EvolutionRiskLevel, CoreRiskLevel] = {
+    EvolutionRiskLevel.SAFE: CoreRiskLevel.LOW,
+    EvolutionRiskLevel.CAUTIOUS: CoreRiskLevel.MEDIUM,
+    EvolutionRiskLevel.RESTRICTED: CoreRiskLevel.HIGH,
+    EvolutionRiskLevel.FORBIDDEN: CoreRiskLevel.CRITICAL,
+}
+
+
+def to_core_risk_level(level: EvolutionRiskLevel) -> CoreRiskLevel:
+    """将进化引擎风险等级映射到统一 RiskLevel。"""
+    return _EVOLUTION_TO_CORE_RISK.get(level, CoreRiskLevel.MEDIUM)
+
+
+RiskLevel = EvolutionRiskLevel
 
 
 @dataclass
@@ -106,10 +129,10 @@ class V2EvolutionResult:
 
 
 @dataclass
-class V2RollbackCheckpoint:
-    id: str = ""
+class V2RollbackCheckpoint(BaseCheckpoint):
+    """进化引擎还原点 — 继承 core.types.BaseCheckpoint。"""
+
     plan_id: str = ""
-    timestamp: float = 0.0
     snapshot: dict[str, str] = field(default_factory=dict)
 
 
@@ -206,6 +229,7 @@ class EvolutionRollback:
         self._checkpoint_dir = Path(checkpoint_dir)
         self._checkpoint_dir.mkdir(parents=True, exist_ok=True)
         self._checkpoints: dict[str, V2RollbackCheckpoint] = {}
+        self._MAX_CHECKPOINTS = 200
         self._load_checkpoints()
 
     def _load_checkpoints(self) -> None:
@@ -220,6 +244,7 @@ class EvolutionRollback:
                 )
                 self._checkpoints[cp.id] = cp
             except Exception as _exc:
+                log.debug("v2_engine 异常处理", error=str(_exc))
                 log_ignored(log, "v2_engine.EvolutionRollback._load_checkpoints", _exc)
 
     def create_checkpoint(self, plan_id: str, actions: list[V2EvolutionAction]) -> V2RollbackCheckpoint:
@@ -232,6 +257,7 @@ class EvolutionRollback:
                     try:
                         snapshot[target_path] = p.read_text(encoding="utf-8")
                     except Exception as _exc:
+                        log.debug("v2_engine 异常处理", error=str(_exc))
                         log_ignored(log, "v2_engine.EvolutionRollback.create_checkpoint", _exc)
 
         cp = V2RollbackCheckpoint(
@@ -242,6 +268,11 @@ class EvolutionRollback:
         )
         self._save_checkpoint(cp)
         self._checkpoints[cp.id] = cp
+        if len(self._checkpoints) > self._MAX_CHECKPOINTS:
+            sorted_cps = sorted(self._checkpoints.items(), key=lambda x: x[1].timestamp)
+            to_remove = sorted_cps[: len(self._checkpoints) - (self._MAX_CHECKPOINTS * 3 // 4)]
+            for cid, _ in to_remove:
+                del self._checkpoints[cid]
         log.info("Checkpoint created", id=cp.id, files=len(snapshot))
         return cp
 
@@ -283,6 +314,7 @@ class EvolutionRollback:
                     f.unlink()
                     deleted += 1
             except Exception as _exc:
+                log.debug("v2_engine 异常处理", error=str(_exc))
                 log_ignored(log, "v2_engine.EvolutionRollback.clean_old_checkpoints", _exc)
         return deleted
 
@@ -294,6 +326,7 @@ class SelfModificationEngine:
         self._forbidden_delete_paths: set[str] = {"src/main.ts", "src/index.ts", "package.json", "agent/main.py"}
         self._cautious_modify_paths: set[str] = {"src/core/", "src/harness/", "agent/core/"}
         self._strategy_outcomes: list[StrategyRecord] = []
+        self._MAX_SAFETY_BOUNDARIES = 1000
 
     async def execute_plan(self, plan: V2EvolutionPlan, checkpoint_id: str = "") -> V2EvolutionResult:
         start = time.time()
@@ -349,11 +382,13 @@ class SelfModificationEngine:
             try:
                 action.original_content = p.read_text(encoding="utf-8")
             except Exception as _exc:
+                log.debug("v2_engine 异常处理", error=str(_exc))
                 log_ignored(log, "v2_engine.SelfModificationEngine._modify_file", _exc)
         try:
             p.write_text(action.content, encoding="utf-8")
             return True
-        except Exception:
+        except Exception as _exc:
+            log.warning("异常降级处理", error=str(_exc))
             return False
 
     def _create_file(self, action: V2EvolutionAction) -> bool:
@@ -362,7 +397,8 @@ class SelfModificationEngine:
         try:
             p.write_text(action.content, encoding="utf-8")
             return True
-        except Exception:
+        except Exception as _exc:
+            log.warning("异常降级处理", error=str(_exc))
             return False
 
     def _delete_file(self, action: V2EvolutionAction) -> bool:
@@ -372,6 +408,7 @@ class SelfModificationEngine:
                 try:
                     action.original_content = p.read_text(encoding="utf-8")
                 except Exception as _exc:
+                    log.debug("v2_engine 异常处理", error=str(_exc))
                     log_ignored(log, "v2_engine.SelfModificationEngine._delete_file", _exc)
             p.unlink()
         return True
@@ -384,7 +421,8 @@ class SelfModificationEngine:
         try:
             p.write_text(action.content, encoding="utf-8")
             return True
-        except Exception:
+        except Exception as _exc:
+            log.warning("异常降级处理", error=str(_exc))
             return False
 
     def assess_action_safety(self, action: V2EvolutionAction) -> SafetyAssessment:
@@ -437,6 +475,11 @@ class SelfModificationEngine:
         if not boundary:
             boundary = SafetyBoundary(path=action.target)
             self._safety_boundaries[action.target] = boundary
+            if len(self._safety_boundaries) > self._MAX_SAFETY_BOUNDARIES:
+                sorted_boundaries = sorted(self._safety_boundaries.items(), key=lambda x: x[1].success_count + x[1].violation_count)
+                to_remove = sorted_boundaries[: len(self._safety_boundaries) - (self._MAX_SAFETY_BOUNDARIES * 3 // 4)]
+                for k, _ in to_remove:
+                    del self._safety_boundaries[k]
 
         if success:
             boundary.success_count += 1
@@ -601,6 +644,9 @@ class EvolutionEngineV2:
         self,
         llm_client: LLMClientProtocol | None = None,
         checkpoint_dir: str | Path | None = None,
+        eval_gate: Any | None = None,
+        independent_eval_service: Any | None = None,
+        eval_runner: Any | None = None,
     ) -> None:
         self._rollback = EvolutionRollback(checkpoint_dir)
         self._modifier = SelfModificationEngine()
@@ -610,6 +656,13 @@ class EvolutionEngineV2:
         self._strategy_records: list[StrategyRecord] = []
         self._strategy_weights: dict[str, float] = {}
         self._capability_outcomes: dict[str, dict[str, Any]] = {}
+        self._MAX_CAPABILITY_DOMAINS = 200
+        self._MAX_STRATEGY_WEIGHTS = 100
+        self._eval_gate = eval_gate
+        self._independent_eval_service = independent_eval_service
+        self._eval_runner = eval_runner
+        self._pending_monitoring: dict[str, dict[str, Any]] = {}
+        self._degraded = False
 
     @classmethod
     def get_instance(cls, llm_client: LLMClientProtocol | None = None, checkpoint_dir: str | Path | None = None) -> EvolutionEngineV2:
@@ -618,6 +671,9 @@ class EvolutionEngineV2:
         return cls._instance
 
     async def trigger_evolution(self, cause: V2EvolutionCause) -> V2EvolutionResult | None:
+        if self._degraded:
+            log.error("Evolution engine in DEGRADED state — self-modification blocked until manual recovery")
+            return None
         if self._is_running:
             log.warning("Evolution already in progress, skipping")
             return None
@@ -650,8 +706,36 @@ class EvolutionEngineV2:
                 result.validation_details = validation.get("details", "")
                 if not validation.get("passed", True):
                     result.rollback_needed = True
+                    log.warning(
+                        "Evolution syntax validation failed",
+                        plan_id=plan.id,
+                        details=result.validation_details,
+                    )
+                else:
+                    gate_result = await self._run_eval_gate(plan)
+                    if not gate_result.get("passed", True):
+                        result.rollback_needed = True
+                        result.validation_passed = False
+                        result.validation_details = gate_result.get("reason", "EvalGate blocked")
+                        log.warning(
+                            "Evolution blocked by EvalGate",
+                            plan_id=plan.id,
+                            reason=gate_result.get("reason", ""),
+                        )
+                    else:
+                        log.info(
+                            "Evolution passed EvalGate, registering for post-release monitoring",
+                            plan_id=plan.id,
+                        )
+                        self._pending_monitoring[plan.id] = {
+                            "checkpoint_id": checkpoint.id,
+                            "plan_id": plan.id,
+                            "timestamp": time.time(),
+                            "gate_result": gate_result,
+                        }
 
         except Exception as e:
+            log.debug("v2_engine 异常处理", error=str(e))
             result = V2EvolutionResult(
                 plan_id=plan.id,
                 success=False,
@@ -662,9 +746,116 @@ class EvolutionEngineV2:
         if result.rollback_needed:
             rollback_result = await self._rollback.rollback(checkpoint.id)
             result.rollback_success = rollback_result.get("success", False)
+            if not result.rollback_success:
+                self._degraded = True
+                log.critical(
+                    "ROLLBACK FAILED — production workspace may be corrupted. "
+                    "Evolution engine entering DEGRADED state; all future self-modifications blocked.",
+                    plan_id=plan.id,
+                    checkpoint_id=checkpoint.id,
+                )
 
         self._record_history(plan, result)
         return result
+
+    async def _run_eval_gate(self, plan: V2EvolutionPlan) -> dict[str, Any]:
+        """B-fix: 独立评估 + EvalGate 门控.
+
+        提出修改的人不能拥有"最终证明修改正确"的权力。
+        EvolutionPlanner ≠ IndependentEvaluator ≠ ReleaseAuthority。
+        """
+        if self._eval_runner and self._eval_gate:
+            try:
+                from agent.evaluation.eval_runner import EvalRunner
+                from agent.evaluation.eval_gate import EvalGate, EvalGateResult
+                if isinstance(self._eval_runner, EvalRunner) and isinstance(self._eval_gate, EvalGate):
+                    report = await self._eval_runner.run(self._eval_runner)
+                    gate_result = self._eval_gate.check(report)
+                    return {
+                        "passed": gate_result.passed,
+                        "reason": gate_result.reason,
+                        "details": gate_result.details,
+                    }
+            except Exception as e:
+                log.warning("EvalGate evaluation failed, defaulting to BLOCK", error=str(e))
+                return {"passed": False, "reason": f"EvalGate evaluation error: {e}"}
+
+        if self._independent_eval_service:
+            try:
+                from agent.evaluation.independent_service import (
+                    IndependentEvaluationService,
+                    EvaluationInput,
+                )
+                if isinstance(self._independent_eval_service, IndependentEvaluationService):
+                    eval_input = EvaluationInput(
+                        user_input=f"Evolution plan: {plan.title}",
+                        current_output=plan.description,
+                    )
+                    eval_result = await self._independent_eval_service.evaluate(eval_input)
+                    safety_passed = eval_result.safety.safe
+                    quality_threshold = 0.6
+                    quality_passed = eval_result.quality.overall >= quality_threshold
+                    passed = safety_passed and quality_passed
+                    reason_parts = []
+                    if not safety_passed:
+                        reason_parts.append(f"safety violations: {eval_result.safety.violations}")
+                    if not quality_passed:
+                        reason_parts.append(
+                            f"quality {eval_result.quality.overall:.2f} < {quality_threshold}"
+                        )
+                    return {
+                        "passed": passed,
+                        "reason": "; ".join(reason_parts) if reason_parts else "Independent evaluation passed",
+                        "details": {
+                            "safety": eval_result.safety.safe,
+                            "quality": eval_result.quality.overall,
+                            "task_completion": eval_result.task_completion.completed,
+                        },
+                    }
+            except Exception as e:
+                log.warning("Independent evaluation failed, defaulting to BLOCK", error=str(e))
+                return {"passed": False, "reason": f"Independent evaluation error: {e}"}
+
+        log.warning(
+            "No eval gate or independent evaluator configured — "
+            "self-modification MUST NOT proceed without independent verification"
+        )
+        return {"passed": False, "reason": "No independent evaluator configured: fail-closed"}
+
+    def get_pending_monitoring(self) -> dict[str, dict[str, Any]]:
+        return dict(self._pending_monitoring)
+
+    def remove_pending_monitoring(self, plan_id: str) -> None:
+        self._pending_monitoring.pop(plan_id, None)
+
+    async def delayed_rollback(self, plan_id: str) -> bool:
+        """E-fix: V2 延迟回滚接口.
+
+        供 Orchestrator 在运行时质量退化后调用，
+        回滚 V2 的文件修改并清理监控注册。
+        """
+        monitoring = self._pending_monitoring.get(plan_id)
+        if not monitoring:
+            log.warning("No pending monitoring found for delayed rollback", plan_id=plan_id)
+            return False
+
+        checkpoint_id = monitoring["checkpoint_id"]
+        rollback_result = await self._rollback.rollback(checkpoint_id)
+        success = rollback_result.get("success", False)
+
+        if success:
+            log.info("V2 delayed rollback succeeded", plan_id=plan_id, checkpoint_id=checkpoint_id)
+            self._pending_monitoring.pop(plan_id, None)
+        else:
+            self._degraded = True
+            log.critical(
+                "V2 delayed rollback FAILED — production workspace may be corrupted. "
+                "Evolution engine entering DEGRADED state.",
+                plan_id=plan_id,
+                checkpoint_id=checkpoint_id,
+            )
+
+        return success
 
     async def _validate_evolution(self, plan: V2EvolutionPlan) -> dict[str, Any]:
         # 真实验证：对本次计划改动/新建的 .py 文件做 AST 语法检查、.json 做结构检查。
@@ -685,13 +876,15 @@ class EvolutionEngineV2:
                     ast.parse(p.read_text(encoding="utf-8"), filename=target)
                 except SyntaxError as e:
                     errors.append(f"语法错误 {target}: {e.msg} (line {e.lineno})")
-                except Exception as e:  # noqa: BLE001
+                except Exception as e:
+                    log.debug("v2_engine 异常处理", error=str(e))
                     errors.append(f"校验失败 {target}: {e}")
             elif target.endswith(".json"):
                 if p.exists():
                     try:
                         json.loads(p.read_text(encoding="utf-8"))
-                    except Exception as e:  # noqa: BLE001
+                    except Exception as e:
+                        log.debug("v2_engine 异常处理", error=str(e))
                         errors.append(f"JSON 无效 {target}: {e}")
 
         if errors:
@@ -752,6 +945,11 @@ class EvolutionEngineV2:
         current = self._strategy_weights.get(record.strategy_type, 0.5)
         delta = 0.1 if record.outcome == "success" else -0.15
         self._strategy_weights[record.strategy_type] = max(0.0, min(1.0, current + delta))
+        if len(self._strategy_weights) > self._MAX_STRATEGY_WEIGHTS:
+            sorted_weights = sorted(self._strategy_weights.items(), key=lambda x: x[1])
+            to_remove = sorted_weights[: len(self._strategy_weights) - (self._MAX_STRATEGY_WEIGHTS * 3 // 4)]
+            for st, _ in to_remove:
+                del self._strategy_weights[st]
 
     def predict_optimal_strategy(self, context: str = "") -> StrategyRecommendation | None:
         if not self._strategy_weights:
@@ -809,6 +1007,11 @@ class EvolutionEngineV2:
     def record_capability_outcome(self, domain: str, success: bool) -> None:
         if domain not in self._capability_outcomes:
             self._capability_outcomes[domain] = {"successes": 0, "failures": 0, "last_seen": 0.0}
+        if len(self._capability_outcomes) > self._MAX_CAPABILITY_DOMAINS:
+            sorted_domains = sorted(self._capability_outcomes.items(), key=lambda x: x[1].get("last_seen", 0))
+            to_remove = sorted_domains[: len(self._capability_outcomes) - (self._MAX_CAPABILITY_DOMAINS * 3 // 4)]
+            for d, _ in to_remove:
+                del self._capability_outcomes[d]
         record = self._capability_outcomes[domain]
         if success:
             record["successes"] += 1

@@ -1,4 +1,4 @@
-﻿﻿declare module 'js-yaml' {
+﻿declare module 'js-yaml' {
   export interface LoadOptions {
     schema?: unknown;
     json?: boolean;

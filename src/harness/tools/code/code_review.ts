@@ -10,9 +10,9 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { Logger } from '../../../utils/Logger';
 import type { ToolContext, ToolDefinition, ToolResult } from '../../types';
 import { Permission, ToolCategory } from '../../types';
-import { Logger } from '../../../utils/Logger';
 
 export const CODE_REVIEW_DEF: ToolDefinition = {
   name: 'code_review',
@@ -367,7 +367,7 @@ ${content.substring(0, 6000)}
   const response = await llm.chat(
     prompt,
     [],
-    '你是一个资深代码审查专家。只输出 JSON 数组。'
+    '你是家百星的代码审查模块。只输出 JSON 数组。'
   );
 
   try {

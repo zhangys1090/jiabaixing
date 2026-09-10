@@ -127,9 +127,10 @@ class RollbackSnapshot:
     timestamp: float
     avg_quality: float
     avg_response_time_ms: float
-    interaction_count: int = 0  # 拍快照时的交互计数，用于回滚验证差值（审计 E-01）
+    interaction_count: int = 0
     tool_weights: dict[str, float] = field(default_factory=dict)
     reflection_max_retries: int = 2
     enable_deep_reflection: bool = True
     reason: str = ""
     rolled_back: bool = False
+    v2_plan_ids: list[str] = field(default_factory=list)

@@ -307,10 +307,7 @@ export function createWebFetchExecutor(deps: WebFetchDeps = {}) {
       }
       // P0 SSRF 防护: 拒绝本地/内网/链路本地/云元数据地址
       if (!isSafeUrl(url)) {
-        Logger.warning(
-          `🚫 web_fetch SSRF 拦截: ${url}`,
-          'WebFetch'
-        );
+        Logger.warn(`🚫 web_fetch SSRF 拦截: ${url}`, 'WebFetch');
         return fail(
           '拒绝访问本地/内网/链路本地/云元数据地址（SSRF 防护）',
           Date.now() - startTime
@@ -349,7 +346,7 @@ export function createWebFetchExecutor(deps: WebFetchDeps = {}) {
 
       // 内存 DoS 护栏: 事后截断超长响应(自管 fetch 与注入 httpClient 两路径均适用)
       if (html && html.length > WEB_FETCH_MAX_BUFFER_CHARS) {
-        Logger.warning(
+        Logger.warn(
           `⚠️ web_fetch 响应超长(${html.length}字符), 截断至 ${WEB_FETCH_MAX_BUFFER_CHARS}`,
           'WebFetch'
         );

@@ -26,8 +26,8 @@ from typing import Any
 
 from agent.core.logger import StructuredLogger
 from agent.core.logger import log_ignored
-
 log = StructuredLogger("distributed_lock")
+
 
 LOCK_TIMEOUT_MS_DEFAULT: int = 30_000
 LOCK_RETRY_INTERVAL_MS_DEFAULT: int = 200
@@ -167,7 +167,8 @@ class RedisLock(DistributedLock):
                     break
                 try:
                     await self._redis.set(self._key, self._token, xx=True, px=ttl_ms)
-                except Exception:
+                except Exception as _exc:
+                    log.debug("distributed_lock 异常处理", error=str(_exc))
                     break
         except asyncio.CancelledError as _exc:
             log_ignored(log, "distributed_lock.RedisLock._extend_loop", _exc)
@@ -270,6 +271,7 @@ class LocalLock(DistributedLock):
             try:
                 self._lock.release()
             except Exception as _exc:
+                log.debug("distributed_lock 异常处理", error=str(_exc))
                 log_ignored(log, "distributed_lock.LocalLock.release", _exc)
 
 

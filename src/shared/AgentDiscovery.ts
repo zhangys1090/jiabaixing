@@ -1,4 +1,3 @@
-
 export interface AgentProfile {
   id: string;
   name: string;
@@ -55,7 +54,9 @@ export class AgentDiscovery {
     }
   }
 
-  broadcastAgentMessage(message: Omit<AgentMessage, 'id' | 'timestamp'>): string {
+  broadcastAgentMessage(
+    message: Omit<AgentMessage, 'id' | 'timestamp'>
+  ): string {
     const fullMessage: AgentMessage = {
       id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
       timestamp: Date.now(),
@@ -82,7 +83,7 @@ export class AgentDiscovery {
   getAgentMessages(agentId: string): AgentMessage[] {
     const mailbox = this.agentMailboxes.get(agentId) || [];
     const now = Date.now();
-    const validMessages = mailbox.filter(msg => {
+    const validMessages = mailbox.filter((msg) => {
       if (msg.ttl && now - msg.timestamp > msg.ttl) return false;
       return true;
     });
@@ -109,7 +110,7 @@ export class AgentDiscovery {
     const topic = this.capabilityToTopic(capability);
     const subscribers = this.agentSubscriptions.get(topic) || new Set();
     return Array.from(subscribers)
-      .map(id => this.agentRegistry.get(id))
+      .map((id) => this.agentRegistry.get(id))
       .filter((a): a is AgentProfile => a !== undefined);
   }
 
@@ -124,7 +125,7 @@ export class AgentDiscovery {
     const now = Date.now();
     const heartbeatTimeout = 30_000;
     return this.getAllAgents().filter(
-      a => a.status !== 'offline' && now - a.lastHeartbeat < heartbeatTimeout
+      (a) => a.status !== 'offline' && now - a.lastHeartbeat < heartbeatTimeout
     );
   }
 

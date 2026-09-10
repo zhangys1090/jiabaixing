@@ -29,7 +29,10 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from agent.loop.types import ExecutionPlan, LoopContext, PlanStep
-from agent.core.logger import log_ignored
+from agent.core.logger import log_ignored, StructuredLogger
+import logging
+log = StructuredLogger("mcts_planner")
+logger = logging.getLogger(__name__)
 
 
 class LLMProtocol(Protocol):
@@ -222,7 +225,8 @@ class MCTSPlanner:
                 match = re.search(r"(0\.\d+|1\.0|1)", text)
                 reward = float(match.group(1)) if match else 0.5
                 total_reward += reward
-            except Exception:
+            except Exception as e:
+                logger.warning("mcts_planner._rollout 奖励评估失败", error=str(e))
                 total_reward += 0.3
 
             if depth < self._config.rollout_depth:
@@ -281,6 +285,7 @@ class MCTSPlanner:
                 parsed = json.loads(match.group())
                 return parsed.get("actions", [])
         except Exception as _exc:
+            logger.warning("mcts_planner 异常处理", error=str(_exc))
             log_ignored(None, "mcts_planner.MCTSPlanner._generate_actions", _exc)
 
         return []
@@ -304,7 +309,8 @@ class MCTSPlanner:
                 use_cache=False,
             )
             return str(resp.get("content", "")).strip()
-        except Exception:
+        except Exception as _exc:
+            log.warning("MCTS 快速推测失败", error=str(_exc))
             return None
 
     def _extract_path(self, node: MCTSNode) -> list[MCTSNode]:

@@ -20,10 +20,11 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from agent.core.logger import StructuredLogger
 from agent.core.logger import log_ignored
+from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("framework_integration")
+
 
 
 def _get_env_bool(key: str, default: bool = False) -> bool:
@@ -94,6 +95,7 @@ class LangChainObservability:
                 if hasattr(cb, "on_llm_start"):
                     cb.on_llm_start({"model": model}, [prompt], invocation_params={})
             except Exception as _exc:
+                log.debug("framework_integration 异常处理", error=str(_exc))
                 log_ignored(log, "framework_integration.LangChainObservability.on_llm_start", _exc)
 
     def on_llm_end(self, model: str, output: str, duration_ms: float = 0) -> None:
@@ -107,6 +109,7 @@ class LangChainObservability:
 
                     cb.on_llm_end(LLMResult(generations=[[{"text": output}]]))
             except Exception as _exc:
+                log.debug("framework_integration 异常处理", error=str(_exc))
                 log_ignored(log, "framework_integration.LangChainObservability.on_llm_end", _exc)
 
     def on_tool_start(self, tool_name: str, tool_input: dict) -> None:
@@ -118,6 +121,7 @@ class LangChainObservability:
                 if hasattr(cb, "on_tool_start"):
                     cb.on_tool_start({"name": tool_name}, tool_input)
             except Exception as _exc:
+                log.debug("framework_integration 异常处理", error=str(_exc))
                 log_ignored(log, "framework_integration.LangChainObservability.on_tool_start", _exc)
 
     def on_tool_end(self, tool_name: str, output: str, duration_ms: float = 0) -> None:
@@ -129,6 +133,7 @@ class LangChainObservability:
                 if hasattr(cb, "on_tool_end"):
                     cb.on_tool_end(output)
             except Exception as _exc:
+                log.debug("framework_integration 异常处理", error=str(_exc))
                 log_ignored(log, "framework_integration.LangChainObservability.on_tool_end", _exc)
 
 

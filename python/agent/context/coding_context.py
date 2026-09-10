@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from agent.core.logger import log_ignored
+import logging
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -36,7 +38,7 @@ class CodingContextDetector:
         detector = CodingContextDetector()
         ctx = detector.detect("/path/to/project")
         if ctx:
-            print(ctx.project_type, ctx.languages, ctx.toolsets)
+            logger.info(ctx.project_type, ctx.languages, ctx.toolsets)
     """
 
     # 项目类型检测规则：(文件名, 包含关键词或 None, 项目类型标识)

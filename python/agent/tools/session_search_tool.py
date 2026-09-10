@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from agent.core.logger import StructuredLogger
 from agent.persistence.session_lineage import SessionLineageTracker
 from agent.persistence.session_search_index import SessionSearchIndex
 from agent.tools.registry import (
@@ -23,8 +22,9 @@ from agent.tools.registry import (
     ToolParameterDef,
     ToolResult,
 )
-
+from agent.core.logger import StructuredLogger
 log = StructuredLogger("session_search_tool")
+
 
 # 工具定义
 SESSION_SEARCH_DEF = ToolDefinition(
@@ -499,4 +499,4 @@ def register_session_search_tool(
         SESSION_SEARCH_DEF,
         make_session_search_executor(session_store, search_index, lineage_tracker),
     )
-    log.info("Session search tool registered")
+    log.debug("Session search tool registered")

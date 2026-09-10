@@ -141,7 +141,11 @@ export function createSelfReflectExecutor(deps: SelfReflectDeps) {
         deps.reflectionStore.add(entry);
       }
     } catch (persistErr) {
-      Logger.error('❌ self_reflect 持久化失败', persistErr as Error, 'SelfReflect');
+      Logger.error(
+        '❌ self_reflect 持久化失败',
+        persistErr as Error,
+        'SelfReflect'
+      );
       const analysis = `反思分析 [满意度:${satisfaction}/10, 情感:${sentiment}]`;
       const note = improvement ? `\n💡 ${improvement}` : '';
       return {

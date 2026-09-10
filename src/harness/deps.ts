@@ -281,8 +281,13 @@ const REQUIRED_DEPS_KEYS: ReadonlyArray<keyof RequiredHarnessDeps> = [
   'historyProvider',
 ] as const;
 
-export function validateHarnessDeps(deps: Partial<HarnessDeps>): { valid: boolean; missing: string[] } {
-  const missing = REQUIRED_DEPS_KEYS.filter(key => deps[key] === undefined || deps[key] === null);
+export function validateHarnessDeps(deps: Partial<HarnessDeps>): {
+  valid: boolean;
+  missing: string[];
+} {
+  const missing = REQUIRED_DEPS_KEYS.filter(
+    (key) => deps[key] === undefined || deps[key] === null
+  );
   return { valid: missing.length === 0, missing: missing as string[] };
 }
 

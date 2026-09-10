@@ -3,9 +3,9 @@
  * 闭合 Loop B: 工具可靠性数据 → 进化权重 → ToolReliabilityTracker
  */
 
-import { EvolutionOrchestrator } from '../../evolution/EvolutionOrchestrator';
-import { EvolutionEngineV2 } from '../../evolution';
 import type { JiabaixingCore } from '../../core/JiabaixingCore';
+import { EvolutionEngineV2 } from '../../evolution';
+import { EvolutionOrchestrator } from '../../evolution/EvolutionOrchestrator';
 import { Logger } from '../../utils/Logger';
 
 export interface EvolutionInitResult {}
@@ -60,24 +60,15 @@ export async function initEvolution(
   };
 
   if (isPythonBackend) {
-    Logger.warn(
-      '🧬 TS 进化引擎已弃用（Python 后端模式）：进化执行/数据改由 Python `agent.evolution` 负责，' +
-        'TS 不再自写文件。仅保留进化权重同步任务。',
-      'initEvolution'
-    );
     const OPTIMIZATION_INTERVAL_MS = 5 * 60 * 1000;
     setInterval(() => {
       void syncEvolutionWeights();
     }, OPTIMIZATION_INTERVAL_MS);
-    Logger.info('✅ 进化权重同步已启动（Python 后端模式，每5分钟）', 'Bootstrap');
+    Logger.info('进化权重同步已启动 (Python后端, 每5分钟)', 'initEvolution');
     return {};
   }
 
-  // ── AGENT_BACKEND=local 废弃回退路径：TS 独立进化引擎 ──
-  Logger.warn(
-    '⚠️ 使用 TS 本地进化引擎（AGENT_BACKEND=local，已废弃，请迁移至 Python 后端）',
-    'initEvolution'
-  );
+  Logger.warn('TS本地进化引擎 (AGENT_BACKEND=local, 已废弃)', 'initEvolution');
 
   const orchestrator = EvolutionOrchestrator.getInstance();
   const llmProvider = core?.getLLM();
@@ -157,7 +148,10 @@ export async function initEvolution(
     }
   }, OPTIMIZATION_INTERVAL_MS);
 
-  Logger.info('✅ V2进化循环已启动（每5分钟检查，阈值=0.7，local 回退）', 'Bootstrap');
+  Logger.info(
+    '✅ V2进化循环已启动（每5分钟检查，阈值=0.7，local 回退）',
+    'Bootstrap'
+  );
 
   return {};
 }

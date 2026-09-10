@@ -8,17 +8,18 @@ Usage:
     vg = VisualGrounding()
     result = await vg.locate("确定按钮")
     if result.target_found:
-        print(result.coordinates)
+        logger.info(result.coordinates)
 """
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
 from typing import Any
-
 from agent.core.logger import StructuredLogger, log_ignored
 
 log = StructuredLogger("visual_grounding")
+
+
 
 
 @dataclass

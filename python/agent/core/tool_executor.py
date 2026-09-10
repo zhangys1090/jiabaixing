@@ -16,6 +16,8 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Coroutine
+import logging
+logger = logging.getLogger(__name__)
 
 
 class FailurePolicy(str, Enum):
@@ -197,6 +199,7 @@ class ParallelToolExecutor:
                         duration_ms=timeout * 1000, attempt=attempt + 1,
                     )
             except Exception as e:
+                logger.warning("tool_executor 异常处理", error=str(e))
                 if attempt >= tc.retry_count:
                     return ToolCallResult(
                         id=tc.id, name=tc.name, success=False, error=str(e),
@@ -213,21 +216,34 @@ class ParallelToolExecutor:
     def _build_parallel_groups(
         self, tool_calls: list[ToolCallItem],
     ) -> list[list[ToolCallItem]]:
+        all_ids = {tc.id for tc in tool_calls}
+        for tc in tool_calls:
+            for dep in tc.depends_on:
+                if dep not in all_ids:
+                    tc.depends_on = [d for d in tc.depends_on if d in all_ids]
+
         completed: set[str] = set()
         remaining = list(tool_calls)
         groups: list[list[ToolCallItem]] = []
+        max_iterations = len(tool_calls) + 1
+        iteration = 0
         while remaining:
-            group: list[ToolCallItem] = []
-            still_waiting: list[ToolCallItem] = []
-            for tc in remaining:
-                if all(dep in completed for dep in tc.depends_on):
-                    group.append(tc)
-                else:
-                    still_waiting.append(tc)
-            if not group:
-                still_waiting.sort(key=lambda tc: len(tc.depends_on))
-                group = [still_waiting[0]]
-                still_waiting = still_waiting[1:]
+            iteration += 1
+            if iteration > max_iterations:
+                group = remaining[:1]
+                still_waiting = remaining[1:]
+            else:
+                group: list[ToolCallItem] = []
+                still_waiting: list[ToolCallItem] = []
+                for tc in remaining:
+                    if all(dep in completed for dep in tc.depends_on):
+                        group.append(tc)
+                    else:
+                        still_waiting.append(tc)
+                if not group:
+                    still_waiting.sort(key=lambda tc: len(tc.depends_on))
+                    group = [still_waiting[0]]
+                    still_waiting = still_waiting[1:]
             groups.append(group)
             for tc in group:
                 completed.add(tc.id)

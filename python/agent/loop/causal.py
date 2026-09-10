@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from agent.llm.provider import LLMProvider
+import logging
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -59,9 +61,7 @@ class CausalModeler:
 
     async def build_causal_model(self, task: str) -> CausalGraph:
         if not self.llm:
-            return CausalGraph(
-                nodes=[], edges=[], parallel_groups=[], failure_propagation=[]
-            )
+            return self._build_rule_based_graph(task)
 
         prompt = (
             "请分析以下任务，构建因果关系图。返回 JSON 格式：\n"
@@ -86,7 +86,8 @@ class CausalModeler:
 
             parsed = json.loads(json_match.group())
             return self._validate_graph(parsed)
-        except Exception:
+        except Exception as e:
+            logger.warning("causal.build_graph 因果图构建失败", error=str(e))
             return CausalGraph()
 
     def analyze_dependencies(
@@ -468,3 +469,49 @@ class CausalModeler:
             parallel_groups=parallel_groups,
             failure_propagation=failure_propagation,
         )
+
+    def _build_rule_based_graph(self, task: str) -> CausalGraph:
+        """W5修复: 无LLM时基于规则的因果图构建fallback.
+
+        通过关键词检测和启发式规则，将任务拆解为步骤并推断依赖关系。
+        虽不如LLM精确，但确保CausalModeler在LLM不可用时仍能提供基本的并行分析。
+        """
+        _STEP_KEYWORDS: list[tuple[str, str]] = [
+            ("搜索|查找|查询|检索", "search"),
+            ("读取|打开|加载|获取", "read"),
+            ("分析|解析|评估|判断", "analyze"),
+            ("计算|统计|汇总|聚合", "compute"),
+            ("写入|保存|存储|更新", "write"),
+            ("发送|通知|推送|提交", "send"),
+            ("删除|移除|清理", "delete"),
+        ]
+        import re as _re
+        detected_steps: list[tuple[str, str]] = []
+        for pattern, step_type in _STEP_KEYWORDS:
+            if _re.search(pattern, task):
+                detected_steps.append((step_type, step_type))
+
+        if not detected_steps:
+            detected_steps = [("step1", "action")]
+
+        nodes = [CausalGraphNode(id=sid, description=f"步骤: {sid}", type=stype) for sid, stype in detected_steps]
+        edges: list[CausalGraphEdge] = []
+        write_idx = next((i for i, (sid, _) in enumerate(detected_steps) if sid == "write"), -1)
+        read_idx = next((i for i, (sid, _) in enumerate(detected_steps) if sid == "read"), -1)
+        if read_idx >= 0 and write_idx >= 0 and read_idx < write_idx:
+            edges.append(CausalGraphEdge(from_id="read", to_id="write", reason="读取后写入", type="dependency"))
+        delete_idx = next((i for i, (sid, _) in enumerate(detected_steps) if sid == "delete"), -1)
+        if write_idx >= 0 and delete_idx >= 0:
+            edges.append(CausalGraphEdge(from_id="write", to_id="delete", reason="写入后可删除", type="dependency"))
+
+        parallel_groups: list[list[str]] = []
+        independent = [sid for sid, _ in detected_steps if sid not in {"write", "delete"}]
+        if len(independent) >= 2:
+            parallel_groups.append(independent)
+
+        failure_propagation: list[FailurePropagation] = []
+        for edge in edges:
+            failure_propagation.append(FailurePropagation(source=edge.from_id, affects=[edge.to_id], reason="上游失败传播"))
+
+        logger.debug("W5: rule-based causal graph built (LLM unavailable)", nodes=len(nodes), edges=len(edges))
+        return CausalGraph(nodes=nodes, edges=edges, parallel_groups=parallel_groups, failure_propagation=failure_propagation)

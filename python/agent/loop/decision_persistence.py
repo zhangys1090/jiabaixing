@@ -30,8 +30,8 @@ from agent.loop.meta_decision_engine import (
     DecisionRecord,
 )
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("decision_persistence")
+
 
 
 class Objective(str, Enum):

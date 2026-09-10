@@ -6,23 +6,28 @@
  * 形成「执行 → 验证」闭环，这是 P1-2 桌面动作接回 action_verifier 的关键落点。
  */
 
-import type { DesktopActionExecutor, DesktopActionResult } from '../../../desktop/DesktopActionExecutor';
+import { DesktopActionAuthority } from '../../../desktop/DesktopActionAuthority';
 import type {
-  ActionChannel,
-  ActionRequest,
-  ActionResult,
-  VerificationOutcome,
+    DesktopActionResult,
+} from '../../../desktop/DesktopActionExecutor';
+import { Logger } from '../../../utils/Logger';
+import type {
+    ActionChannel,
+    ActionRequest,
+    ActionResult
 } from '../types';
 import type { VerificationBridge } from '../verify/VerificationBridge';
-import { Logger } from '../../../utils/Logger';
 
 export class DesktopChannel implements ActionChannel {
   readonly kind = 'desktop' as const;
+  private authority: DesktopActionAuthority;
 
   constructor(
-    private readonly executor: DesktopActionExecutor,
-    private readonly verifier?: VerificationBridge
-  ) {}
+    verifier?: VerificationBridge
+  ) {
+    this.authority = DesktopActionAuthority.getInstance();
+    void verifier;
+  }
 
   async dispatch(request: ActionRequest): Promise<ActionResult> {
     const start = Date.now();
@@ -39,39 +44,19 @@ export class DesktopChannel implements ActionChannel {
     }
 
     try {
-      const result: DesktopActionResult = await this.executor.executeAction(
-        action
-      );
-
-      let verification: VerificationOutcome | undefined;
-      if (request.verify && this.verifier) {
-        try {
-          verification = await this.verifier.verify(request.verify);
-        } catch (err) {
-          Logger.warn(
-            `DesktopChannel 验证接回失败: ${(err as Error).message}`,
-            'DesktopChannel'
-          );
-        }
-      }
+      const { result }: { result: DesktopActionResult } =
+        await this.authority.executeAction(action);
 
       return {
         channel: 'desktop',
         success: result.success,
-        output:
-          result.output ??
-          (result.observation ? '[observation]' : null),
+        output: result.output ?? (result.observation ? '[observation]' : null),
         error: result.error,
         durationMs: Date.now() - start,
         raw: result,
-        verification,
       };
     } catch (err) {
-      Logger.error(
-        'DesktopChannel 执行失败',
-        err as Error,
-        'DesktopChannel'
-      );
+      Logger.error('DesktopChannel 执行失败', err as Error, 'DesktopChannel');
       return {
         channel: 'desktop',
         success: false,

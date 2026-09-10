@@ -7,9 +7,9 @@
  * - LLM 总结为结构化简报
  */
 
+import { Logger } from '../../../utils/Logger';
 import type { ToolContext, ToolDefinition, ToolResult } from '../../types';
 import { Permission, ToolCategory } from '../../types';
-import { Logger } from '../../../utils/Logger';
 
 export const MORNING_BRIEF_DEF: ToolDefinition = {
   name: 'morning_brief',
@@ -119,7 +119,7 @@ ${searchContext}
         const summary = await deps.llm.chat(
           prompt,
           [],
-          '你是一个专业的新闻编辑，擅长简洁有力的中文表达。'
+          '你是家百星的简报编辑模块，擅长简洁有力的中文表达。'
         );
 
         return {

@@ -12,7 +12,7 @@ import { BaseMemoryStore } from './BaseMemoryStore';
 import { MemoryDatabase } from './Database';
 import { MemoryItem, MemoryType } from './MemoryEngine';
 
-interface SQLiteLongTermRecord {
+interface _SQLiteLongTermRecord {
   id: string;
   content: string;
   scene: string;

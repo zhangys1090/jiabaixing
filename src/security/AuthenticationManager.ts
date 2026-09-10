@@ -3,7 +3,9 @@
  */
 
 import bcrypt from 'bcrypt';
+import * as fs from 'fs';
 import * as jwt from 'jsonwebtoken';
+import * as path from 'path';
 import { Logger } from '../utils/Logger';
 import { AuditLogger } from './AuditLogger';
 import { AuthConfig, AuthRequest, AuthResponse, UserAuthInfo } from './types';
@@ -59,9 +61,18 @@ export class AuthenticationManager {
   private userStorage: UserStorage = {};
   private initialized: boolean = false;
   private auditLogger?: AuditLogger;
+  // P0-6 修复: 用户数据持久化路径
+  private readonly userStoragePath: string;
+  private _saveTimer?: NodeJS.Timeout;
 
   constructor(config: Partial<AuthConfig> = {}) {
     this.config = { ...DEFAULT_AUTH_CONFIG, ...config };
+    this.userStoragePath = path.join(
+      process.cwd(),
+      'data',
+      'auth',
+      'users.json'
+    );
   }
 
   /**
@@ -89,6 +100,14 @@ export class AuthenticationManager {
 
       this.initializeUserStorage();
 
+      // P0-6 修复: 从磁盘加载持久化的用户数据
+      this.loadUserStorageFromDisk();
+
+      // P0-6: 定期将用户数据持久化到磁盘（每 30 秒）
+      this._saveTimer = setInterval(() => {
+        this.saveUserStorageToDisk();
+      }, 30_000).unref();
+
       this.initialized = true;
     } catch (error) {
       Logger.error('❌ 认证管理器：初始化失败:', error as Error);
@@ -100,9 +119,32 @@ export class AuthenticationManager {
    * 初始化用户存储（临时实现）
    */
   private initializeUserStorage(): void {
-    // 创建默认用户（仅用于测试，生产环境应通过注册流程创建）
+    if (process.env.NODE_ENV === 'production') {
+      this.userStorage = {};
+      Logger.info('🔒 生产环境：不创建默认用户，请通过注册流程创建');
+      return;
+    }
+
+    const devPassword = process.env.DEV_DEFAULT_PASSWORD;
+    if (!devPassword) {
+      this.userStorage = {};
+      Logger.warn(
+        '⚠️ 开发环境：DEV_DEFAULT_PASSWORD 未设置，不创建默认用户。请设置环境变量后重启。'
+      );
+      return;
+    }
+
+    const strengthCheck = this.validatePasswordStrength(devPassword);
+    if (!strengthCheck.valid) {
+      this.userStorage = {};
+      Logger.error(
+        `❌ DEV_DEFAULT_PASSWORD 不满足强度要求: ${strengthCheck.errors.join('; ')}`
+      );
+      return;
+    }
+
     const defaultPasswordHash = bcrypt.hashSync(
-      'password123!',
+      devPassword,
       this.config.password.saltRounds || 10
     );
 
@@ -122,6 +164,10 @@ export class AuthenticationManager {
         roles: ['user'],
       },
     };
+
+    Logger.warn(
+      '⚠️ 开发环境：已从 DEV_DEFAULT_PASSWORD 创建默认用户(admin/user)，生产环境将禁用'
+    );
   }
 
   /**
@@ -430,6 +476,58 @@ export class AuthenticationManager {
         error: (error as Error).message,
       });
       return { success: false, error: '注册过程中发生错误，请稍后再试' };
+    }
+  }
+
+  /**
+   * P0-6 修复: 从磁盘加载持久化的用户数据
+   * 合并策略：磁盘数据优先，内存中不存在的用户从磁盘补充
+   */
+  private loadUserStorageFromDisk(): void {
+    try {
+      if (!fs.existsSync(this.userStoragePath)) {
+        Logger.info('📁 用户存储文件不存在，将从内存初始化', 'AuthManager');
+        return;
+      }
+      const raw = fs.readFileSync(this.userStoragePath, 'utf8');
+      const persisted: UserStorage = JSON.parse(raw);
+      // 合并：磁盘数据补充内存中不存在的用户
+      for (const [username, userData] of Object.entries(persisted)) {
+        if (!this.userStorage[username]) {
+          this.userStorage[username] = userData;
+        }
+      }
+      Logger.info(
+        `💾 已从磁盘加载 ${Object.keys(persisted).length} 个用户`,
+        'AuthManager'
+      );
+    } catch (err) {
+      Logger.warn(
+        `⚠️ 加载用户存储失败（使用内存数据）: ${(err as Error).message}`,
+        'AuthManager'
+      );
+    }
+  }
+
+  /**
+   * P0-6 修复: 将用户数据持久化到磁盘
+   */
+  private saveUserStorageToDisk(): void {
+    try {
+      const dir = path.dirname(this.userStoragePath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFileSync(
+        this.userStoragePath,
+        JSON.stringify(this.userStorage, null, 2),
+        { mode: 0o600 }
+      );
+    } catch (err) {
+      Logger.warn(
+        `⚠️ 保存用户存储失败: ${(err as Error).message}`,
+        'AuthManager'
+      );
     }
   }
 

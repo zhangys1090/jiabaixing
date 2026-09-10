@@ -10,6 +10,8 @@ import ipaddress
 import re
 from typing import ClassVar
 from urllib.parse import urlparse
+import logging
+logger = logging.getLogger(__name__)
 
 
 class URLSafetyError(Exception):
@@ -41,7 +43,7 @@ class URLSafetyGuard:
         guard = URLSafetyGuard()
         safe_url = guard.validate_url("https://example.com/api")
         if guard.is_ssrf_risk("http://127.0.0.1/admin"):
-            print("SSRF 风险!")
+            logger.info("SSRF 风险!")
     """
 
     BLOCKED_HOSTNAMES: ClassVar[list[str]] = [

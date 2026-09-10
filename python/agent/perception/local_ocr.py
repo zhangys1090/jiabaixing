@@ -13,10 +13,11 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from typing import Any
-
 from agent.core.logger import StructuredLogger, log_ignored
 
 log = StructuredLogger("local_ocr")
+
+
 
 
 @dataclass
@@ -49,7 +50,7 @@ class LocalOCR:
     Usage:
         ocr = LocalOCR()
         result = await ocr.recognize("screenshot.png")
-        print(result.text)
+        logger.info(result.text)
     """
 
     def __init__(self, preferred_engine: str = "auto", language: str = "chi_sim+eng") -> None:
@@ -115,14 +116,14 @@ class LocalOCR:
         try:
             import paddleocr
             engines.append("paddle")
-            log.info("LocalOCR: PaddleOCR 可用")
+            log.debug("LocalOCR: PaddleOCR 可用")
         except ImportError as _exc:
             log_ignored(log, "local_ocr._detect_engines.paddle", _exc)
 
         try:
             import pytesseract
             engines.append("tesseract")
-            log.info("LocalOCR: Tesseract 可用")
+            log.debug("LocalOCR: Tesseract 可用")
         except ImportError as _exc:
             log_ignored(log, "local_ocr._detect_engines.tesseract", _exc)
 
@@ -131,7 +132,7 @@ class LocalOCR:
             engines.insert(0, self._preferred_engine)
 
         self._available_engines = engines
-        log.info("LocalOCR 引擎检测完成", available=engines)
+        log.debug("LocalOCR 引擎检测完成", available=engines)
 
     def _select_engine(self) -> str:
         """选择 OCR 引擎。"""

@@ -372,7 +372,12 @@ export class UnifiedContextPipeline {
     try {
       const profile = this.memoryEngine.getUserProfile();
       if (!profile) {
-        return { name: '', preferences: [], emotionalPatterns: [], recentTriggers: [] };
+        return {
+          name: '',
+          preferences: [],
+          emotionalPatterns: [],
+          recentTriggers: [],
+        };
       }
       const basicInfo = profile.getBasicInfo();
       const devHabits = profile.getDevelopmentHabits();
@@ -389,11 +394,17 @@ export class UnifiedContextPipeline {
       }));
 
       const recentTriggers = (
-        (emotionalPatterns as { triggerEvents?: Array<{ emotionType: string; timeSlot: string }> })
-          .triggerEvents || []
+        (
+          emotionalPatterns as {
+            triggerEvents?: Array<{ emotionType: string; timeSlot: string }>;
+          }
+        ).triggerEvents || []
       )
         .slice(0, 5)
-        .map((t: { emotionType: string; timeSlot: string }) => `${t.emotionType}@${t.timeSlot}`);
+        .map(
+          (t: { emotionType: string; timeSlot: string }) =>
+            `${t.emotionType}@${t.timeSlot}`
+        );
 
       return {
         name: basicInfo.name || '',

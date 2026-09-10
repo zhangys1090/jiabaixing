@@ -628,8 +628,8 @@ def create_a2a_router(
                     yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
             except asyncio.TimeoutError:
                 yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
-            except asyncio.CancelledError:
-                pass
+            except asyncio.CancelledError as _exc:
+                log_ignored(logger, "server.create_a2a_router.push_notification_stream.event_generator", _exc)
 
         return StreamingResponse(event_generator(), media_type="text/event-stream")
 
@@ -658,6 +658,7 @@ def create_a2a_router(
                             json={"taskId": task_id, "eventType": event_type, **data},
                         )
                 except Exception as _exc:
+                    logger.debug("server 异常处理", error=str(_exc))
                     log_ignored(logger, "server._dispatch_push_to_subscribers.webhook", _exc)
 
     # ───────────────────────────────────────────────────────────

@@ -17,7 +17,7 @@ Usage:
             return "我的自定义插件"
 
         async def on_load(self, context: dict) -> None:
-            print(f"{self.name} loaded")
+            logger.info("{self.name} loaded")
 """
 
 from __future__ import annotations
@@ -26,6 +26,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
+import logging
+logger = logging.getLogger(__name__)
 
 
 class PluginState(Enum):

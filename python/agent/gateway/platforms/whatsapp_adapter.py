@@ -11,9 +11,9 @@
     from agent.gateway.platforms.whatsapp_adapter import WhatsAppAdapter
 
     adapter = WhatsAppAdapter(
-        phone_number_id="123456",
-        access_token="EAAJ...",
-        verify_token="my_verify",
+        phone_number_id=os.environ["WHATSAPP_PHONE_NUMBER_ID"],
+        access_token=os.environ["WHATSAPP_ACCESS_TOKEN"],
+        verify_token=os.environ["WHATSAPP_VERIFY_TOKEN"],
     )
     await adapter.start()
 """
@@ -164,8 +164,8 @@ class WhatsAppAdapter(PlatformAdapter):
                 "text": {"body": text},
             }
 
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(url, json=payload, headers=headers, timeout=30)
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(url, json=payload, headers=headers)
                 return resp.status_code == 200
         except Exception as e:
             log.error("WhatsApp 发送失败", chat_id=chat_id, error=str(e))

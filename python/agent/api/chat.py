@@ -9,7 +9,8 @@ from agent.models.chat import (
     StatusResponse,
     StreamChunk,
 )
-from agent.core.logger import log_ignored
+from agent.core.logger import log_ignored, StructuredLogger
+log = StructuredLogger("chat")
 
 router = APIRouter()
 root_router = APIRouter()
@@ -54,16 +55,19 @@ async def status():
                 stats = eng.memory.get_stats()
                 memory_entries = stats.get("total_entries", 0)
         except Exception as _exc:
+            logger.warning("chat 异常处理", error=str(_exc))
             log_ignored(None, "chat.status", _exc)
         try:
             if hasattr(eng, "session_store") and eng.session_store:
                 active_sessions = len(eng.session_store.list_sessions())
         except Exception as _exc:
+            logger.warning("chat 异常处理", error=str(_exc))
             log_ignored(None, "chat.status", _exc)
         try:
             if hasattr(eng, "tool_registry") and eng.tool_registry:
                 skills_count = eng.tool_registry.size()
         except Exception as _exc:
+            logger.warning("chat 异常处理", error=str(_exc))
             log_ignored(None, "chat.status", _exc)
 
     return StatusResponse(
@@ -80,14 +84,18 @@ async def chat(req: ChatRequest) -> ChatResponse:
     if not eng:
         return _engine_unavailable()
     use_loop = req.context_files and "use_loop" in req.context_files
-    result = await eng.process_input(
-        message=req.message,
-        session_id=req.session_id,
-        context_files=req.context_files,
-        use_loop=use_loop,
-        user_id=req.user_id,
-        strategy_name=req.strategy_name,
-    )
+    try:
+        result = await eng.process_input(
+            message=req.message,
+            session_id=req.session_id,
+            context_files=req.context_files,
+            use_loop=use_loop,
+            user_id=req.user_id,
+            strategy_name=req.strategy_name,
+        )
+    except Exception as e:
+        logger.error("chat端点异常", error=str(e))
+        return ChatResponse(content="抱歉，处理请求时出现异常，请稍后重试。", session_id=req.session_id, trace_id="", finish_reason="error")
     return ChatResponse(**result)
 
 
@@ -136,6 +144,7 @@ async def stream_chat(websocket: WebSocket, session_id: str):
                             metadata=_event_meta,
                         ).model_dump())
                 except Exception as e:
+                    logger.warning("chat 异常处理", error=str(e))
                     await websocket.send_json(StreamChunk(
                         type="error",
                         content=str(e),
@@ -202,6 +211,7 @@ async def stream_chat(websocket: WebSocket, session_id: str):
                     metadata=stream_done_metadata,
                 ).model_dump())
             except Exception as e:
+                logger.warning("chat 异常处理", error=str(e))
                 await websocket.send_json(StreamChunk(
                     type="error",
                     content=str(e),

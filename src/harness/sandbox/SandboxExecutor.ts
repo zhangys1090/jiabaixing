@@ -10,6 +10,8 @@
  * - 双模式：isolated (Worker) / inline (Function, 仅 low 安全级别)
  */
 
+import * as path from 'path';
+import { Worker } from 'worker_threads';
 import { Logger } from '../../utils/Logger';
 
 // 安全级别定义
@@ -158,24 +160,46 @@ export class SandboxExecutor {
   /**
    * 预检查代码安全性
    */
-  private preCheckCode(code: string): PermissionCheckResult {
-    // 检查危险模式
-    const dangerousPatterns = [
-      { pattern: /require\s*\(/, name: 'require调用' },
-      { pattern: /import\s*\(/, name: '动态导入' },
-      { pattern: /eval\s*\(/, name: 'eval调用' },
-      { pattern: /Function\s*\(/, name: 'Function构造函数' },
-      { pattern: /process\./, name: 'process访问' },
-      { pattern: /global\./, name: 'global对象访问' },
-      { pattern: /__dirname/, name: '__dirname访问' },
-      { pattern: /__filename/, name: '__filename访问' },
-      { pattern: /child_process/, name: '子进程调用' },
-      { pattern: /fs\./, name: '文件系统操作' },
-      { pattern: /net\./, name: '网络操作' },
-      { pattern: /http\./, name: 'HTTP操作' },
-    ];
+  private static readonly CRITICAL_PATTERNS: ReadonlyArray<{
+    pattern: RegExp;
+    name: string;
+  }> = [
+    { pattern: /require\s*\(/, name: 'require调用' },
+    { pattern: /import\s*\(/, name: '动态导入' },
+    { pattern: /eval\s*\(/, name: 'eval调用' },
+    { pattern: /new\s+Function\b/, name: 'new Function构造函数' },
+    { pattern: /child_process/, name: '子进程调用' },
+    { pattern: /\.constructor\s*\.\s*constructor/, name: '原型链逃逸' },
+    { pattern: /arguments\s*\.\s*callee/, name: 'arguments.callee逃逸' },
+    { pattern: /\bWorker\b/, name: 'Worker创建' },
+  ];
 
-    for (const { pattern, name } of dangerousPatterns) {
+  private static readonly HIGH_RISK_PATTERNS: ReadonlyArray<{
+    pattern: RegExp;
+    name: string;
+  }> = [
+    { pattern: /process\./, name: 'process访问' },
+    { pattern: /globalThis/, name: 'globalThis访问' },
+    { pattern: /global\./, name: 'global对象访问' },
+    { pattern: /__dirname/, name: '__dirname访问' },
+    { pattern: /__filename/, name: '__filename访问' },
+    { pattern: /fs\./, name: '文件系统操作' },
+    { pattern: /net\./, name: '网络操作' },
+    { pattern: /http\./, name: 'HTTP操作' },
+    { pattern: /this\s*\.\s*constructor/, name: 'this.constructor逃逸' },
+    { pattern: /Reflect\./, name: 'Reflect访问' },
+    { pattern: /\bProxy\b/, name: 'Proxy使用' },
+    { pattern: /\bWeakRef\b/, name: 'WeakRef使用' },
+    { pattern: /\bSharedArrayBuffer\b/, name: 'SharedArrayBuffer使用' },
+    { pattern: /\bAtomics\b/, name: 'Atomics使用' },
+    { pattern: /\bparentPort\b/, name: 'parentPort访问' },
+    { pattern: /\bfetch\s*\(/, name: 'fetch调用' },
+    { pattern: /\bXMLHttpRequest\b/, name: 'XMLHttpRequest使用' },
+    { pattern: /\bWebSocket\b/, name: 'WebSocket使用' },
+  ];
+
+  private preCheckCode(code: string): PermissionCheckResult {
+    for (const { pattern, name } of SandboxExecutor.CRITICAL_PATTERNS) {
       if (pattern.test(code)) {
         this.securityViolations.push(`检测到危险操作: ${name}`);
         return {
@@ -186,13 +210,27 @@ export class SandboxExecutor {
       }
     }
 
+    if (this.config.securityLevel !== 'low') {
+      for (const { pattern, name } of SandboxExecutor.HIGH_RISK_PATTERNS) {
+        if (pattern.test(code)) {
+          this.securityViolations.push(`检测到高风险操作: ${name}`);
+          return {
+            allowed: false,
+            reason: `检测到高风险操作: ${name} (安全级别: ${this.config.securityLevel})`,
+            riskLevel: 'high',
+          };
+        }
+      }
+    }
+
     return { allowed: true, riskLevel: 'low' };
   }
 
   private async executeInSandbox(code: string): Promise<unknown> {
-    const effectiveMode = this.config.mode === 'inline' && this.config.securityLevel !== 'low'
-      ? 'isolated'
-      : this.config.mode;
+    const effectiveMode =
+      this.config.mode === 'inline' && this.config.securityLevel !== 'low'
+        ? 'isolated'
+        : this.config.mode;
 
     if (effectiveMode === 'isolated') {
       return this.executeInWorker(code);
@@ -207,37 +245,51 @@ export class SandboxExecutor {
       let settled = false;
 
       const worker = new Worker(workerPath, {
-        resourceLimits: {
-          maxOldGenerationSizeMb: this.config.maxMemoryMb,
-          maxYoungGenerationSizeMb: Math.floor(this.config.maxMemoryMb / 4),
-          stackSizeMb: 4,
-        },
         eval: false,
-      });
+        ...(this.config.maxMemoryMb
+          ? {
+              resourceLimits: {
+                maxOldGenerationSizeMb: this.config.maxMemoryMb,
+                maxYoungGenerationSizeMb: Math.floor(
+                  this.config.maxMemoryMb / 4
+                ),
+                stackSizeMb: 4,
+              },
+            }
+          : {}),
+      } as ConstructorParameters<typeof Worker>[1]);
 
       const timeoutId = setTimeout(() => {
         if (!settled) {
           settled = true;
-          worker.terminate();
+          void worker.terminate();
           reject(new Error(`Worker 执行超时 (${this.config.timeoutMs}ms)`));
         }
       }, this.config.timeoutMs);
 
-      worker.on('message', (msg: { success: boolean; output?: unknown; error?: string; logs?: string[] }) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timeoutId);
+      worker.on(
+        'message',
+        (msg: {
+          success: boolean;
+          output?: unknown;
+          error?: string;
+          logs?: string[];
+        }) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeoutId);
 
-        if (msg.logs && msg.logs.length > 0) {
-          this.logs.push(...msg.logs);
-        }
+          if (msg.logs && msg.logs.length > 0) {
+            this.logs.push(...msg.logs);
+          }
 
-        if (msg.success) {
-          resolve(msg.output);
-        } else {
-          reject(new Error(msg.error || 'Worker 执行失败'));
+          if (msg.success) {
+            resolve(msg.output);
+          } else {
+            reject(new Error(msg.error || 'Worker 执行失败'));
+          }
         }
-      });
+      );
 
       worker.on('error', (err: Error) => {
         if (settled) return;
@@ -259,6 +311,23 @@ export class SandboxExecutor {
   }
 
   private async executeInline(code: string): Promise<unknown> {
+    // P1-5 修复: inline 模式（new Function）不提供真正隔离，
+    // 仅允许安全级别 low 且代码长度 < 1KB 的简单表达式。
+    // 超出限制时自动升级到 Worker 隔离模式。
+    if (code.length > 1024) {
+      Logger.warn(
+        '⚠️ inline 模式代码超过 1KB，自动升级到 isolated 模式',
+        'SandboxExecutor'
+      );
+      return this.executeInWorker(code);
+    }
+
+    Logger.warn(
+      '⚠️ inline 模式不提供真正沙箱隔离，仅限低风险表达式',
+      'SandboxExecutor'
+    );
+    this.securityViolations.push('inline_mode_no_isolation');
+
     const safeContext = this.createSafeContext();
 
     return new Promise((resolve, reject) => {
@@ -269,10 +338,32 @@ export class SandboxExecutor {
       try {
         const asyncFunction = new Function(
           ...Object.keys(safeContext),
-          `'use strict'; return (async () => { ${code} })();`
+          `'use strict';
+           const _origProto = Object.getPrototypeOf(this);
+           try {
+             Object.setPrototypeOf(this, null);
+           } catch(_e) {}
+           try {
+             return (async () => {
+               const _guardProps = ['constructor', '__proto__', 'prototype'];
+               for (const _gp of _guardProps) {
+                 try { Object.defineProperty(this, _gp, { get: () => undefined, set: () => {}, configurable: false }); } catch(_de) {}
+               }
+               ${code}
+             })();
+           } finally {
+             try { Object.setPrototypeOf(this, _origProto); } catch(_se) {}
+           }`
         );
 
-        asyncFunction(...Object.values(safeContext))
+        const contextValues = Object.values(safeContext);
+        const nullProtoCtx = Object.create(null);
+        for (let i = 0; i < contextValues.length; i++) {
+          nullProtoCtx[Object.keys(safeContext)[i]] = contextValues[i];
+        }
+
+        asyncFunction
+          .call(nullProtoCtx)
           .then((result: unknown) => {
             clearTimeout(timeoutId);
             resolve(result);
@@ -292,7 +383,6 @@ export class SandboxExecutor {
    * 创建安全的执行上下文
    */
   private createSafeContext(): Record<string, unknown> {
-    // 安全的 console
     const safeConsole = {
       log: (...args: unknown[]) => {
         this.logs.push(args.map((a) => String(a)).join(' '));
@@ -305,17 +395,80 @@ export class SandboxExecutor {
       },
     };
 
+    const safeJSON = {
+      parse: JSON.parse,
+      stringify: JSON.stringify,
+    };
+
+    const safeDate = Date;
+    const safeMath = Math;
+
+    const safeError = class SafeError extends Error {
+      constructor(message?: string) {
+        super(message);
+        this.name = 'Error';
+      }
+    };
+
+    const safeTypeError = class SafeTypeError extends TypeError {
+      constructor(message?: string) {
+        super(message);
+        this.name = 'TypeError';
+      }
+    };
+
+    const safeRangeError = class SafeRangeError extends RangeError {
+      constructor(message?: string) {
+        super(message);
+        this.name = 'RangeError';
+      }
+    };
+
     return {
       console: safeConsole,
-      JSON,
-      Date,
-      Math,
-      // 禁止访问的对象占位
+      JSON: safeJSON,
+      Date: safeDate,
+      Math: safeMath,
+      parseInt,
+      parseFloat,
+      isNaN,
+      isFinite,
+      encodeURIComponent,
+      decodeURIComponent,
+      encodeURI,
+      decodeURI,
+      Array,
+      Object,
+      String,
+      Number,
+      Boolean,
+      Map,
+      Set,
+      RegExp,
+      Error: safeError,
+      TypeError: safeTypeError,
+      RangeError: safeRangeError,
+      Promise,
+      Symbol,
       require: () => {
         throw new Error('require 不可用');
       },
       process: undefined,
       global: undefined,
+      globalThis: undefined,
+      __dirname: undefined,
+      __filename: undefined,
+      Buffer: undefined,
+      module: undefined,
+      exports: undefined,
+      Reflect: undefined,
+      Proxy: undefined,
+      WeakRef: undefined,
+      SharedArrayBuffer: undefined,
+      Atomics: undefined,
+      Worker: undefined,
+      parentPort: undefined,
+      arguments: undefined,
     };
   }
 

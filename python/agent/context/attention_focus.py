@@ -6,8 +6,8 @@ from typing import Any
 
 from agent.core.logger import StructuredLogger
 from agent.core.logger import log_ignored
-
 log = StructuredLogger("attention_focus")
+
 
 _MAX_KEYWORDS = 10
 _MIN_KEYWORD_LENGTH = 2
@@ -64,6 +64,7 @@ class AttentionFocusEngine:
             try:
                 return self._extract_keywords_semantic(task)
             except Exception as _exc:
+                log.debug("attention_focus 异常处理", error=str(_exc))
                 log_ignored(log, "attention_focus.AttentionFocusEngine.extract_keywords", _exc)
         return self._extract_keywords_rule(task)
 
@@ -88,6 +89,7 @@ class AttentionFocusEngine:
                 if isinstance(keywords, list) and keywords:
                     return [str(k).strip() for k in keywords if k]
         except Exception as _exc:
+            log.debug("attention_focus 异常处理", error=str(_exc))
             log_ignored(log, "attention_focus.AttentionFocusEngine._extract_keywords_semantic", _exc)
         return self._extract_keywords_rule(task)
 

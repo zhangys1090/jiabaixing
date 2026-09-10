@@ -9,8 +9,8 @@
  * 桥接与归一化；VerificationOutcome 是 Python VerificationResult 的归一化投影。
  */
 
-import type { DesktopAction } from '../../../desktop/DesktopActionExecutor';
-import type { ToolContext } from '../../types';
+import type { DesktopAction } from '../../desktop/DesktopActionExecutor';
+import type { ToolContext } from '../types';
 
 /** 三类动作通道 */
 export type ActionChannelKind = 'tool' | 'desktop' | 'mcp';

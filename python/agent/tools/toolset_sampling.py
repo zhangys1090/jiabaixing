@@ -24,8 +24,8 @@ import random
 from dataclasses import dataclass
 
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("toolset_sampling")
+
 
 #: 通过该环境变量开启工具集概率分发（默认 off = 确定性行为）。
 TOOLSET_SAMPLING_ENV = "AGENT_TOOLSET_SAMPLING"

@@ -11,6 +11,8 @@ from typing import Any
 from agent.config import DATA_DIR
 from agent.persistence.database import get_sync_connection
 from agent.core.logger import log_ignored
+import logging
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -278,7 +280,8 @@ class TrajectoryDatabase:
             self._conn = get_sync_connection(db_path=str(self._path), check_same_thread=False)
             self._conn.row_factory = sqlite3.Row
             self._init_tables()
-        except Exception:
+        except Exception as e:
+            logger.warning("trajectory.__init__ 数据库初始化失败", error=str(e))
             self._conn = None
 
     def _init_tables(self) -> None:

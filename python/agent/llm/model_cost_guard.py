@@ -29,10 +29,11 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from agent.core.logger import StructuredLogger, log_ignored
 from agent.core.logger import StructuredLogger
-from agent.core.logger import log_ignored
 
 log = StructuredLogger("model_cost_guard")
+
 
 
 class BudgetLevel(str, Enum):
@@ -123,6 +124,9 @@ class ModelCostGuard:
         self._default_budget = ModelBudgetConfig()
         self._global_daily_budget: float = 5.0
         self._alert_callbacks: list[Any] = []
+        self._MAX_MODELS = 100
+        self._MAX_RECORDS_PER_MODEL = 50000
+        self._MAX_ALERT_CALLBACKS = 20
 
     def set_model_budget(self, model: str, daily_usd: float = 1.0, hourly_usd: float = 0.20) -> None:
         self._budgets[model] = ModelBudgetConfig(daily_usd=daily_usd, hourly_usd=hourly_usd)
@@ -131,6 +135,8 @@ class ModelCostGuard:
         self._global_daily_budget = budget_usd
 
     def on_alert(self, callback: Any) -> None:
+        if len(self._alert_callbacks) >= self._MAX_ALERT_CALLBACKS:
+            self._alert_callbacks = self._alert_callbacks[-(self._MAX_ALERT_CALLBACKS * 3 // 4):]
         self._alert_callbacks.append(callback)
 
     def estimate_cost(self, model: str, input_tokens: int, output_tokens: int) -> float:
@@ -152,6 +158,14 @@ class ModelCostGuard:
             timestamp=time.time(),
         )
         self._usage[model].append(record)
+        if len(self._usage[model]) > self._MAX_RECORDS_PER_MODEL:
+            self._usage[model] = self._usage[model][-self._MAX_RECORDS_PER_MODEL * 3 // 4:]
+        if len(self._usage) > self._MAX_MODELS:
+            sorted_models = sorted(self._usage.items(), key=lambda x: x[1][-1].timestamp if x[1] else 0)
+            to_remove = sorted_models[: len(self._usage) - (self._MAX_MODELS * 3 // 4)]
+            for m, _ in to_remove:
+                self._usage.pop(m, None)
+                self._budgets.pop(m, None)
         return cost
 
     def _get_daily_cost(self, model: str) -> float:
@@ -222,6 +236,7 @@ class ModelCostGuard:
                 try:
                     cb(model, level, reason)
                 except Exception as _exc:
+                    log.debug("model_cost_guard 异常处理", error=str(_exc))
                     log_ignored(log, "model_cost_guard.ModelCostGuard.check_before_call", _exc)
             log.warning("模型成本守卫触发", model=model, level=level.value, reason=reason)
 

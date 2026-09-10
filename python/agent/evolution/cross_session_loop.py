@@ -22,8 +22,8 @@ from pathlib import Path
 from typing import Any
 
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("cross_session_loop")
+
 
 
 class MetricAggregation(str, Enum):
@@ -109,6 +109,7 @@ class CrossSessionLoopManager:
         self._snapshots: list[LoopSnapshot] = []
         self._current_session_id: str = ""
         self._max_snapshots = 50
+        self._MAX_SESSION_METRICS = 5000
 
         self._load()
 
@@ -122,6 +123,11 @@ class CrossSessionLoopManager:
             start_time=time.time(),
         )
         self._session_metrics[session_id] = metrics
+        if len(self._session_metrics) > self._MAX_SESSION_METRICS:
+            sorted_sessions = sorted(self._session_metrics.items(), key=lambda x: x[1].start_time)
+            to_remove = sorted_sessions[: len(self._session_metrics) - (self._MAX_SESSION_METRICS * 3 // 4)]
+            for sid, _ in to_remove:
+                del self._session_metrics[sid]
         self._append_session(metrics)
         log.info("Session began", session_id=session_id)
         return metrics

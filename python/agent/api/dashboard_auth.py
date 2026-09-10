@@ -15,8 +15,9 @@
 集成示例::
 
     from agent.api.dashboard_auth import DashboardAuth
+    import os
 
-    auth = DashboardAuth(secret_key="my-secret")
+    auth = DashboardAuth(secret_key=os.environ["DASHBOARD_SECRET_KEY"])
     token = auth.create_token(user_id="admin", role="admin")
     verified = auth.verify_token(token)
 """
@@ -32,8 +33,8 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
-
 from agent.core.logger import StructuredLogger
+from agent.core.types import BaseAuditEntry
 
 log = StructuredLogger("dashboard_auth")
 
@@ -53,12 +54,23 @@ class Role(str, Enum):
 
 
 @dataclass
-class Permission:
+class ResourcePermission:
+    """RBAC 资源权限 — Dashboard 领域特化类型。
+
+    与 core.types.Permission（工具操作枚举）语义不同：
+    - core.types.Permission: 系统级工具权限（memory:read, file:write 等）
+    - ResourcePermission: RBAC 资源+动作权限（resource="files", actions=["read","write"]）
+
+    两者不应混用。Dashboard RBAC 场景使用此类型。
+    """
     resource: str
     actions: list[str] = field(default_factory=lambda: ["read"])
 
     def allows(self, action: str) -> bool:
         return action in self.actions or "*" in self.actions
+
+
+Permission = ResourcePermission
 
 
 @dataclass
@@ -103,14 +115,15 @@ class Session:
 
 
 @dataclass
-class AuditEntry:
-    timestamp: float
-    user_id: str
-    action: str
-    resource: str
-    success: bool
+class AuthAuditEntry(BaseAuditEntry):
+    """认证审计条目 — 继承 core.types.BaseAuditEntry。"""
+    user_id: str = ""
+    success: bool = True
     ip_address: str = ""
     details: str = ""
+
+
+AuditEntry = AuthAuditEntry
 
 
 _ROLE_PERMISSIONS: dict[Role, list[Permission]] = {
@@ -143,11 +156,24 @@ class DashboardAuth:
 
     def __init__(
         self,
-        secret_key: str = "change-me-in-production",
+        secret_key: str = "",
         token_ttl: float = 3600,
         refresh_ttl: float = 86400 * 7,
         max_sessions_per_user: int = 5,
     ) -> None:
+        import os as _os
+        if not secret_key:
+            secret_key = _os.environ.get("DASHBOARD_SECRET_KEY", "")
+        if not secret_key:
+            secret_key = uuid.uuid4().hex
+            log.debug("DashboardAuth: auto-generated secret_key (set DASHBOARD_SECRET_KEY for persistence)")
+        if secret_key in ("change-me-in-production", "my-secret", "secret", "test"):
+            import warnings
+            warnings.warn(
+                "DashboardAuth: 使用不安全的默认密钥，生产环境请设置 DASHBOARD_SECRET_KEY 环境变量",
+                UserWarning,
+                stacklevel=2,
+            )
         self._secret = secret_key.encode()
         self._token_ttl = token_ttl
         self._refresh_ttl = refresh_ttl
@@ -158,6 +184,9 @@ class DashboardAuth:
         self._rate_limits: dict[str, list[float]] = defaultdict(list)
         self._audit_log: list[AuditEntry] = []
         self._max_rpm: int = 60
+        self._MAX_USERS = 5000
+        self._MAX_API_KEYS = 10000
+        self._MAX_RATE_LIMIT_KEYS = 5000
 
     def _generate_token(self, user_id: str, extra: str = "") -> str:
         payload = f"{user_id}:{extra}:{time.time()}:{uuid.uuid4()}"
@@ -174,12 +203,21 @@ class DashboardAuth:
         perms = custom_permissions or _ROLE_PERMISSIONS.get(role, [])
         user = UserInfo(id=user_id, username=username, role=role, permissions=perms)
         self._users[user_id] = user
+        if len(self._users) > self._MAX_USERS:
+            sorted_users = sorted(self._users.items(), key=lambda x: x[1].last_login)
+            to_remove = sorted_users[: len(self._users) - (self._MAX_USERS * 3 // 4)]
+            for uid, _ in to_remove:
+                self._users.pop(uid, None)
         log.info("用户已创建", user_id=user_id, role=role.value)
         return user
 
     def create_api_key(self, user_id: str, prefix: str = "jbk") -> str:
         key = f"{prefix}_{uuid.uuid4().hex[:32]}"
         self._api_keys[key] = user_id
+        if len(self._api_keys) > self._MAX_API_KEYS:
+            oldest_keys = list(self._api_keys.keys())[: self._MAX_API_KEYS * 3 // 4]
+            for k in oldest_keys:
+                self._api_keys.pop(k, None)
         if user_id in self._users:
             self._users[user_id].api_keys.append(key)
         log.info("API Key 已创建", user_id=user_id, prefix=prefix)
@@ -268,6 +306,14 @@ class DashboardAuth:
         if len(self._rate_limits[user_id]) >= self._max_rpm:
             return False
         self._rate_limits[user_id].append(now)
+        if len(self._rate_limits) > self._MAX_RATE_LIMIT_KEYS:
+            stale_keys = [k for k, v in self._rate_limits.items() if not v]
+            for k in stale_keys:
+                del self._rate_limits[k]
+            if len(self._rate_limits) > self._MAX_RATE_LIMIT_KEYS:
+                oldest_keys = sorted(self._rate_limits.keys())[: len(self._rate_limits) - (self._MAX_RATE_LIMIT_KEYS * 3 // 4)]
+                for k in oldest_keys:
+                    del self._rate_limits[k]
         return True
 
     def _audit(self, action: str, user_id: str, resource: str, success: bool, ip: str = "") -> None:
@@ -275,7 +321,7 @@ class DashboardAuth:
             timestamp=time.time(),
             user_id=user_id,
             action=action,
-            resource=resource,
+            target=resource,
             success=success,
             ip_address=ip,
         )

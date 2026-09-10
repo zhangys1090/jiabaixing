@@ -386,7 +386,7 @@ export function createConversationCompressionExecutor(
         const llmSummary = await deps.llm.chat(
           `请将以下对话历史压缩为简洁摘要，保留关键决策、代码修改、错误信息。${focus ? `关注点: ${focus}` : ''}\n\n${conversationText}`,
           [],
-          '你是一个对话压缩助手。输出简洁的对话摘要。'
+          '你是家百星的对话压缩模块。输出简洁的对话摘要，保留关键决策和事实。'
         );
 
         const originalTokens = messages.reduce(

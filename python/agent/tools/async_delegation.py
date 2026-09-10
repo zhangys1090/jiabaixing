@@ -36,10 +36,11 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Awaitable
-
 from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("async_delegation")
+
+
 
 
 class DelegationStatus(str, Enum):
@@ -155,6 +156,7 @@ class AsyncDelegator:
         self._default_timeout = default_timeout
         self._depth_counter: dict[str, int] = defaultdict(int)
         self._stats = {"total_delegations": 0, "total_success": 0, "total_failure": 0}
+        self._MAX_STATS = 500
 
     def register_handler(
         self,
@@ -169,7 +171,7 @@ class AsyncDelegator:
             capabilities=capabilities or [],
             max_concurrent=max_concurrent,
         )
-        log.info("委派处理器已注册", agent=agent_id)
+        log.debug("委派处理器已注册", agent=agent_id)
 
     def unregister_handler(self, agent_id: str) -> None:
         self._handlers.pop(agent_id, None)
@@ -229,6 +231,7 @@ class AsyncDelegator:
             result.completed_at = time.time()
             result.duration_ms = (result.completed_at - result.started_at) * 1000
         except Exception as e:
+            log.debug("async_delegation 异常处理", error=str(e))
             result.status = DelegationStatus.FAILED
             result.error = str(e)
             result.completed_at = time.time()

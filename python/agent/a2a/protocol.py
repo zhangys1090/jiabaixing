@@ -18,8 +18,8 @@ from typing import Any, Dict, List, Optional
 
 from agent.a2a.types import A2AAgentCard, A2ATaskStatus
 from agent.core.logger import log_ignored
-
 logger = logging.getLogger(__name__)
+
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -361,7 +361,8 @@ class A2ADiscovery:
                 async with httpx.AsyncClient(timeout=5.0) as client:
                     response = await client.get(f"{url.rstrip('/')}/health")
                     healthy = response.status_code == 200
-            except Exception:
+            except Exception as e:
+                logger.debug("protocol.health_check 健康检查失败", agent_id=agent_id, error=str(e))
                 healthy = False
 
             results[agent_id] = healthy

@@ -94,6 +94,7 @@ class EvolutionOrchestrator:
         self._last_auto_detection_time = 0.0
         self._runtime_signals_accumulator: list[dict] = []
         self._provider_for_runtime: str = ""
+        self._per_turn_signals: list[dict] = []
 
         # 验证回滚（P0）
         self._pending_rollbacks: dict[str, RollbackSnapshot] = {}
@@ -134,7 +135,7 @@ class EvolutionOrchestrator:
         if strategy_adapter:
             active.append("StrategyAdapter")
 
-        log.info(f"Evolution orchestrator registered {len(active)} engines: {', '.join(active)}")
+        log.debug(f"Evolution orchestrator registered {len(active)} engines: {', '.join(active)}")
 
     def start(self) -> None:
         if self._is_running:
@@ -142,7 +143,7 @@ class EvolutionOrchestrator:
             return
         self._is_running = True
         self._start_auto_detection()
-        log.info("Evolution orchestrator started")
+        log.debug("Evolution orchestrator started")
 
     def stop(self) -> None:
         self._is_running = False
@@ -167,6 +168,7 @@ class EvolutionOrchestrator:
 
     async def record_interaction(self, quality: float, response_time_ms: float, tool_successes: bool = True) -> None:
         self._interaction_count += 1
+        quality = max(0.0, min(1.0, quality))
         self._quality_history.append(quality)
         self._response_time_history.append(response_time_ms)
 
@@ -212,6 +214,47 @@ class EvolutionOrchestrator:
         if self._pending_rollbacks:
             await self._check_pending_rollbacks(quality)
 
+        if self._evolution_engine_v2:
+            await self._check_v2_monitoring(quality)
+
+    async def record_tool_signal(self, tool_name: str, success: bool, latency_ms: float = 0.0) -> None:
+        """每工具调用即时信号 — 解决信号稀疏问题。
+
+        每次工具调用后立即记录信号，无需等待完整优化周期。
+        设计目标：<1ms，不阻塞主流程，失败时静默降级。
+        """
+        try:
+            self._interaction_count += 1
+            quality = 1.0 if success else 0.0
+            self._quality_history.append(quality)
+            if len(self._quality_history) > _MAX_QUALITY_HISTORY:
+                self._quality_history = self._quality_history[-_MAX_QUALITY_HISTORY:]
+            self._response_time_history.append(latency_ms)
+            if len(self._response_time_history) > _MAX_RESPONSE_TIME_HISTORY:
+                self._response_time_history = self._response_time_history[-_MAX_RESPONSE_TIME_HISTORY:]
+
+            if self._strategy_adapter:
+                signal = f"tool_success:{tool_name}" if success else f"tool_failure:{tool_name}"
+                value = 1.0 if success else -1.0
+                self._strategy_adapter.record_signal(signal, value=value)
+
+            if not success:
+                self._consecutive_failure_count += 1
+                self._consecutive_low_quality_count += 1
+            else:
+                self._consecutive_low_quality_count = max(0, self._consecutive_low_quality_count - 1)
+                if self._consecutive_failure_count > 0:
+                    self._consecutive_failure_count -= 1
+
+            log.debug(
+                "Tool signal recorded",
+                tool=tool_name,
+                success=success,
+                latency_ms=round(latency_ms, 1),
+            )
+        except Exception as e:
+            log.debug("record_tool_signal failed", error=str(e))
+
     async def _per_turn_lightweight_signal(
         self,
         quality: float,
@@ -226,7 +269,6 @@ class EvolutionOrchestrator:
         设计目标：<50ms，不阻塞主流程，失败时静默降级。
         """
         try:
-            self._per_turn_signals = getattr(self, "_per_turn_signals", [])
             self._per_turn_signals.append({
                 "quality": quality,
                 "response_time_ms": response_time_ms,
@@ -290,7 +332,7 @@ class EvolutionOrchestrator:
                 except Exception as e:
                     log.debug("Runtime capability upgrade failed", error=str(e))
 
-            log.debug(
+            log.info(
                 "Per-turn lightweight signal processed",
                 avg_quality=round(avg_q, 3),
                 avg_response_time_ms=round(avg_rt, 1),
@@ -309,8 +351,8 @@ class EvolutionOrchestrator:
         try:
             cycle_id = f"cycle_{uuid.uuid4().hex[:8]}"
             results: list[OptimizationCycleResult] = []
+            v2_plan_ids_in_cycle: list[str] = []
 
-            # 验证回滚：优化前拍快照
             pre_snapshot = self._take_baseline_snapshot(cycle_id, reason)
 
             if self._evolution_engine:
@@ -334,6 +376,7 @@ class EvolutionOrchestrator:
                                 detail="No evolution needed",
                             ))
                     except Exception as e:
+                        log.debug("orchestrator 异常处理", error=str(e))
                         results.append(OptimizationCycleResult(
                             engine_name="EvolutionEngine",
                             triggered=False,
@@ -365,6 +408,8 @@ class EvolutionOrchestrator:
                             )
                             v2_result = await self._evolution_engine_v2.trigger_evolution(cause)
                             if v2_result is not None:
+                                if v2_result.success and v2_result.plan_id:
+                                    v2_plan_ids_in_cycle.append(v2_result.plan_id)
                                 results.append(OptimizationCycleResult(
                                     engine_name="EvolutionEngineV2",
                                     triggered=True,
@@ -388,6 +433,7 @@ class EvolutionOrchestrator:
                                 detail="No evolution cause detected",
                             ))
                     except Exception as e:
+                        log.debug("orchestrator 异常处理", error=str(e))
                         results.append(OptimizationCycleResult(
                             engine_name="EvolutionEngineV2",
                             triggered=False,
@@ -421,11 +467,13 @@ class EvolutionOrchestrator:
             # 验证回滚：有引擎被触发优化时，将基线加入待验证队列
             if triggered > 0:
                 pre_snapshot.tool_weights = dict(self._evolution_engine._tool_weights) if self._evolution_engine else {}
+                pre_snapshot.v2_plan_ids = v2_plan_ids_in_cycle
                 self._pending_rollbacks[cycle_id] = pre_snapshot
                 log.info(
                     "Rollback baseline saved, pending verification",
                     cycle_id=cycle_id,
                     baseline_quality=round(pre_snapshot.avg_quality, 3),
+                    v2_plans=len(v2_plan_ids_in_cycle),
                     verification_after=self._VERIFICATION_INTERACTIONS,
                 )
 
@@ -673,7 +721,7 @@ class EvolutionOrchestrator:
             tool_recommendations = dict(self._evolution_engine._tool_weights)
 
         per_turn_summary: dict[str, Any] = {}
-        per_turn_signals = getattr(self, "_per_turn_signals", [])
+        per_turn_signals = self._per_turn_signals
         if per_turn_signals:
             recent = per_turn_signals[-5:]
             per_turn_summary = {
@@ -738,32 +786,110 @@ class EvolutionOrchestrator:
         for cid in expired:
             self._pending_rollbacks.pop(cid, None)
 
+    async def _check_v2_monitoring(self, current_quality: float) -> None:
+        """检查 V2 已发布进化的运行时质量，退化时触发延迟回滚。
+
+        与 _check_pending_rollbacks 互补：后者基于 cycle 粒度检查 V1+V2，
+        本方法直接检查 V2 引擎的 _pending_monitoring，覆盖不在任何
+        pending_rollbacks 中的 V2 独立进化（如手动触发或跨周期残留）。
+        """
+        if not self._evolution_engine_v2:
+            return
+
+        monitoring = self._evolution_engine_v2.get_pending_monitoring()
+        if not monitoring:
+            return
+
+        rollback_plan_ids: set[str] = set()
+        for snapshot in self._pending_rollbacks.values():
+            rollback_plan_ids.update(snapshot.v2_plan_ids)
+
+        avg_quality = self._calculate_avg_quality()
+        degraded_plan_ids: list[str] = []
+
+        for plan_id, info in monitoring.items():
+            if plan_id in rollback_plan_ids:
+                continue
+            gate_quality = info.get("gate_result", {}).get("details", {})
+            if isinstance(gate_quality, dict):
+                baseline = gate_quality.get("quality", None)
+            else:
+                baseline = None
+
+            if baseline is not None and isinstance(baseline, (int, float)):
+                if avg_quality < baseline - self._ROLLBACK_THRESHOLD:
+                    degraded_plan_ids.append(plan_id)
+                    log.warning(
+                        "V2 post-release quality degradation detected",
+                        plan_id=plan_id,
+                        baseline=round(baseline, 3),
+                        current=round(avg_quality, 3),
+                    )
+            elif current_quality < 0.4:
+                degraded_plan_ids.append(plan_id)
+                log.warning(
+                    "V2 post-release quality critically low",
+                    plan_id=plan_id,
+                    current_quality=round(current_quality, 3),
+                )
+
+        for plan_id in degraded_plan_ids:
+            try:
+                ok = await self._evolution_engine_v2.delayed_rollback(plan_id)
+                if ok:
+                    log.info("V2 monitoring-triggered rollback succeeded", plan_id=plan_id)
+                else:
+                    log.warning("V2 monitoring-triggered rollback failed", plan_id=plan_id)
+            except Exception as e:
+                log.error("V2 monitoring-triggered rollback error", plan_id=plan_id, error=str(e))
+
     async def _rollback_evolution(self, cycle_id: str, snapshot: RollbackSnapshot) -> None:
-        """回滚到优化前的状态。"""
+        """回滚到优化前的状态（V1 tool_weights + V2 文件修改统一回滚）。"""
+        v1_ok = False
+        v2_ok = True
+
         if self._evolution_engine:
             try:
-                # 恢复工具权重
                 if snapshot.tool_weights:
                     self._evolution_engine._tool_weights = dict(snapshot.tool_weights)
                     self._evolution_engine._save_state()
                     log.info(
-                        "Rollback executed: tool weights restored",
+                        "Rollback executed: V1 tool weights restored",
                         cycle_id=cycle_id,
                         tools=len(snapshot.tool_weights),
                     )
-                snapshot.rolled_back = True
-                self.add_verification(
-                    vtype="rollback",
-                    target=f"evolution_{cycle_id}",
-                    before_score=snapshot.avg_quality,
-                    after_score=self._calculate_avg_quality(),
-                    success=True,
-                    confidence=0.8,
-                )
-                log.info(
-                    "Rollback completed",
-                    cycle_id=cycle_id,
-                    reason=snapshot.reason,
-                )
+                v1_ok = True
             except Exception as e:
-                log.error("Rollback failed", cycle_id=cycle_id, error=str(e))
+                log.error("V1 rollback failed", cycle_id=cycle_id, error=str(e))
+
+        if self._evolution_engine_v2 and snapshot.v2_plan_ids:
+            for plan_id in snapshot.v2_plan_ids:
+                try:
+                    ok = await self._evolution_engine_v2.delayed_rollback(plan_id)
+                    if ok:
+                        log.info("V2 delayed rollback succeeded", cycle_id=cycle_id, plan_id=plan_id)
+                    else:
+                        log.warning("V2 delayed rollback failed", cycle_id=cycle_id, plan_id=plan_id)
+                        v2_ok = False
+                except Exception as e:
+                    log.error("V2 delayed rollback error", cycle_id=cycle_id, plan_id=plan_id, error=str(e))
+                    v2_ok = False
+
+        rollback_success = v1_ok and v2_ok
+        snapshot.rolled_back = rollback_success
+        self.add_verification(
+            vtype="rollback",
+            target=f"evolution_{cycle_id}",
+            before_score=snapshot.avg_quality,
+            after_score=self._calculate_avg_quality(),
+            success=rollback_success,
+            confidence=0.8 if rollback_success else 0.3,
+        )
+        log.info(
+            "Rollback completed",
+            cycle_id=cycle_id,
+            reason=snapshot.reason,
+            v1=v1_ok,
+            v2=v2_ok,
+            v2_plans=len(snapshot.v2_plan_ids),
+        )

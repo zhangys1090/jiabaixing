@@ -22,10 +22,11 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from agent.core.logger import StructuredLogger
 from agent.knowledge.knowledge_store import KnowledgeStore
+from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("knowledge_extractor")
+
 
 
 @dataclass

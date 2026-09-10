@@ -30,11 +30,12 @@ from pathlib import Path
 from typing import Any
 
 from agent.config import DATA_DIR
-from agent.core.logger import StructuredLogger
-from agent.core.logger import log_ignored
+from agent.core.logger import StructuredLogger, log_ignored
 from agent.infrastructure.safe_json import safe_json_loads
+from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("account_usage")
+
 
 
 class BudgetPeriod(str, Enum):
@@ -101,6 +102,9 @@ class AccountUsageTracker:
         self._budgets: dict[str, UserBudget] = {}
         self._default_budget = UserBudget()
         self._alert_callbacks: list[Any] = []
+        self._MAX_USERS = 5000
+        self._MAX_RECORDS_PER_USER = 10000
+        self._MAX_ALERT_CALLBACKS = 20
         self._load()
 
     def _load(self) -> None:
@@ -185,6 +189,8 @@ class AccountUsageTracker:
         self._save()
 
     def on_budget_alert(self, callback: Any) -> None:
+        if len(self._alert_callbacks) >= self._MAX_ALERT_CALLBACKS:
+            self._alert_callbacks = self._alert_callbacks[-(self._MAX_ALERT_CALLBACKS * 3 // 4):]
         self._alert_callbacks.append(callback)
 
     def record(
@@ -211,6 +217,14 @@ class AccountUsageTracker:
             task_type=task_type,
         )
         self._records[user_id].append(rec)
+        if len(self._records[user_id]) > self._MAX_RECORDS_PER_USER:
+            self._records[user_id] = self._records[user_id][-self._MAX_RECORDS_PER_USER * 3 // 4:]
+        if len(self._records) > self._MAX_USERS:
+            sorted_users = sorted(self._records.items(), key=lambda x: x[1][-1].timestamp if x[1] else 0)
+            to_remove = sorted_users[: len(self._records) - (self._MAX_USERS * 3 // 4)]
+            for uid, _ in to_remove:
+                self._records.pop(uid, None)
+                self._budgets.pop(uid, None)
         self._check_budget(user_id)
         self._save()
         return rec
@@ -240,6 +254,7 @@ class AccountUsageTracker:
                     try:
                         cb(alert)
                     except Exception as _exc:
+                        log.debug("account_usage 异常处理", error=str(_exc))
                         log_ignored(log, "account_usage.AccountUsageTracker._check_budget", _exc)
 
     def _get_period_cost(self, user_id: str, period_seconds: int) -> float:

@@ -210,8 +210,18 @@ export class CircuitBreakerOpenError extends JiabaixingError {
   public readonly toolName: string;
   public readonly failureCount: number;
 
-  constructor(toolName: string, failureCount: number, context: Record<string, unknown> = {}) {
-    super(`工具 ${toolName} 熔断器已打开 (连续失败 ${failureCount} 次)`, 'CIRCUIT_BREAKER_OPEN', 503, true, { ...context, toolName, failureCount });
+  constructor(
+    toolName: string,
+    failureCount: number,
+    context: Record<string, unknown> = {}
+  ) {
+    super(
+      `工具 ${toolName} 熔断器已打开 (连续失败 ${failureCount} 次)`,
+      'CIRCUIT_BREAKER_OPEN',
+      503,
+      true,
+      { ...context, toolName, failureCount }
+    );
     this.toolName = toolName;
     this.failureCount = failureCount;
   }
@@ -220,8 +230,15 @@ export class CircuitBreakerOpenError extends JiabaixingError {
 export class SandboxExecutionError extends JiabaixingError {
   public readonly violations: string[];
 
-  constructor(message: string, violations: string[] = [], context: Record<string, unknown> = {}) {
-    super(message, 'SANDBOX_EXECUTION_ERROR', 500, true, { ...context, violations });
+  constructor(
+    message: string,
+    violations: string[] = [],
+    context: Record<string, unknown> = {}
+  ) {
+    super(message, 'SANDBOX_EXECUTION_ERROR', 500, true, {
+      ...context,
+      violations,
+    });
     this.violations = violations;
     this.code = 'SANDBOX_EXECUTION_ERROR';
   }
@@ -230,8 +247,15 @@ export class SandboxExecutionError extends JiabaixingError {
 export class DependencyResolutionError extends JiabaixingError {
   public readonly token: string;
 
-  constructor(token: string, message: string, context: Record<string, unknown> = {}) {
-    super(message, 'DEPENDENCY_RESOLUTION_ERROR', 500, true, { ...context, token });
+  constructor(
+    token: string,
+    message: string,
+    context: Record<string, unknown> = {}
+  ) {
+    super(message, 'DEPENDENCY_RESOLUTION_ERROR', 500, true, {
+      ...context,
+      token,
+    });
     this.token = token;
   }
 }

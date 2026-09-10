@@ -124,7 +124,11 @@ export function createSystemStatusExecutor(deps: SystemStatusDeps) {
       }
       if (component === 'all' || component === 'evolution') {
         lines.push(
-          formatGenericStats('进化系统', await deps.getEvolutionStats(), detailed)
+          formatGenericStats(
+            '进化系统',
+            await deps.getEvolutionStats(),
+            detailed
+          )
         );
       }
       if (component === 'all' || component === 'scheduler') {

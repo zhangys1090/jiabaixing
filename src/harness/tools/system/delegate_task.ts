@@ -8,9 +8,9 @@
  * - 同步等待结果
  */
 
+import { Logger } from '../../../utils/Logger';
 import type { ToolContext, ToolDefinition, ToolResult } from '../../types';
 import { Permission, ToolCategory } from '../../types';
-import { Logger } from '../../../utils/Logger';
 import type { ToolRegistry } from '../registry/ToolRegistry';
 
 export const DELEGATE_TASK_DEF: ToolDefinition = {
@@ -90,10 +90,11 @@ async function runSubAgent(
   // 构建工具子集（删除未使用的 allTools 声明）
   // 构建子 Agent 的 system prompt
   const systemPrompt = [
-    '你是一个专注执行子任务的 Agent。',
+    '你是家百星的子任务执行器。专注、高效、不闲聊。',
     '你的目标是完成用户交给你的具体任务。',
     '使用提供的工具来完成任务，完成后输出简洁的结果摘要。',
     '不要闲聊，直接执行。',
+    '【反幻觉护栏】只使用下方列出的工具，不编造工具和结果。',
     allowedTools?.length ? `\n可用工具: ${allowedTools.join(', ')}` : '',
   ]
     .filter(Boolean)

@@ -20,7 +20,7 @@ Usage:
         level="minimal",
     )
     if not result.passed:
-        print(result.issues)
+        logger.info(result.issues)
 """
 
 from __future__ import annotations
@@ -32,8 +32,8 @@ from enum import Enum
 from typing import Any
 
 from agent.core.logger import StructuredLogger, log_ignored
-
 log = StructuredLogger("semantic_verifier")
+
 
 
 class VerificationLevel(str, Enum):
@@ -288,6 +288,7 @@ class SemanticVerifier:
                     suggestion="请人工审查输出的准确性",
                 ))
         except Exception as e:
+            log.debug("semantic_verifier 异常处理", error=str(e))
             log_ignored(log, "semantic_verifier._check_factuality", e)
 
         return issues

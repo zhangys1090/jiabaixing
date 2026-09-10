@@ -8,6 +8,18 @@ import { JiabaixingCore } from '../../core/JiabaixingCore';
 import { EventBus } from '../../shared/EventBus';
 import { Logger } from '../../utils/Logger';
 
+const DEBUG_ENABLED =
+  process.env.JBX_DEBUG_ROUTES === '1' ||
+  process.env.NODE_ENV === 'development';
+
+function debugGuard(_req: express.Request, res: express.Response): boolean {
+  if (!DEBUG_ENABLED) {
+    res.status(404).json({ success: false, error: '调试端点未启用' });
+    return false;
+  }
+  return true;
+}
+
 type BroadcastFn = (data: Record<string, unknown>) => void;
 
 export function registerDebugRoutes(
@@ -16,6 +28,7 @@ export function registerDebugRoutes(
   broadcast: BroadcastFn
 ): void {
   app.get('/api/debug/weights', (_req, res) => {
+    if (!debugGuard(_req, res)) return;
     try {
       if (!core) {
         res.status(503).json({ success: false, error: '核心系统未初始化' });
@@ -31,6 +44,7 @@ export function registerDebugRoutes(
   });
 
   app.get('/api/debug/recentHistory', (_req, res) => {
+    if (!debugGuard(_req, res)) return;
     try {
       if (!core) {
         res.status(503).json({ success: false, error: '核心系统未初始化' });
@@ -45,6 +59,7 @@ export function registerDebugRoutes(
   });
 
   app.get('/api/debug/tool-usage', (_req, res) => {
+    if (!debugGuard(_req, res)) return;
     try {
       if (!core) {
         res.status(503).json({ success: false, error: '核心系统未初始化' });
@@ -96,6 +111,7 @@ export function registerDebugRoutes(
   });
 
   app.post('/api/simulate_task', express.json({ limit: '1mb' }), (req, res) => {
+    if (!debugGuard(req, res)) return;
     try {
       const { taskId = 'sim_task', prompt = '' } = req.body || {};
       const traceId = Logger.generateTraceId();

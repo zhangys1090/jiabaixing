@@ -30,10 +30,11 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
-
 from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("threat_patterns")
+
+
 
 
 class ThreatLevel(str, Enum):

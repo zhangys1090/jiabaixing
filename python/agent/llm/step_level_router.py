@@ -29,8 +29,8 @@ from typing import Any
 
 from agent.llm.capability_aware_router import CapabilityAwareRouter, TaskRequirement, ScoredProvider
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("step_level_router")
+
 
 
 class StepComplexity(str, Enum):
@@ -122,6 +122,7 @@ class StepLevelRouter:
     ) -> None:
         self._capability_router = capability_router or CapabilityAwareRouter()
         self._cache_ttl = cache_ttl_seconds
+        self._MAX_CACHE = 5000
         self._cache_max_size = cache_max_size
         self._cache: dict[str, StepRouteCacheEntry] = {}
         self._route_count = 0
@@ -213,6 +214,10 @@ class StepLevelRouter:
             timestamp=time.time(),
             hit_count=0,
         )
+        if len(self._cache) > self._MAX_CACHE:
+            oldest_keys = list(self._cache.keys())[: len(self._cache) - (self._MAX_CACHE * 3 // 4)]
+            for k in oldest_keys:
+                del self._cache[k]
         if len(self._cache) > self._cache_max_size:
             self._evict_cache()
 

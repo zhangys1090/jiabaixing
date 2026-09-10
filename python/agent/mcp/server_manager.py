@@ -64,6 +64,7 @@ class MCPServerConfig:
     transport: str = "stdio"
     url: str = ""
     headers: dict[str, str] | None = None
+    restart_on_failure: bool = True
 
 
 @dataclass
@@ -95,6 +96,8 @@ class MCPServerManager:
         self._logging_manager = MCPLoggingManager()
         self._progress_manager = MCPProgressManager()
         self._initialize_default_servers()
+        self._MAX_EVENT_HANDLERS_PER_EVENT = 50
+        self._MAX_EVENT_TYPES = 100
 
     @classmethod
     def get_instance(cls) -> MCPServerManager:
@@ -120,13 +123,20 @@ class MCPServerManager:
     def on(self, event: str, handler: Callable) -> None:
         if event not in self._event_handlers:
             self._event_handlers[event] = []
+            if len(self._event_handlers) > self._MAX_EVENT_TYPES:
+                oldest_events = list(self._event_handlers.keys())[: len(self._event_handlers) - (self._MAX_EVENT_TYPES * 3 // 4)]
+                for k in oldest_events:
+                    del self._event_handlers[k]
         self._event_handlers[event].append(handler)
+        if len(self._event_handlers[event]) > self._MAX_EVENT_HANDLERS_PER_EVENT:
+            self._event_handlers[event] = self._event_handlers[event][-self._MAX_EVENT_HANDLERS_PER_EVENT * 3 // 4:]
 
     def _emit(self, event: str, data: Any = None) -> None:
         for handler in self._event_handlers.get(event, []):
             try:
                 handler(data)
             except Exception as _exc:
+                log.debug("server_manager 异常处理", error=str(_exc))
                 log_ignored(log, "server_manager.MCPServerManager._emit", _exc)
 
     def _initialize_default_servers(self) -> None:
@@ -166,7 +176,7 @@ class MCPServerManager:
     def register_server(self, config: MCPServerConfig) -> None:
         self._servers[config.name] = config
         self._save_config_to_file()
-        log.info(f"MCP服务器已注册: {config.name}")
+        log.debug(f"MCP服务器已注册: {config.name}")
 
     def unregister_server(self, name: str) -> bool:
         self.stop_server(name)
@@ -330,7 +340,7 @@ class MCPServerManager:
                 "method": "notifications/initialized",
             })
 
-            log.info(f"MCP服务器初始化完成: {name}")
+            log.debug(f"MCP服务器初始化完成: {name}")
             return True
         except Exception as e:
             log.error(f"MCP服务器初始化失败 [{name}]: {e}")
@@ -345,7 +355,8 @@ class MCPServerManager:
                     break
                 chunk = line.decode("utf-8", errors="replace")
                 self._handle_server_output(name, server_proc, chunk)
-            except Exception:
+            except Exception as _exc:
+                log.debug("server_manager 异常处理", error=str(_exc))
                 break
 
     async def _read_stderr(self, name: str, server_proc: MCPServerProcess) -> None:
@@ -358,7 +369,8 @@ class MCPServerManager:
                 msg = line.decode("utf-8", errors="replace").strip()
                 if msg:
                     log.debug(f"MCP[{name}] stderr: {msg[:200]}")
-            except Exception:
+            except Exception as _exc:
+                log.debug("server_manager 异常处理", error=str(_exc))
                 break
 
     async def _monitor_exit(self, name: str, server_proc: MCPServerProcess) -> None:
@@ -367,6 +379,7 @@ class MCPServerManager:
             log.warning(f"MCP服务器进程退出: {name} (code={code})")
             self._cleanup_server(name, server_proc)
         except Exception as _exc:
+            log.debug("server_manager 异常处理", error=str(_exc))
             log_ignored(log, "server_manager.MCPServerManager._monitor_exit", _exc)
 
     def _handle_server_output(
@@ -630,6 +643,7 @@ class MCPServerManager:
         try:
             server_proc.process.stdin.write(json_str.encode("utf-8"))
         except Exception as e:
+            log.debug("server_manager 异常处理", error=str(e))
             server_proc.pending_requests.pop(msg_id, None)
             raise RuntimeError(f"MCP写入失败: {e}")
 
@@ -983,7 +997,7 @@ class MCPServerManager:
                         url=cfg.get("url", ""),
                         headers=cfg.get("headers"),
                     )
-            log.info(f"从文件加载了 {len(configs)} 个 MCP 服务器配置")
+            log.debug(f"从文件加载了 {len(configs)} 个 MCP 服务器配置")
         except FileNotFoundError as _exc:
             log_ignored(log, "server_manager.MCPServerManager._load_config_from_file", _exc)
         except Exception as e:

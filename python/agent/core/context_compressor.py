@@ -6,8 +6,8 @@ from typing import Any
 
 from agent.core.logger import StructuredLogger
 from agent.core.token_counter import TokenCounter, get_token_counter
-
 log = StructuredLogger("context_compressor")
+
 
 
 @dataclass
@@ -55,7 +55,7 @@ class ContextCompressor:
     Usage:
         compressor = ContextCompressor(max_context_tokens=8000)
         result = compressor.compress(messages, target_tokens=5000)
-        print(f"压缩率: {result.ratio:.2f}, 策略: {result.strategy}")
+        logger.info("压缩率: {result.ratio:.2f}, 策略: {result.strategy}")
     """
 
     def __init__(
@@ -80,9 +80,9 @@ class ContextCompressor:
         self._token_counter: TokenCounter | None = None
         if use_precise and TokenCounter.is_available():
             self._token_counter = TokenCounter(model=model)
-            log.info("ContextCompressor using precise token counting", model=model)
+            log.debug("ContextCompressor using precise token counting", model=model)
         else:
-            log.info("ContextCompressor using approximate token counting")
+            log.debug("ContextCompressor using approximate token counting")
 
     def estimate_tokens(self, text: str) -> int:
         """估算文本的 Token 数。
@@ -155,31 +155,35 @@ class ContextCompressor:
                     total += self._approximate_tokens(fn.get("arguments", ""))
         return max(1, total)
 
+    _tokenizer_available: bool | None = None
+
     def extract_attention_keywords(self, messages: list[dict[str, Any]]) -> list[str]:
-        """从最近消息中提取注意力关键词。
-
-        优先使用 ChineseTokenizer 分词，降级使用正则匹配。
-
-        Args:
-            messages: 消息列表（取最近 6 条）。
-
-        Returns:
-            list[str]: 按频率排序的关键词列表（最多 10 个）。
-        """
         keywords: dict[str, int] = {}
+        if self._tokenizer_available is None:
+            try:
+                from agent.memory.tokenizer import ChineseTokenizer
+                self._tokenizer_available = True
+                self._chinese_tokenizer = ChineseTokenizer
+            except Exception as _exc:
+                log.debug("context_compressor 异常处理", error=str(_exc))
+                self._tokenizer_available = False
+
         for msg in messages[-6:]:
             content = msg.get("content", "")
             if not content:
                 continue
-            try:
-                from agent.memory.tokenizer import ChineseTokenizer
-                tags = ChineseTokenizer.extract_tags(content, top_k=8)
-                for tag in tags:
-                    keywords[tag] = keywords.get(tag, 0) + 1
-            except Exception:
-                words = re.findall(r'[\u4e00-\u9fff]{2,}|[a-zA-Z]{3,}', content)
-                for w in words:
-                    keywords[w] = keywords.get(w, 0) + 1
+            if self._tokenizer_available:
+                try:
+                    tags = self._chinese_tokenizer.extract_tags(content, top_k=8)
+                    for tag in tags:
+                        keywords[tag] = keywords.get(tag, 0) + 1
+                    continue
+                except Exception as _exc:
+                    log.warning("异常被静默捕获", error=str(_exc))
+                    pass
+            words = re.findall(r'[\u4e00-\u9fff]{2,}|[a-zA-Z]{3,}', content)
+            for w in words:
+                keywords[w] = keywords.get(w, 0) + 1
 
         sorted_kw = sorted(keywords.items(), key=lambda x: x[1], reverse=True)
         return [kw for kw, _ in sorted_kw[:10]]

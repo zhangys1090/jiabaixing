@@ -177,7 +177,10 @@ export abstract class BaseAgent {
    * @param requiredTools - 所需工具列表
    * @returns 竞标结果，null 表示不参与竞标
    */
-  async bid(taskGoal: string, requiredTools?: string[]): Promise<AgentBid | null> {
+  async bid(
+    taskGoal: string,
+    requiredTools?: string[]
+  ): Promise<AgentBid | null> {
     if (this._status !== 'idle') return null;
     if (!this.canHandle(taskGoal, requiredTools)) return null;
 
@@ -185,7 +188,8 @@ export abstract class BaseAgent {
     return {
       agentId: this.id,
       confidence,
-      estimatedDuration: this.lastExecuteTime > 0 ? this.lastExecuteTime * 1.2 : undefined,
+      estimatedDuration:
+        this.lastExecuteTime > 0 ? this.lastExecuteTime * 1.2 : undefined,
       reason: `${this.name} 匹配能力: ${this.capabilities.join(', ')}`,
     };
   }
@@ -197,8 +201,10 @@ export abstract class BaseAgent {
    */
   canHandle(taskGoal: string, requiredTools?: string[]): boolean {
     if (requiredTools && requiredTools.length > 0) {
-      return requiredTools.some(tool =>
-        this.toolCategories.some(cat => cat === tool || cat === '*')
+      return requiredTools.some((tool) =>
+        this.toolCategories.some(
+          (cat) => String(cat) === tool || String(cat) === '*'
+        )
       );
     }
     return true;

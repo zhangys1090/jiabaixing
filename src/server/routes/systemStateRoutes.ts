@@ -490,9 +490,10 @@ router.get('/api/evolution/status', async (_req, res) => {
   try {
     const bridge = getActivePythonBridge();
     if (bridge) {
-      const metrics = (await bridge.getEvolutionMetrics()) as
-        | Record<string, unknown>
-        | null;
+      const metrics = (await bridge.getEvolutionMetrics()) as Record<
+        string,
+        unknown
+      > | null;
       return res.json({ orchestrator: metrics ?? {} });
     }
     const orchestrator = EvolutionOrchestrator.getInstance();

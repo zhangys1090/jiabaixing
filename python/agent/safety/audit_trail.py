@@ -30,19 +30,20 @@ from typing import Any
 
 from agent.config import DATA_ROOT
 from agent.core.logger import StructuredLogger
+from agent.core.types import BaseAuditEntry
 
 log = StructuredLogger("audit_trail")
+
 
 _DB_PATH = DATA_ROOT / "safety" / "audit.db"
 
 
 @dataclass
-class AuditEntry:
-    """审计条目。
+class AuditEntry(BaseAuditEntry):
+    """审计条目 — 继承 core.types.BaseAuditEntry。
 
     Attributes:
         id: 唯一标识。
-        timestamp: 时间戳。
         tool_name: 工具名称。
         params: 工具参数。
         risk_level: 风险等级。
@@ -57,7 +58,6 @@ class AuditEntry:
     """
 
     id: str = ""
-    timestamp: float = 0.0
     tool_name: str = ""
     params: dict[str, Any] = field(default_factory=dict)
     risk_level: str = "low"
@@ -269,8 +269,9 @@ class AuditTrail:
             params_list.append(since)
 
         where = " AND ".join(conditions) if conditions else "1=1"
+        sql = "SELECT COUNT(*) FROM audit_log WHERE " + where
         with sqlite3.connect(self._db_path) as conn:
-            row = conn.execute(f"SELECT COUNT(*) FROM audit_log WHERE {where}", params_list).fetchone()
+            row = conn.execute(sql, params_list).fetchone()
             return row[0] if row else 0
 
     def stats(self, since: float | None = None) -> dict[str, Any]:

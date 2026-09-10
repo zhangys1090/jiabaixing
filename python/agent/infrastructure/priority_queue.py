@@ -24,8 +24,8 @@ from typing import Any
 
 from agent.core.logger import StructuredLogger
 from agent.infrastructure.rw_lock import AsyncRWLock
-
 log = StructuredLogger("priority_queue")
+
 
 DEFAULT_MAX_SIZE: int = 10_000
 

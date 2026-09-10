@@ -1,15 +1,17 @@
 # 文档存档索引
 
-> 存档日期: 2026-06-16
+> 存档日期: 2026-06-16 | 更新: 2026-09-04
 > 存档原因: V5.0 Hermes 特性增强完成后，旧开发文档已过时
 
 ## 目录结构
 
 ```
 docs/archive/
-├── 2026-05/          ← 2026年5月及之前的旧文档
-├── 2026-06/          ← 2026年6月的临时文档
-└── root-legacy/      ← 项目根目录迁移的旧文档
+├── 2026-05/              ← 2026年5月及之前的旧文档
+├── 2026-06-07-reports/   ← 2026年6-8月阶段性审计/设计/实施报告
+├── root-legacy/          ← 项目根目录迁移的旧文档
+├── superpowers-legacy/   ← superpowers 旧计划（2026-05~06）
+└── trae-legacy-plans/    ← .trae/documents 旧计划（V3~V5 时期）
 ```
 
 ## 存档分类
@@ -77,6 +79,18 @@ docs/archive/
 | 2026-05-29-true-self-evolution-cycle.md      | 自我进化循环实现计划，已执行      |
 | 2026-05-28-api-interface-review.md           | API接口审查计划，已过时           |
 
-### 2026-06/ — 2026年6月临时文档
+### 2026-06-07-reports/ — 2026年6-8月阶段性报告（59 个文件）
 
-（暂无）
+包括 PHASE1-4 审计/优化报告、Agent 能力审计、差距分析、增强方案、E2E 测试、
+桌面自动化审计、改进计划等。全部已被 `ARCHITECTURE_AUDIT_V6.md` 和
+`COMPREHENSIVE_ENGINEERING_AUDIT_2026-09-04.md` 取代。
+
+### superpowers-legacy/ — superpowers 旧计划（16 个文件）
+
+2026-05~06 期间的优化计划（layer audit、hermes gap closure、core slimming 等），
+已全部执行完毕或被后续方案取代。
+
+### trae-legacy-plans/ — .trae/documents 旧计划（22 个文件）
+
+V3~V5 时期的架构优化计划（CodeGeneratorSkill、Phase0-4 实施计划、
+V5 架构优化计划等），已全部执行完毕或被 V6 架构取代。

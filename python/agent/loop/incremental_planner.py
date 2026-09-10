@@ -21,8 +21,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("incremental_planner")
+
 
 
 @dataclass
@@ -84,6 +84,7 @@ class IncrementalPlanner:
             preserve_completed_steps: 是否保留已完成步骤。
             enabled: 是否启用。
         """
+        self._MAX_STATS = 500
         self._max_changes = max_changes_per_replan
         self._preserve_completed = preserve_completed_steps
         self._enabled = enabled

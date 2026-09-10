@@ -36,8 +36,8 @@ from pathlib import Path
 from typing import Any
 
 from agent.core.logger import StructuredLogger, log_ignored
-
 log = StructuredLogger("structured_report")
+
 
 
 class RiskSeverity(str, Enum):
@@ -422,4 +422,5 @@ class StructuredReportGenerator:
             with open(str(path), "w", encoding="utf-8") as f:
                 f.write(report.to_json())
         except Exception as e:
+            log.debug("structured_report 异常处理", error=str(e))
             log_ignored(log, "structured_report._persist_report", e)

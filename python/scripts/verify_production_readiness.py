@@ -133,14 +133,16 @@ def _fetch_slo_snapshot() -> dict[str, Any] | None:
 
     for attempt in range(4):
         try:
-            with urllib.request.urlopen(url, timeout=5) as resp:  # noqa: S310
+            with urllib.request.urlopen(url, timeout=5) as resp:
                 return json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             if exc.code == 429 and attempt < 3:
                 time.sleep(0.5 * (2 ** attempt))
                 continue
             return None
-        except Exception:  # noqa: BLE001
+        except Exception as _exc:
+            import logging
+            logging.getLogger(__name__).debug("SLO 快照获取失败: %s", _exc)
             return None
     return None
 
@@ -165,13 +167,15 @@ def _check_real_traffic(n: int) -> dict[str, Any]:
         try:
             import urllib.request
 
-            with urllib.request.urlopen(base + p, timeout=5) as r:  # noqa: S310
+            with urllib.request.urlopen(base + p, timeout=5) as r:
                 code = r.status
             total += 1
             if 200 <= code < 400:
                 ok += 1
-        except Exception:  # noqa: BLE001
+        except Exception as _exc:
             total += 1
+            import logging
+            logging.getLogger(__name__).debug("真实流量请求失败: %s", _exc)
         # 每 10 个请求间短暂暂停，避免触发令牌桶限流（默认 60 容量/秒 1 补充）
         if (i + 1) % 10 == 0:
             time.sleep(0.2)
@@ -215,7 +219,7 @@ def _slo_base() -> str:
 
 def _redis_ping() -> tuple[bool, str]:
     try:
-        import redis.asyncio as aioredis  # type: ignore
+        import redis.asyncio as aioredis
 
 
 
@@ -242,7 +246,7 @@ def _redis_ping() -> tuple[bool, str]:
 
 
         return _run(_ping()), ""
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return False, str(exc)
 
 

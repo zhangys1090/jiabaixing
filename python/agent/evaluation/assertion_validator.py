@@ -15,6 +15,10 @@ class EvalAssertion:
     pattern: str | None = None
     min_score: float | None = None
     max_score: float | None = None
+    tool_names: list[str] = field(default_factory=list)
+    max_latency_ms: float | None = None
+    min_length: int | None = None
+    max_length: int | None = None
 
 
 @dataclass
@@ -71,6 +75,12 @@ class AssertionValidator:
             return self._check_regex(assertion, actual_output)
         elif atype == "score_range":
             return self._check_score_range(assertion, quality_score)
+        elif atype == "tool_call_order":
+            return self._check_tool_call_order(assertion, tool_calls)
+        elif atype == "latency_bound":
+            return self._check_latency_bound(assertion, tool_calls)
+        elif atype == "output_length":
+            return self._check_output_length(assertion, actual_output)
 
         return AssertionResult(
             assertion=assertion,
@@ -230,4 +240,87 @@ class AssertionValidator:
             assertion=assertion,
             passed=False,
             reason=f"分数 {quality_score:.2f} 不在范围 [{min_s}, {max_s}]",
+        )
+
+    @staticmethod
+    def _check_tool_call_order(
+        assertion: EvalAssertion,
+        tool_calls: list[dict[str, Any]],
+    ) -> AssertionResult:
+        expected_order = assertion.tool_names
+        if not expected_order:
+            return AssertionResult(
+                assertion=assertion,
+                passed=False,
+                reason="未指定 tool_names 顺序",
+            )
+        actual_order = []
+        for tc in tool_calls:
+            name = tc.get("name", "") or tc.get("function", {}).get("name", "")
+            if name in expected_order:
+                actual_order.append(name)
+        filtered = [n for n in actual_order if n in expected_order]
+        is_ordered = True
+        prev_idx = -1
+        for name in filtered:
+            idx = expected_order.index(name)
+            if idx < prev_idx:
+                is_ordered = False
+                break
+            prev_idx = idx
+        if is_ordered:
+            return AssertionResult(
+                assertion=assertion,
+                passed=True,
+                reason=f"工具调用顺序正确: {filtered}",
+            )
+        return AssertionResult(
+            assertion=assertion,
+            passed=False,
+            reason=f"工具调用顺序错误: 期望 {expected_order}, 实际 {filtered}",
+        )
+
+    @staticmethod
+    def _check_latency_bound(
+        assertion: EvalAssertion,
+        tool_calls: list[dict[str, Any]],
+    ) -> AssertionResult:
+        max_ms = assertion.max_latency_ms
+        if max_ms is None:
+            return AssertionResult(
+                assertion=assertion,
+                passed=False,
+                reason="未指定 max_latency_ms",
+            )
+        actual_ms = sum(tc.get("latency_ms", 0) for tc in tool_calls)
+        if actual_ms <= max_ms:
+            return AssertionResult(
+                assertion=assertion,
+                passed=True,
+                reason=f"延迟 {actual_ms:.0f}ms <= {max_ms}ms",
+            )
+        return AssertionResult(
+            assertion=assertion,
+            passed=False,
+            reason=f"延迟 {actual_ms:.0f}ms > {max_ms}ms",
+        )
+
+    @staticmethod
+    def _check_output_length(
+        assertion: EvalAssertion,
+        actual_output: str,
+    ) -> AssertionResult:
+        length = len(actual_output)
+        min_len = assertion.min_length if assertion.min_length is not None else 0
+        max_len = assertion.max_length if assertion.max_length is not None else float("inf")
+        if min_len <= length <= max_len:
+            return AssertionResult(
+                assertion=assertion,
+                passed=True,
+                reason=f"输出长度 {length} 在范围 [{min_len}, {max_len}]",
+            )
+        return AssertionResult(
+            assertion=assertion,
+            passed=False,
+            reason=f"输出长度 {length} 不在范围 [{min_len}, {max_len}]",
         )

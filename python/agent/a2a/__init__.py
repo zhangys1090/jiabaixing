@@ -43,12 +43,12 @@ try:
     from agent.a2a.client import A2AClient
     from agent.a2a.auth import A2AAuthInterceptor
 except ImportError:  # pragma: no cover - 仅在缺 fastapi 等可选依赖时触发
-    A2AProtocolManager = None  # type: ignore[assignment,misc]
-    get_a2a_manager = None  # type: ignore[assignment]
-    create_a2a_router = None  # type: ignore[assignment]
-    mount_a2a_routes = None  # type: ignore[assignment]
-    A2AClient = None  # type: ignore[assignment,misc]
-    A2AAuthInterceptor = None  # type: ignore[assignment,misc]
+    A2AProtocolManager = None
+    get_a2a_manager = None
+    create_a2a_router = None
+    mount_a2a_routes = None
+    A2AClient = None
+    A2AAuthInterceptor = None
 
 __all__ = [
     "A2AAgentCard",

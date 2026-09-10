@@ -1,7 +1,6 @@
 import { Logger } from '../utils/Logger';
 import { TimerManager } from '../utils/TimerManager';
 import { DesktopUIInspector, UIElementNode } from './DesktopUIInspector';
-import { WindowInfo, WindowManager } from './WindowManager';
 import { SnapshotStorage } from './snapshot/SnapshotStorage';
 import {
   ClipboardStateSnapshot,
@@ -18,6 +17,7 @@ import {
   StateSnapshotManagerConfig,
   WindowStateSnapshot,
 } from './snapshot/types';
+import { WindowInfo, WindowManager } from './WindowManager';
 
 export {
   ClipboardStateSnapshot,
@@ -32,7 +32,7 @@ export {
   SnapshotTriggerType,
   StateDiffResult,
   StateSnapshotManagerConfig,
-  WindowStateSnapshot,
+  WindowStateSnapshot
 };
 
 export class StateSnapshotManager {
@@ -42,6 +42,7 @@ export class StateSnapshotManager {
   private windowManager: WindowManager;
   private uiInspector: DesktopUIInspector;
   private storage: SnapshotStorage;
+  private authority: DesktopActionAuthority;
   private customProviders: Map<string, CustomStateProvider> = new Map();
   private autoSnapshotTimerId: string | null = null;
   private initialized = false;
@@ -61,6 +62,7 @@ export class StateSnapshotManager {
     this.timerManager = TimerManager.getInstance();
     this.windowManager = WindowManager.getInstance();
     this.uiInspector = DesktopUIInspector.getInstance();
+    this.authority = DesktopActionAuthority.getInstance();
     this.storage = SnapshotStorage.getInstance(this.config);
   }
 
@@ -175,7 +177,18 @@ export class StateSnapshotManager {
 
       if (options.restoreWindows !== false && snapshot.foregroundWindowHandle) {
         try {
-          this.windowManager.activateWindow(snapshot.foregroundWindowHandle);
+          const { result: actionResult, authorization } =
+            await this.authority.executeAction({
+              type: 'restoreWindowState',
+              params: { handle: snapshot.foregroundWindowHandle },
+              description: '恢复前台窗口状态',
+            });
+          if (!authorization.allowed) {
+            throw new Error(authorization.reason || '窗口恢复被安全策略阻止');
+          }
+          if (!actionResult.success) {
+            throw new Error(actionResult.error || '窗口恢复执行失败');
+          }
           result.restoredComponents.push('foreground_window');
         } catch (error) {
           result.failedComponents.push({

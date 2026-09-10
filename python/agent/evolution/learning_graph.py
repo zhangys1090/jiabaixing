@@ -39,6 +39,7 @@ from agent.core.logger import StructuredLogger
 log = StructuredLogger("learning_graph")
 
 
+
 class NodeType(str, Enum):
     SKILL = "skill"
     MEMORY = "memory"
@@ -116,6 +117,8 @@ class LearningGraph:
         self._edges: list[GraphEdge] = []
         self._adj: dict[str, list[tuple[str, GraphEdge]]] = defaultdict(list)
         self._rev_adj: dict[str, list[tuple[str, GraphEdge]]] = defaultdict(list)
+        self._MAX_NODES = 10000
+        self._MAX_EDGES = 50000
         self._init_db()
         self._load_from_db()
 
@@ -196,6 +199,11 @@ class LearningGraph:
     def add_node(self, node_id: str, node_type: NodeType, name: str, metadata: dict[str, Any] | None = None, weight: float = 1.0) -> GraphNode:
         node = GraphNode(id=node_id, type=node_type, name=name, metadata=metadata or {}, weight=weight)
         self._nodes[node_id] = node
+        if len(self._nodes) > self._MAX_NODES:
+            sorted_nodes = sorted(self._nodes.items(), key=lambda x: x[1].updated_at if hasattr(x[1], 'updated_at') else 0)
+            to_remove = sorted_nodes[: len(self._nodes) - (self._MAX_NODES * 3 // 4)]
+            for nid, _ in to_remove:
+                self.remove_node(nid)
         self._persist_node(node)
         return node
 

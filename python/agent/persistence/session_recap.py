@@ -28,14 +28,15 @@ from __future__ import annotations
 import re
 import time
 from typing import TYPE_CHECKING, Any
-
 from agent.core.logger import StructuredLogger
+
 
 if TYPE_CHECKING:
     from agent.llm.provider import LLMProvider
     from agent.persistence.session_store import SessionStore, SessionMessage
 
 log = StructuredLogger("session_recap")
+
 
 # 用于生成摘要的最大消息数
 MAX_MESSAGES_FOR_RECAP = 20

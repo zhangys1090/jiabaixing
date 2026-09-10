@@ -24,10 +24,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Awaitable
 
-from agent.core.logger import StructuredLogger
 from agent.workflow.types import TriggerConfig, TriggerType
+from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("event_bridge")
+
 
 
 @dataclass

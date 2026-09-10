@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from agent.context.base import ContextComponent
+import logging
 from agent.context.models import (
     BuildContext,
     ComponentDependency,
     ComponentPriority,
     ContextBuildRequest,
 )
+logger = logging.getLogger(__name__)
 
 
 class MemoryRetrievalComponent(ContextComponent):
@@ -62,7 +64,8 @@ class MemoryRetrievalComponent(ContextComponent):
                 )
                 memory_results = mem_results or []
                 memories = [m.get("content", "") for m in memory_results[: request.memory_limit]]
-            except Exception:
+            except Exception as e:
+                logger.warning("memory_retrieval.search 记忆检索失败", error=str(e))
                 # 记忆检索失败，降级为空
                 memories = []
                 memory_results = []

@@ -91,9 +91,11 @@ export class AuditService {
       } else if (typeof logger.clearAllLogs === 'function') {
         logger.clearAllLogs();
       }
-      AuditService.instance.shutdown().catch((err) =>
-        Logger.warn('审计服务关闭失败', err as Error, 'AuditService')
-      );
+      AuditService.instance
+        .shutdown()
+        .catch((err: unknown) =>
+          Logger.warn('审计服务关闭失败', 'AuditService', err)
+        );
     }
     AuditService.instance = null;
   }

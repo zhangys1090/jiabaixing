@@ -6,8 +6,8 @@
  * 确保用户对关键文件修改有完全控制权。
  */
 
-import { Logger } from '../../../utils/Logger';
 import { EventBus } from '../../../shared/EventBus';
+import { Logger } from '../../../utils/Logger';
 import type { ToolContext, ToolDefinition, ToolResult } from '../../types';
 import { Permission, ToolCategory } from '../../types';
 
@@ -37,7 +37,8 @@ export const WRITE_APPROVAL_DEF: ToolDefinition = {
     },
     auto_approve: {
       type: 'boolean',
-      description: '是否自动批准（仅用于低风险场景的快速通道）',
+      description:
+        '是否自动批准（已禁用 — 所有写入操作必须经过审批流程，此参数不再生效）',
       default: false,
     },
   },
@@ -125,18 +126,13 @@ export function createWriteApprovalExecutor(deps: WriteApprovalDeps = {}) {
       };
     }
 
+    // P0-7 修复: auto_approve 旁路已禁用 — 所有写入操作必须经过审批流程
+    // 即使调用方传入 auto_approve=true，也必须走审批，防止攻击者绕过
     if (autoApprove) {
-      Logger.info(
-        `🔓 write_approval 自动批准: ${operation} → ${target}`,
+      Logger.warn(
+        `⚠️ write_approval: auto_approve 参数已被禁用，所有写入操作必须经过审批: ${operation} → ${target}`,
         'WriteApproval'
       );
-      return {
-        success: true,
-        output: `✅ 已自动批准: ${OPERATION_LABEL[operation] || operation} → ${target}`,
-        duration: Date.now() - startTime,
-        validated: true,
-        metadata: { autoApproved: true, operation, target },
-      };
     }
 
     const approvalMessage = buildApprovalMessage(

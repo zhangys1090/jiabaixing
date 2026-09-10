@@ -13,6 +13,7 @@ from agent.tools.registry import (
 )
 from agent.core.logger import log_ignored
 from agent.core.logger import StructuredLogger
+log = StructuredLogger("network_tools")
 
 _log = StructuredLogger("tools.network")
 
@@ -70,6 +71,7 @@ async def async_is_safe_url(url: str) -> bool:
                 return False
         return True
     except Exception as _exc:
+        log.warning("network_tools 异常处理", error=str(_exc))
         log_ignored(_log, "network_tools._is_safe_url", _exc)
         return False
 
@@ -150,6 +152,7 @@ async def web_search_executor(params: dict[str, Any]) -> ToolResult:
     except ImportError:
         return ToolResult(success=True, output="网络搜索服务未配置，请设置搜索API Key", duration=time.time() - start)
     except Exception as e:
+        log.warning("network_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"搜索失败: {e}")
 
 
@@ -181,6 +184,7 @@ async def web_fetch_executor(params: dict[str, Any]) -> ToolResult:
 
         return ToolResult(success=True, output=content[:10000], duration=time.time() - start)
     except Exception as e:
+        log.warning("network_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"获取网页失败: {e}")
 
 
@@ -203,6 +207,7 @@ async def chart_generate_executor(params: dict[str, Any]) -> ToolResult:
         if engine and hasattr(engine, "llm"):
             llm = engine.llm
     except Exception as _exc:
+        log.warning("network_tools 异常处理", error=str(_exc))
         log_ignored(None, "network_tools.chart_generate_executor", _exc)
 
     if llm:
@@ -218,6 +223,7 @@ async def chart_generate_executor(params: dict[str, Any]) -> ToolResult:
             content = response.get("content", "")
             return ToolResult(success=True, output=content, duration=time.time() - start)
         except Exception as _exc:
+            log.warning("network_tools 异常处理", error=str(_exc))
             log_ignored(None, "network_tools.chart_generate_executor", _exc)
 
     return ToolResult(

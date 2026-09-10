@@ -8,6 +8,8 @@ import threading
 import time
 from pathlib import Path
 from typing import Any
+import logging
+logger = logging.getLogger(__name__)
 
 
 class CacheEntry:
@@ -41,7 +43,8 @@ class LLMCache:
                 tools_sig = "|T:" + ",".join(
                     sorted(t.get("name", "") for t in tools if isinstance(t, dict))
                 )
-            except Exception:
+            except Exception as e:
+                logger.warning("cache._make_key 工具签名生成失败", error=str(e))
                 tools_sig = "|T:*"
         raw = (
             f"{model}|{temperature}|{system_prompt or ''}|{tools_sig}|"
@@ -147,6 +150,17 @@ class PersistentCache:
             "ON llm_cache(created_at)"
         )
         conn.commit()
+
+    def close(self) -> None:
+        if hasattr(self._local, "conn") and self._local.conn is not None:
+            try:
+                self._local.conn.close()
+            except Exception as _exc:
+                logger.debug("llm_cache close 失败", exc_info=_exc)
+            self._local.conn = None
+
+    def __del__(self) -> None:
+        self.close()
 
     def get(self, cache_key: str) -> str | None:
         conn = self._get_conn()

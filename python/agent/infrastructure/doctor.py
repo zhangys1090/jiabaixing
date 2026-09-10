@@ -8,7 +8,7 @@
 
     doctor = Doctor()
     results = doctor.run_all()
-    print(doctor.format_report(results))
+    logger.info(doctor.format_report(results))
 """
 
 from __future__ import annotations
@@ -26,7 +26,8 @@ from pathlib import Path
 from typing import Any
 
 from agent.config import DATA_DIR
-from agent.core.logger import log_ignored
+from agent.core.logger import log_ignored, StructuredLogger
+log = StructuredLogger("doctor")
 
 log = logging.getLogger(__name__)
 
@@ -98,7 +99,7 @@ class Doctor:
 
         doctor = Doctor()
         results = doctor.run_all()
-        print(doctor.format_report(results))
+        logger.info(doctor.format_report(results))
     """
 
     # ── 公共接口 ──────────────────────────────────────────────
@@ -220,6 +221,7 @@ class Doctor:
                 details={"version": version},
             )
         except Exception as exc:
+            log.debug("doctor 异常处理", error=str(exc))
             return DiagnosticResult(
                 name="SQLite",
                 level=DiagnosticLevel.CRITICAL,
@@ -283,6 +285,7 @@ class Doctor:
                 details={"free_bytes": usage.free, "free_mb": round(free_mb, 2)},
             )
         except Exception as exc:
+            log.debug("doctor 异常处理", error=str(exc))
             return DiagnosticResult(
                 name="磁盘空间",
                 level=DiagnosticLevel.CRITICAL,
@@ -308,11 +311,13 @@ class Doctor:
             # 自建，硬删除安全）；两处异常以 log_ignored 记录，不静默吞掉。
             try:
                 test_file.unlink()
-            except Exception as _exc:  # noqa: BLE001
+            except Exception as _exc:
+                log.debug("doctor 异常处理", error=str(_exc))
                 log_ignored(log, "Doctor.check_file_permissions", _exc)
                 try:
                     os.remove(str(test_file))
-                except Exception as _exc2:  # noqa: BLE001
+                except Exception as _exc2:
+                    log.debug("doctor 异常处理", error=str(_exc2))
                     log_ignored(log, "Doctor.check_file_permissions", _exc2)
             if content == "test":
                 return DiagnosticResult(
@@ -338,6 +343,7 @@ class Doctor:
                 details={"path": str(DATA_DIR)},
             )
         except Exception as exc:
+            log.debug("doctor 异常处理", error=str(exc))
             return DiagnosticResult(
                 name="文件权限",
                 level=DiagnosticLevel.CRITICAL,

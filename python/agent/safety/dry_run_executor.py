@@ -13,8 +13,8 @@ Usage:
 
     executor = DryRunExecutor()
     report = executor.preview_file_write("/project/src/main.py", "new content")
-    print(report.affected_files)
-    print(report.risk_assessment)
+    logger.info(report.affected_files)
+    logger.info(report.risk_assessment)
 """
 
 from __future__ import annotations
@@ -26,10 +26,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from agent.core.logger import StructuredLogger, log_ignored
 from agent.safety.operation_scope import OperationScope
+from agent.core.logger import StructuredLogger, log_ignored
 
 log = StructuredLogger("dry_run_executor")
+
 
 
 @dataclass
@@ -81,6 +82,7 @@ class DryRunExecutor:
     def __init__(self, scope: OperationScope | None = None) -> None:
         self._scope = scope
         self._virtual_fs: dict[str, str | None] = {}
+        self._MAX_VIRTUAL_FS = 10000
 
     def preview_file_write(
         self,
@@ -144,6 +146,10 @@ class DryRunExecutor:
             report.risk_assessment = "low"
 
         self._virtual_fs[resolved] = content
+        if len(self._virtual_fs) > self._MAX_VIRTUAL_FS:
+            oldest_keys = list(self._virtual_fs.keys())[: len(self._virtual_fs) - (self._MAX_VIRTUAL_FS * 3 // 4)]
+            for k in oldest_keys:
+                del self._virtual_fs[k]
         return report
 
     def preview_file_delete(

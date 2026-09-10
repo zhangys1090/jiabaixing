@@ -27,8 +27,8 @@ from agent.loop.debate_harness import (
     HarnessLevel,
 )
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("harness_dataflow")
+
 
 
 class ActivationPolicy(str, Enum):

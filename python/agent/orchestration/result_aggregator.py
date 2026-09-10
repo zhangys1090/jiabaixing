@@ -6,8 +6,8 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("result_aggregator")
+
 
 
 class LLMChatProtocol(Protocol):
@@ -280,11 +280,11 @@ class ResultAggregator:
     ) -> list[ResultConflict]:
         """检测不同Agent执行结果之间的冲突。
 
-        检测两类冲突：
+        检测四类冲突：
         1. 文件写入冲突：多个Agent写入同一文件路径。
         2. 目标重叠冲突：多个Agent执行相同目标描述。
-
-        支持通过 filePath / path / file_path 三种字段名识别文件路径。
+        3. 资源竞争冲突：多个Agent竞争同一资源。
+        4. 数据不一致冲突：不同Agent对同一字段产生不同值。
 
         Args:
             agent_results: 任务ID到执行结果的映射。
@@ -297,6 +297,7 @@ class ResultAggregator:
 
         file_write_map: dict[str, list[str]] = {}
         goal_map: dict[str, list[str]] = {}
+        resource_map: dict[str, list[str]] = {}
 
         for task in task_nodes:
             if task.status != "completed":
@@ -315,6 +316,14 @@ class ResultAggregator:
 
             if task.goal:
                 goal_map.setdefault(task.goal, []).append(task.id)
+
+            resource = (
+                result.get("resource")
+                or result.get("resourceId")
+                or result.get("target")
+            )
+            if isinstance(resource, str):
+                resource_map.setdefault(resource, []).append(task.id)
 
         for file_path, task_ids in file_write_map.items():
             if len(task_ids) > 1:
@@ -337,6 +346,64 @@ class ResultAggregator:
                         severity="medium",
                     )
                 )
+
+        for resource, task_ids in resource_map.items():
+            if len(task_ids) > 1:
+                conflicts.append(
+                    ResultConflict(
+                        type="resource_contention",
+                        description=f"多个Agent竞争同一资源: {resource}",
+                        involved_tasks=task_ids,
+                        severity="medium",
+                    )
+                )
+
+        completed_tasks = [t for t in task_nodes if t.status == "completed"]
+        for i in range(len(completed_tasks)):
+            for j in range(i + 1, len(completed_tasks)):
+                result_a = agent_results.get(completed_tasks[i].id)
+                result_b = agent_results.get(completed_tasks[j].id)
+                if (
+                    result_a
+                    and result_b
+                    and isinstance(result_a, dict)
+                    and isinstance(result_b, dict)
+                ):
+                    shared_keys = [
+                        k for k in result_a
+                        if k in result_b
+                        and k not in ("taskId", "completedAt", "task_id")
+                    ]
+                    for key in shared_keys:
+                        val_a = result_a[key]
+                        val_b = result_b[key]
+                        if (
+                            val_a is not None
+                            and val_b is not None
+                            and not isinstance(val_a, (dict, list))
+                            and not isinstance(val_b, (dict, list))
+                            and val_a != val_b
+                            and any(
+                                kw in key
+                                for kw in ("count", "total", "value", "result")
+                            )
+                        ):
+                            conflicts.append(
+                                ResultConflict(
+                                    type="data_inconsistency",
+                                    description=(
+                                        f"任务 {completed_tasks[i].id} 和 "
+                                        f"{completed_tasks[j].id} 在字段 "
+                                        f'"{key}" 上数据不一致: '
+                                        f"{val_a} vs {val_b}"
+                                    ),
+                                    involved_tasks=[
+                                        completed_tasks[i].id,
+                                        completed_tasks[j].id,
+                                    ],
+                                    severity="low",
+                                )
+                            )
 
         return conflicts
 

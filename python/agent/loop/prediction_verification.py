@@ -23,8 +23,8 @@ from enum import Enum
 from typing import Any
 
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("prediction_verification")
+
 
 
 class PredictionOutcome(str, Enum):
@@ -134,6 +134,7 @@ class PredictionVerificationLoop:
                     prediction.expected_duration_ms = historical.avg_duration_ms
                     prediction.source = "historical"
             except Exception as _exc:
+                log.warning("prediction_verification 异常被捕获", error=str(_exc))
                 pass
 
         if tool_name in self._tool_stats:

@@ -25,6 +25,8 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable
+import logging
+logger = logging.getLogger(__name__)
 
 
 class CircuitState(str, Enum):
@@ -144,7 +146,8 @@ class CircuitBreaker:
             async with self._lock:
                 self._on_success()
             return result
-        except Exception:
+        except Exception as e:
+            logger.debug("circuit_breaker.call 请求失败，记录故障", error=str(e))
             async with self._lock:
                 self._on_failure()
             raise

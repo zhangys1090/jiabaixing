@@ -61,8 +61,16 @@ describe('ContextReferenceResolver 多模态 @引用 (U4)', () => {
       const resolver = new ContextReferenceResolver({ projectRoot: '/tmp' });
       resolver.setMultimodalReferenceProvider(
         mockProvider({
-          截图区域: { modality: 'visual', content: '按钮[提交]在(120,340)', confidence: 0.92 },
-          设备状态: { modality: 'environment', content: '设备A在线', confidence: 0.99 },
+          截图区域: {
+            modality: 'visual',
+            content: '按钮[提交]在(120,340)',
+            confidence: 0.92,
+          },
+          设备状态: {
+            modality: 'environment',
+            content: '设备A在线',
+            confidence: 0.99,
+          },
         })
       );
       const res = await resolver.resolve('点击 @截图区域 时检查 @设备状态');
@@ -86,7 +94,13 @@ describe('ContextReferenceResolver 多模态 @引用 (U4)', () => {
     it('provider 无法解析的 token 保留在文本', async () => {
       const resolver = new ContextReferenceResolver({ projectRoot: '/tmp' });
       resolver.setMultimodalReferenceProvider(
-        mockProvider({ 截图区域: { modality: 'visual', content: '截图像素', confidence: 0.9 } })
+        mockProvider({
+          截图区域: {
+            modality: 'visual',
+            content: '截图像素',
+            confidence: 0.9,
+          },
+        })
       );
       const res = await resolver.resolve('关注 @未知通道 与 @截图区域');
       expect(res.multimodalReferences).toHaveLength(1); // 仅截图区域被解析
@@ -97,7 +111,13 @@ describe('ContextReferenceResolver 多模态 @引用 (U4)', () => {
     it('文件/URL 引用与多模态引用可共存', async () => {
       const resolver = new ContextReferenceResolver({ projectRoot: '/tmp' });
       resolver.setMultimodalReferenceProvider(
-        mockProvider({ 截图区域: { modality: 'visual', content: '截图像素', confidence: 0.9 } })
+        mockProvider({
+          截图区域: {
+            modality: 'visual',
+            content: '截图像素',
+            confidence: 0.9,
+          },
+        })
       );
       const res = await resolver.resolve(
         '读取 @https://example.com 并参考 @截图区域'

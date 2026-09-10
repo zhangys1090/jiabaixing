@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import argparse
 import sys
+import logging
+logger = logging.getLogger(__name__)
 
 
 def cmd_chat(args: argparse.Namespace) -> None:
@@ -50,6 +52,7 @@ def cmd_chat(args: argparse.Namespace) -> None:
                 content = result.get("content", "")
                 print(f"  🤖 {content}\n")
             except Exception as e:
+                logger.warning("cli 异常处理", error=str(e))
                 print(f"  ❌ 错误: {e}\n")
             return
 
@@ -82,6 +85,7 @@ def cmd_chat(args: argparse.Namespace) -> None:
                 print(f"  🤖 {content}\n")
                 turn_count += 1
             except Exception as e:
+                logger.warning("cli 异常处理", error=str(e))
                 print(f"  ❌ 错误: {e}\n")
 
     try:
@@ -90,6 +94,7 @@ def cmd_chat(args: argparse.Namespace) -> None:
         print(f"错误: 无法导入模块 - {e}")
         sys.exit(1)
     except Exception as e:
+        logger.warning("cli 异常处理", error=str(e))
         print(f"错误: {e}")
         sys.exit(1)
 
@@ -124,6 +129,7 @@ def cmd_goal(args: argparse.Namespace) -> None:
         print(f"错误: 无法导入模块 - {e}")
         sys.exit(1)
     except Exception as e:
+        logger.warning("cli 异常处理", error=str(e))
         print(f"错误: {e}")
         sys.exit(1)
 
@@ -187,6 +193,7 @@ def cmd_status(args: argparse.Namespace) -> None:
         print(f"错误: 无法导入模块 - {e}")
         sys.exit(1)
     except Exception as e:
+        logger.warning("cli 异常处理", error=str(e))
         print(f"错误: {e}")
         sys.exit(1)
 
@@ -222,6 +229,7 @@ def cmd_observer(args: argparse.Namespace) -> None:
         print(f"错误: 无法导入模块 - {e}")
         sys.exit(1)
     except Exception as e:
+        logger.warning("cli 异常处理", error=str(e))
         print(f"错误: {e}")
         sys.exit(1)
 
@@ -260,6 +268,7 @@ def cmd_feedback(args: argparse.Namespace) -> None:
         print(f"错误: 无法导入模块 - {e}")
         sys.exit(1)
     except Exception as e:
+        logger.warning("cli 异常处理", error=str(e))
         print(f"错误: {e}")
         sys.exit(1)
 

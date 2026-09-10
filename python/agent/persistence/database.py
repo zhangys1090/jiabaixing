@@ -33,7 +33,8 @@ from pathlib import Path
 from typing import Any, AsyncIterator
 
 from agent.config import DATA_DIR
-from agent.core.logger import log_ignored
+from agent.core.logger import log_ignored, StructuredLogger
+log = StructuredLogger("database")
 
 log = logging.getLogger(__name__)
 
@@ -120,6 +121,7 @@ def _put_pg_sync_conn(conn: Any) -> None:
         try:
             pool.putconn(conn)
         except Exception as _exc:
+            log.debug("database 异常处理", error=str(_exc))
             log_ignored(log, "database._put_pg_sync_conn", _exc)
 
 

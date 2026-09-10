@@ -1,4 +1,3 @@
-
 export interface TraceRecord {
   traceId: string;
   eventName: string;
@@ -56,7 +55,10 @@ export interface TraceStats {
 }
 
 export class TraceCollector {
-  private activeTraces: Map<string, { eventName: string; startTime: number; metadata?: Record<string, unknown> }> = new Map();
+  private activeTraces: Map<
+    string,
+    { eventName: string; startTime: number; metadata?: Record<string, unknown> }
+  > = new Map();
   private traceHistory: TraceRecord[] = [];
   private readonly MAX_TRACE_HISTORY = 1000;
 
@@ -69,8 +71,16 @@ export class TraceCollector {
   private fullTraces: Map<string, FullTrace> = new Map();
   private readonly MAX_FULL_TRACES = 100;
 
-  startTrace(traceId: string, eventName: string, metadata?: Record<string, unknown>): void {
-    this.activeTraces.set(traceId, { eventName, startTime: Date.now(), metadata });
+  startTrace(
+    traceId: string,
+    eventName: string,
+    metadata?: Record<string, unknown>
+  ): void {
+    this.activeTraces.set(traceId, {
+      eventName,
+      startTime: Date.now(),
+      metadata,
+    });
   }
 
   completeTrace(traceId: string, success: boolean = true): TraceRecord | null {
@@ -94,7 +104,7 @@ export class TraceCollector {
     return record;
   }
 
-  failTrace(traceId: string, error: string): TraceRecord | null {
+  failTrace(traceId: string, _error: string): TraceRecord | null {
     const trace = this.activeTraces.get(traceId);
     if (!trace) return null;
 
@@ -115,7 +125,12 @@ export class TraceCollector {
     return record;
   }
 
-  recordTokenUsage(traceId: string, model: string, promptTokens: number, completionTokens: number): void {
+  recordTokenUsage(
+    traceId: string,
+    model: string,
+    promptTokens: number,
+    completionTokens: number
+  ): void {
     this.tokenUsage.push({
       traceId,
       model,
@@ -135,7 +150,12 @@ export class TraceCollector {
     }
   }
 
-  recordToolCall(traceId: string, toolName: string, success: boolean, duration: number): void {
+  recordToolCall(
+    traceId: string,
+    toolName: string,
+    success: boolean,
+    duration: number
+  ): void {
     this.toolCallRecords.push({
       traceId,
       toolName,
@@ -145,7 +165,9 @@ export class TraceCollector {
     });
 
     if (this.toolCallRecords.length > this.MAX_TOOL_CALL_RECORDS) {
-      this.toolCallRecords = this.toolCallRecords.slice(-this.MAX_TOOL_CALL_RECORDS);
+      this.toolCallRecords = this.toolCallRecords.slice(
+        -this.MAX_TOOL_CALL_RECORDS
+      );
     }
 
     const fullTrace = this.fullTraces.get(traceId);
@@ -170,7 +192,11 @@ export class TraceCollector {
     });
   }
 
-  addTracePhase(traceId: string, phase: string, metadata?: Record<string, unknown>): void {
+  addTracePhase(
+    traceId: string,
+    phase: string,
+    metadata?: Record<string, unknown>
+  ): void {
     const fullTrace = this.fullTraces.get(traceId);
     if (!fullTrace) return;
 
@@ -181,11 +207,17 @@ export class TraceCollector {
     });
   }
 
-  completeTracePhase(traceId: string, phase: string, success: boolean = true): void {
+  completeTracePhase(
+    traceId: string,
+    phase: string,
+    success: boolean = true
+  ): void {
     const fullTrace = this.fullTraces.get(traceId);
     if (!fullTrace) return;
 
-    const phaseInfo = fullTrace.phases.find(p => p.phase === phase && p.endTime === undefined);
+    const phaseInfo = fullTrace.phases.find(
+      (p) => p.phase === phase && p.endTime === undefined
+    );
     if (phaseInfo) {
       phaseInfo.endTime = Date.now();
       phaseInfo.duration = phaseInfo.endTime - phaseInfo.startTime;
@@ -193,7 +225,10 @@ export class TraceCollector {
     }
   }
 
-  completeFullTrace(traceId: string, status: 'completed' | 'failed' = 'completed'): void {
+  completeFullTrace(
+    traceId: string,
+    status: 'completed' | 'failed' = 'completed'
+  ): void {
     const fullTrace = this.fullTraces.get(traceId);
     if (!fullTrace) return;
 
@@ -211,12 +246,16 @@ export class TraceCollector {
 
   getTraceStats(): TraceStats {
     const total = this.traceHistory.length;
-    const successful = this.traceHistory.filter(t => t.success).length;
+    const successful = this.traceHistory.filter((t) => t.success).length;
     const failed = total - successful;
-    const avgDuration = total > 0
-      ? this.traceHistory.reduce((sum, t) => sum + t.duration, 0) / total
-      : 0;
-    const totalTokens = this.tokenUsage.reduce((sum, t) => sum + t.totalTokens, 0);
+    const avgDuration =
+      total > 0
+        ? this.traceHistory.reduce((sum, t) => sum + t.duration, 0) / total
+        : 0;
+    const totalTokens = this.tokenUsage.reduce(
+      (sum, t) => sum + t.totalTokens,
+      0
+    );
     const totalToolCalls = this.toolCallRecords.length;
     const slowestTraces = [...this.traceHistory]
       .sort((a, b) => b.duration - a.duration)
@@ -236,13 +275,25 @@ export class TraceCollector {
   }
 
   getTokenUsageByModel(model: string): TokenUsageRecord[] {
-    return this.tokenUsage.filter(t => t.model === model);
+    return this.tokenUsage.filter((t) => t.model === model);
   }
 
-  getToolCallStats(): { toolName: string; callCount: number; successRate: number; avgDuration: number }[] {
-    const stats = new Map<string, { count: number; success: number; totalDuration: number }>();
+  getToolCallStats(): {
+    toolName: string;
+    callCount: number;
+    successRate: number;
+    avgDuration: number;
+  }[] {
+    const stats = new Map<
+      string,
+      { count: number; success: number; totalDuration: number }
+    >();
     for (const record of this.toolCallRecords) {
-      const existing = stats.get(record.toolName) || { count: 0, success: 0, totalDuration: 0 };
+      const existing = stats.get(record.toolName) || {
+        count: 0,
+        success: 0,
+        totalDuration: 0,
+      };
       existing.count++;
       if (record.success) existing.success++;
       existing.totalDuration += record.duration;

@@ -17,9 +17,9 @@ import EventBus from '../shared/EventBus';
 import { ProfileEvolutionManager } from '../user/ProfileEvolutionManager';
 import { Logger } from '../utils/Logger';
 import {
-    EvolutionMetrics as CodeEvolutionMetrics,
-    EvolutionCause,
-    EvolutionEngineV2,
+  EvolutionMetrics as CodeEvolutionMetrics,
+  EvolutionCause,
+  EvolutionEngineV2,
 } from './';
 
 /** 自我增强结果（原 SelfEnhancementEngine 已删除，本地定义） */
@@ -374,7 +374,7 @@ export class EvolutionOrchestrator {
 
     try {
       // 检查各引擎冷却期
-      const canTriggerEngine = (engineName: string): boolean => {
+      const _canTriggerEngine = (engineName: string): boolean => {
         const cooldown =
           this.engineCooldowns.get(engineName) || this.defaultCooldownMs;
         const lastTriggered = this.engineLastTriggered.get(engineName) || 0;
@@ -848,10 +848,7 @@ export class EvolutionOrchestrator {
     if (this.optimizationSchedulerTimer) {
       clearInterval(this.optimizationSchedulerTimer);
       this.optimizationSchedulerTimer = null;
-      Logger.info(
-        '⏰ P1-2: 进化优化定时调度器已停止',
-        'EvolutionOrchestrator'
-      );
+      Logger.info('⏰ P1-2: 进化优化定时调度器已停止', 'EvolutionOrchestrator');
     }
   }
 

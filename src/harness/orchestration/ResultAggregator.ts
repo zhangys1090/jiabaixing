@@ -174,7 +174,7 @@ export class ResultAggregator {
 任务详情:
 ${taskSummaries}
 
-请生成一段100字以内的执行摘要。`;
+请生成一段100字以内的执行摘要。不要编造不存在的任务或结果。`;
 
         result.llmSummary = await this.llm.chat(prompt);
       } catch (err) {
@@ -199,6 +199,7 @@ ${taskSummaries}
 
     const fileWriteMap = new Map<string, string[]>();
     const goalMap = new Map<string, string[]>();
+    const resourceMap = new Map<string, string[]>();
 
     for (const task of taskNodes) {
       if (task.status !== 'completed') continue;
@@ -221,6 +222,15 @@ ${taskSummaries}
         }
         goalMap.get(task.goal)!.push(task.id);
       }
+
+      const resource =
+        resultObj.resource || resultObj.resourceId || resultObj.target;
+      if (typeof resource === 'string') {
+        if (!resourceMap.has(resource)) {
+          resourceMap.set(resource, []);
+        }
+        resourceMap.get(resource)!.push(task.id);
+      }
     }
 
     for (const [filePath, taskIds] of fileWriteMap) {
@@ -242,6 +252,57 @@ ${taskSummaries}
           involvedTasks: taskIds,
           severity: 'medium',
         });
+      }
+    }
+
+    for (const [resource, taskIds] of resourceMap) {
+      if (taskIds.length > 1) {
+        conflicts.push({
+          type: 'resource_contention',
+          description: `多个Agent竞争同一资源: ${resource}`,
+          involvedTasks: taskIds,
+          severity: 'medium',
+        });
+      }
+    }
+
+    const completedTasks = taskNodes.filter((t) => t.status === 'completed');
+    for (let i = 0; i < completedTasks.length; i++) {
+      for (let j = i + 1; j < completedTasks.length; j++) {
+        const resultA = agentResults.get(completedTasks[i].id);
+        const resultB = agentResults.get(completedTasks[j].id);
+        if (
+          resultA &&
+          resultB &&
+          typeof resultA === 'object' &&
+          typeof resultB === 'object'
+        ) {
+          const a = resultA as Record<string, unknown>;
+          const b = resultB as Record<string, unknown>;
+          const sharedKeys = Object.keys(a).filter(
+            (k) => k in b && k !== 'taskId' && k !== 'completedAt'
+          );
+          for (const key of sharedKeys) {
+            if (
+              a[key] !== null &&
+              b[key] !== null &&
+              typeof a[key] !== 'object' &&
+              typeof b[key] !== 'object' &&
+              a[key] !== b[key] &&
+              (key.includes('count') ||
+                key.includes('total') ||
+                key.includes('value') ||
+                key.includes('result'))
+            ) {
+              conflicts.push({
+                type: 'data_inconsistency',
+                description: `任务 ${completedTasks[i].id} 和 ${completedTasks[j].id} 在字段 "${key}" 上数据不一致: ${String(a[key])} vs ${String(b[key])}`,
+                involvedTasks: [completedTasks[i].id, completedTasks[j].id],
+                severity: 'low',
+              });
+            }
+          }
+        }
       }
     }
 
@@ -284,7 +345,8 @@ ${taskSummaries}
         const parsed = JSON.parse(response);
         const rawWinner = parsed?.winnerTaskId;
         const winnerTaskId =
-          typeof rawWinner === 'string' && conflict.involvedTasks.includes(rawWinner)
+          typeof rawWinner === 'string' &&
+          conflict.involvedTasks.includes(rawWinner)
             ? rawWinner
             : conflict.involvedTasks[0];
         resolutions.push({

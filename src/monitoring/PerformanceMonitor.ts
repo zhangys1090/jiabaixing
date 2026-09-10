@@ -87,6 +87,7 @@ export class PerformanceMonitor extends EventEmitter {
   private spanMetrics: Map<string, PerformanceMetric[]> = new Map();
   private activeSpans: Map<string, PerformanceMetric> = new Map();
   private readonly maxMetricsPerCategory: number = 1000;
+  private static readonly MAX_METRICS_HISTORY = 5000;
 
   private tokenUsage: {
     totalInputTokens: number;
@@ -169,6 +170,12 @@ export class PerformanceMonitor extends EventEmitter {
     };
 
     this.metrics.push(metrics);
+
+    if (this.metrics.length > PerformanceMonitor.MAX_METRICS_HISTORY) {
+      this.metrics = this.metrics.slice(
+        -PerformanceMonitor.MAX_METRICS_HISTORY
+      );
+    }
 
     if (this.config.performanceTracking) {
       Logger.debug(
@@ -259,6 +266,17 @@ export class PerformanceMonitor extends EventEmitter {
         `🧹 清理旧指标: ${beforeCount - afterCount} 条记录已删除`,
         'PerformanceMonitor'
       );
+    }
+
+    const spanTimeout = Date.now() - 300_000;
+    for (const [id, span] of this.activeSpans) {
+      if (span.startTime < spanTimeout) {
+        this.activeSpans.delete(id);
+        Logger.debug(
+          `🧹 清理超时span: ${span.name} (${id})`,
+          'PerformanceMonitor'
+        );
+      }
     }
   }
 
@@ -763,7 +781,10 @@ export function recordOTelRequest(
 export async function shutdownOTel(): Promise<void> {
   tracer = null;
   meter = null;
-  Logger.info('📡 OpenTelemetry 透传句柄已清理（SDK 由 Python 后端管理）', 'OTel');
+  Logger.info(
+    '📡 OpenTelemetry 透传句柄已清理（SDK 由 Python 后端管理）',
+    'OTel'
+  );
 }
 
 export default PerformanceMonitor;

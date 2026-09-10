@@ -4,8 +4,8 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Awaitable
 
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("feedback_loops")
+
 
 
 @dataclass

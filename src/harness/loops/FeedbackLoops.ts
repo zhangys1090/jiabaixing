@@ -103,7 +103,10 @@ export class FeedbackLoops {
             meta.userId
           )
           .catch((err) =>
-            Logger.debug(`知识提取失败（非关键）: ${(err as Error).message}`, 'FeedbackLoops')
+            Logger.debug(
+              `知识提取失败（非关键）: ${(err as Error).message}`,
+              'FeedbackLoops'
+            )
           );
       });
     }
@@ -153,7 +156,10 @@ export class FeedbackLoops {
             userId: userId || 'default',
           })
           .catch((err) =>
-            Logger.debug(`反馈提交失败（非关键）: ${(err as Error).message}`, 'FeedbackLoops')
+            Logger.debug(
+              `反馈提交失败（非关键）: ${(err as Error).message}`,
+              'FeedbackLoops'
+            )
           );
       } else {
         const orchestrator = EvolutionOrchestrator.getInstance();
@@ -235,7 +241,8 @@ export class FeedbackLoops {
 
       // 从纠正中自动学习用户偏好
       try {
-        const { PreferenceManager } = await import('../../memory/PreferenceManager');
+        const { PreferenceManager } =
+          await import('../../memory/PreferenceManager');
         const pm = PreferenceManager.getInstance();
         const entry = pm.applyCorrection(input, 'general');
         if (entry) {

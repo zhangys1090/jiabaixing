@@ -78,11 +78,17 @@ export class DIContainer {
       initialized: false,
       tags: new Set(options?.tags ?? []),
       dependencies: options?.dependencies ?? [],
-      onDispose: options?.onDispose as Registration<T>['onDispose'],
+      onDispose: options?.onDispose as
+        | ((instance: unknown) => void | Promise<void>)
+        | undefined,
     });
   }
 
-  registerValue<T>(token: Token, value: T, options?: { tags?: string[] }): void {
+  registerValue<T>(
+    token: Token,
+    value: T,
+    options?: { tags?: string[] }
+  ): void {
     if (this.frozen) {
       throw new Error(`DI: 容器已冻结，无法注册 "${String(token)}"`);
     }
@@ -103,8 +109,12 @@ export class DIContainer {
     }
 
     if (this.resolving.has(token)) {
-      const chain = Array.from(this.resolving).map(t => String(t)).join(' → ');
-      throw new Error(`DI: 检测到循环依赖 "${String(token)}"，解析链: ${chain}`);
+      const chain = Array.from(this.resolving)
+        .map((t) => String(t))
+        .join(' → ');
+      throw new Error(
+        `DI: 检测到循环依赖 "${String(token)}"，解析链: ${chain}`
+      );
     }
 
     if (registration.lifecycle === 'singleton' && registration.initialized) {
@@ -219,9 +229,7 @@ export class DIContainer {
     for (const [token, reg] of this.registrations) {
       for (const dep of reg.dependencies) {
         if (!this.registrations.has(dep)) {
-          errors.push(
-            `"${String(token)}" 依赖未注册的 "${String(dep)}"`
-          );
+          errors.push(`"${String(token)}" 依赖未注册的 "${String(dep)}"`);
         }
       }
     }
@@ -312,7 +320,10 @@ export class DIContainer {
         try {
           await reg.onDispose(reg.instance);
         } catch (err) {
-          Logger.warn(`DI: dispose 失败: ${(err as Error).message}`, 'DIContainer');
+          Logger.warn(
+            `DI: dispose 失败: ${(err as Error).message}`,
+            'DIContainer'
+          );
         }
       }
     }

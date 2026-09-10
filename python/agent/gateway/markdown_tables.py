@@ -21,7 +21,7 @@
         headers=["Name", "Status", "Score"],
         rows=[["alpha", "running", "0.95"], ["beta", "stopped", "0.80"]],
     )
-    print(table)
+    logger.info(table)
 """
 
 from __future__ import annotations
@@ -32,10 +32,11 @@ import json
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable
-
 from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("markdown_tables")
+
+
 
 
 class Align(str, Enum):

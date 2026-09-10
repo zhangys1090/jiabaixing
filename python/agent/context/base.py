@@ -165,6 +165,7 @@ class ContextComponent(ABC):
             result.output = output or {}
 
         except Exception as e:
+            log.debug("base 异常处理", error=str(e))
             error_info = ErrorInfo(
                 error_type=type(e).__name__,
                 message=str(e),
@@ -242,7 +243,7 @@ class ComponentRegistry:
             raise ValueError(f"Component '{component.name}' already registered")
 
         self._components[component.name] = component
-        self._logger.info(
+        self._logger.debug(
             "Component registered",
             component=component.name,
             priority=component.priority,

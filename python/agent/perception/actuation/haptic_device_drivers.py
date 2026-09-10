@@ -23,8 +23,8 @@ from enum import Enum
 from typing import Any
 
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("haptic_device_drivers")
+
 
 
 class HapticDriverType(str, Enum):
@@ -269,6 +269,7 @@ class GamepadHapticDriver:
         try:
             result = await self._rumble(intensity, duration_ms)
         except Exception as e:
+            log.debug("haptic_device_drivers 异常处理", error=str(e))
             result = {"success": False, "error": f"游戏手柄驱动失败: {e}"}
 
         result["duration_ms"] = (time.time() - start) * 1000

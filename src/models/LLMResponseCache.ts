@@ -10,10 +10,12 @@ export interface LLMResponseCacheConfig {
 export class LLMResponseCache {
   private _cache = new Map<string, { response: string; timestamp: number }>();
   private _ttlMs: number;
+  private _maxSize: number;
 
   constructor(config?: LLMResponseCacheConfig | number) {
     this._ttlMs =
       typeof config === 'number' ? config : (config?.ttlMs ?? 5 * 60 * 1000);
+    this._maxSize = typeof config === 'number' ? 500 : (config?.maxSize ?? 500);
   }
 
   get(key: string): string | null {
@@ -27,7 +29,23 @@ export class LLMResponseCache {
   }
 
   set(key: string, response: string): void {
+    if (this._cache.size >= this._maxSize) {
+      this.evictExpired();
+      if (this._cache.size >= this._maxSize) {
+        const firstKey = this._cache.keys().next().value;
+        if (firstKey !== undefined) this._cache.delete(firstKey);
+      }
+    }
     this._cache.set(key, { response, timestamp: Date.now() });
+  }
+
+  private evictExpired(): void {
+    const now = Date.now();
+    for (const [key, entry] of this._cache) {
+      if (now - entry.timestamp > this._ttlMs) {
+        this._cache.delete(key);
+      }
+    }
   }
 
   has(key: string): boolean {

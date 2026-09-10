@@ -9,6 +9,8 @@
  * 解决的核心问题：Agent 重复调用 web_search 相同关键词
  */
 
+import { createHash } from 'crypto';
+
 import { Logger } from '../../../utils/Logger';
 import type { ToolResult } from '../../types';
 
@@ -41,9 +43,10 @@ export interface ConstitutionGuardVerdict {
  * 宪法守卫 provider（TS 入口透传 → Python 宪法守卫核心）。
  * 实际"危险感知 → 动作拦截"判断在 Python 端完成，TS 仅调用与渲染。
  */
-export type ConstitutionGuardProvider = (
-  action: { toolName: string; args: Record<string, unknown> }
-) => Promise<ConstitutionGuardVerdict>;
+export type ConstitutionGuardProvider = (action: {
+  toolName: string;
+  args: Record<string, unknown>;
+}) => Promise<ConstitutionGuardVerdict>;
 
 /** check / guard 的统一返回类型 */
 type GuardOutcome = { blocked: boolean; result?: ToolResult; reason?: string };
@@ -176,6 +179,8 @@ export class ToolCallGuard {
           result: {
             success: false,
             output: `[宪法守卫拦截] ${verdict.reason}`,
+            duration: 0,
+            validated: false,
             metadata: {
               constitutionBlocked: true,
               violations: verdict.violations.map((v) => v.ruleId),
@@ -272,9 +277,32 @@ export class ToolCallGuard {
           },
           {} as Record<string, unknown>
         );
-      return JSON.stringify(sorted);
+      const serialized = JSON.stringify(sorted, (key, value) => {
+        if (
+          value !== null &&
+          typeof value === 'object' &&
+          !Array.isArray(value)
+        ) {
+          return Object.keys(value as Record<string, unknown>)
+            .sort()
+            .reduce(
+              (sortedObj, sortedKey) => {
+                (sortedObj as Record<string, unknown>)[sortedKey] = (
+                  value as Record<string, unknown>
+                )[sortedKey];
+                return sortedObj;
+              },
+              {} as Record<string, unknown>
+            );
+        }
+        return value;
+      });
+      return createHash('sha256').update(serialized).digest('hex').slice(0, 16);
     } catch {
-      return Math.random().toString(); // 无法哈希则不去重
+      return createHash('sha256')
+        .update(`fallback_${Date.now()}_${Math.random()}`)
+        .digest('hex')
+        .slice(0, 16);
     }
   }
 }

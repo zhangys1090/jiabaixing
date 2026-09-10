@@ -102,7 +102,10 @@ export class HarnessConfigManager {
     const resolvedPath = configPath ?? this.configPath ?? this.findConfigFile();
 
     if (!resolvedPath) {
-      Logger.info('HarnessConfig: 未找到配置文件，使用默认配置', 'HarnessConfig');
+      Logger.info(
+        'HarnessConfig: 未找到配置文件，使用默认配置',
+        'HarnessConfig'
+      );
       return this.config;
     }
 
@@ -119,7 +122,10 @@ export class HarnessConfigManager {
       } else if (ext === '.yaml' || ext === '.yml') {
         parsed = this.parseYaml(content);
       } else {
-        Logger.warn(`HarnessConfig: 不支持的配置文件格式: ${ext}`, 'HarnessConfig');
+        Logger.warn(
+          `HarnessConfig: 不支持的配置文件格式: ${ext}`,
+          'HarnessConfig'
+        );
         return this.config;
       }
 
@@ -136,7 +142,8 @@ export class HarnessConfigManager {
   }
 
   save(configPath?: string): void {
-    const resolvedPath = configPath ?? this.configPath ?? this.getDefaultConfigPath();
+    const resolvedPath =
+      configPath ?? this.configPath ?? this.getDefaultConfigPath();
 
     try {
       const dir = path.dirname(resolvedPath);
@@ -156,9 +163,16 @@ export class HarnessConfigManager {
       }
 
       fs.writeFileSync(resolvedPath, content, 'utf-8');
-      Logger.info(`HarnessConfig: 配置已保存到 ${resolvedPath}`, 'HarnessConfig');
+      Logger.info(
+        `HarnessConfig: 配置已保存到 ${resolvedPath}`,
+        'HarnessConfig'
+      );
     } catch (error) {
-      Logger.error('HarnessConfig: 保存配置失败', error as Error, 'HarnessConfig');
+      Logger.error(
+        'HarnessConfig: 保存配置失败',
+        error as Error,
+        'HarnessConfig'
+      );
     }
   }
 
@@ -193,7 +207,9 @@ export class HarnessConfigManager {
   }
 
   addPlugin(plugin: PluginConfig): void {
-    const existing = this.config.plugins.findIndex((p) => p.name === plugin.name);
+    const existing = this.config.plugins.findIndex(
+      (p) => p.name === plugin.name
+    );
     if (existing >= 0) {
       this.config.plugins[existing] = plugin;
     } else {
@@ -276,7 +292,9 @@ export class HarnessConfigManager {
     return path.join(process.cwd(), 'harness.config.yaml');
   }
 
-  private mergeWithDefaults(partial: Partial<HarnessConfigFile>): HarnessConfigFile {
+  private mergeWithDefaults(
+    partial: Partial<HarnessConfigFile>
+  ): HarnessConfigFile {
     const layers: Partial<Record<LayerName, LayerConfig>> = {};
 
     for (const [name, defaultConfig] of Object.entries(DEFAULT_LAYER_CONFIGS)) {
@@ -355,10 +373,18 @@ export class HarnessConfigManager {
     if (value.startsWith('"') && value.endsWith('"')) return value.slice(1, -1);
     if (value.startsWith("'") && value.endsWith("'")) return value.slice(1, -1);
     if (value.startsWith('[')) {
-      try { return JSON.parse(value); } catch { return value; }
+      try {
+        return JSON.parse(value);
+      } catch {
+        return value;
+      }
     }
     if (value.startsWith('{')) {
-      try { return JSON.parse(value); } catch { return value; }
+      try {
+        return JSON.parse(value);
+      } catch {
+        return value;
+      }
     }
     return value;
   }

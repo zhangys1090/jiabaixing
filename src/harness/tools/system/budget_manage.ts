@@ -16,7 +16,6 @@ function toFiniteOr(value: number, fallback: number): number {
   return Number.isFinite(value) ? value : fallback;
 }
 
-
 export const BUDGET_MANAGE_DEF: ToolDefinition = {
   name: 'budget_manage',
   description:
@@ -102,7 +101,10 @@ class BudgetManager {
     if (params.max_duration_ms !== undefined)
       this.config.maxDurationMs = toFiniteOr(Number(params.max_duration_ms), 0);
     if (params.warning_threshold !== undefined)
-      this.config.warningThreshold = toFiniteOr(Number(params.warning_threshold), 0);
+      this.config.warningThreshold = toFiniteOr(
+        Number(params.warning_threshold),
+        0
+      );
     this.overBudget = false;
     this.warnings = [];
     return {

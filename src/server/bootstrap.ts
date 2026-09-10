@@ -3,6 +3,7 @@ import * as net from 'net';
 import * as path from 'path';
 import { JiabaixingCore } from '../core/JiabaixingCore';
 import { ScenarioAwareScheduler } from '../core/ScenarioAwareScheduler';
+import { registerCognitionForwarder } from '../harness/cognition/cognitionForwarder';
 import {
   PythonAgentBridge,
   type PythonAgentConfig,
@@ -11,7 +12,6 @@ import {
   getActivePythonBridge,
   setActivePythonBridge,
 } from '../ide/bridgeRegistry';
-import { registerCognitionForwarder } from '../harness/cognition/cognitionForwarder';
 import { EventBus } from '../shared/EventBus';
 import { Logger } from '../utils/Logger';
 import { initEvolution } from './init/initEvolution';
@@ -505,14 +505,31 @@ export async function startIpcServer(core: JiabaixingCore): Promise<void> {
     });
   });
 
-  ipcServer.on('error', (err: Error) => {
-    Logger.error('IPC 服务器错误', err, 'IPC');
-  });
-
   return new Promise<void>((resolve) => {
-    ipcServer!.listen(pipePath, () => {
+    let settled = false;
+    const server = ipcServer!;
+
+    server.on('error', (err: Error) => {
+      Logger.error(`IPC 服务器错误: ${err.message}`, err, 'IPC');
+      if (!settled) {
+        settled = true;
+        try {
+          server.close();
+        } catch {
+          /* ignore */
+        }
+        ipcServer = null;
+        Logger.warn('IPC 服务器启动失败，跳过 IPC（不影响主服务）', 'IPC');
+        resolve();
+      }
+    });
+
+    server.listen(pipePath, () => {
       Logger.info(`IPC 服务器已启动: ${pipePath}`, 'IPC');
-      resolve();
+      if (!settled) {
+        settled = true;
+        resolve();
+      }
     });
   });
 }
@@ -535,48 +552,75 @@ export function stopIpcServer(): Promise<void> {
 }
 
 export function printBanner(): void {
-  Logger.info('\n  ===========================================================\n  |                                                         |\n  |   jiabaixing v5.0                                       |\n  |                                                         |\n  ===========================================================\n', 'Bootstrap');
+  Logger.info('jiabaixing v5.0', 'Bootstrap');
+}
+
+const BOOT_STEP_WIDTH = 18;
+function bootStep(label: string): void {
+  process.stdout.write(`  ${label}`.padEnd(BOOT_STEP_WIDTH) + '... ');
+}
+function bootOk(msg?: string): void {
+  process.stdout.write('OK\n');
+  if (msg) Logger.info(msg, 'Bootstrap');
+}
+
+async function healthCheckWithRetry(
+  bridge: PythonAgentBridge,
+  maxRetries = 10,
+  intervalMs = 2000
+): Promise<boolean> {
+  for (let i = 0; i <= maxRetries; i++) {
+    if (await bridge.healthCheck()) return true;
+    if (i < maxRetries) {
+      Logger.info(
+        `Python Agent 未就绪，${intervalMs / 1000}s 后重试 (${i + 1}/${maxRetries})`,
+        'Bootstrap'
+      );
+      await new Promise((r) => setTimeout(r, intervalMs));
+    }
+  }
+  return false;
 }
 
 export async function bootstrap(): Promise<JiabaixingCore> {
-  Logger.info('🚀 jiabaixing v5.0 启动中...', 'Bootstrap');
+  Logger.info('jiabaixing v5.0 启动', 'Bootstrap');
 
   let core: JiabaixingCore;
 
   try {
-    process.stdout.write('  🧠 核心引擎... ');
+    bootStep('核心引擎');
     core = new JiabaixingCore();
-    Logger.info('✅ 核心引擎初始化完成', 'Bootstrap');
+    bootOk('核心引擎初始化完成');
 
-    process.stdout.write('  🔒 安全模块... ');
+    bootStep('安全模块');
     const { sovereigntyPipeline } = await initSecurity();
-    Logger.info('✅ 安全模块初始化完成', 'Bootstrap');
+    bootOk('安全模块初始化完成');
 
-    process.stdout.write('  📡 可观测性... ');
-    Logger.info('✅ 可观测性就绪（OTel 由 Python 后端管理，TS 仅透传 traceId）', 'Bootstrap');
+    bootStep('可观测性');
+    bootOk('可观测性就绪');
 
-    process.stdout.write('  💾 数据库... ');
+    bootStep('数据库');
     const { memoryEngine } = await initMemory(core, sovereigntyPipeline);
-    Logger.info('✅ 数据库初始化完成', 'Bootstrap');
+    bootOk('数据库初始化完成');
 
-    process.stdout.write('  🎭 交互模块... ');
+    bootStep('交互模块');
     const { sceneRecognizer } = await initInteraction(
       core,
       memoryEngine as import('../core/IMemoryEngine').IMemoryEngine
     );
-    Logger.info('✅ 交互模块初始化完成', 'Bootstrap');
+    bootOk('交互模块初始化完成');
 
-    process.stdout.write('  🔧 技能系统... ');
-    Logger.info('✅ 技能系统就绪（内置）', 'Bootstrap');
+    bootStep('技能系统');
+    bootOk('技能系统就绪');
 
-    process.stdout.write('  🧠 推理引擎... ');
-    Logger.info('✅ 推理引擎就绪', 'Bootstrap');
+    bootStep('推理引擎');
+    bootOk('推理引擎就绪');
 
-    process.stdout.write('  🧬 核心初始化... ');
+    bootStep('核心初始化');
     await core.initialize();
-    Logger.info('✅ 核心初始化完成', 'Bootstrap');
+    bootOk('核心初始化完成');
 
-    process.stdout.write('  📡 调度器... ');
+    bootStep('调度器');
     const scenarioScheduler = new ScenarioAwareScheduler();
     scenarioScheduler.setMemoryEngine(memoryEngine);
 
@@ -587,11 +631,11 @@ export async function bootstrap(): Promise<JiabaixingCore> {
     const { setSchedulerInstance } = await import('../routes/automation');
     setSchedulerInstance(scenarioScheduler);
 
-    Logger.info('✅ 调度器启动完成', 'Bootstrap');
+    bootOk('调度器启动完成');
 
-    process.stdout.write('  🧬 进化引擎... ');
+    bootStep('进化引擎');
     await initEvolution(core, memoryEngine);
-    Logger.info('✅ 进化引擎初始化完成', 'Bootstrap');
+    bootOk('进化引擎初始化完成');
 
     // ── 后端选型（纯环境变量解析，无副作用；需前置以便决定 TS Harness 是否构建）──
     // V5.0 默认启用 Python 后端（真后端）。
@@ -607,17 +651,15 @@ export async function bootstrap(): Promise<JiabaixingCore> {
     // 必须先于 MCP Host 与 Harness：前者要用 bridge 实例，后者要根据 bridge
     // 的**实际可用性**（而非配置意图）决定是否构建 TS 兜底实现。
     if (usePythonBackend) {
-      process.stdout.write('  🐍 Python Agent 桥接... ');
+      bootStep('Python Agent');
       const pythonConfig: PythonAgentConfig = {
         baseUrl: getPythonAgentUrl(),
         timeout: 60000,
       };
       pythonBridge = new PythonAgentBridge(pythonConfig);
       setActivePythonBridge(pythonBridge);
-      // D2 (P2 第4轮): 注册认知信号回灌转发器 — 把 TS 认知工具的 cognition_result
-      // 经 PythonAgentBridge 转发到 Python 会话缓冲, 供 ReAct 循环 LLM 消费。
       registerCognitionForwarder();
-      const pyHealthy = await pythonBridge.healthCheck();
+      const pyHealthy = await healthCheckWithRetry(pythonBridge);
       if (pyHealthy) {
         pythonBridge.setTsEventBusForward((event: string, payload: unknown) => {
           try {
@@ -629,13 +671,9 @@ export async function bootstrap(): Promise<JiabaixingCore> {
         pythonBridge.connectEvents();
         pythonBridge.connectChatWs();
         core.setPythonBridgeResolver(() => pythonBridge);
-        Logger.info('✅ Python Agent 桥接成功', 'Bootstrap');
-        Logger.info(
-          `Python Agent 桥接已启用: ${getPythonAgentUrl()}`,
-          'Bootstrap'
-        );
+        bootOk(`Python Agent 桥接成功: ${getPythonAgentUrl()}`);
       } else {
-        Logger.warn('⚠️ Python Agent 不可用，降级到 TS 本地', 'Bootstrap');
+        process.stdout.write('FALLBACK\n');
         Logger.warn(
           `Python Agent 不可用: ${getPythonAgentUrl()}，降级到 TS 本地`,
           'Bootstrap'
@@ -644,28 +682,28 @@ export async function bootstrap(): Promise<JiabaixingCore> {
         setActivePythonBridge(null);
       }
     } else {
-      process.stdout.write('  🐍 Python Agent 桥接... ');
-      Logger.info('⏭️ 使用 TS 本地', 'Bootstrap');
+      bootStep('Python Agent');
+      process.stdout.write('SKIP (TS本地)\n');
     }
 
     // W5（审计 §1.8）：此处原先位于 Python 桥接**之前**，
     // getActivePythonBridge() 恒为 null → startAllMcpServers() 从未执行，
     // 却照常打印 ✅（接线断裂 + 假成功）。现移到桥接之后并如实上报。
-    process.stdout.write('  🔌 MCP Host... ');
+    bootStep('MCP Host');
     const mcpBridge = getActivePythonBridge();
     if (mcpBridge) {
       try {
         await mcpBridge.startAllMcpServers();
-        Logger.info('✅ MCP Host 启动成功', 'Bootstrap');
+        bootOk('MCP Host 启动成功');
       } catch (err) {
-        Logger.warn('⚠️ MCP Host 启动失败', 'Bootstrap');
+        process.stdout.write('FAIL\n');
         Logger.warn(
           `MCP Host 启动失败: ${(err as Error).message}`,
           'Bootstrap'
         );
       }
     } else {
-      Logger.info('⏭️ 无 Python 桥接，MCP Host 未启动', 'Bootstrap');
+      process.stdout.write('SKIP\n');
     }
 
     // W2（审计 §1.8）：TS Harness 此前无条件构建。
@@ -680,38 +718,33 @@ export async function bootstrap(): Promise<JiabaixingCore> {
     // P0-1 收口：后端决策在启动期一次性锁定，禁止运行时静默切换双脑。
     _backendDecision = pythonBackendLive ? 'python' : 'ts';
     Logger.info(
-      `后端决策已锁定：${pythonBackendLive ? 'Python 主实现（AGENTS.md §0.1）' : 'TS 本地兜底'}`,
+      `后端决策锁定: ${pythonBackendLive ? 'Python' : 'TS本地'}`,
       'Bootstrap'
     );
     const enableTsHarness = !pythonBackendLive || harnessForced;
 
-    process.stdout.write('  🏗️ Harness 框架... ');
+    bootStep('Harness 框架');
     let harness: Awaited<ReturnType<typeof initHarness>>['harness'] = null;
     if (enableTsHarness) {
       ({ harness } = await initHarness(core, memoryEngine, sceneRecognizer));
-      if (pythonBackendLive) {
-        Logger.info('✅ Harness 已构建 (AGENT_HARNESS_ENABLE 强制开启)', 'Bootstrap');
-      } else {
-        Logger.info('✅ Harness 已构建 (TS 本地兜底)', 'Bootstrap');
-      }
-    } else {
-      Logger.info('⏭️ Python 后端为主实现；AGENT_HARNESS_ENABLE=1 可强制开启', 'Bootstrap');
-      Logger.info(
-        'TS Harness 未构建：Agent 核心由 Python 后端承担（AGENTS.md §0.1）',
-        'Bootstrap'
+      bootOk(
+        pythonBackendLive
+          ? 'Harness 已构建 (AGENT_HARNESS_ENABLE)'
+          : 'Harness 已构建 (TS本地兜底)'
       );
+    } else {
+      process.stdout.write('SKIP (Python主实现)\n');
     }
 
-    process.stdout.write('  📡 网关隔离... ');
+    bootStep('网关隔离');
     await initGateway(core, harness);
-    Logger.info('✅ 网关隔离启动完成', 'Bootstrap');
+    bootOk('网关隔离启动完成');
 
-    process.stdout.write('  🔗 IPC 服务器... ');
+    bootStep('IPC 服务器');
     await startIpcServer(core);
-    Logger.info('✅ IPC 服务器启动完成', 'Bootstrap');
+    bootOk('IPC 服务器启动完成');
 
-    Logger.info('✅ 系统就绪', 'Bootstrap');
-    Logger.info('系统初始化完成', 'Bootstrap');
+    Logger.info('系统就绪', 'Bootstrap');
 
     return core;
   } catch (error) {

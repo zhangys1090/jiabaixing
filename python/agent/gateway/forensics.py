@@ -42,6 +42,7 @@ from typing import Any
 from agent.config import DATA_ROOT
 
 from agent.core.logger import StructuredLogger
+from agent.core.logger import log_ignored
 
 log = StructuredLogger("gateway.forensics")
 
@@ -250,8 +251,8 @@ class ShutdownForensics:
             self._pending_signal = reason
             try:
                 os.write(self._signal_wfd, b"\x00")
-            except OSError:
-                pass
+            except OSError as _exc:
+                log_ignored(log, "forensics.ShutdownForensics.register_signal_handlers._sig_handler", _exc)
 
         def _signal_reader() -> None:
             # 守护线程：读取自管道，在「非信号上下文」中执行 record 与关闭回调，
@@ -270,14 +271,14 @@ class ShutdownForensics:
                         else signal.SIGINT
                     )
                     self.record(reason, {"signal": signum})
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    log.warning("关机信号记录失败", error=str(_exc))
                 cb = self._shutdown_callback
                 if cb is not None:
                     try:
                         cb()
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        log.warning("关机回调执行失败", error=str(_exc))
 
         try:
             signal.signal(signal.SIGTERM, _sig_handler)
@@ -287,7 +288,7 @@ class ShutdownForensics:
             )
             reader.start()
             self._registered_signals = True
-            log.info("关闭信号处理器已注册（自管道模式，异步信号安全）")
+            log.debug("关闭信号处理器已注册（自管道模式，异步信号安全）")
         except (OSError, ValueError) as e:
             log.warning("信号处理器注册失败", error=str(e))
 

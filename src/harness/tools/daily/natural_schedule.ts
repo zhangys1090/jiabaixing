@@ -7,6 +7,8 @@
  * - 支持循环：每小时/每天/每周/每月
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
 import { Logger } from '../../../utils/Logger';
 import type { ToolContext, ToolDefinition, ToolResult } from '../../types';
 import { ToolCategory } from '../../types';
@@ -52,11 +54,7 @@ interface ScheduledTask {
 
 // 任务存储（内存 + 文件持久化）
 const tasks: Map<string, ScheduledTask> = new Map();
-const TASKS_FILE = path.join(
-  process.cwd(),
-  'data',
-  'scheduled-tasks.json'
-);
+const TASKS_FILE = path.join(process.cwd(), 'data', 'scheduled-tasks.json');
 
 function loadTasks(): void {
   try {
@@ -67,7 +65,10 @@ function loadTasks(): void {
       }
     }
   } catch (e) {
-    Logger.warn(`定时任务加载失败，已忽略损坏的 scheduled-tasks.json: ${String(e)}`, 'NaturalSchedule');
+    Logger.warn(
+      `定时任务加载失败，已忽略损坏的 scheduled-tasks.json: ${String(e)}`,
+      'NaturalSchedule'
+    );
   }
 }
 
@@ -81,7 +82,10 @@ function saveTasks(): void {
       'utf-8'
     );
   } catch (e) {
-    Logger.warn(`定时任务加载失败，已忽略损坏的 scheduled-tasks.json: ${String(e)}`, 'NaturalSchedule');
+    Logger.warn(
+      `定时任务加载失败，已忽略损坏的 scheduled-tasks.json: ${String(e)}`,
+      'NaturalSchedule'
+    );
   }
 }
 

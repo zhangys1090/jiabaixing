@@ -61,7 +61,9 @@ describe('SubAgentFanout W7/W8 traceId + 感知模板', () => {
       traceId: 'trace-inject',
     });
     expect(received).not.toBeNull();
-    expect((received as unknown as TaskNode).metadata?.traceId).toBe('trace-inject');
+    expect((received as unknown as TaskNode).metadata?.traceId).toBe(
+      'trace-inject'
+    );
     expect(result.subResults[0].traceId).toBe('trace-inject');
   });
 
@@ -81,7 +83,11 @@ describe('SubAgentFanout W7/W8 traceId + 感知模板', () => {
       'device_control',
       'visual_operator',
     ]);
-    expect(PERCEPTION_AGENT_TEMPLATES.visual_operator.modalities).toContain('visual');
-    expect(PERCEPTION_AGENT_TEMPLATES.device_control.modalities).toContain('environment');
+    expect(PERCEPTION_AGENT_TEMPLATES.visual_operator.modalities).toContain(
+      'visual'
+    );
+    expect(PERCEPTION_AGENT_TEMPLATES.device_control.modalities).toContain(
+      'environment'
+    );
   });
 });

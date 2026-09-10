@@ -122,15 +122,19 @@ def test_harden_windows_graceful_when_pywin32_missing(monkeypatch):
         ("off", False),
         ("true", True),
         ("on", True),
-        ("auto", False),  # 本环境 pywin32 缺失 → auto 解析为 False
+        # auto 跟随 pywin32 可用性：显式 mock 缺失环境，保证测试不依赖宿主机是否安装 pywin32。
     ],
 )
 def test_hard_windows_enabled_parsing(monkeypatch, env_val, expected):
     monkeypatch.setenv("SANDBOX_HARD_WINDOWS", env_val)
-    # auto 依赖 is_available；本环境 pywin32 缺失，故为 False。
+    monkeypatch.setattr(windows_hard.WindowsHardSandbox, "is_available", classmethod(lambda cls: False))
     assert windows_hard.hard_windows_enabled() is expected
 
 
-def test_windows_hard_sandbox_is_available_false_without_pywin32():
-    """本环境未安装 pywin32，is_available() 必须为 False（硬隔离安全降级）。"""
+def test_windows_hard_sandbox_is_available_false_without_pywin32(monkeypatch):
+    """pywin32 不可用时 is_available() 必须为 False（硬隔离安全降级）。
+
+    mock _pywin32_available 以模拟"未安装 pywin32"环境（不依赖宿主机真实状态）。
+    """
+    monkeypatch.setattr(windows_hard, "_pywin32_available", lambda: False)
     assert windows_hard.WindowsHardSandbox.is_available() is False

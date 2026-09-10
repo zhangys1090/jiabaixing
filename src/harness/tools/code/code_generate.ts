@@ -2,6 +2,7 @@
  * Harness Tool: code_generate - 生成代码
  */
 
+import { Logger } from '../../../utils/Logger';
 import type { ToolContext, ToolDefinition, ToolResult } from '../../types';
 import { Permission, ToolCategory } from '../../types';
 import { scanGeneratedCode } from './codeShared';

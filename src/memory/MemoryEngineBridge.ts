@@ -8,11 +8,11 @@
  * AGENT_BACKEND=python（默认）时全部走 Python；Python 不可用时按最小可用降级。
  */
 
+import type { MemoryEngineUserProfile } from '../core/ConstitutionPromptBuilder';
+import type { IMemoryEngine } from '../core/IMemoryEngine';
 import { getActivePythonBridge } from '../ide/bridgeRegistry';
 import Logger from '../utils/Logger';
 import { UserProfile } from './UserProfile';
-import type { IMemoryEngine } from '../core/IMemoryEngine';
-import type { MemoryEngineUserProfile } from '../core/ConstitutionPromptBuilder';
 
 // 复用既有类型/枚举，保持下游 import 不变
 export enum MemoryType {
@@ -86,10 +86,30 @@ interface MemoryRetrievalRow {
 
 /**
  * 记忆引擎桥接实现。所有方法委托 Python；本地仅做最小降级（返回空结果 / no-op），不实现核心逻辑。
+ *
+ * D6: 所有 write/read 操作经过 MemoryAuthority 审计追踪。
  */
 export class MemoryEngineBridge implements IMemoryEngine {
   /** 本地用户画像存根（Python 持有真实数据；生产仅经 getUserProfile 暴露本地视图，与旧 MemoryEngine 行为一致） */
   private userProfile = new UserProfile();
+
+  private recordMemoryOp(operation: 'store' | 'retrieve', memoryType: 'short_term' | 'long_term' | 'episodic' | 'persistent_hermes' | 'feedback', goalId?: string, decisionId?: string): void {
+    try {
+      const { MemoryAuthority } = require('../authority/MemoryAuthority');
+      const ma = MemoryAuthority.getInstance();
+      const opId = `MO_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+      (ma as any).recordTraceDirect?.({
+        operationId: opId,
+        operation,
+        memoryType,
+        goalId: goalId ?? null,
+        decisionId: decisionId ?? null,
+        snapshotId: null,
+        source: 'ts_bridge',
+        timestamp: Date.now(),
+      });
+    } catch { /* MemoryAuthority audit failure must not block memory operations */ }
+  }
 
   // ==================== 存储 ====================
 
@@ -98,6 +118,7 @@ export class MemoryEngineBridge implements IMemoryEngine {
     scene?: string,
     emotion?: string
   ): Promise<MemoryItem> {
+    this.recordMemoryOp('store', 'short_term');
     const bridge = getActivePythonBridge();
     const contentStr =
       typeof content === 'string' ? content : JSON.stringify(content);
@@ -131,6 +152,7 @@ export class MemoryEngineBridge implements IMemoryEngine {
     scene?: string,
     emotion?: string
   ): Promise<MemoryItem> {
+    this.recordMemoryOp('store', 'long_term');
     const bridge = getActivePythonBridge();
     const contentStr =
       typeof content === 'string' ? content : JSON.stringify(content);
@@ -164,6 +186,7 @@ export class MemoryEngineBridge implements IMemoryEngine {
     scene?: string,
     emotion?: string
   ): Promise<MemoryItem> {
+    this.recordMemoryOp('store', 'short_term');
     const bridge = getActivePythonBridge();
     const contentStr =
       typeof content === 'string' ? content : JSON.stringify(content);
@@ -201,6 +224,7 @@ export class MemoryEngineBridge implements IMemoryEngine {
     userId?: string;
     timestamp?: number;
   }): Promise<void> {
+    this.recordMemoryOp('store', 'feedback');
     const bridge = getActivePythonBridge();
     if (bridge) {
       // bridge.memoryStoreFeedback 要求 feedbackType 为字面量联合类型，调用处放宽后在此收窄
@@ -223,6 +247,7 @@ export class MemoryEngineBridge implements IMemoryEngine {
     emotion?: string,
     topK: number = 10
   ): Promise<MemoryItem[]> {
+    this.recordMemoryOp('retrieve', 'long_term');
     const bridge = getActivePythonBridge();
     if (bridge) {
       const results = await bridge.memoryHybridRetrieval(
@@ -269,6 +294,7 @@ export class MemoryEngineBridge implements IMemoryEngine {
     memories: Array<{ type: string; relevance: number; content: string }>;
     preferences: { codingStyle: string[]; namingRules: string[] };
   }> {
+    this.recordMemoryOp('retrieve', 'long_term');
     const bridge = getActivePythonBridge();
     if (bridge) {
       try {
@@ -315,7 +341,7 @@ export class MemoryEngineBridge implements IMemoryEngine {
     return this.userProfile as unknown as MemoryEngineUserProfile;
   }
 
-  public async getUserProfileSummary(userId: string): Promise<{
+  public async getUserProfileSummary(_userId: string): Promise<{
     name?: string;
     preferredLanguage?: string;
     preferredFrameworks?: string[];

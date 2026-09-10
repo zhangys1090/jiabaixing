@@ -13,61 +13,42 @@
 
 // 基础模块
 export {
-  ScreenCapture,
-  ScreenshotOptions,
-  ScreenshotResult,
-} from './ScreenCapture';
-export { WindowManager, WindowInfo, WindowActionResult } from './WindowManager';
-export { SystemInput, MousePosition, InputResult } from './SystemInput';
+    AuthorizationDecision,
+    AuthorizedExecutionResult, DesktopActionAuthority
+} from './DesktopActionAuthority';
 export {
-  DesktopVisionEngine,
-  DesktopObservation,
-  DesktopVisionConfig,
-} from './DesktopVisionEngine';
-export {
-  DesktopActionExecutor,
-  DesktopAction,
-  DesktopActionResult,
-  DesktopTaskResult,
+    DesktopAction, DesktopActionExecutor, DesktopActionResult,
+    DesktopTaskResult
 } from './DesktopActionExecutor';
 export {
-  DesktopAgentLoop,
-  DesktopAgentConfig,
-  DesktopAgentResult,
+    DesktopAgentConfig, DesktopAgentLoop, DesktopAgentResult
 } from './DesktopAgentLoop';
 export {
-  DesktopUIInspector,
-  UIElement,
-  UIElementNode,
-  ElementQueryResult,
-  UIInspectorConfig,
-  UIAControlType,
+    DecisionAction,
+    DecisionExperience,
+    DecisionPolicy, DecisionState, DesktopDecisionEngine
+} from './DesktopDecisionEngine';
+export {
+    DesktopUIInspector, ElementQueryResult, UIAControlType, UIElement,
+    UIElementNode, UIInspectorConfig
 } from './DesktopUIInspector';
 export {
-  ElementMatcher,
-  VisualElement,
-  MatchResult,
-  MatcherConfig,
+    DesktopObservation,
+    DesktopVisionConfig, DesktopVisionEngine
+} from './DesktopVisionEngine';
+export {
+    ElementMatcher, MatcherConfig, MatchResult, VisualElement
 } from './ElementMatcher';
 export {
-  StateSnapshotManager,
-  SnapshotTriggerType,
-  SnapshotStatus,
-  DesktopStateSnapshot,
-  SnapshotMetadata,
-  StateDiffResult,
-  CustomStateProvider,
-  StateSnapshotManagerConfig,
-  SnapshotRestoreResult,
-  SnapshotListOptions,
-} from './StateSnapshotManager';
+    ScreenCapture,
+    ScreenshotOptions,
+    ScreenshotResult
+} from './ScreenCapture';
 export {
-  DesktopDecisionEngine,
-  DecisionState,
-  DecisionAction,
-  DecisionExperience,
-  DecisionPolicy,
-} from './DesktopDecisionEngine';
+    CustomStateProvider, DesktopStateSnapshot, SnapshotListOptions, SnapshotMetadata, SnapshotRestoreResult, SnapshotStatus, SnapshotTriggerType, StateDiffResult, StateSnapshotManager, StateSnapshotManagerConfig
+} from './StateSnapshotManager';
+export { InputResult, MousePosition, SystemInput } from './SystemInput';
+export { WindowActionResult, WindowInfo, WindowManager } from './WindowManager';
 
 // ========== Codex风格 Computer Use 新增模块 ==========
 
@@ -77,15 +58,8 @@ export {
  * 内部自动转换为实际像素坐标
  */
 export {
-  NormalizedCoordinateSystem,
-  NormalizedPoint,
-  PixelPoint,
-  NormalizedRect,
-  PixelRect,
-  NORMALIZED_MAX,
-  coords,
-  toPixel,
-  toNormalized,
+    coords, NORMALIZED_MAX, NormalizedCoordinateSystem,
+    NormalizedPoint, NormalizedRect, PixelPoint, PixelRect, toNormalized, toPixel
 } from './NormalizedCoordinates';
 
 /**
@@ -101,11 +75,8 @@ export { DesktopMCPServer, MCPTool, MCPToolResult } from './DesktopMCPServer';
  * 参考 UI-TARS Event Stream 设计
  */
 export {
-  DesktopEventStream,
-  DesktopEventType,
-  DesktopEvent,
-  EventStreamOptions,
-  eventStream,
+    DesktopEvent, DesktopEventStream,
+    DesktopEventType, eventStream, EventStreamOptions
 } from './DesktopEventStream';
 
 /**
@@ -114,11 +85,7 @@ export {
  * 参考 Codex Computer Use 安全设计
  */
 export {
-  DesktopSafetyGuard,
-  SafetyLevel,
-  SafetyConfig,
-  DangerousAction,
-  safetyGuard,
+    DangerousAction, DesktopSafetyGuard, SafetyConfig, safetyGuard, SafetyLevel
 } from './DesktopSafetyGuard';
 
 /**
@@ -126,11 +93,8 @@ export {
  * 预定义复杂任务模板，包含匹配规则、操作步骤、验证点、错误恢复
  */
 export {
-  DesktopSkillRegistry,
-  DesktopSkill,
-  SkillStep,
-  SkillExecutionResult,
-  skillRegistry,
+    DesktopSkill, DesktopSkillRegistry, SkillExecutionResult,
+    skillRegistry, SkillStep
 } from './DesktopSkillRegistry';
 
 /**
@@ -139,8 +103,6 @@ export {
  * 支持：技能匹配、LLM规划、安全检查、事件推送
  */
 export {
-  DesktopExecutionAgent,
-  ExecutionAgentConfig,
-  ExecutionResult,
-  executionAgent,
+    DesktopExecutionAgent, executionAgent, ExecutionAgentConfig,
+    ExecutionResult
 } from './DesktopExecutionAgent';

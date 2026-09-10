@@ -28,13 +28,14 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, TYPE_CHECKING
-
 from agent.core.logger import StructuredLogger
+
 
 if TYPE_CHECKING:
     from agent.llm.provider import LLMProvider
 
 log = StructuredLogger("auxiliary_client")
+
 
 
 class AuxiliaryTask(str, Enum):
@@ -224,6 +225,7 @@ class AuxiliaryLLMClient:
                 duration_ms=duration,
             )
         except Exception as e:
+            log.debug("auxiliary_client 异常处理", error=str(e))
             duration = (time.monotonic() - start) * 1000
             log.error("旁路 LLM 调用失败", task=task.value, model=model, error=str(e))
             return AuxiliaryResult(

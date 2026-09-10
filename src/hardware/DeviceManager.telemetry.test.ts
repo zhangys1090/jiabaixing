@@ -32,11 +32,13 @@ function makeStatus(): DeviceStatus {
 
 function makeManager(): DeviceManager {
   const dm = new DeviceManager();
-  (dm as unknown as { devices: Map<string, Device> }).devices.set('dev-1', makeDevice());
-  (dm as unknown as { deviceStatuses: Map<string, DeviceStatus> }).deviceStatuses.set(
+  (dm as unknown as { devices: Map<string, Device> }).devices.set(
     'dev-1',
-    makeStatus()
+    makeDevice()
   );
+  (
+    dm as unknown as { deviceStatuses: Map<string, DeviceStatus> }
+  ).deviceStatuses.set('dev-1', makeStatus());
   return dm;
 }
 
@@ -56,10 +58,9 @@ describe('DeviceManager W3 遥测（TS 入口/透传）', () => {
 
   it('离线状态 online=false', () => {
     const dm = makeManager();
-    (dm as unknown as { deviceStatuses: Map<string, DeviceStatus> }).deviceStatuses.set(
-      'dev-1',
-      { ...makeStatus(), status: 'offline' }
-    );
+    (
+      dm as unknown as { deviceStatuses: Map<string, DeviceStatus> }
+    ).deviceStatuses.set('dev-1', { ...makeStatus(), status: 'offline' });
     const p = dm.buildDeviceTelemetry()[0];
     expect(p.online).toBe(false);
     expect(p.state).toBe('offline');

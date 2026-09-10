@@ -24,7 +24,8 @@ V6.0 设计:
 from __future__ import annotations
 
 from typing import Any, AsyncIterator, Protocol, runtime_checkable
-from agent.core.logger import log_ignored
+from agent.core.logger import StructuredLogger, log_ignored
+log = StructuredLogger("domain_containers")
 
 
 @runtime_checkable
@@ -32,6 +33,7 @@ class DomainContainer(Protocol):
     """域容器协议 — 所有域容器必须实现此接口。
 
     V6.0 P3: 域生命周期 — startup/shutdown/health_check 钩子。
+    V6.1: 域间依赖声明 — depends_on 显式化域间启动顺序。
     """
 
     @property
@@ -42,6 +44,11 @@ class DomainContainer(Protocol):
     @property
     def is_initialized(self) -> bool:
         """域是否已初始化。"""
+        ...
+
+    @property
+    def depends_on(self) -> tuple[str, ...]:
+        """域间依赖 — 声明本域启动前必须就绪的域名称。"""
         ...
 
     def get_subsystem(self, name: str) -> Any | None:
@@ -69,6 +76,10 @@ class _DomainLifecycleMixin:
     """域生命周期默认实现 — 所有域容器继承此混入获得 startup/shutdown/health_check/depends_on。"""
 
     depends_on: tuple[str, ...] = ()
+
+    @property
+    def _depends_on_prop(self) -> tuple[str, ...]:
+        return self.depends_on
 
     async def startup(self) -> None:
         pass
@@ -264,6 +275,7 @@ class DomainEventBus:
                 if result is not None and hasattr(result, "__await__"):
                     await result
             except Exception as e:
+                log.debug("domain_containers 异常处理", error=str(e))
                 from agent.core.logger import StructuredLogger
                 _bus_log = StructuredLogger("domain_event_bus")
                 _bus_log.warning("Event handler failed", event=event_type, error=str(e))
@@ -279,6 +291,8 @@ class CoreDomain(_DomainLifecycleMixin):
     V6.0: 实现 LLMInvokeProtocol 行为协议，将 LLM 调用链纳入域边界。
     V6.0 P3: LLM 子域拆分 — cache/pool/router/limiter 归入 LLMSubDomain。
     """
+
+    depends_on: tuple[str, ...] = ()
 
     def __init__(self) -> None:
         self.llm: Any = None
@@ -317,11 +331,13 @@ class CoreDomain(_DomainLifecycleMixin):
                 if self.llm_sub.connection_pool is not None and hasattr(self.llm_sub.connection_pool, "warmup"):
                     await self.llm_sub.connection_pool.warmup()
             except Exception as _exc:
+                log.warning("domain_containers 异常处理", error=str(_exc))
                 log_ignored(None, "domain_containers.CoreDomain.startup", _exc)
             try:
                 if self.llm_sub.cache is not None and hasattr(self.llm_sub.cache, "warmup"):
                     await self.llm_sub.cache.warmup()
             except Exception as _exc:
+                log.warning("domain_containers 异常处理", error=str(_exc))
                 log_ignored(None, "domain_containers.CoreDomain.startup", _exc)
 
     async def shutdown(self) -> None:
@@ -330,11 +346,13 @@ class CoreDomain(_DomainLifecycleMixin):
                 if self.llm_sub.connection_pool is not None and hasattr(self.llm_sub.connection_pool, "close"):
                     await self.llm_sub.connection_pool.close()
             except Exception as _exc:
+                log.warning("domain_containers 异常处理", error=str(_exc))
                 log_ignored(None, "domain_containers.CoreDomain.shutdown", _exc)
             try:
                 if self.llm_sub.credential_pool is not None and hasattr(self.llm_sub.credential_pool, "close"):
                     await self.llm_sub.credential_pool.close()
             except Exception as _exc:
+                log.warning("domain_containers 异常处理", error=str(_exc))
                 log_ignored(None, "domain_containers.CoreDomain.shutdown", _exc)
 
     async def health_check(self) -> dict[str, Any]:
@@ -344,6 +362,7 @@ class CoreDomain(_DomainLifecycleMixin):
                 available = await self.llm.check_available()
                 details["llm_available"] = available
             except Exception as e:
+                log.warning("domain_containers 异常处理", error=str(e))
                 details["llm_available"] = False
                 details["llm_error"] = str(e)
         return {"healthy": self._initialized and details.get("llm_available", False), "details": details}
@@ -581,6 +600,7 @@ class SecurityDomain(_DomainLifecycleMixin):
                     if hasattr(watcher, "stop"):
                         await watcher.stop()
             except Exception as _exc:
+                log.warning("domain_containers 异常处理", error=str(_exc))
                 log_ignored(None, "domain_containers.PerceptionDomain.shutdown", _exc)
         if self.safety_net is not None:
             try:
@@ -588,6 +608,7 @@ class SecurityDomain(_DomainLifecycleMixin):
                 if cp_mgr is not None and hasattr(cp_mgr, "cleanup"):
                     cp_mgr.cleanup(days=0)
             except Exception as _exc:
+                log.warning("domain_containers 异常处理", error=str(_exc))
                 log_ignored(None, "domain_containers.PersistenceDomain.shutdown", _exc)
 
 
@@ -647,6 +668,7 @@ class PersistenceDomain(_DomainLifecycleMixin):
             try:
                 await self.knowledge_lifecycle.close()
             except Exception as _exc:
+                log.warning("domain_containers 异常处理", error=str(_exc))
                 log_ignored(None, "domain_containers.PersistenceDomain.shutdown", _exc)
         if self.workflow_engine is not None:
             try:
@@ -654,6 +676,7 @@ class PersistenceDomain(_DomainLifecycleMixin):
                 if store is not None and hasattr(store, "close"):
                     store.close()
             except Exception as _exc:
+                log.warning("domain_containers 异常处理", error=str(_exc))
                 log_ignored(None, "domain_containers.PersistenceDomain.shutdown", _exc)
 
 
@@ -842,11 +865,13 @@ class IntegrationDomain(_DomainLifecycleMixin):
             try:
                 await self.mcp_lifecycle.stop_all()
             except Exception as _exc:
+                log.warning("domain_containers 异常处理", error=str(_exc))
                 log_ignored(None, "domain_containers.IntegrationDomain.shutdown", _exc)
         if self.mcp_client is not None:
             try:
                 await self.mcp_client.disconnect_all()
             except Exception as _exc:
+                log.warning("domain_containers 异常处理", error=str(_exc))
                 log_ignored(None, "domain_containers.IntegrationDomain.shutdown", _exc)
 
 
@@ -1023,6 +1048,7 @@ class CacheDomain(_DomainLifecycleMixin):
                     import structlog
                     structlog.get_logger().warning("Redis cache unhealthy at startup")
             except Exception as _exc:
+                log.warning("domain_containers 异常处理", error=str(_exc))
                 log_ignored(None, "domain_containers.CacheDomain.startup", _exc)
 
     async def shutdown(self) -> None:
@@ -1031,6 +1057,7 @@ class CacheDomain(_DomainLifecycleMixin):
                 if hasattr(self._redis_cache, "close"):
                     await self._redis_cache.close()
             except Exception as _exc:
+                log.warning("domain_containers 异常处理", error=str(_exc))
                 log_ignored(None, "domain_containers.CacheDomain.shutdown", _exc)
             self._redis_cache = None
 
@@ -1041,6 +1068,7 @@ class CacheDomain(_DomainLifecycleMixin):
                 healthy = await self._redis_cache.health_check()
                 details["redis_healthy"] = healthy
             except Exception as e:
+                log.warning("domain_containers 异常处理", error=str(e))
                 details["redis_healthy"] = False
                 details["redis_error"] = str(e)
         else:

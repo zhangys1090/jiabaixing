@@ -31,6 +31,8 @@ from typing import Any, Protocol
 
 from agent.loop.types import ExecutionPlan, LoopContext, PlanStep
 from agent.core.logger import log_ignored
+import logging
+logger = logging.getLogger(__name__)
 
 
 class LLMProtocol(Protocol):
@@ -286,6 +288,7 @@ class HierarchicalPlanner:
                 if nature.value in text:
                     return nature
         except Exception as _exc:
+            logger.warning("hierarchical_planner 异常处理", error=str(_exc))
             log_ignored(None, "hierarchical_planner.HierarchicalPlanner._classify_task", _exc)
         return TaskNature.UNKNOWN
 
@@ -327,6 +330,7 @@ class HierarchicalPlanner:
                 parsed = json.loads(match.group())
                 return parsed.get("subtasks", [])
         except Exception as _exc:
+            logger.warning("hierarchical_planner 异常处理", error=str(_exc))
             log_ignored(None, "hierarchical_planner.HierarchicalPlanner._llm_decompose", _exc)
 
         return []
@@ -400,7 +404,7 @@ def _patch_subtask_depth():
             return 0
         return 1
 
-    SubTask.depth_in_tree = depth_in_tree  # type: ignore[attr-defined]
+    SubTask.depth_in_tree = depth_in_tree
 
 
 _patch_subtask_depth()

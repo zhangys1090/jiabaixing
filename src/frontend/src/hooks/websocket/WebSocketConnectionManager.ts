@@ -232,7 +232,7 @@ class WebSocketConnectionManager {
   private handleMessage(message: WebSocketMessage): void {
     const traceTag = message.traceId ? ` [traceId: ${message.traceId}]` : '';
     const timestamp = new Date().toISOString();
-    console.log(`📨 [${timestamp}] 收到WebSocket消息: ${message.type}${traceTag}`);
+    WebSocketConnectionManager.log.debug(`📨 [${timestamp}] 收到WebSocket消息: ${message.type}${traceTag}`);
 
     if (message.type === 'response_ready') {
       const data = message.data as Record<string, unknown> | undefined;
@@ -240,7 +240,7 @@ class WebSocketConnectionManager {
         typeof data?.response === 'string'
           ? data.response.substring(0, 80)
           : JSON.stringify(data?.response)?.substring(0, 80);
-      console.log(`💬 [WS] response_ready: "${responsePreview}..."${traceTag}`);
+      WebSocketConnectionManager.log.debug(`💬 [WS] response_ready: "${responsePreview}..."${traceTag}`);
     }
 
     this.messageListeners.forEach((listener) => {
@@ -325,7 +325,7 @@ class WebSocketConnectionManager {
       }
       case 'clarification_request': {
         const requestData = message.data as ClarificationRequest;
-        console.log('🤔 收到澄清请求:', requestData.question);
+        WebSocketConnectionManager.log.debug('🤔 收到澄清请求:', requestData.question);
         this.clarificationRequestListeners.forEach((listener) => {
           try {
             listener(requestData);
@@ -337,7 +337,7 @@ class WebSocketConnectionManager {
       }
       case 'execution_preview': {
         const previewData = message.data as ExecutionPreview;
-        console.log('📋 收到执行预览:', previewData.summary);
+        WebSocketConnectionManager.log.debug('📋 收到执行预览:', previewData.summary);
         this.executionPreviewListeners.forEach((listener) => {
           try {
             listener(previewData);
@@ -349,7 +349,7 @@ class WebSocketConnectionManager {
       }
       case 'file_modified': {
         const fileData = message.data as FileModifiedEvent;
-        console.log('✏️ 文件已修改:', fileData.filePath);
+        WebSocketConnectionManager.log.debug('✏️ 文件已修改:', fileData.filePath);
         this.fileModifiedListeners.forEach((listener) => {
           try {
             listener(fileData);
@@ -390,13 +390,20 @@ class WebSocketConnectionManager {
             // 静默处理
           }
         });
+        setTimeout(() => this.updateDialogState('idle'), 200);
         break;
+      case 'response_ready_ack': {
+        const ackData = message.data as { traceId?: string; success?: boolean; source?: string };
+        WebSocketConnectionManager.log.debug(`✅ [WS] Python后端响应确认: traceId=${ackData.traceId}, source=${ackData.source}`);
+        this.updateDialogState('idle');
+        break;
+      }
       case 'response':
         this.updateDialogState('speaking');
         break;
       case 'processing_status': {
         const statusData = message.data as { status: string; message: string; traceId?: string };
-        console.log('⏳ 收到处理状态更新:', statusData.message);
+        WebSocketConnectionManager.log.debug('⏳ 收到处理状态更新:', statusData.message);
         this.processingStatusListeners.forEach((listener) => {
           try {
             listener(statusData);
@@ -407,11 +414,12 @@ class WebSocketConnectionManager {
         break;
       }
       case 'connected':
-        console.log('📨 WebSocket连接已确认');
+        WebSocketConnectionManager.log.debug('📨 WebSocket连接已确认');
         break;
       case 'error': {
         const errorData = message.data as ErrorEvent;
         console.error('❌ 收到服务器错误:', errorData);
+        this.updateDialogState('idle');
         this.errorListeners.forEach((listener) => {
           try {
             listener(errorData);
@@ -423,7 +431,7 @@ class WebSocketConnectionManager {
       }
       case 'proactive_message': {
         const messageData = message.data as ProactiveMessage;
-        console.log('💬 收到主动消息:', messageData.message);
+        WebSocketConnectionManager.log.debug('💬 收到主动消息:', messageData.message);
         this.proactiveMessageListeners.forEach((listener) => {
           try {
             listener(messageData);
@@ -446,7 +454,7 @@ class WebSocketConnectionManager {
       }
       case 'file_rollback': {
         const rollbackData = message.data as FileRollback;
-        console.log('↩️ 文件已回滚:', rollbackData.filePath);
+        WebSocketConnectionManager.log.debug('↩️ 文件已回滚:', rollbackData.filePath);
         this.fileRollbackListeners.forEach((listener) => {
           try {
             listener(rollbackData);
@@ -458,7 +466,7 @@ class WebSocketConnectionManager {
       }
       case 'multi_file_modified': {
         const multiFileData = message.data as MultiFileModified;
-        console.log('📝 多个文件已修改:', multiFileData.files?.length || 0, '个文件');
+        WebSocketConnectionManager.log.debug('📝 多个文件已修改:', multiFileData.files?.length || 0, '个文件');
         this.multiFileModifiedListeners.forEach((listener) => {
           try {
             listener(multiFileData);
@@ -481,7 +489,7 @@ class WebSocketConnectionManager {
       }
       case 'task_cancelled': {
         const cancelledData = message.data as TaskCancelled;
-        console.log('🚫 任务已取消:', cancelledData.traceId ?? cancelledData.taskId ?? 'unknown');
+        WebSocketConnectionManager.log.debug('🚫 任务已取消:', cancelledData.traceId ?? cancelledData.taskId ?? 'unknown');
         this.taskCancelledListeners.forEach((listener) => {
           try {
             listener(cancelledData);
@@ -504,7 +512,7 @@ class WebSocketConnectionManager {
       }
       case 'project_change': {
         const changeData = message.data as ProjectChange;
-        console.log('📂 项目变更:', changeData.repo, changeData.type);
+        WebSocketConnectionManager.log.debug('📂 项目变更:', changeData.repo, changeData.type);
         this.projectChangeListeners.forEach((listener) => {
           try {
             listener(changeData);
@@ -549,6 +557,7 @@ class WebSocketConnectionManager {
       }
       case 'stream_done': {
         const streamDoneData = message.data as StreamDoneData;
+        this.updateDialogState('idle');
         this.streamDoneListeners.forEach((listener) => {
           try {
             listener(streamDoneData);
@@ -614,7 +623,7 @@ class WebSocketConnectionManager {
         traceId: data.traceId || `trace_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 9)}`,
         timestamp: data._timestamp || Date.now(),
       };
-      console.log(`📤 [WS] 发送消息: type=${data.type}, traceId=${message.traceId}`);
+      WebSocketConnectionManager.log.debug(`📤 [WS] 发送消息: type=${data.type}, traceId=${message.traceId}`);
       this.ws.send(JSON.stringify(message));
       return true;
     }
@@ -635,6 +644,7 @@ class WebSocketConnectionManager {
   }
 
   sendProcess(input: string, userId: string = 'default'): boolean {
+    this.updateDialogState('processing');
     return this.send({
       type: 'user_input',
       payload: { input, userId },
@@ -642,6 +652,7 @@ class WebSocketConnectionManager {
   }
 
   sendMessage(input: string, userId: string = 'default'): boolean {
+    this.updateDialogState('processing');
     return this.send({
       type: 'user_input',
       payload: { input, userId },
@@ -951,7 +962,7 @@ class WebSocketConnectionManager {
     for (const msg of messages) {
       try {
         this.ws.send(JSON.stringify(msg));
-        console.log(`📤 [WS] 发送缓存消息: type=${msg.type}, traceId=${msg.traceId}`);
+        WebSocketConnectionManager.log.debug(`📤 [WS] 发送缓存消息: type=${msg.type}, traceId=${msg.traceId}`);
       } catch (err) {
         console.error('❌ [WS] 缓存消息发送失败', err);
       }

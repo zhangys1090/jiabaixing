@@ -11,6 +11,8 @@ from agent.config import DATA_DIR
 from agent.memory.engine import MemoryEngine
 from agent.persistence.trajectory import TrajectoryDatabase
 from agent.core.logger import log_ignored
+import logging
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -148,6 +150,8 @@ class PersistenceService:
         self._promoted_ids: set[str] = set()
         self._initialized = False
         self._flush_count = 0
+        self._MAX_TASK_STATES = 10000
+        self._MAX_PROMOTED_IDS = 50000
         # P1 修复：持久化写入锁，防止并发 flush 导致数据撕裂
         self._flush_lock = asyncio.Lock()
 
@@ -173,7 +177,8 @@ class PersistenceService:
             else:
                 await self.memory.store_short_term(content, scene=opts.scene, emotion=opts.emotion)
             return "stored"
-        except Exception:
+        except Exception as e:
+            logger.warning("service.store_memory 记忆存储失败", error=str(e))
             return ""
 
     async def recall_memory(
@@ -186,7 +191,8 @@ class PersistenceService:
         try:
             results = await self.memory.search(query=query, limit=opts.limit)
             return results
-        except Exception:
+        except Exception as e:
+            logger.warning("service.recall_memory 记忆检索失败", error=str(e))
             return []
 
     async def promote_memories(self) -> int:
@@ -235,17 +241,26 @@ class PersistenceService:
                     if mid:
                         self._promoted_ids.add(mid)
                         self._promoted_ids.add(f"promoted:{mid}")
+                        if len(self._promoted_ids) > self._MAX_PROMOTED_IDS:
+                            self._promoted_ids = set(list(self._promoted_ids)[-(self._MAX_PROMOTED_IDS * 3 // 4):])
                     promoted += 1
                 except Exception as _exc:
+                    logger.warning("service 异常处理", error=str(_exc))
                     log_ignored(None, "service.PersistenceService.promote_memories", _exc)
 
             return promoted
-        except Exception:
+        except Exception as e:
+            logger.warning("service.promote_memories 记忆提升失败", error=str(e))
             return 0
 
     async def save_task_state(self, task: TaskState) -> None:
         task.updated_at = time.time()
         self._task_states[task.task_id] = task
+        if len(self._task_states) > self._MAX_TASK_STATES:
+            sorted_tasks = sorted(self._task_states.items(), key=lambda x: x[1].updated_at if hasattr(x[1], 'updated_at') else 0)
+            to_remove = sorted_tasks[: len(self._task_states) - (self._MAX_TASK_STATES * 3 // 4)]
+            for tid, _ in to_remove:
+                del self._task_states[tid]
         await self._flush_task_states()
 
     async def load_task_state(self, task_id: str) -> TaskState | None:
@@ -326,6 +341,7 @@ class PersistenceService:
                 tmp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
                 tmp_path.replace(path)
             except Exception as _exc:
+                logger.warning("service 异常处理", error=str(_exc))
                 log_ignored(None, "service.PersistenceService._flush_task_states", _exc)
 
     async def _load_task_states(self) -> None:
@@ -349,6 +365,7 @@ class PersistenceService:
                 )
                 self._task_states[task.task_id] = task
         except Exception as _exc:
+            logger.warning("service 异常处理", error=str(_exc))
             log_ignored(None, "service.PersistenceService._load_task_states", _exc)
 
     def _flush_evolution_metrics(self) -> None:
@@ -365,6 +382,7 @@ class PersistenceService:
             ]
             path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
         except Exception as _exc:
+            logger.warning("service 异常处理", error=str(_exc))
             log_ignored(None, "service.PersistenceService._flush_evolution_metrics", _exc)
 
     async def _load_evolution_metrics(self) -> None:
@@ -383,4 +401,5 @@ class PersistenceService:
                 for m in data[-1000:]
             ]
         except Exception as _exc:
+            logger.warning("service 异常处理", error=str(_exc))
             log_ignored(None, "service.PersistenceService._load_evolution_metrics", _exc)

@@ -10,6 +10,7 @@
 
 Usage:
     from agent.core.otel_tracer import otel_trace, get_tracer
+logger = logging.getLogger(__name__)
 
     @otel_trace("loop.execute")
     async def execute(self, ...):
@@ -29,7 +30,6 @@ from typing import Any, Callable, Optional, TypeVar
 
 from opentelemetry import trace
 
-logger = logging.getLogger(__name__)
 
 # 模块常量
 OTEL_ENABLED_DEFAULT: bool = False
@@ -187,9 +187,10 @@ def otel_trace(name: str | None = None) -> Callable[[F], F]:
                         result = await func(*args, **kwargs)
                         return result
                     except Exception as exc:
+                        logger.debug("otel_tracer 异常处理", error=str(exc))
                         span.record_exception(exc)
                         raise
-            return async_wrapper  # type: ignore[return-value]
+            return async_wrapper
 
         @functools.wraps(func)
         def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -201,8 +202,9 @@ def otel_trace(name: str | None = None) -> Callable[[F], F]:
                 try:
                     return func(*args, **kwargs)
                 except Exception as exc:
+                    logger.debug("otel_tracer 异常处理", error=str(exc))
                     span.record_exception(exc)
                     raise
-        return sync_wrapper  # type: ignore[return-value]
+        return sync_wrapper
 
     return decorator

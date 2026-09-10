@@ -22,8 +22,8 @@ from typing import Any
 
 from agent.llm.moa_aggregator import MoAAggregator, AggregationStrategy, AggregationResult
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("moa_orchestration_adapter")
+
 
 
 class OrchestrationPhase(str, Enum):
@@ -269,8 +269,8 @@ class MoAOrchestrationAdapter:
                     status = self._budget_checker.get_session_status()
                     if status and status.get("remaining_percentage", 0.0) > 0.5:
                         return True
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    log.warning("预算检查异常", error=str(_exc))
             return False
 
         return False
@@ -307,6 +307,7 @@ class MoAOrchestrationAdapter:
                 candidates_count=1,
             )
         except Exception as e:
+            log.debug("moa_orchestration_adapter 异常处理", error=str(e))
             return MoAOrchestrationResult(
                 success=False,
                 used_moa=False,

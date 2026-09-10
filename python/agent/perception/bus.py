@@ -183,6 +183,7 @@ class PerceptionBus:
             try:
                 state.emotion = await self._perceive_emotion(user_input)
             except Exception as e:
+                log.debug("bus 异常处理", error=str(e))
                 state.errors.append(f"emotion: {e}")
                 log.debug("Emotion perception failed", error=str(e))
 
@@ -190,6 +191,7 @@ class PerceptionBus:
             try:
                 state.scene = await self._perceive_scene(user_input)
             except Exception as e:
+                log.debug("bus 异常处理", error=str(e))
                 state.errors.append(f"scene: {e}")
                 log.debug("Scene perception failed", error=str(e))
 
@@ -197,6 +199,7 @@ class PerceptionBus:
             try:
                 state.environment = await self._perceive_environment()
             except Exception as e:
+                log.debug("bus 异常处理", error=str(e))
                 state.errors.append(f"environment: {e}")
                 log.debug("Environment perception failed", error=str(e))
 
@@ -204,6 +207,7 @@ class PerceptionBus:
             try:
                 state.visual = await self._perceive_visual()
             except Exception as e:
+                log.debug("bus 异常处理", error=str(e))
                 state.errors.append(f"visual: {e}")
                 log.debug("Visual perception failed", error=str(e))
 
@@ -211,6 +215,7 @@ class PerceptionBus:
             try:
                 state.audio = await self._perceive_audio()
             except Exception as e:
+                log.debug("bus 异常处理", error=str(e))
                 state.errors.append(f"audio: {e}")
                 log.debug("Audio perception failed", error=str(e))
 
@@ -238,6 +243,7 @@ class PerceptionBus:
                     },
                 )
             except Exception as _exc:
+                log.debug("bus 异常处理", error=str(_exc))
                 log_ignored(log, "bus.PerceptionBus.perceive.persist_env", _exc)
 
         log.info(
@@ -549,8 +555,10 @@ class PerceptionBus:
                     if result.returncode == 0:
                         active_window = result.stdout.strip()
                 except Exception as _exc:
+                    log.debug("bus 异常处理", error=str(_exc))
                     log_ignored(log, "bus.PerceptionBus._perceive_environment_local", _exc)
         except Exception as _exc:
+            log.debug("bus 异常处理", error=str(_exc))
             log_ignored(log, "bus.PerceptionBus._perceive_environment_local", _exc)
 
         network_status = "unknown"
@@ -558,7 +566,8 @@ class PerceptionBus:
             import socket
             socket.create_connection(("8.8.8.8", 53), timeout=2)
             network_status = "online"
-        except Exception:
+        except Exception as _exc:
+            log.debug("bus 异常处理", error=str(_exc))
             network_status = "offline"
 
         screen_resolution = ""
@@ -578,6 +587,7 @@ class PerceptionBus:
                         screen_resolution = line.split(":")[-1].strip()
                         break
         except Exception as _exc:
+            log.debug("bus 异常处理", error=str(_exc))
             log_ignored(log, "bus.PerceptionBus._perceive_environment_local", _exc)
 
         return EnvironmentState(
@@ -650,6 +660,7 @@ class PerceptionBus:
                 ),
             )
         except Exception as _exc:
+            log.debug("bus 异常处理", error=str(_exc))
             log_ignored(log, "bus.PerceptionBus.load_historical_state", _exc)
             return None
 

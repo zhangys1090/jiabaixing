@@ -14,8 +14,8 @@ from agent.tools.registry import (
     ToolParameterDef,
     ToolResult,
 )
-
 log = StructuredLogger("daily_tools")
+
 
 
 TASK_MANAGE_DEF = ToolDefinition(
@@ -289,6 +289,7 @@ class DailyStore:
                         entry = cls_type(**{k: v for k, v in item.items() if k in cls_type.__dataclass_fields__})
                         store[entry.id] = entry
                 except Exception as _exc:
+                    log.debug("daily_tools 异常处理", error=str(_exc))
                     log_ignored(log, "daily_tools.DailyStore._load", _exc)
 
     def _save(self, name: str, store: dict) -> None:
@@ -630,6 +631,7 @@ async def system_status_executor(params: dict[str, Any]) -> ToolResult:
         if component in ("all", "scheduler"):
             lines.append("✅ 调度器: 运行中")
     except Exception as e:
+        log.debug("daily_tools 异常处理", error=str(e))
         lines.append(f"⚠️ 查询异常: {e}")
 
     return ToolResult(success=True, output="\n".join(lines), duration=time.time() - start)

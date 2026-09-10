@@ -30,8 +30,8 @@ from typing import Dict, Optional
 import jwt
 
 from agent.a2a.types import A2AAgentCard, A2AAuthConfig, A2AAuthType
-
 logger = logging.getLogger(__name__)
+
 
 
 # 标准鉴权头名称

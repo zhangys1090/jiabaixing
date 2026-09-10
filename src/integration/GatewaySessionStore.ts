@@ -5,10 +5,10 @@
  * 网关重启后自动恢复连接，无需重新扫码/授权。
  */
 
-import { createDatabase } from '../shared/DatabaseShim';
-import type { DatabaseAdapter } from '../shared/DatabaseShim';
-import { Logger } from '../utils/Logger';
 import path from 'path';
+import type { DatabaseAdapter } from '../shared/DatabaseShim';
+import { createDatabase } from '../shared/DatabaseShim';
+import { Logger } from '../utils/Logger';
 
 /** 已持久化的平台连接 */
 export interface StoredPlatformSession {
@@ -297,16 +297,28 @@ export class GatewaySessionStore {
     owner: string
   ): boolean {
     try {
-      // 检查是否已被锁定
       const existing = this.db
-        .prepare('SELECT owner FROM gateway_token_locks WHERE token_hash = ?')
+        .prepare(
+          'SELECT owner, acquired_at FROM gateway_token_locks WHERE token_hash = ?'
+        )
         .get(tokenHash) as Record<string, unknown> | undefined;
       if (existing) {
-        Logger.warn(
-          `🔒 Token 已被锁定: ${platform}/${tokenHash.substring(0, 8)}... (所有者: ${existing.owner})`,
-          'GatewaySessionStore'
-        );
-        return false;
+        const lockAge = Date.now() - ((existing.acquired_at as number) || 0);
+        if (lockAge > 24 * 60 * 60 * 1000) {
+          Logger.warn(
+            `🔒 Token 锁已过期 (>24h)，强制释放: ${platform}/${tokenHash.substring(0, 8)}...`,
+            'GatewaySessionStore'
+          );
+          this.db
+            .prepare('DELETE FROM gateway_token_locks WHERE token_hash = ?')
+            .run(tokenHash);
+        } else {
+          Logger.warn(
+            `🔒 Token 已被锁定: ${platform}/${tokenHash.substring(0, 8)}... (所有者: ${existing.owner})`,
+            'GatewaySessionStore'
+          );
+          return false;
+        }
       }
       this.db
         .prepare(

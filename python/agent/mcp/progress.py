@@ -40,6 +40,7 @@ class MCPProgressManager:
 
     def __init__(self) -> None:
         self._subscribers: list[tuple[Callable, str | None]] = []
+        self._MAX_SUBSCRIBERS = 100
 
     def subscribe(
         self,
@@ -56,6 +57,8 @@ class MCPProgressManager:
                 所有进度更新（默认）.
         """
         self._subscribers.append((handler, progress_token))
+        if len(self._subscribers) > self._MAX_SUBSCRIBERS:
+            self._subscribers = self._subscribers[-self._MAX_SUBSCRIBERS * 3 // 4:]
         log.debug(
             "注册进度订阅者",
             token_filter=progress_token,

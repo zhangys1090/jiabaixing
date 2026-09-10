@@ -68,6 +68,7 @@ class MCPLoggingManager:
 
     def __init__(self) -> None:
         self._subscribers: list[tuple[Callable, str]] = []
+        self._MAX_SUBSCRIBERS = 100
 
     def subscribe(
         self, handler: Callable, min_level: str = LOG_LEVEL_DEBUG
@@ -88,6 +89,8 @@ class MCPLoggingManager:
                 f"非法日志级别: {min_level}，允许值: {sorted(VALID_LOG_LEVELS)}"
             )
         self._subscribers.append((handler, min_level))
+        if len(self._subscribers) > self._MAX_SUBSCRIBERS:
+            self._subscribers = self._subscribers[-self._MAX_SUBSCRIBERS * 3 // 4:]
         log.debug(
             "注册日志订阅者",
             min_level=min_level,

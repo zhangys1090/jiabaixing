@@ -8,6 +8,8 @@ from agent.context.models import (
     ContextBuildRequest,
 )
 from agent.core.logger import log_ignored
+import logging
+logger = logging.getLogger(__name__)
 
 
 class PersonaComponent(ContextComponent):
@@ -64,6 +66,7 @@ class PersonaComponent(ContextComponent):
                         request.scene
                     )
             except Exception as _exc:
+                logger.warning("persona 异常处理", error=str(_exc))
                 # 如果 PersonaCore 调用失败，使用默认值
                 log_ignored(None, "persona.PersonaComponent._execute", _exc)
 

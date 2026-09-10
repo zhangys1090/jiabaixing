@@ -3,8 +3,8 @@
  * 从 websocket.ts 提取，专门处理认证逻辑
  */
 
-import { Logger } from '../../utils/Logger';
 import { AuthenticationManager } from '../../security/AuthenticationManager';
+import { Logger } from '../../utils/Logger';
 
 /**
  * 认证结果
@@ -42,7 +42,6 @@ export class WsAuthenticator {
    * @returns 认证结果
    */
   verifyToken(token: string | null): AuthResult {
-    // 生产环境必须验证
     if (process.env.NODE_ENV === 'production') {
       if (!token) {
         return { valid: false, error: '认证失败：缺少令牌' };
@@ -50,8 +49,12 @@ export class WsAuthenticator {
 
       const authManager = this.ensureAuthManager();
       if (!authManager) {
-        Logger.warn('⚠️ 认证模块未初始化，WebSocket跳过认证', 'WsAuth');
-        return { valid: true }; // 降级：允许连接
+        Logger.error(
+          '🚫 认证模块未初始化，fail-closed 拒绝连接',
+          undefined,
+          'WsAuth'
+        );
+        return { valid: false, error: '认证服务不可用' };
       }
 
       try {
@@ -60,13 +63,25 @@ export class WsAuthenticator {
           return { valid: false, error: `认证失败：${result.error}` };
         }
         return { valid: true };
-      } catch {
-        Logger.warn('⚠️ 认证验证异常，跳过认证', 'WsAuth');
-        return { valid: true }; // 降级：允许连接
+      } catch (err) {
+        Logger.error(
+          '🚫 认证验证异常，fail-closed 拒绝连接',
+          err as Error,
+          'WsAuth'
+        );
+        return { valid: false, error: '认证服务异常' };
       }
     }
 
-    // 非生产环境跳过认证
+    if (
+      process.env.NODE_ENV !== 'development' &&
+      process.env.NODE_ENV !== 'test'
+    ) {
+      Logger.warn(
+        '⚠️ NODE_ENV 未设置，WebSocket 认证已跳过，建议设置 NODE_ENV=production',
+        'WsAuth'
+      );
+    }
     return { valid: true };
   }
 

@@ -4,18 +4,18 @@
  */
 
 import WebSocket from 'ws';
-import { Logger } from '../../../utils/Logger';
 import { JiabaixingCore } from '../../../core/JiabaixingCore';
 import { SYSTEM_CONSTANTS } from '../../../shared/contracts';
-import {
-  WsRateLimiter,
-  WsCircuitBreaker,
-  createRateLimitErrorResponse,
-  createCircuitOpenResponse,
-} from '../WsRateLimit';
-import { WsTaskManager } from '../WsTaskManager';
+import { Logger } from '../../../utils/Logger';
 import { checkAndMarkResponse } from '../WsDedup';
 import { processInputWithRetry } from '../WsProcessor';
+import {
+  WsCircuitBreaker,
+  WsRateLimiter,
+  createCircuitOpenResponse,
+  createRateLimitErrorResponse,
+} from '../WsRateLimit';
+import { WsTaskManager } from '../WsTaskManager';
 
 const rateLimiter = new WsRateLimiter();
 
@@ -138,7 +138,7 @@ export async function handleUserInput(
       ws.send(
         JSON.stringify({
           type: 'error',
-          data: { message: (err as Error).message, traceId },
+          data: { message: '处理请求时发生错误，请稍后重试。', traceId },
         })
       );
     }

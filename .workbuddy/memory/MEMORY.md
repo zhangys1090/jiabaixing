@@ -63,3 +63,14 @@
 - 成熟度审计: `docs/Agent_Technical_Maturity_Audit_2026-07-18.md`; 生产就绪: `docs/PRODUCTION_READINESS_RUNBOOK.md`
 - 旧差距报告: `docs/Agent_Technical_System_Gap_Report_2026-07-03.md`, `docs/Gap_Closure_Phase_Plan_2026-07-04.md`, `docs/adr/ADR-001-llm-hub-migration.md`
 - Agent 效能评估: `python/scripts/analyze_agent_efficiency.py`; 生产核查: `python/scripts/verify_production_readiness.py`
+- **Authority Reconstruction 总方案(2026-09-10 FROZEN)**: `docs/AUTHORITY_RECONSTRUCTION.md` — 七层架构、验收标准、阶段边界、开发标准、文件清单、残余风险
+
+## Authority Reconstruction (2026-09-10)
+- **总方案已冻结**: `docs/AUTHORITY_RECONSTRUCTION.md` 是唯一真相源。阶段边界、验收标准、开发标准不可未经用户批准修改。
+- **七层架构**: Layer 0 ActionAuthority(SEALED) → Layer 1 DecisionAuthority(SEALED) → Layer 2 StateAuthority(SEALED) → Layer 3 GoalAuthority(SEALED) → Layer 4 Evidence(SEALED) → Layer 5 LearningAuthority(PASS) → Layer 6 MemoryAuthority(TODO) → Layer 7 Long-HorizonAgency(TODO)
+- **D4 全部 SEALED**: D4-I1(Python) + D4-I2(Desktop) + D4-I3(Orchestrator) + D4-I4(Global Replay) 全部 PASS
+- **D5 PASS**: Evidence→PredictionError→BeliefUpdate→Future Decision changes. 4 hard gates 全过. 集成点: DecisionAuthority.decide() 调 adjustCandidate(), GoalAuthority.updateFromEvidence() 调 learn()
+- **残余风险**: ① delegation metadata 真实性仅验证存在性未验证绑定一致性(L2) ② Goal progress 仍为 prediction stub ③ Goal≠Plan versioning 不完整 ④ Learning belief 跨进程未共享
+- **测试**: TS 92/92 + Python 27/27 = 119/119 ALL GREEN
+- **开发标准(§9)**: ① No Direct Execution ② Every Step Has Authority IDs ③ Proposers Are Pure ④ DecisionAuthority Is Sole FINAL ⑤ Evidence Writes Back to Same Goal ⑥ Learning Failure Does Not Block ⑦ Cross-Process Delegation Is Identity-Only ⑧ Delegation Anti-Forgery
+- **下一步**: D6 Memory Authority — 解决 TS/Python/Redis canonical owner 问题

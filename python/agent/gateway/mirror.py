@@ -201,6 +201,7 @@ class MessageMirror:
                     else:
                         self._stats.total_errors += 1
                 except Exception as e:
+                    log.debug("mirror 异常处理", error=str(e))
                     mr = MirrorResult(
                         rule_id=rule.id,
                         source_chat=message.chat_id,

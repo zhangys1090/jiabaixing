@@ -27,6 +27,49 @@ const FORBIDDEN_CODE_PATTERNS = [
   'process.exit',
   'fs.unlink',
   'fs.rmdir',
+  'process.',
+  'globalThis',
+  'global.',
+  '__dirname',
+  '__filename',
+  '.constructor.constructor',
+  'arguments.callee',
+  'this.constructor',
+  'Object.create',
+  'Reflect.',
+  'Proxy(',
+  'WeakRef',
+  'SharedArrayBuffer',
+  'Atomics.',
+  'fetch(',
+  'XMLHttpRequest',
+  'WebSocket',
+];
+
+const FORBIDDEN_CODE_REGEX: RegExp[] = [
+  /\brequire\s*\(/,
+  /\bimport\s*\(/,
+  /\beval\s*\(/,
+  /\bFunction\s*\(/,
+  /\bnew\s+Function\b/,
+  /\bprocess\b/,
+  /\bglobalThis\b/,
+  /\bchild_process\b/,
+  /\bfs\b\.\s*(read|write|unlink|rmdir|mkdir|append|open|rename|copy|access|stat|chmod|chown)/,
+  /\bnet\b\./,
+  /\bhttp\b\./,
+  /\bhttps\b\./,
+  /\.constructor\s*\.\s*constructor/,
+  /\barguments\s*\.\s*callee/,
+  /\bthis\s*\.\s*constructor/,
+  /\bReflect\s*\./,
+  /\bProxy\b/,
+  /\bWeakRef\b/,
+  /\bSharedArrayBuffer\b/,
+  /\bAtomics\b/,
+  /\bfetch\s*\(/,
+  /\bXMLHttpRequest\b/,
+  /\bWebSocket\b/,
 ];
 
 const TOOL_NAME_REGEX = /^[a-z][a-z0-9_]{2,39}$/;
@@ -86,13 +129,21 @@ function containsForbiddenCode(code: string): string | null {
       return pattern;
     }
   }
+  for (const regex of FORBIDDEN_CODE_REGEX) {
+    if (regex.test(code)) {
+      return regex.source;
+    }
+  }
   return null;
 }
 
 function createSandboxedExecutor(
   code: string,
   toolName: string
-): (params: Record<string, unknown>, context?: ToolContext) => Promise<ToolResult> {
+): (
+  params: Record<string, unknown>,
+  context?: ToolContext
+) => Promise<ToolResult> {
   return async (
     params: Record<string, unknown>,
     _context?: ToolContext
@@ -106,12 +157,64 @@ function createSandboxedExecutor(
         warn: (...args: unknown[]) => logs.push(args.map(String).join(' ')),
         info: (...args: unknown[]) => logs.push(args.map(String).join(' ')),
       };
+
+      const sandboxGlobals: Record<string, unknown> = {
+        console: sandboxConsole,
+        JSON,
+        Math,
+        Date,
+        parseInt,
+        parseFloat,
+        isNaN,
+        isFinite,
+        encodeURIComponent,
+        decodeURIComponent,
+        encodeURI,
+        decodeURI,
+        Array,
+        Object,
+        String,
+        Number,
+        Boolean,
+        Map,
+        Set,
+        RegExp,
+        Error,
+        TypeError,
+        RangeError,
+        Promise,
+        Symbol,
+      };
+
+      const keys = Object.keys(sandboxGlobals);
+
+      const wrappedCode = `"use strict";
+const _wl = {${keys.map((k) => `${k}: arguments[2].${k}`).join(', ')}};
+try { Object.setPrototypeOf(_wl, null); } catch(_e) {}
+const _guarded = new Proxy(_wl, {
+  has: () => true,
+  get: (t, p) => {
+    if (p === Symbol.unscopables) return {};
+    if (p === 'constructor' || p === '__proto__' || p === 'prototype') return undefined;
+    return t[p];
+  },
+  set: (t, p, v) => { t[p] = v; return true; }
+});
+with (_guarded) {
+  ${code}
+}`;
+
       const asyncFn = new Function(
         'console',
         'params',
-        `"use strict";\n${code}`
-      );
-      const result = await asyncFn(sandboxConsole, params);
+        'globals',
+        wrappedCode
+      ) as (
+        c: typeof sandboxConsole,
+        p: Record<string, unknown>,
+        g: Record<string, unknown>
+      ) => unknown;
+      const result = await asyncFn(sandboxConsole, params, sandboxGlobals);
       const output =
         result !== undefined
           ? typeof result === 'string'
@@ -185,7 +288,9 @@ export function createToolDefineExecutor(deps: ToolDefineDeps) {
     context?: ToolContext
   ): Promise<ToolResult> => {
     const startTime = Date.now();
-    const rawName = String(params.name || '').trim().toLowerCase();
+    const rawName = String(params.name || '')
+      .trim()
+      .toLowerCase();
     const description = String(params.description || '').trim();
     const code = String(params.code || '').trim();
     const parametersSchema =
@@ -288,7 +393,10 @@ export function createToolDefineExecutor(deps: ToolDefineDeps) {
       name: fullName,
       description: `[动态工具] ${description}`,
       category: ToolCategory.SYSTEM,
-      parameters: parametersSchema as Record<string, import('../../types').ToolParameterDef>,
+      parameters: parametersSchema as Record<
+        string,
+        import('../../types').ToolParameterDef
+      >,
       requiredParams,
       requiredPermissions: [Permission.CODE_EXECUTE],
       riskLevel: 'high',
@@ -302,7 +410,10 @@ export function createToolDefineExecutor(deps: ToolDefineDeps) {
     }
 
     const expiresAt = Date.now() + ttlMinutes * 60 * 1000;
-    const ttlTimer = setTimeout(() => forceUndefine(fullName), ttlMinutes * 60 * 1000);
+    const ttlTimer = setTimeout(
+      () => forceUndefine(fullName),
+      ttlMinutes * 60 * 1000
+    );
     if (ttlTimer.unref) ttlTimer.unref();
     ttlTimers.set(fullName, ttlTimer);
 

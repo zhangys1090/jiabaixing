@@ -29,8 +29,8 @@ from agent.context.models import (
     BuildContext,
     ContextBuildRequest,
 )
-
 log = StructuredLogger("attention_focus")
+
 
 
 @dataclass
@@ -83,16 +83,21 @@ class AttentionFocusAdapter(ContextComponent):
         self,
         config: AttentionFocusConfig | None = None,
         enabled: bool = True,
+        attention_engine: Any | None = None,
     ) -> None:
         """初始化注意力聚焦适配器。
 
         Args:
             config: 配置。
             enabled: 是否启用。
+            attention_engine: 外部 AttentionFocusEngine 实例（可选）。
         """
         super().__init__()
+        self._MAX_IMPORTANT_KEYWORDS = 200
+        self._MAX_STATS = 500
         self._config = config or AttentionFocusConfig()
         self._enabled = enabled
+        self._attention_engine = attention_engine
 
         # 统计
         self._stats = {

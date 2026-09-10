@@ -6,10 +6,10 @@
 import { getActivePythonBridge } from '../ide/bridgeRegistry';
 import { Logger } from '../utils/Logger';
 import {
-    Model,
-    ModelInput,
-    ModelManagerInterface,
-    ModelOutput,
+  Model,
+  ModelInput,
+  ModelManagerInterface,
+  ModelOutput,
 } from './ModelInterface';
 import { OpenAICompatibleModel } from './OpenAICompatibleModel';
 import { PythonBackedModel } from './PythonBackedModel';

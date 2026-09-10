@@ -68,7 +68,10 @@ export function createDesktopAutomateExecutor() {
         await agent.initialize();
       }
 
-      const result = await agent.executeTask(task);
+      const result = await agent.executeTask(
+        task,
+        params._authority_meta as Record<string, unknown> | undefined
+      );
 
       const duration = Date.now() - startTime;
 
@@ -109,9 +112,7 @@ export function createDesktopAutomateExecutor() {
           totalSteps: result.totalSteps,
           usedSkill: result.usedSkill,
           observationCount: result.observations.length,
-          ...(verification
-            ? { verification }
-            : {}),
+          ...(verification ? { verification } : {}),
         },
       };
     } catch (err) {

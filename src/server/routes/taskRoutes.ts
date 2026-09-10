@@ -174,7 +174,7 @@ router.post('/:id/resume', async (req: Request, res: Response) => {
 /**
  * GET /api/harness/status - Harness 状态
  */
-router.get('/../harness/status', (_req: Request, res: Response) => {
+router.get('/harness/status', (_req: Request, res: Response) => {
   if (!harnessInstance) {
     res.json({ initialized: false, config: null });
     return;

@@ -40,7 +40,6 @@ from agent.orchestration.executor import (
 from agent.core.logger import StructuredLogger
 from agent.core.logger import log_ignored
 
-log = StructuredLogger("dynamic_dag_replanner")
 
 
 class ReplanTrigger(str, Enum):
@@ -114,9 +113,15 @@ class DynamicDAGReplanner:
         self._replan_count = 0
         self._conditional_branches: dict[str, list[ReplanRule]] = {}
         self._on_replan_callback: Callable[[ReplanEvent], None] | None = None
+        self._MAX_RULES = 100
+        self._MAX_CHECKPOINTS = 200
+        self._MAX_REPLAN_EVENTS = 1000
+        self._MAX_CONDITIONAL_BRANCHES = 500
 
     def add_rule(self, rule: ReplanRule) -> None:
         self._rules.append(rule)
+        if len(self._rules) > self._MAX_RULES:
+            self._rules = self._rules[-self._MAX_RULES * 3 // 4:]
         self._rules.sort(key=lambda r: r.priority, reverse=True)
 
     def set_on_replan_callback(self, callback: Callable[[ReplanEvent], None]) -> None:
@@ -166,6 +171,10 @@ class DynamicDAGReplanner:
             task_template=on_false_task,
         )
         self._conditional_branches.setdefault(source_task_id, []).extend([true_rule, false_rule])
+        if len(self._conditional_branches) > self._MAX_CONDITIONAL_BRANCHES:
+            oldest_keys = list(self._conditional_branches.keys())[: len(self._conditional_branches) - (self._MAX_CONDITIONAL_BRANCHES * 3 // 4)]
+            for k in oldest_keys:
+                del self._conditional_branches[k]
 
     def save_checkpoint(self, label: str = "") -> str:
         checkpoint_id = f"cp_{uuid.uuid4().hex[:8]}"
@@ -191,6 +200,8 @@ class DynamicDAGReplanner:
             label=label,
         )
         self._checkpoints.append(checkpoint)
+        if len(self._checkpoints) > self._MAX_CHECKPOINTS:
+            self._checkpoints = self._checkpoints[-self._MAX_CHECKPOINTS * 3 // 4:]
         log.info("Checkpoint saved", checkpoint_id=checkpoint_id, label=label)
         return checkpoint_id
 
@@ -403,10 +414,13 @@ class DynamicDAGReplanner:
             detail=detail,
         )
         self._replan_events.append(event)
+        if len(self._replan_events) > self._MAX_REPLAN_EVENTS:
+            self._replan_events = self._replan_events[-self._MAX_REPLAN_EVENTS * 3 // 4:]
         if self._on_replan_callback:
             try:
-                self._on_replan_event(event)
+                self._on_replan_callback(event)
             except Exception as _exc:
+                log.debug("dynamic_dag_replanner 异常处理", error=str(_exc))
                 log_ignored(log, "dynamic_dag_replanner.DynamicDAGReplanner._fire_replan_event", _exc)
 
     def _on_replan_event(self, event: ReplanEvent) -> None:
@@ -437,3 +451,4 @@ class DynamicDAGReplanner:
 
 
 import asyncio
+log = StructuredLogger("dynamic_dag_replanner")

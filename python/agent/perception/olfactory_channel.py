@@ -26,6 +26,8 @@ from typing import Any
 
 from agent.perception.sensory_fusion import SenseSample, SensoryFusion
 from agent.core.logger import log_ignored
+import logging
+logger = logging.getLogger(__name__)
 
 
 class GasType(str, Enum):
@@ -227,6 +229,7 @@ class OlfactoryChannel:
             try:
                 cb(reading)
             except Exception as _exc:
+                logger.warning("olfactory_channel 异常处理", error=str(_exc))
                 log_ignored(None, "olfactory_channel.OlfactoryChannel._fire_alert", _exc)
 
     @staticmethod

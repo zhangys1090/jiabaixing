@@ -4,6 +4,8 @@ import os
 import tempfile
 from pathlib import Path
 from typing import Any
+import logging
+logger = logging.getLogger(__name__)
 
 try:
     from pdfminer.high_level import extract_text, extract_pages
@@ -174,6 +176,7 @@ async def pdf_parse_executor(params: dict[str, Any]) -> ToolResult:
             }
         )
     except Exception as e:
+        logger.warning("file_parse_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"PDF解析失败: {e}")
 
 
@@ -249,6 +252,7 @@ async def xlsx_parse_executor(params: dict[str, Any]) -> ToolResult:
             }
         )
     except Exception as e:
+        logger.warning("file_parse_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"Excel解析失败: {e}")
 
 
@@ -322,6 +326,7 @@ async def docx_parse_executor(params: dict[str, Any]) -> ToolResult:
             }
         )
     except Exception as e:
+        logger.warning("file_parse_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"Word文档解析失败: {e}")
 
 

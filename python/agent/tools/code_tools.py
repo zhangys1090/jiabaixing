@@ -9,6 +9,7 @@ from typing import Any
 
 from agent.core.logger import StructuredLogger
 from agent.core.logger import log_ignored
+log = StructuredLogger("code_tools")
 
 _log = StructuredLogger("tools.code")
 
@@ -186,6 +187,7 @@ async def code_generate_executor(params: dict[str, Any]) -> ToolResult:
             metadata={"language": language, "complexity": complexity},
         )
     except Exception as e:
+        log.warning("code_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"代码生成失败: {e}")
 
 
@@ -206,6 +208,7 @@ async def code_analyze_executor(params: dict[str, Any]) -> ToolResult:
     try:
         code = p.read_text(encoding="utf-8", errors="replace")
     except Exception as e:
+        log.warning("code_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"读取失败: {e}")
 
     llm = _get_llm()
@@ -235,6 +238,7 @@ async def code_analyze_executor(params: dict[str, Any]) -> ToolResult:
         content = response.get("content", "")
         return ToolResult(success=True, output=content, duration=time.time() - start)
     except Exception as e:
+        log.warning("code_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"代码分析失败: {e}")
 
 
@@ -256,6 +260,7 @@ async def code_fix_executor(params: dict[str, Any]) -> ToolResult:
     try:
         code = p.read_text(encoding="utf-8", errors="replace")
     except Exception as e:
+        log.warning("code_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"读取失败: {e}")
 
     llm = _get_llm()
@@ -284,6 +289,7 @@ async def code_fix_executor(params: dict[str, Any]) -> ToolResult:
             duration=time.time() - start,
         )
     except Exception as e:
+        log.warning("code_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"代码修复失败: {e}")
 
 
@@ -395,6 +401,7 @@ async def shell_exec_executor(params: dict[str, Any]) -> ToolResult:
     except subprocess.TimeoutExpired:
         return ToolResult(success=False, error=f"命令超时（{timeout_sec}秒）", duration=time.time() - start)
     except Exception as e:
+        log.warning("code_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"执行失败: {e}", duration=time.time() - start)
 
 
@@ -573,6 +580,7 @@ async def _run_llm_review(content: str, file_path: str, focus: str) -> list[dict
             import json
             return json.loads(json_match.group(0))
     except Exception as _exc:
+        log.warning("code_tools 异常处理", error=str(_exc))
         log_ignored(_log, "code_tools._run_llm_review", _exc)
     return []
 
@@ -649,6 +657,7 @@ async def code_review_executor(params: dict[str, Any]) -> ToolResult:
             try:
                 content = tf.read_text(encoding="utf-8", errors="replace")
             except Exception as e:
+                log.warning("code_tools 异常处理", error=str(e))
                 log_ignored(_log, "code_tools._review_targets.read", e)
                 continue
             out, findings, crit, high = await _review_single_file(tf, content, focus)
@@ -683,6 +692,7 @@ async def code_review_executor(params: dict[str, Any]) -> ToolResult:
     try:
         content = file_path.read_text(encoding="utf-8", errors="replace")
     except Exception as e:
+        log.warning("code_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"读取失败: {e}")
 
     out, findings, critical_count, high_count = await _review_single_file(file_path, content, focus)
@@ -744,6 +754,7 @@ def _code_review_changed_files(repo: str) -> list[str]:
                 capture_output=True, text=True, check=False, timeout=30,
             )
         except Exception as e:
+            log.warning("code_tools 异常处理", error=str(e))
             log_ignored(_log, "code_tools._git_collect_changes", e)
             continue
         if proc.returncode == 0:
@@ -795,6 +806,7 @@ async def csv_analyze_executor(params: dict[str, Any]) -> ToolResult:
     try:
         content = file_path.read_text(encoding="utf-8", errors="replace")
     except Exception as e:
+        log.warning("code_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"读取失败: {e}")
 
     raw_lines = [l for l in content.split("\n") if l.strip()]
@@ -987,7 +999,8 @@ def _read_file_lines(path: Path) -> list[str] | None:
     """
     try:
         return path.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
-    except Exception:
+    except Exception as _exc:
+        log.warning("code_tools 异常被捕获", error=str(_exc))
         return None
 
 
@@ -1064,6 +1077,7 @@ async def code_generate_ast_executor(params: dict[str, Any]) -> ToolResult:
         try:
             existing_code = target_path.read_text(encoding="utf-8", errors="replace")
         except Exception as e:
+            log.warning("code_tools 异常处理", error=str(e))
             return ToolResult(success=False, error=f"读取目标文件失败: {e}")
 
         if language == "python":
@@ -1091,6 +1105,7 @@ async def code_generate_ast_executor(params: dict[str, Any]) -> ToolResult:
                             **_extract_ast_summary(cf_tree),
                         })
                 except Exception as _exc:
+                    log.warning("code_tools 异常处理", error=str(_exc))
                     log_ignored(_log, "code_tools.code_generate_ast_executor", _exc)
 
     # 构建LLM提示词
@@ -1119,6 +1134,7 @@ async def code_generate_ast_executor(params: dict[str, Any]) -> ToolResult:
         )
         generated = response.get("content", "")
     except Exception as e:
+        log.warning("code_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"LLM代码生成失败: {e}")
 
     # 从markdown代码块中提取代码
@@ -1163,6 +1179,7 @@ async def code_generate_ast_executor(params: dict[str, Any]) -> ToolResult:
         target_path.parent.mkdir(parents=True, exist_ok=True)
         target_path.write_text(result_code, encoding="utf-8")
     except Exception as e:
+        log.warning("code_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"写入文件失败: {e}", duration=time.time() - start)
 
     # 生成diff
@@ -1303,6 +1320,7 @@ async def code_edit_ast_executor(params: dict[str, Any]) -> ToolResult:
     try:
         code = p.read_text(encoding="utf-8", errors="replace")
     except Exception as e:
+        log.warning("code_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"读取文件失败: {e}")
 
     lines = code.splitlines(keepends=True)
@@ -1382,6 +1400,7 @@ async def code_edit_ast_executor(params: dict[str, Any]) -> ToolResult:
     try:
         p.write_text(result_code, encoding="utf-8")
     except Exception as e:
+        log.warning("code_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"写入文件失败: {e}", duration=time.time() - start)
 
     return ToolResult(

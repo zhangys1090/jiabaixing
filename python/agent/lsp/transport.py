@@ -75,10 +75,12 @@ class LspTransport:
             try:
                 self._process.stdin.close()
             except Exception as _exc:
+                log.debug("transport 异常处理", error=str(_exc))
                 log_ignored(log, "transport.LspTransport.stop", _exc)
             try:
                 self._process.kill()
             except Exception as _exc:
+                log.debug("transport 异常处理", error=str(_exc))
                 log_ignored(log, "transport.LspTransport.stop", _exc)
             self._process = None
 
@@ -163,7 +165,8 @@ class LspTransport:
                 if not line:
                     break
                 log.debug(f"stderr: {line.decode('utf-8', errors='replace').strip()}")
-            except Exception:
+            except Exception as _exc:
+                log.debug("transport 异常处理", error=str(_exc))
                 break
 
     def _try_parse_messages(self) -> None:

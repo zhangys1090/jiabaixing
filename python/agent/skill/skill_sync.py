@@ -156,6 +156,7 @@ class SkillSyncManager:
             log.info("Skill pushed", skill=skill_name, version=local.version)
             return SyncResult(success=True, synced=[skill_name], duration_ms=duration)
         except Exception as e:
+            log.debug("skill_sync 异常处理", error=str(e))
             self._status = SyncStatus.ERROR
             return SyncResult(success=False, errors=[str(e)])
 
@@ -186,6 +187,7 @@ class SkillSyncManager:
             duration = (time.time() - start) * 1000
             return SyncResult(success=True, synced=synced, conflicts=conflicts, duration_ms=duration)
         except Exception as e:
+            log.debug("skill_sync 异常处理", error=str(e))
             self._status = SyncStatus.ERROR
             return SyncResult(success=False, errors=[str(e)])
 

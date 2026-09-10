@@ -73,7 +73,9 @@ export async function gracefulShutdown(
   });
 
   setTimeout(() => {
-    Logger.info('⚠️ 强制退出', 'Main');
-    process.exit(1);
+    Logger.info('⚠️ 优雅关闭超时，强制退出', 'Main');
+    // P1-6 修复: 优雅关闭超时仍属正常退出（非异常），使用 exit code 0
+    // 避免监控系统（systemd/K8s/PM2）误判为异常崩溃而触发不必要的重启告警
+    process.exit(0);
   }, 10000);
 }

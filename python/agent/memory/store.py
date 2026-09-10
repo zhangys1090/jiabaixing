@@ -40,6 +40,7 @@ class SemanticSearchEngine:
                         del self._embedding_cache[oldest_key]
                     return embedding
         except Exception as _exc:
+            log.debug("store 异常处理", error=str(_exc))
             log_ignored(log, "store.SemanticSearchEngine.get_embedding", _exc)
 
         return None
@@ -417,7 +418,8 @@ class MemoryStore:
             mem_tokens_str = row[2]
             try:
                 mem_tokens = set(mem_tokens_str.split())
-            except Exception:
+            except Exception as _exc:
+                log.debug("store 异常处理", error=str(_exc))
                 mem_tokens = set()
 
             if not mem_tokens:
@@ -617,7 +619,8 @@ class MemoryStore:
 
         try:
             cur = self._conn.execute(sql, params)
-        except Exception:
+        except Exception as _exc:
+            log.debug("store 异常处理", error=str(_exc))
             return self.search_semantic(
                 query, limit, memory_type, min_relevance,
                 scene_filter=scene_filter, recent_hours=recent_hours,
@@ -1092,5 +1095,5 @@ class MemoryStore:
     def __del__(self) -> None:
         try:
             self.close()
-        except Exception as _exc:  # noqa: BLE001
+        except Exception as _exc:
             log_ignored(log, "store.MemoryStore.__del__", _exc)

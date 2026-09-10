@@ -39,8 +39,8 @@ from agent.verification.service import (
     ValidationResult,
     VerificationService,
 )
-
 log = StructuredLogger("verification_loop")
+
 
 
 class VerifyAction(str, Enum):
@@ -101,6 +101,7 @@ class VerificationLoop:
         self._enable_guardrails = enable_guardrails
         self._max_correction_rounds = max_correction_rounds
         self._reports: list[VerificationReport] = []
+        self._max_reports = 200
 
     def verify_tool_result(
         self,
@@ -275,8 +276,9 @@ class VerificationLoop:
         return latest
 
     def start_session(self) -> None:
-        """开始新的验证会话，重置报告。"""
         self._reports.append(VerificationReport())
+        if len(self._reports) > self._max_reports:
+            self._reports = self._reports[-(self._max_reports * 3 // 4):]
 
     def record_step(self, step: StepVerification) -> None:
         """记录验证步骤到当前报告。

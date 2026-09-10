@@ -13,8 +13,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("vector_store")
+
 
 # ChromaDB 为可选依赖，缺失时 graceful 降级
 _chromadb_available: bool = False
@@ -378,8 +378,8 @@ class VectorStore:
             try:
                 if hasattr(self._client, "clear"):
                     self._client.clear()
-            except Exception:
-                pass
+            except Exception as _exc:
+                log.warning("ChromaDB 清理失败", error=str(_exc))
             self._client = None
         self._collection = None
         self._available = False
@@ -387,8 +387,8 @@ class VectorStore:
     def __del__(self) -> None:
         try:
             self.close()
-        except Exception:
-            pass
+        except Exception as _exc:
+            log.debug("vector_store __del__ close 失败", error=str(_exc))
 
     def __enter__(self) -> "VectorStore":
         return self

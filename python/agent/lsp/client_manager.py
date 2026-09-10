@@ -176,6 +176,7 @@ class LspClientManager:
             return config.id
 
         except Exception as e:
+            log.debug("client_manager 异常处理", error=str(e))
             managed.state.status = "error"
             managed.state.last_error = str(e)
             log.error(f"连接语言服务器 {config.id} 失败: {e}")
@@ -190,6 +191,7 @@ class LspClientManager:
             await managed.transport.send_request("shutdown", None)
             managed.transport.send_notification("exit", None)
         except Exception as _exc:
+            log.debug("client_manager 异常处理", error=str(_exc))
             log_ignored(log, "client_manager.LspClientManager.disconnect_server", _exc)
 
         await managed.transport.stop()

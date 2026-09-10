@@ -15,6 +15,8 @@ from typing import Any
 from agent.config import DATA_DIR
 from agent.llm.credential_pool import CredentialEntry
 from agent.core.logger import log_ignored
+import logging
+logger = logging.getLogger(__name__)
 
 
 class CredentialStore:
@@ -68,7 +70,8 @@ class CredentialStore:
         """
         try:
             return base64.b64decode(value.encode("ascii")).decode("utf-8")
-        except Exception:
+        except Exception as e:
+            logger.warning("credential_persistence._decode 凭据解码失败", error=str(e))
             return ""
 
     def _provider_path(self, provider_name: str) -> Path:

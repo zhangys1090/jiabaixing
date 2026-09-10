@@ -121,6 +121,7 @@ class HapticFeedbackDriver:
             try:
                 return await self._device_executor(action)
             except Exception as e:
+                log.debug("haptic_feedback 异常处理", error=str(e))
                 return HapticFeedbackResult(
                     success=False,
                     feedback_type=action.feedback_type,

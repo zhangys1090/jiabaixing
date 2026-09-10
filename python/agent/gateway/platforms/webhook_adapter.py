@@ -13,7 +13,7 @@ Usage:
     adapter = WebhookAdapter(host="0.0.0.0", port=9000)
     await adapter.start()
     async for msg in adapter.receive_message():
-        print(msg.content)
+        logger.info(msg.content)
 """
 
 from __future__ import annotations
@@ -75,7 +75,8 @@ class WebhookAdapter(PlatformAdapter):
             """
             try:
                 body = await request.json()
-            except Exception:
+            except Exception as _exc:
+                log.debug("webhook_adapter 异常处理", error=str(_exc))
                 return JSONResponse(
                     status_code=400,
                     content={"error": "invalid JSON body"},

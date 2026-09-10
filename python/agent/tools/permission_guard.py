@@ -1,70 +1,27 @@
+"""PermissionGuard — 工具权限守卫。
+
+Permission 枚举和 RiskLevel 枚举的权威定义已移至 agent.core.types。
+本模块仅保留 PermissionGuard 类及相关辅助逻辑。
+"""
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import Any
 
+from agent.core.types import (
+    Permission,
+    RiskLevel,
+    RISK_ORDER,
+    RISK_CONFIRMATION_MAP,
+    DEFAULT_PERMISSIONS,
+    ADMIN_PERMISSIONS,
+    PermissionCheckResult,
+    ToolAccessPolicy,
+    BaseAuditEntry,
+)
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("permission_guard")
-
-
-class Permission(str, Enum):
-    """工具操作权限枚举。
-
-    定义系统支持的所有权限类型，每个工具调用需要具备对应的权限。
-    """
-
-    MEMORY_READ = "memory:read"
-    MEMORY_WRITE = "memory:write"
-    FILE_READ = "file:read"
-    FILE_WRITE = "file:write"
-    CODE_EXECUTE = "code:execute"
-    NETWORK_ACCESS = "network:access"
-    DESKTOP_CONTROL = "desktop:control"
-    SYSTEM_ADMIN = "system:admin"
-
-
-RiskLevel = str
-
-RISK_ORDER: list[RiskLevel] = ["low", "medium", "high", "critical"]
-RISK_CONFIRMATION_MAP: dict[RiskLevel, bool] = {
-    "low": False, "medium": False, "high": True, "critical": True,
-}
-
-DEFAULT_PERMISSIONS: list[Permission] = [
-    Permission.MEMORY_READ, Permission.MEMORY_WRITE,
-    Permission.FILE_READ, Permission.FILE_WRITE,
-    Permission.CODE_EXECUTE, Permission.NETWORK_ACCESS,
-]
-
-ADMIN_PERMISSIONS: list[Permission] = [
-    *DEFAULT_PERMISSIONS,
-    Permission.DESKTOP_CONTROL, Permission.NETWORK_ACCESS,
-    Permission.SYSTEM_ADMIN,
-]
-
-ToolAccessPolicy = str
-
-
-@dataclass
-class PermissionCheckResult:
-    """权限检查结果。
-
-    Attributes:
-        allowed: 是否允许执行。
-        missing: 缺失的权限列表。
-        reason: 拒绝原因（allowed=False时）。
-        needs_confirmation: 是否需要用户确认。
-        policy: 当前生效的策略（allow/deny/ask）。
-    """
-
-    allowed: bool
-    missing: list[Permission] = field(default_factory=list)
-    reason: str = ""
-    needs_confirmation: bool = False
-    policy: ToolAccessPolicy = "allow"
 
 
 @dataclass
@@ -85,24 +42,26 @@ class ToolPolicyEntry:
 
 
 @dataclass
-class AuditEntry:
-    """审计日志条目。
+class AuditEntry(BaseAuditEntry):
+    """审计日志条目 — 继承 core.types.BaseAuditEntry。
+
+    BaseAuditEntry.action 存储工具名称，BaseAuditEntry.result 存储 allowed/reason。
 
     Attributes:
-        timestamp: 事件时间戳。
         trace_id: 追踪ID。
-        tool_name: 工具名称。
         allowed: 是否被允许。
         reason: 拒绝/允许原因。
         risk_level: 风险等级。
     """
 
-    timestamp: float
-    trace_id: str
-    tool_name: str
-    allowed: bool
-    reason: str
-    risk_level: RiskLevel
+    trace_id: str = ""
+    allowed: bool = True
+    reason: str = ""
+    risk_level: RiskLevel = RiskLevel.LOW
+
+    @property
+    def tool_name(self) -> str:
+        return self.action
 
 
 @dataclass
@@ -136,7 +95,7 @@ class SessionLimits:
     max_tool_calls: int = 100
     max_consecutive_same: int = 5
     auto_stop_threshold: int = 5
-    risk_threshold: RiskLevel = "high"
+    risk_threshold: RiskLevel = RiskLevel.HIGH
 
 
 @dataclass
@@ -186,7 +145,7 @@ class PermissionGuard:
     Usage:
         guard = PermissionGuard()
         ctx = ToolContext(user_id="user1", session_id="s1")
-        result = guard.check("shell_exec", [Permission.CODE_EXECUTE], "high", ctx)
+        result = guard.check("shell_exec", [Permission.CODE_EXECUTE], RiskLevel.HIGH, ctx)
         if result.needs_confirmation:
             ...  # 等待用户确认
     """
@@ -218,7 +177,7 @@ class PermissionGuard:
         Args:
             tool_name: 工具名称。
             required_permissions: 执行该工具所需的权限列表。
-            risk_level: 操作风险等级（low/medium/high/critical）。
+            risk_level: 操作风险等级。
             context: 工具调用上下文。
 
         Returns:
@@ -257,12 +216,12 @@ class PermissionGuard:
         risk_index = RISK_ORDER.index(risk_level) if risk_level in RISK_ORDER else 0
         threshold_index = RISK_ORDER.index(limits.risk_threshold) if limits.risk_threshold in RISK_ORDER else 0
         if risk_index >= threshold_index and policy.policy != "allow":
-            self._record_audit(trace_id, tool_name, False, f"风险超过阈值: {risk_level}", risk_level)
-            return PermissionCheckResult(allowed=False, reason=f"需要确认: {risk_level} 风险操作", needs_confirmation=True, policy="ask")
+            self._record_audit(trace_id, tool_name, False, f"风险超过阈值: {risk_level.value}", risk_level)
+            return PermissionCheckResult(allowed=False, reason=f"需要确认: {risk_level.value} 风险操作", needs_confirmation=True, policy="ask")
 
         needs_confirmation = policy.policy == "ask" or RISK_CONFIRMATION_MAP.get(risk_level, False)
         if needs_confirmation:
-            log.info("需确认", tool=tool_name, risk=risk_level)
+            log.info("需确认", tool=tool_name, risk=risk_level.value)
 
         self._record_audit(trace_id, tool_name, True, "等待确认" if needs_confirmation else "权限检查通过", risk_level)
         return PermissionCheckResult(allowed=True, needs_confirmation=needs_confirmation, policy=policy.policy)
@@ -436,8 +395,8 @@ class PermissionGuard:
     def _record_audit(self, trace_id: str, tool_name: str, allowed: bool, reason: str, risk_level: RiskLevel) -> None:
         self._audit_trail.append(AuditEntry(
             timestamp=time.time(),
+            action=tool_name,
             trace_id=trace_id,
-            tool_name=tool_name,
             allowed=allowed,
             reason=reason,
             risk_level=risk_level,

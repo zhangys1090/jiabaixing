@@ -228,10 +228,12 @@ class StdioMCPTransport(BaseMCPTransport):
             try:
                 self._process.stdin.close()
             except Exception as _exc:
+                log.debug("transport 异常处理", error=str(_exc))
                 log_ignored(log, "transport.StdioMCPTransport.stop", _exc)
             try:
                 self._process.kill()
             except Exception as _exc:
+                log.debug("transport 异常处理", error=str(_exc))
                 log_ignored(log, "transport.StdioMCPTransport.stop", _exc)
             self._process = None
         for task in (self._stdout_task, self._stderr_task):
@@ -264,6 +266,7 @@ class StdioMCPTransport(BaseMCPTransport):
         try:
             self._process.stdin.write(json_str.encode("utf-8"))
         except Exception as e:
+            log.debug("transport 异常处理", error=str(e))
             self._pending.pop(msg_id, None)
             raise RuntimeError(f"StdioMCPTransport 写入失败: {e}")
         try:
@@ -326,7 +329,8 @@ class StdioMCPTransport(BaseMCPTransport):
                     self._handle_jsonrpc_message(json.loads(text))
                 except json.JSONDecodeError as _exc:
                     log_ignored(log, "transport.StdioMCPTransport._read_stdout", _exc)
-            except Exception:
+            except Exception as _exc:
+                log.debug("transport 异常处理", error=str(_exc))
                 break
 
     async def _read_stderr(self) -> None:
@@ -340,7 +344,8 @@ class StdioMCPTransport(BaseMCPTransport):
                 msg = line.decode("utf-8", errors="replace").strip()
                 if msg:
                     log.debug(f"StdioMCPTransport stderr: {msg[:200]}")
-            except Exception:
+            except Exception as _exc:
+                log.debug("transport 异常处理", error=str(_exc))
                 break
 
 
@@ -368,6 +373,7 @@ class HttpSseMCPTransport(BaseMCPTransport):
         self._buffer: str = ""
         self._event_type: str = ""
         self._data_lines: list[str] = []
+        self._MAX_DATA_LINES = 10000
 
     @property
     def is_running(self) -> bool:

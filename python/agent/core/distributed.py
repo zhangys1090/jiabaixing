@@ -34,7 +34,8 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-from agent.core.logger import log_ignored
+from agent.core.logger import log_ignored, StructuredLogger
+log = StructuredLogger("distributed")
 
 # 注意：本模块的日志调用使用 %-style 位置参数（如 log.warning("x %d", n)），
 # 必须使用标准库 Logger —— StructuredLogger 只接受 **kwargs，传位置参数会 TypeError。
@@ -82,6 +83,14 @@ class DistributedLock:
             self._local.conn.execute("PRAGMA journal_mode=WAL")
             self._local.conn.execute("PRAGMA busy_timeout=5000")
         return self._local.conn
+
+    def close(self) -> None:
+        if hasattr(self._local, "conn") and self._local.conn is not None:
+            try:
+                self._local.conn.close()
+            except Exception as _exc:
+                log.debug("distributed_lock close 失败", error=str(_exc))
+            self._local.conn = None
 
     def _init_db(self) -> None:
         conn = self._get_conn()
@@ -163,6 +172,7 @@ class DistributedLock:
                     break
                 consecutive_failures = 0
             except Exception as e:
+                log.debug("distributed 异常处理", error=str(e))
                 consecutive_failures += 1
                 log.warning("DistributedLock heartbeat failed (%d/%d): %s", consecutive_failures, _MAX_HEARTBEAT_FAILURES, e)
                 if consecutive_failures >= _MAX_HEARTBEAT_FAILURES:
@@ -192,6 +202,7 @@ class DistributedLock:
             (self._name, self._owner_id),
         )
         conn.commit()
+        self.close()
         return True
 
     def is_owned(self) -> bool:
@@ -251,6 +262,14 @@ class LeaderElector:
             self._local.conn.execute("PRAGMA busy_timeout=3000")
         return self._local.conn
 
+    def close(self) -> None:
+        if hasattr(self._local, "conn") and self._local.conn is not None:
+            try:
+                self._local.conn.close()
+            except Exception as _exc:
+                log.debug("leader_election close 失败", error=str(_exc))
+            self._local.conn = None
+
     def _init_db(self) -> None:
         conn = self._get_conn()
         conn.execute(
@@ -278,6 +297,7 @@ class LeaderElector:
             except asyncio.CancelledError as _exc:
                 log_ignored(None, "distributed.LeaderElector.stop", _exc)
             self._heartbeat_task = None
+        self.close()
 
     async def _run_loop(self) -> None:
         """领导者选举循环 — 定期尝试成为/维持 Leader，连续失败后退出。"""
@@ -288,6 +308,7 @@ class LeaderElector:
                 self._try_become_leader()
                 consecutive_failures = 0
             except Exception as e:
+                log.debug("distributed 异常处理", error=str(e))
                 consecutive_failures += 1
                 log.warning("LeaderElection try_become_leader failed (%d/%d): %s", consecutive_failures, _MAX_ELECTION_FAILURES, e)
                 if consecutive_failures >= _MAX_ELECTION_FAILURES:

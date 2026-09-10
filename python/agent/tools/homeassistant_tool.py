@@ -13,6 +13,8 @@ from agent.tools.registry import (
     ToolParameterDef,
     ToolResult,
 )
+import logging
+logger = logging.getLogger(__name__)
 
 
 HA_CONTROL_DEF = ToolDefinition(
@@ -115,6 +117,7 @@ class HomeAssistantClient:
                 except URLError as e:
                     return {"error": str(e)}
             except Exception as e:
+                logger.warning("homeassistant_tool 异常处理", error=str(e))
                 return {"error": str(e)}
 
         url = f"{self._base_url}{path}"
@@ -132,6 +135,7 @@ class HomeAssistantClient:
                     return {"error": f"Unsupported method: {method}"}
                 return r.json()
             except Exception as e:
+                logger.warning("homeassistant_tool 异常处理", error=str(e))
                 return {"error": str(e)}
 
     async def get_states(self) -> list[HAEntity]:

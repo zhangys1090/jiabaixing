@@ -5,11 +5,13 @@ import re
 from typing import Any
 
 from agent.llm.provider import LLMProvider
+import logging
 from agent.loop.types import (
     EvaluatorOutput,
     LoopContext,
     StepResult,
 )
+logger = logging.getLogger(__name__)
 
 
 class Evaluator:
@@ -44,7 +46,8 @@ class Evaluator:
 
         try:
             return await self._llm_evaluate(input_text, context, step_success_rate)
-        except Exception:
+        except Exception as e:
+            logger.warning("evaluator.evaluate LLM评估失败，降级为规则评估", error=str(e))
             return self._rule_evaluate(context, step_success_rate)
 
     async def _llm_evaluate(

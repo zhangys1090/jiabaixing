@@ -5,23 +5,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-
-class RiskLevel(str, Enum):
-    """风险等级枚举。
-
-    Attributes:
-        NONE: 无风险。
-        LOW: 低风险。
-        MEDIUM: 中等风险。
-        HIGH: 高风险。
-        CRITICAL: 严重风险。
-    """
-
-    NONE = "none"
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-    CRITICAL = "critical"
+from agent.core.types import RiskLevel
 
 
 class CheckScene(str, Enum):

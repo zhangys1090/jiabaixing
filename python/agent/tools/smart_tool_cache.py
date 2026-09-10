@@ -33,8 +33,8 @@ from enum import Enum
 from typing import Any
 
 from agent.core.logger import StructuredLogger, log_ignored
-
 log = StructuredLogger("smart_tool_cache")
+
 
 
 class CachePolicy(str, Enum):

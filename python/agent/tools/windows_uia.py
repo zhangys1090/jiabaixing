@@ -22,10 +22,11 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from agent.core.logger import StructuredLogger
 from agent.core.logger import log_ignored
+from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("windows_uia")
+
 
 # UIA 控制类型常量（不依赖 uiautomation 包时使用常量字符串）
 UIA_CONTROL_TYPES = {
@@ -172,6 +173,7 @@ class UIAEngine:
             if self._matches(element, query):
                 results.append(element)
         except Exception as _exc:
+            log.debug("windows_uia 异常处理", error=str(_exc))
             log_ignored(log, "windows_uia.UIAEngine._search_tree", _exc)
 
         try:
@@ -179,6 +181,7 @@ class UIAEngine:
             for child in children:
                 self._search_tree(child, query, results, depth + 1)
         except Exception as _exc:
+            log.debug("windows_uia 异常处理", error=str(_exc))
             log_ignored(log, "windows_uia.UIAEngine._search_tree", _exc)
 
     def _control_to_element(self, control: Any) -> UIAElement:
@@ -200,6 +203,7 @@ class UIAEngine:
             if callable(get_children):
                 return len(get_children())
         except Exception as _exc:
+            log.debug("windows_uia 异常处理", error=str(_exc))
             log_ignored(log, "windows_uia.UIAEngine._safe_children_count", _exc)
         return 0
 
@@ -208,6 +212,7 @@ class UIAEngine:
             rect = control.BoundingRectangle
             return {"x": rect.left, "y": rect.top, "w": rect.width(), "h": rect.height()}
         except Exception as _exc:
+            log.debug("windows_uia 异常处理", error=str(_exc))
             log_ignored(log, "windows_uia.UIAEngine._get_rect", _exc)
             return {"x": 0, "y": 0, "w": 0, "h": 0}
 
@@ -316,6 +321,7 @@ class UIAEngine:
         try:
             return self._uia.GetForegroundControl().Name
         except Exception as _exc:
+            log.debug("windows_uia 异常处理", error=str(_exc))
             log_ignored(log, "windows_uia.UIAEngine._get_active_window_title_sync", _exc)
             return ""
 

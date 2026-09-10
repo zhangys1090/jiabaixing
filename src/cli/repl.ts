@@ -583,7 +583,9 @@ export async function mainLoop(): Promise<void> {
       `\n  ${COLORS.yellow}(按 Ctrl+C 再次强制退出，或输入 /quit)${COLORS.reset}`,
       'CLI'
     );
-    setTimeout(() => { sigintCount = 0; }, 3000);
+    setTimeout(() => {
+      sigintCount = 0;
+    }, 3000);
   };
 
   process.on('SIGINT', sigintHandler);

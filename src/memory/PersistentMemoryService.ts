@@ -1,4 +1,23 @@
 /**
+ * D6: ROGUE STORE — PersistentMemoryService 使用 MEMORY.md/USER.md 文件存储，
+ * 未桥接到 Python canonical MemoryEngine。
+ * MemoryAuthority 审计标记为 bridge_to_python。
+ *
+ * 新代码应通过 MemoryAuthority.write({ memoryType: 'persistent_hermes' }) 写入。
+ *
+ * @deprecated Use MemoryAuthority.write({ memoryType: 'persistent_hermes' }) instead.
+ * See docs/AUTHORITY_RECONSTRUCTION.md §4 D6.
+ */
+
+import { emitDeprecationWarning } from '../shared/deprecationWarning';
+emitDeprecationWarning(
+  'PersistentMemoryService',
+  'MemoryAuthority (memoryType: persistent_hermes -> Python)',
+  'V6.0',
+  'PersistentMemoryService is a rogue store. Use MemoryAuthority.write({ memoryType: "persistent_hermes" }) instead.'
+);
+
+/**
  * Hermes风格持久化记忆服务
  * 采用 MEMORY.md / USER.md 双文件模式，分别存储Agent笔记和用户画像
  * 支持添加、替换、删除操作，具备安全扫描和容量管理能力

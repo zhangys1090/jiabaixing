@@ -46,8 +46,8 @@ from agent.orchestration.executor import (
     TaskPriority,
 )
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("task_dsl")
+
 
 
 # ---------------------------------------------------------------------------
@@ -84,16 +84,17 @@ def _compile_dsl_condition(expr: str) -> Callable[[dict], bool]:
     """
     try:
         tree = _ast.parse(expr, mode="eval")
-    except SyntaxError as e:  # noqa: PERF203
+    except SyntaxError as e:
         raise ValueError(f"DSL 条件语法错误: {e}") from e
     _validate_dsl_condition(tree)
     code = compile(tree, "<dsl_condition>", "eval")
+    _SAFE_GLOBALS = {"__builtins__": {}, "abs": abs, "len": len, "min": min, "max": max, "round": round, "int": int, "float": float, "str": str, "bool": bool}
 
     def _cond(row: dict) -> bool:
         try:
-            return bool(eval(code, {"__builtins__": {}}, row))  # noqa: S307
-        except Exception:
-            # 字段缺失或类型不匹配时视为条件不满足（安全失败，走 else 分支）
+            return bool(eval(code, _SAFE_GLOBALS, row))
+        except Exception as _exc:
+            log.warning("task_dsl._compile_dsl_condition 条件求值失败", error=str(_exc), expr=expr[:80])
             return False
 
     return _cond
@@ -196,6 +197,7 @@ class PipelineBuilder:
         self._name = name
         self._specs: list[TaskSpec] = []
         self._last_task_ids: list[str] = []
+        self._MAX_LAST_TASK_IDS = 1000
         self._default_timeout_ms = 60000
         self._default_retry_policy = RetryPolicy()
 

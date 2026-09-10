@@ -24,8 +24,8 @@ from typing import Any
 
 from agent.perception.sensory_fusion import SenseSample, SensoryFusion
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("acoustic_emotion")
+
 
 
 class AcousticEmotion(str, Enum):

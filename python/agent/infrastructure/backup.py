@@ -8,7 +8,7 @@
 
     manager = BackupManager()
     path = manager.create_backup()
-    print(f"备份已创建: {path}")
+    logger.info("备份已创建: {path}")
 
     manifests = manager.list_backups()
     ok = manager.verify_backup(path)
@@ -26,6 +26,8 @@ from pathlib import Path
 from typing import Any
 
 from agent.config import DATA_DIR
+import logging
+logger = logging.getLogger(__name__)
 
 # 备份版本号，随格式升级递增
 _BACKUP_VERSION = 1
@@ -204,7 +206,8 @@ class BackupManager:
                     members.append(member)
                 tar.extractall(path=str(dest), members=members, filter="data")
             return True
-        except Exception:
+        except Exception as e:
+            logger.warning("backup.restore 备份恢复失败", error=str(e))
             return False
 
     def list_backups(self, backup_dir: Path | str | None = None) -> list[BackupManifest]:

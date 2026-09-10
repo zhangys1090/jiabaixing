@@ -8,6 +8,11 @@
  * Python ActionVerifier（闭环）。各通道后端对象经 use* 方法注入，启动时装配。
  */
 
+import { Logger } from '../../utils/Logger';
+import type { ToolRegistry } from '../tools/registry/ToolRegistry';
+import { DesktopChannel } from './channels/DesktopChannel';
+import { McpChannel } from './channels/McpChannel';
+import { ToolChannel } from './channels/ToolChannel';
 import type {
   ActionChannel,
   ActionChannelKind,
@@ -16,22 +21,14 @@ import type {
   VerificationOutcome,
   VerifyRequest,
 } from './types';
-import type { ToolRegistry } from '../tools/registry/ToolRegistry';
-import type { DesktopActionExecutor } from '../../desktop/DesktopActionExecutor';
-import { ToolChannel } from './channels/ToolChannel';
-import { DesktopChannel } from './channels/DesktopChannel';
-import { McpChannel } from './channels/McpChannel';
 import {
   getActionVerificationBridge,
   type VerificationBridge,
 } from './verify/VerificationBridge';
-import { DesktopActionExecutor as DefaultDesktopExecutor } from '../../desktop/DesktopActionExecutor';
-import { Logger } from '../../utils/Logger';
 
 export class ActionDispatcher {
   private readonly channels = new Map<ActionChannelKind, ActionChannel>();
   private toolRegistry: ToolRegistry | null = null;
-  private desktopExecutor: DesktopActionExecutor | null = null;
   private verifier: VerificationBridge = getActionVerificationBridge();
 
   constructor() {
@@ -39,13 +36,11 @@ export class ActionDispatcher {
   }
 
   private ensureChannels(): void {
-    // MCP / Desktop 通道不依赖外部注入，始终可用
     if (!this.channels.has('mcp')) {
       this.channels.set('mcp', new McpChannel());
     }
-    const desktop = this.desktopExecutor ?? DefaultDesktopExecutor.getInstance();
     if (!this.channels.has('desktop')) {
-      this.channels.set('desktop', new DesktopChannel(desktop, this.verifier));
+      this.channels.set('desktop', new DesktopChannel(this.verifier));
     }
   }
 
@@ -56,21 +51,10 @@ export class ActionDispatcher {
     return this;
   }
 
-  /** 注入桌面执行器实例（默认使用 DesktopActionExecutor 单例） */
-  useDesktopExecutor(executor: DesktopActionExecutor): this {
-    this.desktopExecutor = executor;
-    this.channels.set(
-      'desktop',
-      new DesktopChannel(executor, this.verifier)
-    );
-    return this;
-  }
-
   /** 切换验证桥（默认 Python 优先，可降级为 Local） */
   useVerifier(verifier: VerificationBridge): this {
     this.verifier = verifier;
-    const desktop = this.desktopExecutor ?? DefaultDesktopExecutor.getInstance();
-    this.channels.set('desktop', new DesktopChannel(desktop, verifier));
+    this.channels.set('desktop', new DesktopChannel(verifier));
     return this;
   }
 
@@ -128,15 +112,13 @@ export function getActionDispatcher(): ActionDispatcher {
   return _dispatcher;
 }
 
-/** 启动装配：注入真实工具注册表 / 桌面执行器 / 验证桥 */
+/** 启动装配：注入真实工具注册表 / 验证桥 */
 export function configureActionDispatcher(opts: {
   toolRegistry?: ToolRegistry;
-  desktopExecutor?: DesktopActionExecutor;
   verifier?: VerificationBridge;
 }): ActionDispatcher {
   const d = getActionDispatcher();
   if (opts.toolRegistry) d.useToolRegistry(opts.toolRegistry);
-  if (opts.desktopExecutor) d.useDesktopExecutor(opts.desktopExecutor);
   if (opts.verifier) d.useVerifier(opts.verifier);
   return d;
 }

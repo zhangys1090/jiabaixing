@@ -31,10 +31,11 @@ import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
-
 from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("skill_provenance")
+
+
 
 
 class SourceType(str, Enum):
@@ -169,7 +170,7 @@ class SkillProvenance:
         )
         self._records[skill_id] = record
         self._record_audit("register", skill_id, source_type=source_type.value, url=url)
-        log.info("Skill source registered", skill_id=skill_id, source=source_type.value, trust=score)
+        log.debug("Skill source registered", skill_id=skill_id, source=source_type.value, trust=score)
         return record
 
     def add_version(

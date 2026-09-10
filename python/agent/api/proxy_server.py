@@ -32,10 +32,11 @@ from collections import OrderedDict, defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
-
 from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("proxy_server")
+
+
 
 
 class BackendStatus(str, Enum):
@@ -168,6 +169,7 @@ class ProxyServer:
         self._cache = LRUCache(max_size=cache_max_size) if cache_enabled else None
         self._rate_limits: dict[str, list[float]] = defaultdict(list)
         self._running: bool = False
+        self._MAX_RATE_LIMIT_KEYS = 1000
 
     def add_backend(
         self,
@@ -220,6 +222,10 @@ class ProxyServer:
         now = time.time()
         timestamps = self._rate_limits[backend_name]
         self._rate_limits[backend_name] = [t for t in timestamps if now - t < 60]
+        if len(self._rate_limits) > self._MAX_RATE_LIMIT_KEYS:
+            stale_keys = [k for k, v in self._rate_limits.items() if not v]
+            for k in stale_keys:
+                del self._rate_limits[k]
         return len(self._rate_limits[backend_name]) < backend.max_rpm
 
     async def proxy_request(self, request: ProxyRequest) -> ProxyResponse:
@@ -252,13 +258,12 @@ class ProxyServer:
                 else:
                     headers["Authorization"] = f"Bearer {backend.api_key}"
 
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=60.0) as client:
                 resp = await client.request(
                     request.method,
                     url,
                     headers=headers,
                     json=request.body if request.body else None,
-                    timeout=60,
                 )
 
             latency = (time.monotonic() - start) * 1000
@@ -282,6 +287,7 @@ class ProxyServer:
                 latency_ms=latency,
             )
         except Exception as e:
+            log.debug("proxy_server 异常处理", error=str(e))
             backend.total_errors += 1
             if backend.total_errors > 5:
                 backend.status = BackendStatus.DEGRADED

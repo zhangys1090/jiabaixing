@@ -81,7 +81,8 @@ export type MultimodalReferenceProvider = (
 const REFERENCE_PATTERN = /@(https?:\/\/[^\s]+)|@([\w./\-]+(?:\.[\w]+)?)/g;
 
 /** 多模态 @引用：CJK 或拉丁（具名类型 / 通道名），可选 #样本索引 */
-const MULTIMODAL_REFERENCE_PATTERN = /@([\u4e00-\u9fffA-Za-z][\u4e00-\u9fffA-Za-z0-9_]*(?:#\d+)?)/g;
+const MULTIMODAL_REFERENCE_PATTERN =
+  /@([\u4e00-\u9fffA-Za-z][\u4e00-\u9fffA-Za-z0-9_]*(?:#\d+)?)/g;
 /** 已知感知通道名（拉丁），用于区分"多模态 @引用"与普通 @文件/@配置 引用 */
 const KNOWN_MODALITIES = new Set<string>([
   'visual',

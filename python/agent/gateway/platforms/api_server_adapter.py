@@ -80,7 +80,8 @@ class APIServerAdapter(PlatformAdapter):
             """
             try:
                 body = await request.json()
-            except Exception:
+            except Exception as _exc:
+                log.debug("api_server_adapter 异常处理", error=str(_exc))
                 return JSONResponse(
                     status_code=400,
                     content={"error": "invalid JSON body"},

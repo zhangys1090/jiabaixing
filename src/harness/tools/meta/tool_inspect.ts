@@ -48,7 +48,9 @@ export function createToolInspectExecutor(deps: ToolInspectDeps) {
   ): Promise<ToolResult> => {
     const startTime = Date.now();
     const name = params.name ? String(params.name).trim() : '';
-    const filter = String(params.filter || 'all').trim().toLowerCase();
+    const filter = String(params.filter || 'all')
+      .trim()
+      .toLowerCase();
 
     if (name) {
       const tool = deps.toolRegistry ? deps.toolRegistry.get(name) : null;

@@ -18,10 +18,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from agent.core.logger import StructuredLogger, log_ignored
 from agent.mcp_integration.mcp_client import MCPClient, MCPTool
+from agent.core.logger import StructuredLogger, log_ignored
 
 log = StructuredLogger("mcp_tool_bridge")
+
 
 
 class MCPToolBridge:
@@ -70,7 +71,7 @@ class MCPToolBridge:
             if success:
                 count += 1
 
-        log.info("MCP 工具注册", server=server_name, registered=count, total=len(tools))
+        log.debug("MCP 工具注册", server=server_name, registered=count, total=len(tools))
         return count
 
     async def register_tool(self, server_name: str, tool_name: str) -> bool:
@@ -114,6 +115,7 @@ class MCPToolBridge:
                     self._registry.unregister(agent_name)
                 count += 1
             except Exception as _exc:
+                log.debug("mcp_tool_bridge 异常处理", error=str(_exc))
                 log_ignored(log, "mcp_tool_bridge.unregister_server", _exc)
 
         for mcp_name in list(self._registered.keys()):

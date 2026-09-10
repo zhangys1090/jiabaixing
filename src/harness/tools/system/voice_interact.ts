@@ -6,13 +6,13 @@
  */
 
 import * as fs from 'fs';
-import { Logger } from '../../../utils/Logger';
-import { EventBus } from '../../../shared/EventBus';
 import { SpeechRecognizer } from '../../../multimodal/SpeechRecognizer';
 import {
   SpeechSynthesizer,
   type TTSBackend,
 } from '../../../multimodal/SpeechSynthesizer';
+import { EventBus } from '../../../shared/EventBus';
+import { Logger } from '../../../utils/Logger';
 import type { ToolContext, ToolDefinition, ToolResult } from '../../types';
 import { Permission, ToolCategory } from '../../types';
 
@@ -50,7 +50,8 @@ export const VOICE_INTERACT_DEF: ToolDefinition = {
     },
     ttsBackend: {
       type: 'string',
-      description: 'speak 操作：TTS 后端选择（mock=仅记录意图 / real=真实合成）。默认 mock。',
+      description:
+        'speak 操作：TTS 后端选择（mock=仅记录意图 / real=真实合成）。默认 mock。',
       enum: ['mock', 'real'],
       default: 'mock',
     },
@@ -250,10 +251,10 @@ async function handleSpeak(
   }
 
   // P1-3：TTS 后端切换（real 走真实合成器，mock 仅记录意图）
-  const ttsBackend = (
-    (params.ttsBackend as TTSBackend) ||
-    (deps.interactionEngine?.speechSynthesizer ? 'real' : 'mock')
-  ) as TTSBackend;
+  const ttsBackend = ((params.ttsBackend as TTSBackend) ||
+    (deps.interactionEngine?.speechSynthesizer
+      ? 'real'
+      : 'mock')) as TTSBackend;
 
   const synthesizer = new SpeechSynthesizer(
     ttsBackend,
@@ -273,7 +274,7 @@ async function handleSpeak(
   );
   return ok(
     result.backend === 'real'
-      ? `语音已生成并播放 (${(result.duration ?? 0)}ms)`
+      ? `语音已生成并播放 (${result.duration ?? 0}ms)`
       : `语音指令已接收: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`,
     Date.now() - startTime,
     {
@@ -308,9 +309,9 @@ async function handleListen(
         Date.now() - startTime
       );
     }
-  } else if (deps.audioCapturer) {
+  } else if (deps.interactionEngine?.audioCapturer) {
     try {
-      audioBuffer = await deps.audioCapturer(language);
+      audioBuffer = await deps.interactionEngine.audioCapturer(language);
     } catch (capErr) {
       Logger.warn(
         `🎤 麦克风采集失败: ${(capErr as Error).message}`,
@@ -325,11 +326,18 @@ async function handleListen(
     const result = await recognizer.recognize(audioBuffer);
 
     // ASR 结果写入感知总线（voice_recognized 事件供对话/感知链路消费）
-    EventBus.emit('voice_recognized', {
+    EventBus.emit('cognition_result', {
+      tool: 'voice_interact',
+      category: 'speech_recognition',
+      success: true,
+      durationMs: Date.now() - startTime,
+      outputPreview: result.text?.substring(0, 100) ?? null,
+      error: null,
+      timestamp: new Date().toISOString(),
+      sessionId: null,
       text: result.text,
       language,
       confidence: result.confidence,
-      timestamp: new Date().toISOString(),
     });
 
     // 回灌对话引擎（若已装配真实交互引擎）

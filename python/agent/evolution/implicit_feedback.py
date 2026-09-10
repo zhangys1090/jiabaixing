@@ -51,8 +51,8 @@ from enum import Enum
 from typing import Any
 
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("implicit_feedback")
+
 
 # ========== 常量定义 ==========
 
@@ -182,8 +182,9 @@ class ImplicitFeedbackCollector:
 
         # 当前话题关键词
         self._current_topic_keywords: list[str] = []
+        self._MAX_CURRENT_TOPIC_KEYWORDS = 200
 
-        log.info("🎯 隐式反馈收集器已初始化")
+        log.debug("隐式反馈收集器已初始化")
 
     @classmethod
     def get_instance(cls) -> ImplicitFeedbackCollector:
@@ -229,6 +230,7 @@ class ImplicitFeedbackCollector:
                     confidence=SATISFACTION_SIGNAL_CONFIDENCE,
                 )
         except Exception as e:
+            log.debug("implicit_feedback 异常处理", error=str(e))
             self._statistics.error_count += 1
             log.warning(f"满意度检测失败: {e}")
 
@@ -261,6 +263,7 @@ class ImplicitFeedbackCollector:
                 else:
                     self._consecutive_follow_ups = 0
         except Exception as e:
+            log.debug("implicit_feedback 异常处理", error=str(e))
             self._statistics.error_count += 1
             log.warning(f"追问检测失败: {e}")
 
@@ -275,6 +278,7 @@ class ImplicitFeedbackCollector:
                 )
                 self._current_topic_keywords = self._extract_keywords(content)
         except Exception as e:
+            log.debug("implicit_feedback 异常处理", error=str(e))
             self._statistics.error_count += 1
             log.warning(f"话题切换检测失败: {e}")
 
@@ -290,6 +294,7 @@ class ImplicitFeedbackCollector:
                     metadata={"retry_count": self._retry_count},
                 )
         except Exception as e:
+            log.debug("implicit_feedback 异常处理", error=str(e))
             self._statistics.error_count += 1
             log.warning(f"重试检测失败: {e}")
 
@@ -297,6 +302,7 @@ class ImplicitFeedbackCollector:
         try:
             self._last_user_message_time = now
         except Exception as e:
+            log.debug("implicit_feedback 异常处理", error=str(e))
             self._statistics.error_count += 1
             log.warning(f"状态更新失败: {e}")
 

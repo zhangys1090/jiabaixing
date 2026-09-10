@@ -6,20 +6,20 @@
  * 集成到 JiabaixingCore.processInput()
  */
 
-import {
-  DesktopActionExecutor,
-  DesktopAction,
-  DesktopTaskResult,
-} from './DesktopActionExecutor';
-import { DesktopVisionEngine, DesktopObservation } from './DesktopVisionEngine';
-import { WindowManager } from './WindowManager';
-import { SystemInput } from './SystemInput';
-import { DesktopUIInspector } from './DesktopUIInspector';
-import { StateSnapshotManager } from './StateSnapshotManager';
 import { Logger } from '../utils/Logger';
+import {
+    DesktopAction,
+    DesktopTaskResult,
+} from './DesktopActionExecutor';
+import { DesktopUIInspector } from './DesktopUIInspector';
+import { DesktopObservation, DesktopVisionEngine } from './DesktopVisionEngine';
+import { StateSnapshotManager } from './StateSnapshotManager';
+import { SystemInput } from './SystemInput';
+import { WindowManager } from './WindowManager';
 // F3: 桌面决策不再独立持有 TS LLMProvider（违反 AGENTS.md §0.1），
 // 改为路由到 Python 后端的 LLM（经 PythonAgentBridge）。
 import { getPythonBridge } from '../server/bootstrap';
+import { DesktopActionAuthority } from './DesktopActionAuthority';
 
 export interface DesktopAgentConfig {
   maxRetries?: number;
@@ -80,7 +80,7 @@ const DEFAULT_MANIFEST: DesktopManifest = {
 
 export class DesktopAgentLoop {
   private static instance: DesktopAgentLoop | null = null;
-  private executor: DesktopActionExecutor;
+  private authority: DesktopActionAuthority;
   private visionEngine: DesktopVisionEngine;
   private windowManager: WindowManager;
   private systemInput: SystemInput;
@@ -93,7 +93,7 @@ export class DesktopAgentLoop {
   private lastCheckpointId: string | null = null;
 
   private constructor(config?: DesktopAgentConfig) {
-    this.executor = DesktopActionExecutor.getInstance();
+    this.authority = DesktopActionAuthority.getInstance();
     this.visionEngine = DesktopVisionEngine.getInstance();
     this.windowManager = WindowManager.getInstance();
     this.systemInput = SystemInput.getInstance();
@@ -123,7 +123,7 @@ export class DesktopAgentLoop {
     if (this.initialized) return;
 
     Logger.info('🤖 DesktopAgentLoop 初始化', 'DesktopAgentLoop');
-    await this.executor.initialize();
+    await this.authority.initialize();
     await this.visionEngine.initialize();
     await this.windowManager.initialize();
     await this.systemInput.initialize();
@@ -189,7 +189,25 @@ export class DesktopAgentLoop {
         if (this.config.enableLLMPlanning && this._bridgeLlmAvailable()) {
           actions = await this.llmPlanActions(userInput, observation);
         } else {
-          actions = this.planActions(userInput, observation);
+          Logger.warn(
+            '🛡️ Python Bridge 不可用，桌面执行被阻止 (FAIL CLOSED)',
+            'DesktopAgentLoop'
+          );
+          this.isRunning = false;
+          return {
+            success: false,
+            taskDescription: userInput,
+            executionResult: {
+              success: false,
+              actions: [],
+              summary: 'Python Bridge 不可用，桌面执行被阻止',
+            },
+            observations,
+            report:
+              '桌面操作需要 Python 后端支持，当前后端不可用。请检查 Python Agent 状态或重启服务。',
+            error: 'BRIDGE_UNAVAILABLE_FAIL_CLOSED',
+            retryCount,
+          };
         }
 
         if (actions.length === 0) {
@@ -262,7 +280,7 @@ export class DesktopAgentLoop {
           `🎮 阶段3: 执行 ${actions.length} 个动作 (尝试 ${attempt + 1}/${this.config.maxRetries + 1})`,
           'DesktopAgentLoop'
         );
-        const executionResult = await this.executor.executeTask(actions);
+        const executionResult = await this.authority.execute(actions);
 
         if (executionResult.success) {
           // ═══════════════════════ 4. 验证 ═══════════════════════
@@ -387,7 +405,11 @@ export class DesktopAgentLoop {
     observation: DesktopObservation
   ): Promise<DesktopAction[]> {
     if (!this._bridgeLlmAvailable()) {
-      return this.planActions(userInput, observation);
+      Logger.warn(
+        '🛡️ llmPlanActions: Bridge 不可用，返回空 (FAIL CLOSED)',
+        'DesktopAgentLoop'
+      );
+      return [];
     }
 
     try {
@@ -436,7 +458,6 @@ ${observation.visionAnalysis.description ? `\n视觉分析: ${observation.vision
         ? [`data:image/png;base64,${screenshotBase64}`]
         : [];
 
-      // F3: 决策经 Python LLM（Bridge），不再使用本地 LLMProvider。
       const llmResponse = await this._bridgePlan(userPrompt, images);
 
       const actions = llmResponse ? this.parseLLMActions(llmResponse) : [];
@@ -448,14 +469,17 @@ ${observation.visionAnalysis.description ? `\n视觉分析: ${observation.vision
         return actions;
       }
 
-      Logger.warn('⚠️ LLM 规划结果为空，降级为正则模式', 'DesktopAgentLoop');
-      return this.planActions(userInput, observation);
-    } catch (error) {
       Logger.warn(
-        `⚠️ LLM 规划失败，降级为正则模式: ${(error as Error).message}`,
+        '⚠️ LLM 规划结果为空，返回空 (FAIL CLOSED，不降级正则)',
         'DesktopAgentLoop'
       );
-      return this.planActions(userInput, observation);
+      return [];
+    } catch (error) {
+      Logger.warn(
+        `⚠️ LLM 规划失败，返回空 (FAIL CLOSED): ${(error as Error).message}`,
+        'DesktopAgentLoop'
+      );
+      return [];
     }
   }
 
@@ -788,7 +812,6 @@ ${observation.visionAnalysis.description ? `\n视觉分析: ${observation.vision
 
   public async shutdown(): Promise<void> {
     this.isRunning = false;
-    await this.executor.shutdown();
     this.snapshotManager.dispose();
     this.initialized = false;
     Logger.info('🤖 DesktopAgentLoop 已关闭', 'DesktopAgentLoop');

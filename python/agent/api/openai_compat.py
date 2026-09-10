@@ -26,9 +26,9 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from agent.core.logger import StructuredLogger
+log = StructuredLogger("openai_compat")
 
 router = APIRouter()
-log = StructuredLogger("openai_compat")
 
 
 # ═══════════════════════════════════════════════════════════════

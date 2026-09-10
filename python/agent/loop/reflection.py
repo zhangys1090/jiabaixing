@@ -17,6 +17,7 @@ from agent.loop.reflection_knowledge_base import (
 )
 from agent.core.otel_tracer import otel_trace
 from opentelemetry import trace as _otel_trace_api
+log = StructuredLogger("reflection")
 
 
 ERROR_CATEGORIES: list[tuple[re.Pattern[str], str]] = [
@@ -155,6 +156,7 @@ class ReflectionEngine:
         self.max_experience_records = max_experience_records
         self._experience_buffer: list[ExperienceEntry] = []
         self._task_reflection_buffer: list[TaskReflectionExperience] = []
+        self._MAX_METRICS = 500
         self._metrics = {
             "total_reflections": 0,
             "deep_reflections": 0,
@@ -208,6 +210,7 @@ class ReflectionEngine:
         try:
             _otel_trace_api.get_current_span().set_attribute("reflection_type", "failure")
         except Exception as _exc:
+            log.warning("reflection 异常处理", error=str(_exc))
             log_ignored(None, "reflection.ReflectionEngine.reflect", _exc)
 
         prompt = self._build_reflect_prompt(tool_name, args, error, ctx, similar)
@@ -226,6 +229,7 @@ class ReflectionEngine:
                 try:
                     _otel_trace_api.get_current_span().set_attribute("success", True)
                 except Exception as _exc:
+                    log.warning("reflection 异常处理", error=str(_exc))
                     log_ignored(None, "reflection.ReflectionEngine.reflect", _exc)
                 return ReflectionResult(
                     root_cause=parsed.get("rootCause", f"{tool_name} 执行失败"),
@@ -246,14 +250,17 @@ class ReflectionEngine:
                         metadata={"tool_name": tool_name, "error": error[:200]},
                     )
                 except Exception as _exc:
+                    log.warning("reflection 异常处理", error=str(_exc))
                     log_ignored(None, "reflection.ReflectionEngine.reflect", _exc)
 
             return self._fallback_reflect(tool_name, error)
-        except Exception:
+        except Exception as _exc:
+            log.warning("reflection 异常被捕获", error=str(_exc))
             # OTel span 属性：反思失败
             try:
                 _otel_trace_api.get_current_span().set_attribute("success", False)
             except Exception as _exc:
+                log.warning("reflection 异常处理", error=str(_exc))
                 log_ignored(None, "reflection.ReflectionEngine.reflect", _exc)
             return self._fallback_reflect(tool_name, error)
 
@@ -278,6 +285,7 @@ class ReflectionEngine:
         try:
             _otel_trace_api.get_current_span().set_attribute("reflection_type", "deep")
         except Exception as _exc:
+            log.warning("reflection 异常处理", error=str(_exc))
             log_ignored(None, "reflection.ReflectionEngine.deep_reflect", _exc)
 
         try:
@@ -294,6 +302,7 @@ class ReflectionEngine:
                 try:
                     _otel_trace_api.get_current_span().set_attribute("success", True)
                 except Exception as _exc:
+                    log.warning("reflection 异常处理", error=str(_exc))
                     log_ignored(None, "reflection.ReflectionEngine.deep_reflect", _exc)
                 return DeepReflectionResult(
                     diagnosis=parsed.get("diagnosis", "未知诊断"),
@@ -303,11 +312,13 @@ class ReflectionEngine:
                 )
 
             return self._fallback_deep_reflect(trajectory, eval_result)
-        except Exception:
+        except Exception as _exc:
+            log.warning("reflection 异常被捕获", error=str(_exc))
             # OTel span 属性：深度反思失败
             try:
                 _otel_trace_api.get_current_span().set_attribute("success", False)
             except Exception as _exc:
+                log.warning("reflection 异常处理", error=str(_exc))
                 log_ignored(None, "reflection.ReflectionEngine.deep_reflect", _exc)
             return self._fallback_deep_reflect(trajectory, eval_result)
 
@@ -340,7 +351,8 @@ class ReflectionEngine:
                 return result
 
             return self._fallback_task_reflect(task_input)
-        except Exception:
+        except Exception as _exc:
+            log.warning("reflection 异常被捕获", error=str(_exc))
             return self._fallback_task_reflect(task_input)
 
     async def reflect_on_success(
@@ -387,6 +399,7 @@ class ReflectionEngine:
                     metadata={"tool_name": tool_name, "pattern": pattern, "tips_count": len(tips)},
                 )
             except Exception as _exc:
+                log.warning("reflection 异常处理", error=str(_exc))
                 log_ignored(None, "reflection.ReflectionEngine.reflect_on_success", _exc)
 
         return SuccessReflectionResult(
@@ -774,6 +787,10 @@ class ReflectionEngine:
             MetaReflectionResult: 元反思结果。
         """
         self._metrics["meta_reflections"] = self._metrics.get("meta_reflections", 0) + 1
+        if len(self._metrics) > self._MAX_METRICS:
+            oldest_keys = list(self._metrics.keys())[: len(self._metrics) - (self._MAX_METRICS * 3 // 4)]
+            for k in oldest_keys:
+                del self._metrics[k]
 
         if not recent_reflections:
             return MetaReflectionResult(

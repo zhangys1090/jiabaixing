@@ -17,7 +17,7 @@ export function handleGetStatus(
         type: 'status',
         data: {
           status: 'running',
-          model: process.env.MODEL_NAME || 'qwen2.5:3b',
+          model: process.env.LLM_MODEL || process.env.MODEL_NAME || 'unknown',
           uptime: process.uptime(),
           clients: clientCount,
         },

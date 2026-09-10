@@ -32,8 +32,10 @@ from typing import Any
 
 from agent.config import DATA_ROOT
 from agent.core.logger import StructuredLogger, log_ignored
+from agent.core.types import BaseCheckpoint
 
 log = StructuredLogger("checkpoint_manager")
+
 
 _CHECKPOINTS_DIR = DATA_ROOT / "safety" / "checkpoints"
 _DB_PATH = DATA_ROOT / "safety" / "checkpoints.db"
@@ -59,30 +61,22 @@ class FileSnapshot:
 
 
 @dataclass
-class Checkpoint:
-    """还原点。
+class Checkpoint(BaseCheckpoint):
+    """还原点 — 继承 core.types.BaseCheckpoint。
 
     Attributes:
-        id: 唯一标识。
-        label: 用户可读标签。
-        created_at: 创建时间戳。
+        created_at: 创建时间戳（映射到 BaseCheckpoint.timestamp）。
         trigger: 触发原因（auto/manual/pre-batch/pre-workflow）。
         file_snapshots: 文件快照映射 {原始路径: FileSnapshot}。
         git_commit: Git 还原点 commit hash（如有）。
         git_stash_ref: Git stash 引用（如有）。
-        metadata: 扩展元数据。
-        restored: 是否已被恢复。
     """
 
-    id: str
-    label: str = ""
     created_at: float = 0.0
     trigger: str = "auto"
     file_snapshots: dict[str, FileSnapshot] = field(default_factory=dict)
     git_commit: str = ""
     git_stash_ref: str = ""
-    metadata: dict[str, Any] = field(default_factory=dict)
-    restored: bool = False
 
 
 def _file_hash(path: str) -> str:
@@ -109,6 +103,7 @@ def _git_current_commit(repo_path: str) -> str | None:
         if result.returncode == 0:
             return result.stdout.strip()
     except Exception as _exc:
+        log.debug("checkpoint_manager 异常处理", error=str(_exc))
         log_ignored(log, "checkpoint_manager._git_current_commit", _exc)
     return None
 
@@ -133,6 +128,7 @@ def _git_stash_create(repo_path: str, label: str) -> str | None:
             if ref_result.returncode == 0:
                 return ref_result.stdout.strip()
     except Exception as _exc:
+        log.debug("checkpoint_manager 异常处理", error=str(_exc))
         log_ignored(log, "checkpoint_manager._git_stash_create", _exc)
     return None
 
@@ -333,6 +329,7 @@ class CheckpointManager:
                     shutil.copy2(snap.snapshot_path, path)
                     restored += 1
                 except Exception as e:
+                    log.debug("checkpoint_manager 异常处理", error=str(e))
                     errors.append(f"恢复 {path} 失败: {e}")
 
         self._store.mark_restored(checkpoint_id)
@@ -413,6 +410,7 @@ class CheckpointManager:
             else:
                 errors.append(f"git stash pop 失败: {result.stderr}")
         except Exception as e:
+            log.debug("checkpoint_manager 异常处理", error=str(e))
             errors.append(f"Git 恢复异常: {e}")
         return 0
 
@@ -434,6 +432,7 @@ class CheckpointManager:
             else:
                 errors.append(f"git checkout 失败: {result.stderr}")
         except Exception as e:
+            log.debug("checkpoint_manager 异常处理", error=str(e))
             errors.append(f"Git checkout 异常: {e}")
         return 0
 

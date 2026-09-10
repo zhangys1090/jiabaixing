@@ -4,6 +4,7 @@ import type { JiabaixingCore } from '../../core/JiabaixingCore';
 import { LLMCapabilityDetector } from '../../evolution/LLMCapabilityDetector';
 import { AgentHarness } from '../../harness';
 import type { HarnessDeps } from '../../harness/AgentHarness';
+import { AgentFactory } from '../../harness/agents/AgentFactory';
 import { ContextReferenceResolver } from '../../harness/context/ContextReferenceResolver';
 import { EvaluationPipeline } from '../../harness/evaluation/EvaluationPipeline';
 import { IndependentEvaluationService } from '../../harness/evaluation/IndependentEvaluationService';
@@ -1361,6 +1362,22 @@ export async function initHarness(
     }
 
     core.setHarness(harness);
+
+    // P0-6: 注入 AgentFactory 全局执行函数，使专业化 Agent 可执行
+    AgentFactory.injectExecuteFn(
+      async (
+        goal: string,
+        context: string,
+        _agent: import('../../harness/agents/BaseAgent').BaseAgent
+      ) => {
+        const result = await core.processInput(
+          goal,
+          context || 'agent-factory'
+        );
+        return result.response || '';
+      }
+    );
+    Logger.info('🏭 AgentFactory: 执行函数已注入', 'Bootstrap');
 
     const mcpBridge = MCPToolBridge.getInstance();
     if (harness.getToolRegistry) {

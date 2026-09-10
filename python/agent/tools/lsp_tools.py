@@ -13,6 +13,8 @@ from agent.tools.registry import (
     ToolParameterDef,
     ToolResult,
 )
+import logging
+logger = logging.getLogger(__name__)
 
 
 LSP_COMPLETION_DEF = ToolDefinition(
@@ -140,6 +142,7 @@ async def lsp_completion_executor(params: dict[str, Any]) -> ToolResult:
             result = await _python_completions(file_path, line, character)
             return ToolResult(success=True, output=result, duration=time.time() - start)
         except Exception as e:
+            logger.warning("lsp_tools 异常处理", error=str(e))
             return ToolResult(success=False, error=f"补全失败: {e}", duration=time.time() - start)
 
     return ToolResult(
@@ -169,6 +172,7 @@ async def lsp_diagnostics_executor(params: dict[str, Any]) -> ToolResult:
             result = await _python_diagnostics(file_path, severity_filter)
             return ToolResult(success=True, output=result, duration=time.time() - start)
         except Exception as e:
+            logger.warning("lsp_tools 异常处理", error=str(e))
             return ToolResult(success=False, error=f"诊断失败: {e}", duration=time.time() - start)
 
     return ToolResult(
@@ -199,6 +203,7 @@ async def lsp_hover_executor(params: dict[str, Any]) -> ToolResult:
             result = await _python_hover(file_path, line, character)
             return ToolResult(success=True, output=result, duration=time.time() - start)
         except Exception as e:
+            logger.warning("lsp_tools 异常处理", error=str(e))
             return ToolResult(success=False, error=f"悬停查询失败: {e}", duration=time.time() - start)
 
     return ToolResult(
@@ -229,6 +234,7 @@ async def lsp_definition_executor(params: dict[str, Any]) -> ToolResult:
             result = await _python_definition(file_path, line, character)
             return ToolResult(success=True, output=result, duration=time.time() - start)
         except Exception as e:
+            logger.warning("lsp_tools 异常处理", error=str(e))
             return ToolResult(success=False, error=f"定义跳转失败: {e}", duration=time.time() - start)
 
     return ToolResult(
@@ -259,6 +265,7 @@ async def lsp_references_executor(params: dict[str, Any]) -> ToolResult:
             result = await _python_references(file_path, line, character)
             return ToolResult(success=True, output=result, duration=time.time() - start)
         except Exception as e:
+            logger.warning("lsp_tools 异常处理", error=str(e))
             return ToolResult(success=False, error=f"引用查找失败: {e}", duration=time.time() - start)
 
     return ToolResult(
@@ -287,6 +294,7 @@ async def lsp_symbols_executor(params: dict[str, Any]) -> ToolResult:
             result = await _python_symbols(file_path)
             return ToolResult(success=True, output=result, duration=time.time() - start)
         except Exception as e:
+            logger.warning("lsp_tools 异常处理", error=str(e))
             return ToolResult(success=False, error=f"符号查找失败: {e}", duration=time.time() - start)
 
     return ToolResult(
@@ -367,6 +375,7 @@ async def _python_hover(file_path: str, line: int, character: int) -> str:
             return f"📄 悬停信息 ({Path(file_path).name}:{line}:{character})\n```\n{code_line}\n```\n详细类型信息需通过 pyright 语言服务器获取。"
         return f"📄 行 {line} 超出文件范围"
     except Exception as e:
+        logger.warning("lsp_tools 异常处理", error=str(e))
         return f"悬停查询失败: {e}"
 
 
@@ -383,6 +392,7 @@ async def _python_symbols(file_path: str) -> str:
         with open(file_path, "r", encoding="utf-8", errors="replace") as f:
             lines_list = f.readlines()
     except Exception as e:
+        logger.warning("lsp_tools 异常处理", error=str(e))
         return f"符号查找失败: {e}"
 
     import re as _re

@@ -3,8 +3,8 @@
  * 从 websocket.ts 提取，专门处理重试逻辑
  */
 
-import { Logger } from '../../utils/Logger';
 import { EventBus } from '../../shared/EventBus';
+import { Logger } from '../../utils/Logger';
 
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 1500;
@@ -152,7 +152,7 @@ export function getRetryMessage(error: Error): string {
     return `抱歉，无法连接到 LLM 服务。\n\n请检查：\n1. 如果使用 DeepSeek API，确认网络连接正常\n2. 如果使用本地模型，请启动 Ollama 服务（ollama serve）`;
   }
 
-  return `抱歉，处理出错了：${errorMsg}`;
+  return '抱歉，处理出错了，请稍后重试。';
 }
 
 /**

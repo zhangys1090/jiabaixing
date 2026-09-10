@@ -28,7 +28,6 @@ from agent.core.otel_metrics import tool_calls_counter, tool_duration_histogram
 from agent.core.resilience import get_circuit, CircuitState
 from opentelemetry import trace as _otel_trace_api
 
-log = StructuredLogger("executor")
 
 _MAX_REFLECTION_RETRIES = 3
 
@@ -86,6 +85,7 @@ _DESKTOP_TOOL_NAMES = frozenset({
 })
 # 单个工具调用默认超时（秒），可通过环境变量 TOOL_TIMEOUT 覆盖
 import os as _os
+log = StructuredLogger("executor")
 _DEFAULT_TOOL_TIMEOUT = float(_os.environ.get("TOOL_TIMEOUT", "30"))
 # LLM 调用默认超时（秒）
 _DEFAULT_LLM_TIMEOUT = float(_os.environ.get("LLM_TIMEOUT", "60"))
@@ -127,6 +127,7 @@ class Executor:
         # P2-5: 动作回滚链 — 记录每个可逆操作及其补偿动作
         self._rollback_chain: list[RollbackEntry] = []
         self._rollback_enabled = os.environ.get("ROLLBACK_CHAIN_ENABLED", "true").lower() == "true"
+        self._MAX_ROLLBACK_CHAIN = 500
         # W3-3: 预测验证循环 — 执行前预测、执行后验证、偏差调整
         self._prediction_loop: Any | None = None
 
@@ -140,6 +141,7 @@ class Executor:
             try:
                 return await self._risk_precheck.execute(name, params)
             except Exception as exc:
+                log.debug("executor 异常处理", error=str(exc))
                 return ToolResult(
                     success=False,
                     error=f"高风险预检异常: {exc}",
@@ -196,6 +198,8 @@ class Executor:
             compensate_params=compensate_params,
         )
         self._rollback_chain.append(entry)
+        if len(self._rollback_chain) > self._MAX_ROLLBACK_CHAIN:
+            self._rollback_chain = self._rollback_chain[-self._MAX_ROLLBACK_CHAIN * 3 // 4:]
         log.info(
             "P2-5: 回滚链记录",
             step_id=step_id,
@@ -290,6 +294,7 @@ class Executor:
                 if isinstance(suggested, int) and 1 <= suggested <= 6:
                     return suggested
         except Exception as _exc:
+            log.debug("executor 异常处理", error=str(_exc))
             log_ignored(log, "executor.Executor._get_dynamic_max_retries", _exc)
         return base_retries
 
@@ -834,6 +839,7 @@ class Executor:
         try:
             return await self._execute_step(step, context)
         except Exception as e:
+            log.debug("executor 异常处理", error=str(e))
             return StepResult(
                 step_id=step.step_id,
                 success=False,
@@ -861,6 +867,7 @@ class Executor:
             try:
                 prediction = self._prediction_loop.predict_step(step, context)
             except Exception as _exc:
+                log.debug("executor 异常处理", error=str(_exc))
                 log_ignored(log, "executor.Executor._execute_step.predict", _exc)
 
         if step.tool_name and self._tool_registry:
@@ -890,6 +897,7 @@ class Executor:
                 result.metadata["prediction_outcome"] = vr.outcome.value
                 result.metadata["prediction_adjustment"] = vr.adjustment.value
             except Exception as _exc:
+                log.debug("executor 异常处理", error=str(_exc))
                 log_ignored(log, "executor.Executor._execute_step.verify", _exc)
 
         return result
@@ -1020,6 +1028,7 @@ class Executor:
                                         count=len(migrated),
                                     )
                             except Exception as _exc:
+                                log.debug("executor 异常处理", error=str(_exc))
                                 log_ignored(log, "executor.Executor._retry_with_reflection", _exc)
 
             # 工具替代：通用路径和参数路径都执行到此
@@ -1110,6 +1119,7 @@ class Executor:
         try:
             _otel_trace_api.get_current_span().set_attribute("tool_name", tool_name)
         except Exception as _exc:
+            log.debug("executor 异常处理", error=str(_exc))
             log_ignored(log, "executor.Executor._execute_with_tool", _exc)
 
         if not tool_params and step.description:
@@ -1155,6 +1165,7 @@ class Executor:
                         )
                     tool_params = sv_result.sanitized_params
             except Exception as exc:
+                log.debug("executor 异常处理", error=str(exc))
                 # D6（审计 §1.7）：Schema 校验异常不得静默放行，改为 fail-closed 拦截。
                 duration = (time.time() - start) * 1000
                 log.error("Schema校验异常，拒绝执行 (executor)", tool=tool_name, error=str(exc))
@@ -1190,6 +1201,7 @@ class Executor:
                         metadata={**gr_meta, "guard_blocked": True, "guard_reason": _gr.reason},
                     )
             except Exception as exc:
+                log.debug("executor 异常处理", error=str(exc))
                 # D6（审计 §1.7）：守卫检查异常不得静默放行（fail-open），改为 fail-closed 拦截。
                 duration = (time.time() - start) * 1000
                 log.error("工具调用守卫异常，拒绝执行 (executor)", tool=tool_name, error=str(exc))
@@ -1229,6 +1241,7 @@ class Executor:
                         metadata={"sandbox_blocked": True, "risk_level": risk_result.risk_level.value if hasattr(risk_result.risk_level, 'value') else str(risk_result.risk_level)},
                     )
             except Exception as _exc:
+                log.debug("executor 异常处理", error=str(_exc))
                 log_ignored(log, "executor.Executor._execute_with_tool.sandbox", _exc)
 
         # Phase 3+4: SmartToolCache 缓存命中检查 — 幂等工具直接返回缓存
@@ -1253,6 +1266,7 @@ class Executor:
                         metadata={"cache_hit": True},
                     )
             except Exception as _exc:
+                log.debug("executor 异常处理", error=str(_exc))
                 log_ignored(log, "executor.Executor._execute_with_tool.cache_get", _exc)
 
         log.info("Executing tool", tool=tool_name, step_id=step.step_id)
@@ -1285,6 +1299,7 @@ class Executor:
                                         duration_ms=duration,
                                     )
                             except Exception as _exc:
+                                log.debug("executor 异常处理", error=str(_exc))
                                 log_ignored(log, "executor.Executor._execute_with_tool", _exc)
             duration = (time.time() - start) * 1000
             return StepResult(
@@ -1332,6 +1347,7 @@ class Executor:
                             "tool_success", True
                         )
                     except Exception as _exc:
+                        log.debug("executor 异常处理", error=str(_exc))
                         log_ignored(log, "executor.Executor._execute_with_tool", _exc)
 
                     # P1-1: 桌面操作自动验证 — 感知闭环协同
@@ -1360,6 +1376,7 @@ class Executor:
                                 method=verify_result.method,
                             )
                         except Exception as _exc:
+                            log.debug("executor 异常处理", error=str(_exc))
                             log_ignored(log, "executor.Executor._execute_with_tool.perception", _exc)
 
                     step_meta = {}
@@ -1375,6 +1392,7 @@ class Executor:
                                 {"success": True, "output": content},
                             )
                         except Exception as _exc:
+                            log.debug("executor 异常处理", error=str(_exc))
                             log_ignored(log, "executor.Executor._execute_with_tool.guard_record", _exc)
 
                     # Phase 3+4: SmartToolCache 缓存存储 — 成功结果写入缓存
@@ -1387,6 +1405,7 @@ class Executor:
                                 latency_ms=duration,
                             )
                         except Exception as _exc:
+                            log.debug("executor 异常处理", error=str(_exc))
                             log_ignored(log, "executor.Executor._execute_with_tool.cache_put", _exc)
 
                     # P2-5: 记录可回滚动作到回滚链
@@ -1428,6 +1447,7 @@ class Executor:
                 )
 
             except Exception as e:
+                log.debug("executor 异常处理", error=str(e))
                 last_error = str(e)
                 last_error_type = self._robustness.classify_error(last_error, tool_name)
                 circuit.record_failure()
@@ -1552,6 +1572,7 @@ class Executor:
             tool_duration_histogram().record(duration / 1000.0)
             _otel_trace_api.get_current_span().set_attribute("tool_success", False)
         except Exception as _exc:
+            log.debug("executor 异常处理", error=str(_exc))
             log_ignored(log, "executor.Executor._execute_with_tool", _exc)
 
         # Phase 3+4: ToolSelfHealing — 工具自愈尝试（参数修正/替代工具/降级策略）
@@ -1580,6 +1601,7 @@ class Executor:
                         metadata={"self_healed": True, "heal_strategy": heal_result.strategy},
                     )
             except Exception as _exc:
+                log.debug("executor 异常处理", error=str(_exc))
                 log_ignored(log, "executor.Executor._execute_with_tool.self_healing", _exc)
 
         return StepResult(
@@ -1622,6 +1644,7 @@ class Executor:
                 duration_ms=duration,
             )
         except Exception as e:
+            log.debug("executor 异常处理", error=str(e))
             duration = (time.time() - start) * 1000
             return StepResult(
                 step_id=step.step_id,

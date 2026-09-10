@@ -9,7 +9,8 @@ from typing import Any
 from agent.core.logger import StructuredLogger
 from agent.core.logger import log_ignored
 from agent.infrastructure.safe_json import safe_json_loads
-from agent.security.sensitive_detector import CheckScene, RiskLevel
+from agent.core.types import RiskLevel
+from agent.security.sensitive_detector import CheckScene
 from agent.evolution.feedback_collector import FeedbackCollector
 from agent.evolution.types import (
     EvolutionAction,
@@ -47,11 +48,23 @@ class EvolutionEngine:
         self._correction_rules: list[dict[str, str]] = []
         self._knowledge_nudges: list[str] = []
         self._tool_signal_stats: dict[str, dict[str, Any]] = {}
+        self._MAX_TOOL_SIGNAL_STATS = 500
+        self._MAX_EVOLUTION_HISTORY = 5000
+        self._MAX_TOOL_CALL_STATS = 500
+        self._MAX_SCENE_QUALITY = 500
+        self._MAX_SKILLS = 500
+        self._MAX_SKILL_QUALITY_HISTORY = 500
+        self._MAX_USED_PLAN_IDS = 5000
         self._task_success_count: int = 0
         self._task_failure_count: int = 0
         self._total_signals: int = 0
         self._skills: dict[str, dict[str, Any]] = {}
         self._skill_quality_history: dict[str, list[float]] = {}
+        self._tool_sequence_history: list[tuple[str, ...]] = []
+        self._compound_skills: dict[str, dict[str, Any]] = {}
+        self._MAX_TOOL_SEQUENCE_HISTORY = 2000
+        self._MAX_COMPOUND_SKILLS = 100
+        self._COMPOUND_PATTERN_MIN_OCCURRENCE = 2
         self._data_dir = Path(data_dir) if data_dir else Path(__file__).resolve().parent.parent.parent / "data" / "evolution"
         self._state_path = self._data_dir / "engine-state.json"
         self._used_plan_ids: set[str] = set()
@@ -91,6 +104,10 @@ class EvolutionEngine:
                 k: (v[-30:] if isinstance(v, list) else v)
                 for k, v in state["scene_quality"].items()
             }
+        if isinstance(state.get("tool_sequence_history"), list):
+            self._tool_sequence_history = [tuple(s) for s in state["tool_sequence_history"] if isinstance(s, list)][-self._MAX_TOOL_SEQUENCE_HISTORY:]
+        if isinstance(state.get("compound_skills"), dict):
+            self._compound_skills = state["compound_skills"]
         if isinstance(state.get("used_plan_ids"), list):
             self._used_plan_ids = set(state["used_plan_ids"][-1000:])
         if isinstance(state.get("knowledge_nudges"), list):
@@ -110,7 +127,7 @@ class EvolutionEngine:
             self._metrics.quality_trend = m.get("quality_trend", "stable")
             self._metrics.tool_weights = dict(self._tool_weights)
             self._metrics.prompt_examples = list(self._prompt_examples[-20:])
-        log.info("Evolution state restored", examples=len(self._prompt_examples), tools=len(self._tool_call_stats), rules=len(self._correction_rules))
+        log.debug("Evolution state restored", examples=len(self._prompt_examples), tools=len(self._tool_call_stats), rules=len(self._correction_rules))
 
     def _schedule_persist(self) -> None:
         try:
@@ -123,6 +140,8 @@ class EvolutionEngine:
                 "skills": self._skills,
                 "skill_quality_history": {k: v[-20:] for k, v in self._skill_quality_history.items()},
                 "scene_quality": {k: v[-30:] for k, v in self._scene_quality.items()},
+                "tool_sequence_history": [list(s) for s in self._tool_sequence_history[-self._MAX_TOOL_SEQUENCE_HISTORY:]],
+                "compound_skills": self._compound_skills,
                 "used_plan_ids": list(self._used_plan_ids)[-1000:],
                 "knowledge_nudges": self._knowledge_nudges[-50:],
                 "task_success_count": self._task_success_count,
@@ -164,6 +183,10 @@ class EvolutionEngine:
                 stats["successes"] += 1
             if tool_name in signal.tool_durations_ms:
                 stats["total_duration_ms"] += signal.tool_durations_ms[tool_name]
+            if len(self._tool_call_stats) > self._MAX_TOOL_CALL_STATS:
+                oldest_tools = list(self._tool_call_stats.keys())[: len(self._tool_call_stats) - (self._MAX_TOOL_CALL_STATS * 3 // 4)]
+                for t in oldest_tools:
+                    del self._tool_call_stats[t]
 
         if signal.scene:
             if signal.scene not in self._scene_quality:
@@ -171,6 +194,10 @@ class EvolutionEngine:
             self._scene_quality[signal.scene].append(signal.quality_score)
             if len(self._scene_quality[signal.scene]) > 30:
                 self._scene_quality[signal.scene] = self._scene_quality[signal.scene][-30:]
+            if len(self._scene_quality) > self._MAX_SCENE_QUALITY:
+                oldest_scenes = list(self._scene_quality.keys())[: len(self._scene_quality) - (self._MAX_SCENE_QUALITY * 3 // 4)]
+                for s in oldest_scenes:
+                    del self._scene_quality[s]
 
         if signal.user_correction:
             self._add_prompt_example(signal)
@@ -290,6 +317,7 @@ class EvolutionEngine:
                 if success:
                     executed += 1
             except Exception as _exc:
+                log.debug("engine 异常处理", error=str(_exc))
                 log_ignored(log, "engine.EvolutionEngine.execute_evolution", _exc)
 
         result = EvolutionResult(
@@ -301,6 +329,8 @@ class EvolutionEngine:
         )
 
         self._evolution_history.append(result)
+        if len(self._evolution_history) > self._MAX_EVOLUTION_HISTORY:
+            self._evolution_history = self._evolution_history[-self._MAX_EVOLUTION_HISTORY * 3 // 4:]
         self._metrics.total_evolutions += 1
         if result.success:
             self._metrics.successful_evolutions += 1
@@ -595,6 +625,11 @@ class EvolutionEngine:
                 "avg_quality": 0.0,
                 "last_used": 0.0,
             }
+            if len(self._tool_signal_stats) > self._MAX_TOOL_SIGNAL_STATS:
+                sorted_stats = sorted(self._tool_signal_stats.items(), key=lambda x: x[1].get("last_used", 0))
+                to_remove = sorted_stats[: len(self._tool_signal_stats) - (self._MAX_TOOL_SIGNAL_STATS * 3 // 4)]
+                for k, _ in to_remove:
+                    del self._tool_signal_stats[k]
 
         stats = self._tool_signal_stats[signal.tool_name]
 
@@ -719,6 +754,11 @@ class EvolutionEngine:
         }
 
         self._skills[skill_name] = skill_entry
+        if len(self._skills) > self._MAX_SKILLS:
+            oldest_skills = list(self._skills.keys())[: len(self._skills) - (self._MAX_SKILLS * 3 // 4)]
+            for s in oldest_skills:
+                del self._skills[s]
+                self._skill_quality_history.pop(s, None)
         self._schedule_persist()
         log.info("Skill generated", skill_name=skill_name, quality=quality_score)
         return skill_name
@@ -886,6 +926,109 @@ class EvolutionEngine:
             "pruned": pruned,
         }
 
+    # ─── E2: 工具自创造 — 检测重复工具组合模式，自动创造复合工具 ───
+
+    def record_tool_sequence(self, tool_names: list[str]) -> None:
+        if not tool_names or len(tool_names) < 2:
+            return
+        seq = tuple(tool_names)
+        self._tool_sequence_history.append(seq)
+        if len(self._tool_sequence_history) > self._MAX_TOOL_SEQUENCE_HISTORY:
+            self._tool_sequence_history = self._tool_sequence_history[-self._MAX_TOOL_SEQUENCE_HISTORY:]
+
+    def _find_recurring_patterns(self, min_length: int = 2, max_length: int = 5) -> dict[tuple[str, ...], int]:
+        pattern_counts: dict[tuple[str, ...], int] = {}
+        for seq in self._tool_sequence_history:
+            for length in range(min_length, min(max_length + 1, len(seq) + 1)):
+                for start in range(len(seq) - length + 1):
+                    sub = seq[start:start + length]
+                    pattern_counts[sub] = pattern_counts.get(sub, 0) + 1
+        return {
+            p: c for p, c in pattern_counts.items()
+            if c >= self._COMPOUND_PATTERN_MIN_OCCURRENCE
+        }
+
+    def generate_compound_skill(self, tool_names: list[str], context: str = "") -> str | None:
+        if not tool_names or len(tool_names) < 2:
+            return None
+        self.record_tool_sequence(tool_names)
+        recurring = self._find_recurring_patterns()
+        if not recurring:
+            return None
+        sorted_patterns = sorted(recurring.items(), key=lambda x: (-len(x[0]), -x[1]))
+        best_pattern, occurrence = sorted_patterns[0]
+        compound_key = "+".join(best_pattern)
+        if compound_key in self._compound_skills:
+            self._compound_skills[compound_key]["use_count"] += 1
+            self._compound_skills[compound_key]["last_seen_at"] = time.time()
+            self._schedule_persist()
+            return None
+        skill_name = f"compound_{compound_key}"
+        self._compound_skills[compound_key] = {
+            "name": skill_name,
+            "tools": list(best_pattern),
+            "occurrence": occurrence,
+            "created_at": time.time(),
+            "use_count": 0,
+            "last_seen_at": time.time(),
+            "context": context[:100] if context else "",
+        }
+        if len(self._compound_skills) > self._MAX_COMPOUND_SKILLS:
+            oldest = sorted(
+                self._compound_skills.items(),
+                key=lambda x: x[1].get("last_seen_at", 0),
+            )
+            for key, _ in oldest[: len(oldest) - self._MAX_COMPOUND_SKILLS * 3 // 4]:
+                del self._compound_skills[key]
+        self._schedule_persist()
+        log.info(
+            "E2: compound skill created",
+            skill_name=skill_name,
+            tools=list(best_pattern),
+            occurrence=occurrence,
+        )
+        return skill_name
+
+    def get_compound_skills(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "name": data["name"],
+                "tools": data["tools"],
+                "occurrence": data["occurrence"],
+                "use_count": data.get("use_count", 0),
+            }
+            for data in self._compound_skills.values()
+        ]
+
+    # ─── E3: 知识自增长 — 自动沉淀知识到长期记忆 ───
+
+    def auto_deposit_knowledge(
+        self,
+        user_input: str,
+        assistant_output: str,
+        tools_used: list[str],
+        quality_score: float,
+    ) -> dict[str, str] | None:
+        if quality_score < 0.6:
+            return None
+        deposits: dict[str, str] = {}
+        nudge = self.nudge_knowledge_persistence(user_input, tools_used)
+        if nudge:
+            deposits["preference_nudge"] = nudge
+        if tools_used and quality_score >= 0.7:
+            tool_knowledge = f"工具组合经验: {', '.join(tools_used)} → 成功完成任务（质量{quality_score:.0%}）"
+            deposits["tool_experience"] = tool_knowledge
+        if len(user_input) > 20 and len(assistant_output) > 50 and quality_score >= 0.75:
+            import re as _re
+            snippet_in = _re.sub(r'[\w.+-]+@[\w-]+\.[\w.]+', '[邮箱]', user_input[:60])
+            snippet_in = _re.sub(r'1[3-9]\d{9}', '[电话]', snippet_in)
+            snippet_out = assistant_output[:80]
+            qa_knowledge = f"问答经验: Q=\"{snippet_in}\" → A=\"{snippet_out}\""
+            deposits["qa_experience"] = qa_knowledge
+        if deposits:
+            log.info("E3: knowledge auto-deposit", types=list(deposits.keys()))
+        return deposits if deposits else None
+
     # ─── Few-shot 泛化 ───
 
     def generalize_fewshot(self) -> list[dict[str, Any]]:
@@ -1006,6 +1149,7 @@ class EvolutionEngine:
                     if ratio > 0.7 and self._metrics.quality_trend == "stable":
                         log.debug("High positive feedback ratio detected")
                 except Exception as _exc:
+                    log.debug("engine 异常处理", error=str(_exc))
                     log_ignored(log, "engine.EvolutionEngine.record_implicit_feedback", _exc)
         except Exception as e:
             log.warning(f"Failed to record implicit feedback: {e}")

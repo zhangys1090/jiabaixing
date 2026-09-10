@@ -40,17 +40,19 @@ export function registerCognitionForwarder(): void {
     const bridge = getActivePythonBridge();
     if (
       !bridge ||
-      typeof (bridge as { sendCognitionSignal?: unknown }).sendCognitionSignal !==
-        'function'
+      typeof (bridge as { sendCognitionSignal?: unknown })
+        .sendCognitionSignal !== 'function'
     ) {
       return;
     }
-    (bridge as {
-      sendCognitionSignal: (
-        s: string,
-        pl: Record<string, unknown>
-      ) => Promise<unknown>;
-    })
+    (
+      bridge as {
+        sendCognitionSignal: (
+          s: string,
+          pl: Record<string, unknown>
+        ) => Promise<unknown>;
+      }
+    )
       .sendCognitionSignal(sessionId, {
         tool: p.tool,
         category: p.category,

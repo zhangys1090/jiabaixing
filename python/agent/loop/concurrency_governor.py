@@ -23,8 +23,8 @@ from enum import Enum
 from typing import Any
 
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("concurrency_governor")
+
 
 
 class RiskTier(str, Enum):

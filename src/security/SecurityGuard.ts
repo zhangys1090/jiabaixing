@@ -49,6 +49,7 @@ export interface PermissionConfig {
  */
 export class SecurityGuard {
   private static instance: SecurityGuard | null = null;
+  private static instanceLock: boolean = false;
 
   // 安全红线模式
   private securityRedlines: RegExp[] = [
@@ -59,34 +60,41 @@ export class SecurityGuard {
     /(malware|virus|trojan)/i,
   ];
 
-  // SQL注入模式 - 更精确的匹配，避免自然语言误报
+  // SQL注入模式 - 精确匹配，避免自然语言误报
+  // P0-3 修复: 缩窄模式范围，仅匹配真正的 SQL 注入特征
+  // P1-4 修复: 1=1 仅在 SQL 上下文（WHERE/OR/AND 后）匹配，避免数学表达式误报
   private sqlInjectionPatterns: RegExp[] = [
-    // 经典SQL注入特征：关键字+逻辑运算符+数字比较
-    /(\b(union\s+all\s+)?select\b[\s\S]{0,50}\bfrom\b)/i,
-    /(\b(insert\s+into|update\s+\w+\s+set|delete\s+from|drop\s+table|alter\s+table)\b)/i,
-    // 经典注入：1=1, 1=2, ' or '1'='1
-    /('\s*or\s+'\d+'\s*=\s*'\d+|\b\d+\s*=\s*\d+)/i,
-    // 注释符+危险语句
-    /(--\s*(drop|delete|update|insert)\b)/i,
-    // 特殊注入字符组合：'; + SQL关键字
-    /(;\s*(drop|delete|update|insert|select)\b)/i,
+    /(\bunion\s+(all\s+)?select\b[\s\S]{0,80}\bfrom\b)/i,
+    /(\binsert\s+into\b[\s\S]{0,40}\bvalues\b)/i,
+    /(\bupdate\s+\w+\s+set\b[\s\S]{0,40}=)/i,
+    /(\bdelete\s+from\b[\s\S]{0,20}\bwhere\b)/i,
+    /(\bdrop\s+table\b)/i,
+    /(\balter\s+table\b)/i,
+    /('\s*or\s+'[^']*'\s*=\s*')/i,
+    /(\b(?:where|or|and)\s+1\s*=\s*1\b)/i,
+    /('\s*;\s*(drop|delete|update|insert|select)\b)/i,
+    /(--\s*;\s*(drop|delete|update|insert)\b)/i,
   ];
 
-  // XSS攻击模式
+  // XSS攻击模式 - P1-7 修复: on\w+= 改为仅匹配事件属性在HTML标签内
   private xssPatterns: RegExp[] = [
     /<script[^>]*>.*?<\/script>/i,
     /javascript:/i,
-    /on\w+\s*=/i,
+    /<[^>]+\bon\w+\s*=/i,
     /eval\s*\(/i,
     /document\.(cookie|write|location)/i,
   ];
 
-  // 命令注入模式
+  // 命令注入模式 - P0-9 修复: 缩窄至真正的注入特征，不再误杀正常命令
   private commandInjectionPatterns: RegExp[] = [
-    /[;&|`$(){}]/,
-    /\b(rm|del|format|shutdown|reboot)\b/i,
-    /\b(cat|type)\s+\/etc\/passwd/i,
-    /\b(curl|wget)\s+http/i,
+    /\b(rm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+|--no-preserve-root\s+)\/)/i,
+    /\b(format\s+[A-Za-z]:)/i,
+    /\b(shutdown\b|\breboot\b)/i,
+    /\b(cat|type)\s+\/etc\/(passwd|shadow|sudoers)/i,
+    /\b(curl|wget)\s+.+\s*\|\s*(ba)?sh/i,
+    /\$\(\s*(rm|del|format|shutdown|reboot|kill)/i,
+    /\b(chmod|chown)\s+[0-7]{3,4}\s+\/(etc|var|usr|bin|sbin)\b/i,
+    /\bdd\s+if=/i,
   ];
 
   // 代码沙箱危险模式
@@ -117,6 +125,19 @@ export class SecurityGuard {
       /execSync\s*\(/,
     ],
     global_pollution: [/global\./, /process\.env/, /__proto__/],
+    prototype_escape: [
+      /\.constructor\s*\.\s*constructor/,
+      /arguments\s*\.\s*callee/,
+      /this\s*\.\s*constructor/,
+    ],
+    reflection_escape: [
+      /\bReflect\s*\./,
+      /\bProxy\b/,
+      /\bWeakRef\b/,
+      /\bSharedArrayBuffer\b/,
+      /\bAtomics\b/,
+    ],
+    worker_escape: [/\bWorker\b/, /\bparentPort\b/, /\bglobalThis\b/],
   };
 
   // 权限配置
@@ -157,7 +178,9 @@ export class SecurityGuard {
   // 用户角色映射
   private userRoles: Map<string, UserRole> = new Map();
 
-  // 安全审计日志
+  // 安全审计日志 - P0-4 修复: 增加上限常量，使用环形缓冲策略
+  private static readonly AUDIT_LOG_MAX = 2000;
+  private static readonly AUDIT_LOG_TRIM_TO = 1500;
   private auditLogs: Array<{
     timestamp: Date;
     userId: string;
@@ -178,9 +201,27 @@ export class SecurityGuard {
 
   public static getInstance(): SecurityGuard {
     if (!SecurityGuard.instance) {
-      SecurityGuard.instance = new SecurityGuard();
+      if (SecurityGuard.instanceLock) {
+        while (!SecurityGuard.instance) {
+          void 0;
+        }
+        return SecurityGuard.instance;
+      }
+      SecurityGuard.instanceLock = true;
+      try {
+        if (!SecurityGuard.instance) {
+          SecurityGuard.instance = new SecurityGuard();
+        }
+      } finally {
+        SecurityGuard.instanceLock = false;
+      }
     }
     return SecurityGuard.instance;
+  }
+
+  public static resetInstance(): void {
+    SecurityGuard.instance = null;
+    SecurityGuard.instanceLock = false;
   }
 
   /**
@@ -361,9 +402,18 @@ export class SecurityGuard {
             infinite_loop: '无限循环',
             child_process: '子进程调用',
             global_pollution: '全局变量污染',
+            prototype_escape: '原型链逃逸',
+            reflection_escape: '反射API逃逸',
+            worker_escape: 'Worker/线程逃逸',
           };
 
-          if (category === 'eval' || category === 'child_process') {
+          if (
+            category === 'eval' ||
+            category === 'child_process' ||
+            category === 'prototype_escape' ||
+            category === 'reflection_escape' ||
+            category === 'worker_escape'
+          ) {
             errors.push(
               `检测到危险操作: ${categoryNames[category] || category}`
             );
@@ -505,9 +555,9 @@ export class SecurityGuard {
       reason,
     });
 
-    // 限制日志数量
-    if (this.auditLogs.length > 1000) {
-      this.auditLogs = this.auditLogs.slice(-500);
+    // 限制日志数量 - P0-4 修复: 使用常量控制，避免抖动
+    if (this.auditLogs.length > SecurityGuard.AUDIT_LOG_MAX) {
+      this.auditLogs = this.auditLogs.slice(-SecurityGuard.AUDIT_LOG_TRIM_TO);
     }
 
     Logger.debug(

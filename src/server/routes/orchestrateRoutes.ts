@@ -15,10 +15,65 @@ import { Logger } from '../../utils/Logger';
 
 const router = Router();
 
+const MAX_GOAL_LENGTH = 5000;
+const MAX_CONTEXT_LENGTH = 10000;
+const MAX_STEPS_PER_EVALUATE = 50;
+const ORCHESTRATE_RATE_LIMIT_WINDOW_MS = 60000;
+const ORCHESTRATE_RATE_LIMIT_MAX = 10;
+const ORCHESTRATE_TIMEOUT_MS = 120000;
+const _orchestrateRateMap = new Map<
+  string,
+  { count: number; resetAt: number }
+>();
+
+const RATE_MAP_MAX_ENTRIES = 1000;
+
+function trimRateMap(): void {
+  if (_orchestrateRateMap.size <= RATE_MAP_MAX_ENTRIES) return;
+  const now = Date.now();
+  const expired: string[] = [];
+  for (const [key, entry] of _orchestrateRateMap) {
+    if (now >= entry.resetAt) {
+      expired.push(key);
+    }
+  }
+  for (const key of expired) {
+    _orchestrateRateMap.delete(key);
+  }
+  if (_orchestrateRateMap.size > RATE_MAP_MAX_ENTRIES) {
+    const keys = Array.from(_orchestrateRateMap.keys());
+    const toRemove = keys.slice(
+      0,
+      _orchestrateRateMap.size - RATE_MAP_MAX_ENTRIES
+    );
+    for (const k of toRemove) {
+      _orchestrateRateMap.delete(k);
+    }
+  }
+}
+
 let _core: JiabaixingCore | null = null;
+let _sharedRegistry: AgentRegistry | null = null;
 
 export function setOrchestrateCore(core: JiabaixingCore): void {
   _core = core;
+}
+
+function getSharedRegistry(): AgentRegistry {
+  if (!_sharedRegistry) {
+    _sharedRegistry = new AgentRegistry();
+    _sharedRegistry.register({
+      id: 'core-agent',
+      name: '核心执行Agent',
+      capabilities: [
+        { name: '通用执行', description: '可执行任意编排任务', tools: ['*'] },
+      ],
+      status: 'idle',
+      createdAt: new Date(),
+      lastActiveAt: new Date(),
+    });
+  }
+  return _sharedRegistry;
 }
 
 function getCore(): JiabaixingCore {
@@ -28,9 +83,47 @@ function getCore(): JiabaixingCore {
   return _core;
 }
 
+function checkOrchestrateRate(clientIp: string): {
+  allowed: boolean;
+  resetIn: number;
+} {
+  const now = Date.now();
+  const entry = _orchestrateRateMap.get(clientIp);
+  if (!entry || now >= entry.resetAt) {
+    trimRateMap();
+    _orchestrateRateMap.set(clientIp, {
+      count: 1,
+      resetAt: now + ORCHESTRATE_RATE_LIMIT_WINDOW_MS,
+    });
+    return { allowed: true, resetIn: 0 };
+  }
+  if (entry.count >= ORCHESTRATE_RATE_LIMIT_MAX) {
+    return { allowed: false, resetIn: entry.resetAt - now };
+  }
+  entry.count++;
+  return { allowed: true, resetIn: 0 };
+}
+
+function sanitizeForPrompt(input: string): string {
+  return input
+    .replace(/```/g, '`\\`\\`')
+    .replace(/<\|.*?\|>/g, '')
+    .substring(0, MAX_GOAL_LENGTH);
+}
+
 // POST /api/orchestrate — 多Agent编排执行
 router.post('/orchestrate', async (req: Request, res: Response) => {
   try {
+    const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
+    const rateResult = checkOrchestrateRate(clientIp);
+    if (!rateResult.allowed) {
+      res.setHeader('Retry-After', Math.ceil(rateResult.resetIn / 1000));
+      res
+        .status(429)
+        .json({ success: false, error: '编排请求过于频繁，请稍后再试' });
+      return;
+    }
+
     const { goal, context } = req.body as {
       goal?: string;
       context?: string;
@@ -41,30 +134,69 @@ router.post('/orchestrate', async (req: Request, res: Response) => {
       return;
     }
 
+    if (goal.length > MAX_GOAL_LENGTH) {
+      res.status(400).json({
+        success: false,
+        error: `目标长度不能超过${MAX_GOAL_LENGTH}字`,
+      });
+      return;
+    }
+
+    if (
+      context &&
+      typeof context === 'string' &&
+      context.length > MAX_CONTEXT_LENGTH
+    ) {
+      res.status(400).json({
+        success: false,
+        error: `上下文长度不能超过${MAX_CONTEXT_LENGTH}字`,
+      });
+      return;
+    }
+
+    const safeGoal = sanitizeForPrompt(goal.trim());
+    const safeContext = context ? sanitizeForPrompt(context) : undefined;
+
     Logger.info(
-      `[Orchestrate] 收到编排请求: ${goal.substring(0, 60)}...`,
+      `[Orchestrate] 收到编排请求: ${safeGoal.substring(0, 60)}...`,
       'OrchestrateRoute'
     );
 
-    // 注册默认Agent，确保 TaskDispatcher.assignAgent() 能找到执行者
-    const registry = new AgentRegistry();
-    registry.register({
-      id: 'core-agent',
-      name: '核心执行Agent',
-      capabilities: [
-        { name: '通用执行', description: '可执行任意编排任务', tools: ['*'] },
-      ],
-      status: 'idle',
-      createdAt: new Date(),
-      lastActiveAt: new Date(),
-    });
+    const registry = getSharedRegistry();
 
     const orchestrator = new OrchestratorAgent({
       registry,
       llm: {
         decomposeGoal: async (userGoal: string, ctx?: string) => {
           const result = await getCore().processInput(
-            `请将以下目标拆解为子任务列表：\n目标: ${userGoal}\n上下文: ${ctx || '无'}\n\n返回JSON数组，每个元素包含: goal, dependencies[], priority`,
+            `你是家百星的任务编排模块。请将以下目标拆解为子任务列表。
+
+【反幻觉护栏】
+1. 只使用已知可用的工具，不假设不存在的工具能力
+2. 只返回JSON格式，不输出任何其他内容
+3. 不要编造不存在的任务或结果
+4. 每个子任务必须目标明确、可独立执行
+
+目标: ${userGoal}
+上下文: ${ctx || '无'}
+
+返回严格JSON数组，每个元素格式如下:
+[
+  {
+    "id": "task-1",
+    "goal": "子任务目标描述",
+    "dependencies": [],
+    "priority": 5,
+    "tools": ["tool_name"]
+  }
+]
+
+规则:
+- id格式: task-{序号}
+- priority: 1-10整数，10最高
+- dependencies: 依赖的前置任务id数组
+- tools: 该子任务需要的工具名数组（不确定时留空[]）
+- 子任务数量不超过10个`,
             'orchestrator'
           );
           try {
@@ -79,14 +211,22 @@ router.post('/orchestrate', async (req: Request, res: Response) => {
             const tasks = Array.isArray(raw)
               ? raw
               : [{ goal: userGoal, dependencies: [], priority: 5 }];
-            return tasks.map((t: Partial<TaskNode>, i: number) => ({
-              id: t.id || `task-${i + 1}`,
-              goal: t.goal || userGoal,
-              context: t.context || ctx || '',
-              dependencies: t.dependencies || [],
-              priority: t.priority || 5,
-              status: 'pending' as const,
-            }));
+            return tasks
+              .slice(0, 10)
+              .map((t: Partial<TaskNode>, i: number) => ({
+                id: t.id || `task-${i + 1}`,
+                goal: t.goal || userGoal,
+                context: t.context || ctx || '',
+                dependencies: Array.isArray(t.dependencies)
+                  ? t.dependencies
+                  : [],
+                priority:
+                  typeof t.priority === 'number'
+                    ? Math.min(10, Math.max(1, t.priority))
+                    : 5,
+                tools: Array.isArray(t.tools) ? t.tools : [],
+                status: 'pending' as const,
+              }));
           } catch {
             return [
               {
@@ -101,7 +241,6 @@ router.post('/orchestrate', async (req: Request, res: Response) => {
           }
         },
       },
-      // 注入实际执行器：每个子任务通过 core.processInput 真正执行
       executor: async (task: TaskNode) => {
         Logger.info(
           `[Orchestrate] 执行子任务: ${task.id} — ${task.goal.substring(0, 60)}`,
@@ -116,7 +255,18 @@ router.post('/orchestrate', async (req: Request, res: Response) => {
         };
       },
     });
-    const result = await orchestrator.processGoal(goal.trim(), context);
+    const result = await Promise.race([
+      orchestrator.processGoal(safeGoal, safeContext),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () =>
+            reject(
+              new Error(`编排执行超时 (${ORCHESTRATE_TIMEOUT_MS / 1000}秒)`)
+            ),
+          ORCHESTRATE_TIMEOUT_MS
+        )
+      ),
+    ]);
 
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.json({
@@ -156,9 +306,17 @@ router.post('/evaluate', async (req: Request, res: Response) => {
 
     Logger.info('[Evaluate] 收到评估请求', 'EvaluateRoute');
 
-    // 评估步骤 (如果有)
+    const steps = context?.steps || [];
+    if (steps.length > MAX_STEPS_PER_EVALUATE) {
+      res.status(400).json({
+        success: false,
+        error: `评估步骤数量不能超过${MAX_STEPS_PER_EVALUATE}条`,
+      });
+      return;
+    }
+
     const stepEvaluator = new StepEvaluator();
-    const stepResults = (context?.steps || []).map((s) =>
+    const stepResults = steps.map((s) =>
       stepEvaluator.evaluateStep({
         stepId: s.stepId,
         toolName: s.toolName,

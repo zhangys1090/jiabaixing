@@ -21,7 +21,7 @@
     if result.approved:
         write_file(result.path, result.content)
     else:
-        print(result.reason)
+        logger.info(result.reason)
 """
 
 from __future__ import annotations
@@ -31,10 +31,11 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
-
 from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("write_approval")
+
+
 
 
 class ApprovalMode(str, Enum):

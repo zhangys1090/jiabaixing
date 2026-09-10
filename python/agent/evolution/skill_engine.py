@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from agent.core.logger import StructuredLogger
-
 log = StructuredLogger("skill_engine")
+
 
 _STALE_AFTER_DAYS = 30
 _QUALITY_DECLINE_WINDOW = 5
@@ -122,7 +122,7 @@ class SkillUsageTracker:
             data = json.loads(raw)
             for name, record_data in data.get("skills", {}).items():
                 self._skills[name] = SkillUsageRecord.from_dict(record_data)
-            log.info("SkillUsageTracker state loaded", count=len(self._skills))
+            log.debug("SkillUsageTracker state loaded", count=len(self._skills))
         except Exception as e:
             log.warning("Failed to load skill usage state", error=str(e))
 
@@ -160,7 +160,7 @@ class SkillUsageTracker:
             tags=tags or [],
         )
         self._save()
-        log.info("Skill registered to tracker", name=name)
+        log.debug("Skill registered to tracker", name=name)
 
     def track_load(self, name: str) -> None:
         rec = self._skills.get(name)
@@ -324,6 +324,7 @@ class SkillAutoGenerator:
         self._skills_dir.mkdir(parents=True, exist_ok=True)
         # 语义去重缓存 - 存储已生成skill的输入文本hash
         self._generated_inputs: list[tuple[str, float]] = []  # (text_hash, timestamp)
+        self._MAX_GENERATED_INPUTS = 10000
 
     def _text_hash(self, text: str) -> str:
         """生成文本的词袋hash用于快速比较,使用jieba分词"""
@@ -345,40 +346,42 @@ class SkillAutoGenerator:
         except ImportError:
             words_a = set(c for c in text_a.lower())
             words_b = set(c for c in text_b.lower())
-        
+
         if not words_a or not words_b:
             return 0.0
-        
+
         intersection = words_a & words_b
         union = words_a | words_b
-        
+
         return len(intersection) / len(union)
 
     def _is_duplicate_input(self, new_input: str, threshold: float = 0.7) -> bool:
         """检查新输入是否与已生成的skill输入高度相似"""
         if len(self._generated_inputs) == 0:
             return False
-        
+
         now = time.time()
-        
+
         # 清理超过30天的旧记录
         self._generated_inputs = [
             (h, t) for h, t in self._generated_inputs
             if (now - t) < _STALE_AFTER_DAYS * 24 * 60 * 60
         ]
-        
+
         # 使用Jaccard相似度计算
         for existing_hash, _ in self._generated_inputs:
             sim = self._jaccard_similarity(new_input, existing_hash)
             if sim >= threshold:
                 return True
-        
+
         return False
 
     def _track_generated_input(self, text: str) -> None:
         """记录已生成的skill输入用于去重"""
         text_hash = self._text_hash(text)
         self._generated_inputs.append((text_hash, time.time()))
+        if len(self._generated_inputs) > self._MAX_GENERATED_INPUTS:
+            self._generated_inputs = self._generated_inputs[-self._MAX_GENERATED_INPUTS * 3 // 4:]
 
     def generate(self, params: SkillGenerationParams) -> str | None:
         if params.quality_score < _MIN_QUALITY_FOR_GENERATION:

@@ -18,8 +18,8 @@ from pydantic import BaseModel
 
 from agent.core.logger import StructuredLogger, log_ignored
 from agent.perception.action_verifier import ActionVerifier
-
 log = StructuredLogger("action_verify")
+
 router = APIRouter()
 
 

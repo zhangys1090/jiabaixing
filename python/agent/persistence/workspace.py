@@ -6,6 +6,8 @@
 
 Usage:
     from agent.persistence.workspace import WorkspaceManager
+import logging
+logger = logging.getLogger(__name__)
     manager = WorkspaceManager()
     ws = manager.create_workspace("my-project", "/path/to/project", "示例项目")
     active = manager.switch_workspace(ws.id)
@@ -71,7 +73,7 @@ class WorkspaceManager:
         manager = WorkspaceManager()
         ws = manager.create_workspace("demo", "/tmp/demo", "演示项目")
         context = manager.get_workspace_context(ws.id)
-        print(context["project_type"], context["hints"])
+        logger.info(context["project_type"], context["hints"])
     """
 
     def __init__(self, data_dir: Path | None = None) -> None:
@@ -350,6 +352,7 @@ class WorkspaceManager:
                 context["frameworks"] = coding_ctx.frameworks
                 context["toolsets"] = coding_ctx.toolsets
         except Exception as _exc:
+            logger.warning("workspace 异常处理", error=str(_exc))
             log_ignored(None, "workspace.WorkspaceManager.get_workspace_context", _exc)
 
         # 集成 SubdirectoryHints
@@ -365,6 +368,7 @@ class WorkspaceManager:
                 "warnings": hints.warnings,
             }
         except Exception as _exc:
+            logger.warning("workspace 异常处理", error=str(_exc))
             log_ignored(None, "workspace.WorkspaceManager.get_workspace_context", _exc)
 
         return context
@@ -394,6 +398,7 @@ class WorkspaceManager:
             if coding_ctx is not None:
                 project_type = coding_ctx.project_type
         except Exception as _exc:
+            logger.warning("workspace 异常处理", error=str(_exc))
             log_ignored(None, "workspace.WorkspaceManager.auto_detect_workspace", _exc)
 
         if project_type is None:

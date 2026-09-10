@@ -9,11 +9,11 @@
 
 import { checkSensitiveInfo } from '../security/SensitiveDetector';
 import type {
+  GoalProgress,
+  QualityScore,
+  SafetyCheckResult,
   ToolResult,
   ValidationResult,
-  SafetyCheckResult,
-  QualityScore,
-  GoalProgress,
 } from '../types';
 
 /** 验证服务依赖 */
@@ -246,9 +246,7 @@ export class VerificationService {
    * 用于错误指示词判定，避免把教程/代码示例中的 error/failed 误判为真实失败。
    */
   private stripCodeSpans(text: string): string {
-    return text
-      .replace(/```[\s\S]*?```/g, ' ')
-      .replace(/`[^`\n]*`/g, ' ');
+    return text.replace(/```[\s\S]*?```/g, ' ').replace(/`[^`\n]*`/g, ' ');
   }
 
   /**
@@ -287,7 +285,9 @@ export class VerificationService {
 当前输出: "${currentOutput.substring(0, 500)}"
 
 请用JSON格式回答:
-{"achieved": true, "progress": 0.9, "remainingSteps": [], "suggestedAction": "continue"}`;
+{"achieved": true, "progress": 0.9, "remainingSteps": [], "suggestedAction": "continue"}
+
+重要：只基于上方提供的实际输出评估，不编造评估依据。`;
 
     const response = await this.deps.llm.chat(prompt);
     const jsonMatch = response.match(/\{[\s\S]*\}/);

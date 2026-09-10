@@ -15,6 +15,10 @@ from agent.models.plan import (
 
 router = APIRouter()
 
+_MAX_TASK_LENGTH = 2000
+_MAX_STEPS = 50
+_MAX_STEP_DESC_LENGTH = 5000
+
 
 def get_engine():
     from agent.main import engine
@@ -33,9 +37,13 @@ async def plan(req: PlanRequest) -> PlanResponse:
     eng = get_engine()
     if not eng:
         return _engine_unavailable()
+    if not req.task or not req.task.strip():
+        return JSONResponse(status_code=400, content={"detail": "task is required"})
+    if len(req.task) > _MAX_TASK_LENGTH:
+        return JSONResponse(status_code=400, content={"detail": f"task too long (max {_MAX_TASK_LENGTH} chars)"})
     messages = [
         {"role": "system", "content": "你是一个任务规划专家。请将用户任务分解为具体步骤，以JSON格式输出。"},
-        {"role": "user", "content": f"请规划以下任务：{req.task}"},
+        {"role": "user", "content": f"请规划以下任务：{req.task[:_MAX_TASK_LENGTH]}"},
     ]
     result = await eng.llm.chat(messages=messages)
     return PlanResponse(
@@ -51,12 +59,16 @@ async def execute(req: ExecuteRequest) -> ExecuteResponse:
     eng = get_engine()
     if not eng:
         return _engine_unavailable()
+    if not req.steps:
+        return JSONResponse(status_code=400, content={"detail": "steps are required"})
+    if len(req.steps) > _MAX_STEPS:
+        return JSONResponse(status_code=400, content={"detail": f"too many steps (max {_MAX_STEPS})"})
     from agent.models.plan import ExecuteStepResult
     results = []
     for step in req.steps:
         messages = [
             {"role": "system", "content": "你是任务执行专家。请执行给定的步骤。"},
-            {"role": "user", "content": f"执行步骤: {step.description}"},
+            {"role": "user", "content": f"执行步骤: {step.description[:_MAX_STEP_DESC_LENGTH]}"},
         ]
         result = await eng.llm.chat(messages=messages)
         results.append(ExecuteStepResult(
@@ -76,9 +88,13 @@ async def evaluate(req: EvaluateRequest) -> EvaluateResponse:
     eng = get_engine()
     if not eng:
         return _engine_unavailable()
+    if not req.task or not req.task.strip():
+        return JSONResponse(status_code=400, content={"detail": "task is required"})
+    if len(req.task) > _MAX_TASK_LENGTH:
+        return JSONResponse(status_code=400, content={"detail": f"task too long (max {_MAX_TASK_LENGTH} chars)"})
     messages = [
         {"role": "system", "content": "你是任务评估专家。请评估执行结果的质量。"},
-        {"role": "user", "content": f"评估任务: {req.task}\n结果: {[r.model_dump() for r in req.results]}"},
+        {"role": "user", "content": f"评估任务: {req.task[:_MAX_TASK_LENGTH]}\n结果: {[r.model_dump() for r in req.results]}"},
     ]
     result = await eng.llm.chat(messages=messages)
     return EvaluateResponse(
@@ -95,9 +111,13 @@ async def reflect(req: ReflectRequest) -> ReflectResponse:
     eng = get_engine()
     if not eng:
         return _engine_unavailable()
+    if not req.task or not req.task.strip():
+        return JSONResponse(status_code=400, content={"detail": "task is required"})
+    if len(req.task) > _MAX_TASK_LENGTH:
+        return JSONResponse(status_code=400, content={"detail": f"task too long (max {_MAX_TASK_LENGTH} chars)"})
     messages = [
         {"role": "system", "content": "你是反思专家。请分析任务执行过程，找出改进点。"},
-        {"role": "user", "content": f"反思任务: {req.task}"},
+        {"role": "user", "content": f"反思任务: {req.task[:_MAX_TASK_LENGTH]}"},
     ]
     result = await eng.llm.chat(messages=messages)
     return ReflectResponse(

@@ -1,7 +1,4 @@
-import {
-  ToolCallGuard,
-  ConstitutionGuardProvider,
-} from './ToolCallGuard';
+import { ConstitutionGuardProvider, ToolCallGuard } from './ToolCallGuard';
 
 const blockedProvider: ConstitutionGuardProvider = async (action) => {
   const blocked = action.toolName === 'shutdown_device';
@@ -59,7 +56,17 @@ describe('ToolCallGuard 宪法守卫 (U4 第2项)', () => {
     const first = await g.guard('web_search', { q: 'same' });
     expect(first.blocked).toBe(false);
     // 模拟工具执行后记录调用（success:false 不进缓存，确保走到去重分支）
-    g.record('web_search', { q: 'same' }, { success: false, output: '', metadata: {} });
+    g.record(
+      'web_search',
+      { q: 'same' },
+      {
+        success: false,
+        output: '',
+        duration: 0,
+        validated: false,
+        metadata: {},
+      }
+    );
     // 相同参数再次调用 → 去重拦截（宪法未拦截，走 check 去重）
     const second = await g.guard('web_search', { q: 'same' });
     expect(second.blocked).toBe(true);

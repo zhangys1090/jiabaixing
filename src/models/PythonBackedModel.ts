@@ -36,7 +36,7 @@ export class PythonBackedModel implements Model {
           ],
           input.tools,
           input.maxTokens ?? 4096,
-          ((input.toolChoice as 'none' | 'auto' | 'required') ?? 'auto')
+          (input.toolChoice as 'none' | 'auto' | 'required') ?? 'auto'
         );
         return { text: result?.content ?? '', toolCalls: result?.toolCalls };
       }
@@ -47,7 +47,11 @@ export class PythonBackedModel implements Model {
       );
       return { text };
     } catch (err) {
-      Logger.error('🐍 PythonBackedModel 委派 LLM 失败', err as Error, 'PythonBackedModel');
+      Logger.error(
+        '🐍 PythonBackedModel 委派 LLM 失败',
+        err as Error,
+        'PythonBackedModel'
+      );
       throw err;
     }
   }

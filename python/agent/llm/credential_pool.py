@@ -10,6 +10,8 @@ from typing import Any
 
 from agent.config import DATA_DIR
 from agent.core.logger import log_ignored
+import logging
+logger = logging.getLogger(__name__)
 
 
 class RotationStrategy(str, Enum):
@@ -327,6 +329,7 @@ class CostGuard:
         self._warning_threshold = warning_threshold
         self._critical_threshold = critical_threshold
         self._records: list[UsageRecord] = []
+        self._MAX_RECORDS = 5000
         self._daily_reset: float = time.time()
         self._alert_callbacks: list[Any] = []
 
@@ -375,6 +378,7 @@ class CostGuard:
             try:
                 cb(alert)
             except Exception as _exc:
+                logger.warning("credential_pool 异常处理", error=str(_exc))
                 log_ignored(None, "credential_pool.CostGuard.check_budget_alert", _exc)
         return alert
 
@@ -698,7 +702,6 @@ class CredentialPoolManager:
         if self._persistence:
             restored = self._persistence.apply(self)
             if restored > 0:
-                import logging
                 logging.getLogger(__name__).info(
                     "Credential pool state restored", extra={"restored": restored}
                 )

@@ -1,4 +1,4 @@
-import { SimulatedDeviceAdapter, HttpDeviceAdapter } from './DeviceAdapter';
+import { HttpDeviceAdapter, SimulatedDeviceAdapter } from './DeviceAdapter';
 import { Device, DeviceStatus } from './types';
 
 function makeDevice(over: Partial<Device> = {}): Device {
@@ -6,12 +6,16 @@ function makeDevice(over: Partial<Device> = {}): Device {
     id: 'dev-1',
     name: 'Test Device',
     type: 'light',
+    model: 'TestModel',
+    manufacturer: 'TestMfg',
     status: 'online',
-    ip: '127.0.0.1',
-    port: 80,
-    protocol: 'http',
+    protocol: 'wifi',
+    ipAddress: '127.0.0.1',
+    lastSeen: new Date(),
+    properties: {},
     capabilities: [],
-    metadata: {},
+    createdAt: new Date(),
+    updatedAt: new Date(),
     ...over,
   };
 }
@@ -39,14 +43,18 @@ describe('SimulatedDeviceAdapter (W3)', () => {
 
 describe('HttpDeviceAdapter (W3)', () => {
   it('falls back to simulated status before any refresh', () => {
-    const adapter = new HttpDeviceAdapter({ baseUrl: 'http://127.0.0.1:9/status' });
+    const adapter = new HttpDeviceAdapter({
+      baseUrl: 'http://127.0.0.1:9/status',
+    });
     const status = adapter.sampleStatus(makeDevice());
     expect(status.deviceId).toBe('dev-1');
     expect(adapter.kind).toBe('http');
   });
 
   it('refresh failure degrades to fallback without throwing', async () => {
-    const adapter = new HttpDeviceAdapter({ baseUrl: 'http://127.0.0.1:9/none' });
+    const adapter = new HttpDeviceAdapter({
+      baseUrl: 'http://127.0.0.1:9/none',
+    });
     await expect(adapter.refresh(makeDevice())).resolves.toBeUndefined();
     // 刷新失败后仍能返回状态（降级模拟）
     expect(adapter.sampleStatus(makeDevice()).deviceId).toBe('dev-1');

@@ -203,7 +203,9 @@ export function registerMCPRoutes(app: express.Application): void {
         res.json({ success: true, data: { name: config.name } });
       } catch (error) {
         Logger.error('注册MCP服务器失败', error as Error, 'MCPRoutes');
-        res.status(500).json({ success: false, error: (error as Error).message });
+        res
+          .status(500)
+          .json({ success: false, error: (error as Error).message });
       }
     }
   );

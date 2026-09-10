@@ -454,6 +454,7 @@ export class ContextWindowManager {
     crossSessionMemory: CrossSessionMemoryEntry[],
     currentInput?: string
   ): ChatMessage[] {
+    void currentInput;
     if (!crossSessionMemory || crossSessionMemory.length === 0) {
       return messages;
     }

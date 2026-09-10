@@ -4,6 +4,8 @@ import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from agent.core.logger import StructuredLogger
+log = StructuredLogger("registry")
 
 if TYPE_CHECKING:  # 仅供类型注解使用，避免 toolset_registry ↔ registry 循环导入
     from agent.tools.toolset_registry import SceneToToolsetMapper
@@ -80,6 +82,7 @@ class ToolDefinition:
     parameters: list[ToolParameterDef] = field(default_factory=list)
     risk_level: str = "low"
     permissions: list[str] = field(default_factory=list)
+    timeout: float = 0.0
 
 
 @dataclass
@@ -121,8 +124,6 @@ class ToolRegistry:
 
     def register(self, definition: ToolDefinition, executor: ToolExecutor) -> None:
         if definition.name in self._tools:
-            from agent.core.logger import StructuredLogger
-            log = StructuredLogger("tool_registry")
             log.warning(
                 "工具注册覆盖已有同名工具",
                 tool_name=definition.name,
@@ -309,6 +310,7 @@ class ToolRegistry:
             _tracing.end_span(_span)
             return result
         except Exception as e:
+            log.debug("registry 异常处理", error=str(e))
             result = ToolResult(
                 success=False,
                 error=f"{type(e).__name__}: {e}",

@@ -391,8 +391,10 @@ export interface UserEvents {
       outputPreview?: string | null;
       error?: string | null;
       timestamp: string;
-      /** D2 会话标识: 由 ToolRegistry 从 ToolContext 捕获; null 表示无法归属会话(不转发 Python)。 */
       sessionId: string | null;
+      text?: string;
+      language?: string;
+      confidence?: number;
     },
   ];
   behavior_analysis: [
@@ -503,7 +505,7 @@ export interface VibeCodingEvents {
         type: 'file' | 'command' | 'api';
         target: string;
         action: string;
-        risk: 'low' | 'medium' | 'high';
+        risk: 'none' | 'low' | 'medium' | 'high' | 'critical';
         preview?: string;
       }>;
       estimatedTime?: number;
@@ -728,6 +730,8 @@ export interface SecurityEvents {
       description: string;
       target: string;
       risk: string;
+      approved?: boolean;
+      method?: string;
     },
   ];
 }

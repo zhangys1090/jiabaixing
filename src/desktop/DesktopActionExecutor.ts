@@ -6,6 +6,7 @@
  */
 
 import { exec, execSync } from 'child_process';
+import { isShellCommandDangerous } from '../harness/tools/system/shell_exec';
 import { Logger } from '../utils/Logger';
 import { DesktopUIInspector } from './DesktopUIInspector';
 import { DesktopObservation, DesktopVisionEngine } from './DesktopVisionEngine';
@@ -26,6 +27,7 @@ export interface DesktopAction {
     | 'drag'
     | 'openApp'
     | 'activateWindow'
+    | 'restoreWindowState'
     | 'closeWindow'
     | 'maximize'
     | 'minimize'
@@ -135,6 +137,8 @@ export class DesktopActionExecutor {
           return this.handleOpenApp(action);
         case 'activateWindow':
           return this.handleActivateWindow(action);
+        case 'restoreWindowState':
+          return this.handleRestoreWindowState(action);
         case 'closeWindow':
           return this.handleCloseWindow(action);
         case 'maximize':
@@ -362,6 +366,17 @@ export class DesktopActionExecutor {
       success: result.success,
       action,
       output: `激活窗口: ${title}`,
+      error: result.error,
+    };
+  }
+
+  private handleRestoreWindowState(action: DesktopAction): DesktopActionResult {
+    const handle = action.params.handle as number;
+    const result = this.windowManager.activateWindow(handle);
+    return {
+      success: result.success,
+      action,
+      output: `恢复窗口状态: handle=${handle}`,
       error: result.error,
     };
   }
@@ -614,6 +629,28 @@ $hwnd = [IntPtr]::new(${window.handle})
     action: DesktopAction
   ): Promise<DesktopActionResult> {
     const command = action.params.command as string;
+
+    if (!command || typeof command !== 'string') {
+      return {
+        success: false,
+        action,
+        error: 'shell 命令不能为空',
+      };
+    }
+
+    const dangerCheck = isShellCommandDangerous(command);
+    if (dangerCheck.blocked) {
+      Logger.warn(
+        `🛡️ Desktop shell 命令被安全策略拦截: ${dangerCheck.reason}`,
+        'DesktopActionExecutor'
+      );
+      return {
+        success: false,
+        action,
+        error: `命令被安全策略拦截: ${dangerCheck.reason}`,
+      };
+    }
+
     try {
       const output = await new Promise<string>((resolve, reject) => {
         exec(

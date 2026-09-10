@@ -157,7 +157,7 @@ export class TaskDispatcher {
   private executor: TaskExecutor | null;
   private config: Required<TaskDispatcherConfig>;
   private activeControllers: Map<string, AbortController> = new Map();
-  private messageBus: TaskMessageBus = new TaskMessageBus();
+  private currentMessageBus: TaskMessageBus | null = null;
 
   constructor(
     registry: AgentRegistry,
@@ -183,83 +183,95 @@ export class TaskDispatcher {
     const results = new Map<string, unknown>();
     const taskMap = new Map<string, TaskNode>();
 
-    // 创建新的消息总线实例（每次 dispatch 独立）
-    this.messageBus = new TaskMessageBus();
+    const messageBus = new TaskMessageBus();
+    this.currentMessageBus = messageBus;
 
     for (const task of tasks) {
       taskMap.set(task.id, { ...task, status: 'pending' });
     }
 
-    this.validateDAG(tasks);
+    try {
+      this.validateDAG(tasks);
 
-    const layers = this.buildDAG(tasks);
-    Logger.info(
-      `📋 DAG 分层完成: ${layers.length} 层, ${tasks.length} 个任务`,
-      'TaskDispatcher'
-    );
-
-    for (const layer of layers) {
+      const layers = this.buildDAG(tasks);
       Logger.info(
-        `🏗️ 执行第 ${layer.layer + 1} 层 (${layer.tasks.length} 个任务)`,
+        `📋 DAG 分层完成: ${layers.length} 层, ${tasks.length} 个任务`,
         'TaskDispatcher'
       );
 
-      const batchSize = runConfig.maxConcurrentPerLayer;
-      for (let offset = 0; offset < layer.tasks.length; offset += batchSize) {
-        const batch = layer.tasks.slice(offset, offset + batchSize);
-        if (offset > 0) {
-          Logger.debug(
-            `  批次 ${Math.floor(offset / batchSize) + 1}: ${batch.length} 个任务`,
-            'TaskDispatcher'
-          );
-        }
-
-        const batchPromises = batch.map((task) =>
-          this.executeTaskWithRetry(taskMap.get(task.id)!, results, runConfig)
+      for (const layer of layers) {
+        Logger.info(
+          `🏗️ 执行第 ${layer.layer + 1} 层 (${layer.tasks.length} 个任务)`,
+          'TaskDispatcher'
         );
 
-        const batchResults = await Promise.allSettled(batchPromises);
-
-        for (let i = 0; i < batchResults.length; i++) {
-          const task = batch[i];
-          const settled = batchResults[i];
-          const node = taskMap.get(task.id)!;
-
-          if (settled.status === 'fulfilled') {
-            results.set(task.id, settled.value);
-          } else {
-            node.status = 'failed';
-            node.error = settled.reason?.message || String(settled.reason);
-            results.set(task.id, { error: node.error });
-            Logger.error(
-              `❌ 任务执行失败: ${task.id} (${task.goal})`,
-              settled.reason as Error,
+        const batchSize = runConfig.maxConcurrentPerLayer;
+        for (let offset = 0; offset < layer.tasks.length; offset += batchSize) {
+          const batch = layer.tasks.slice(offset, offset + batchSize);
+          if (offset > 0) {
+            Logger.debug(
+              `  批次 ${Math.floor(offset / batchSize) + 1}: ${batch.length} 个任务`,
               'TaskDispatcher'
             );
           }
+
+          const batchPromises = batch.map((task) =>
+            this.executeTaskWithRetry(taskMap.get(task.id)!, results, runConfig)
+          );
+
+          const batchResults = await Promise.allSettled(batchPromises);
+
+          for (let i = 0; i < batchResults.length; i++) {
+            const task = batch[i];
+            const settled = batchResults[i];
+            const node = taskMap.get(task.id)!;
+
+            if (settled.status === 'fulfilled') {
+              results.set(task.id, settled.value);
+            } else {
+              node.status = 'failed';
+              node.error = settled.reason?.message || String(settled.reason);
+              results.set(task.id, { error: node.error });
+              Logger.error(
+                `❌ 任务执行失败: ${task.id} (${task.goal})`,
+                settled.reason as Error,
+                'TaskDispatcher'
+              );
+            }
+          }
         }
       }
-    }
 
-    for (const task of tasks) {
-      const updated = taskMap.get(task.id);
-      if (updated) {
-        task.status = updated.status;
-        task.result = updated.result;
-        task.error = updated.error;
-        task.assignedTo = updated.assignedTo;
+      for (const task of tasks) {
+        const updated = taskMap.get(task.id);
+        if (updated) {
+          task.status = updated.status;
+          task.result = updated.result;
+          task.error = updated.error;
+          task.assignedTo = updated.assignedTo;
+        }
       }
+
+      Logger.info(
+        `✅ DAG 执行完成: ${tasks.length} 个任务, ${results.size} 个结果`,
+        'TaskDispatcher'
+      );
+
+      messageBus.clear();
+
+      return results;
+    } catch (dispatchError) {
+      this.activeControllers.forEach((controller) => {
+        try {
+          controller.abort();
+        } catch {
+          /* ignore */
+        }
+      });
+      this.activeControllers.clear();
+      messageBus.clear();
+      throw dispatchError;
     }
-
-    Logger.info(
-      `✅ DAG 执行完成: ${tasks.length} 个任务, ${results.size} 个结果`,
-      'TaskDispatcher'
-    );
-
-    // 清理消息总线
-    this.messageBus.clear();
-
-    return results;
   }
 
   /**
@@ -280,7 +292,7 @@ export class TaskDispatcher {
    * @returns TaskMessageBus 实例
    */
   getMessageBus(): TaskMessageBus {
-    return this.messageBus;
+    return this.currentMessageBus || new TaskMessageBus();
   }
 
   /**

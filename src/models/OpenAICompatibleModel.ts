@@ -10,11 +10,9 @@
 
 import { Logger } from '../utils/Logger';
 import { Model, ModelInput, ModelOutput } from './ModelInterface';
-import type {
-  TransportConfig,
-  TransportResponse,
-} from './transports/BaseTransport';
-import { ChatCompletionsTransport } from './transports/ChatCompletionsTransport';
+import type { TransportResponse } from './transports/BaseTransport';
+import { BaseTransport } from './transports/BaseTransport';
+import { TransportFactory } from './transports/TransportFactory';
 
 /**
  * OpenAI 兼容模型的配置
@@ -33,6 +31,8 @@ export interface OpenAICompatibleConfig {
   circuitBreakerRecoveryMs?: number;
   thinkingMode?: 'enabled' | 'disabled';
   reasoningEffort?: 'high' | 'max';
+  /** 传输层类型: 'openai_compatible' | 'openai_responses' | 'anthropic' */
+  transportType?: string;
 }
 
 /**
@@ -75,9 +75,12 @@ const FALLBACK_RESPONSES = [
 
 type ResolvedConfig = Omit<
   Required<OpenAICompatibleConfig>,
-  'thinkingMode' | 'reasoningEffort'
+  'thinkingMode' | 'reasoningEffort' | 'transportType'
 > &
-  Pick<OpenAICompatibleConfig, 'thinkingMode' | 'reasoningEffort'>;
+  Pick<
+    OpenAICompatibleConfig,
+    'thinkingMode' | 'reasoningEffort' | 'transportType'
+  >;
 
 /**
  * @deprecated TS 本地 LLM 客户端（AGENT_BACKEND=local 回退实现）。
@@ -89,7 +92,7 @@ export class OpenAICompatibleModel implements Model {
   private config: ResolvedConfig;
   private initialized: boolean = false;
   /** 传输层 — 负责 Provider 协议格式的请求/响应转换 */
-  private transport: ChatCompletionsTransport;
+  private transport: BaseTransport;
   /** 连续失败次数 */
   private consecutiveFailures: number = 0;
   /** 连接错误导致的连续失败次数（连接错误不再自动恢复） */
@@ -124,11 +127,10 @@ export class OpenAICompatibleModel implements Model {
       reasoningEffort: config.reasoningEffort,
     };
 
-    // 初始化传输层 — 委托请求/响应格式转换
-    const transportConfig: TransportConfig = {
+    this.transport = TransportFactory.fromProviderConfig({
       baseUrl: this.config.baseUrl,
       apiKey: this.config.apiKey,
-      modelName: this.config.modelName,
+      model: this.config.modelName,
       timeout: this.config.timeout,
       maxTokens: this.config.maxTokens,
       temperature: this.config.temperature,
@@ -136,9 +138,9 @@ export class OpenAICompatibleModel implements Model {
       extra: {
         thinkingMode: this.config.thinkingMode,
         reasoningEffort: this.config.reasoningEffort,
+        transport: config.transportType,
       },
-    };
-    this.transport = new ChatCompletionsTransport(transportConfig);
+    });
   }
 
   async initialize(): Promise<void> {

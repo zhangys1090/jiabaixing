@@ -24,11 +24,12 @@ import re
 from collections import Counter
 from typing import Any
 
-from agent.core.logger import StructuredLogger
 from agent.core.logger import log_ignored
 from agent.tools.registry import ToolCategory, ToolDefinition, ToolRegistry
+from agent.core.logger import StructuredLogger
 
 log = StructuredLogger("tool_search")
+
 
 
 def _tokenize(text: str) -> list[str]:
@@ -154,7 +155,7 @@ class ToolSearchIndex:
             for token, freq in doc_freq.items():
                 self._idf[token] = math.log((total_docs + 1) / (freq + 1)) + 1
 
-        log.info(f"工具搜索索引已构建: {len(self._documents)} 个工具")
+        log.debug(f"工具搜索索引已构建: {len(self._documents)} 个工具")
         return len(self._documents)
 
     def search(self, query: str, limit: int = 5) -> list[dict[str, Any]]:

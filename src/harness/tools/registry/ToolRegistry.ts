@@ -24,8 +24,19 @@ import type {
   ToolParameterDef,
   ToolResult,
 } from '../../types';
-import { ToolCategory } from '../../types';
+import { Permission, ToolCategory } from '../../types';
+import { PermissionGuard } from './PermissionGuard';
+import { SchemaValidator } from './SchemaValidator';
 import { ToolCallGuard } from './ToolCallGuard';
+import {
+  ToolMetadataEnhancer,
+  type ToolSearchOptions,
+  type ToolSearchResult,
+} from './ToolMetadataEnhancer';
+import {
+  InMemoryToolRuntimeState,
+  type ToolRuntimeState,
+} from './ToolRuntimeState';
 
 /** OpenAI Function Calling 工具格式 */
 interface OpenAIToolDef {
@@ -42,7 +53,7 @@ interface OpenAIToolDef {
 }
 
 /** P2-4: 熔断器状态 */
-interface CircuitBreakerState {
+export interface CircuitBreakerState {
   state: 'closed' | 'open' | 'half-open';
   failureCount: number;
   lastFailureTime: number;
@@ -344,7 +355,10 @@ export class ToolRegistry {
         };
       }
       cbState.state = 'half-open';
-      Logger.info(`⚡ P2-4: 工具 ${name} 进入半开状态，尝试恢复`, 'ToolRegistry');
+      Logger.info(
+        `⚡ P2-4: 工具 ${name} 进入半开状态，尝试恢复`,
+        'ToolRegistry'
+      );
     }
 
     // P0-1: Schema 参数验证 — 前置拦截非法/缺失参数
@@ -374,7 +388,13 @@ export class ToolRegistry {
     // 注意：permResult 必须在外层声明（此前为 if 块内 const，导致 permission-less
     // 工具在第 404 行引用未定义变量抛 ReferenceError，使 execute 直接崩溃）。
     let permResult:
-      | { allowed: boolean; reason?: string; policy?: string; needsConfirmation?: boolean; missing?: unknown }
+      | {
+          allowed: boolean;
+          reason?: string;
+          policy?: string;
+          needsConfirmation?: boolean;
+          missing?: unknown;
+        }
       | undefined;
     if (
       this.enablePreChecks &&
@@ -385,8 +405,16 @@ export class ToolRegistry {
         tool.definition.requiredPermissions as Permission[],
         tool.definition.riskLevel,
         context
-      ) as { allowed: boolean; reason?: string; policy?: string; needsConfirmation?: boolean; missing?: unknown } | undefined;
-      if (!permResult.allowed) {
+      ) as
+        | {
+            allowed: boolean;
+            reason?: string;
+            policy?: string;
+            needsConfirmation?: boolean;
+            missing?: unknown;
+          }
+        | undefined;
+      if (permResult && !permResult.allowed) {
         Logger.warn(
           `🚫 权限拒绝: ${name} — ${permResult.reason}`,
           'ToolRegistry'
@@ -439,10 +467,7 @@ export class ToolRegistry {
     // C1: 统一结果缓存 / 去重 / 限速（D4 统一门禁的一部分）。
     // 仅对幂等且属 NETWORK/FILE/MEMORY 类的工具生效（审计要求缓存 web_fetch/file_read/search 类），
     // 排除 result_cache 自身以免自递归。命中即短路返回，避免重复外部调用与费用。
-    if (
-      tool.definition.idempotent &&
-      name !== 'result_cache'
-    ) {
+    if (tool.definition.idempotent && name !== 'result_cache') {
       const cat = tool.definition.category;
       const c1Eligible =
         cat === ToolCategory.NETWORK ||
@@ -502,13 +527,19 @@ export class ToolRegistry {
 
       // B1: 最大重试次数（网络/LLM 类默认 3，其他默认 0；env 可覆盖；上限 3）
       const maxRetries = this.computeMaxRetries(name, tool.definition.category);
-      const baseDelay = parseFloat(process.env['TOOL_RETRY_BASE_DELAY'] || '0.5');
+      const baseDelay = parseFloat(
+        process.env['TOOL_RETRY_BASE_DELAY'] || '0.5'
+      );
       const maxDelay = parseFloat(process.env['TOOL_RETRY_MAX_DELAY'] || '30');
 
       let lastResult: ToolResult | null = null;
 
       for (let attempt = 0; attempt <= maxRetries; attempt++) {
-        const attemptResult = await this.runSingleAttempt(name, params, context);
+        const attemptResult = await this.runSingleAttempt(
+          name,
+          params,
+          context
+        );
         lastResult = attemptResult;
 
         if (attemptResult.success) {
@@ -797,6 +828,7 @@ export class ToolRegistry {
         state.state = 'open';
         Logger.error(
           `⚡ P2-4: 工具 ${toolName} 连续失败 ${state.failureCount} 次，熔断器打开`,
+          undefined,
           'ToolRegistry'
         );
       }
@@ -806,9 +838,7 @@ export class ToolRegistry {
   /**
    * P2-4: 获取工具熔断器状态（用于监控/诊断）
    */
-  getCircuitBreakerState(
-    toolName: string
-  ): CircuitBreakerState | undefined {
+  getCircuitBreakerState(toolName: string): CircuitBreakerState | undefined {
     return this.runtimeState.getCircuitBreaker(toolName);
   }
 
@@ -821,10 +851,7 @@ export class ToolRegistry {
       state.state = 'closed';
       state.failureCount = 0;
       state.lastFailureTime = 0;
-      Logger.info(
-        `⚡ P2-4: 工具 ${toolName} 熔断器已手动重置`,
-        'ToolRegistry'
-      );
+      Logger.info(`⚡ P2-4: 工具 ${toolName} 熔断器已手动重置`, 'ToolRegistry');
       return true;
     }
     return false;
@@ -900,7 +927,11 @@ export class ToolRegistry {
       // C3: 包装层输出截断（保护上下文窗口，填充 truncation 元数据）
       this.truncateToolOutput(finalResult);
       // D4: 能力指标观测（此前 capMetrics 零调用，现按工具类别记录）
-      this.recordCapability(name, tool.definition.category, finalResult.success);
+      this.recordCapability(
+        name,
+        tool.definition.category,
+        finalResult.success
+      );
       // D2: 认知类工具完成后回灌认知总线（情绪/反思总线），供 ReAct 循环消费
       if (tool.definition.category === ToolCategory.COGNITION) {
         // D2: 从 ToolContext 捕获会话标识, 便于转发到对应 Python 会话(缺失则 null, 诚实降级不转发)
@@ -991,13 +1022,14 @@ export class ToolRegistry {
           `🩹 B2: ${name} 降级至替代工具 ${heal.alternativeTool}`,
           'ToolRegistry'
         );
-        return this.execute(heal.alternativeTool, heal.params ?? params, context);
+        return this.execute(
+          heal.alternativeTool,
+          heal.params ?? params,
+          context
+        );
       }
       if (heal.action === ToolHealAction.DEGRADE) {
-        Logger.warn(
-          `🩹 B2: ${name} 降级执行（部分能力可用）`,
-          'ToolRegistry'
-        );
+        Logger.warn(`🩹 B2: ${name} 降级执行（部分能力可用）`, 'ToolRegistry');
         return {
           ...failed,
           success: true,
@@ -1033,7 +1065,9 @@ export class ToolRegistry {
 
   private sessionKey(context: ToolContext): string {
     const m = context.metadata || {};
-    return (m.sessionId as string) || context.userId || context.traceId || 'default';
+    return (
+      (m.sessionId as string) || context.userId || context.traceId || 'default'
+    );
   }
 
   private agentKey(context: ToolContext): string {
@@ -1197,7 +1231,9 @@ export class ToolRegistry {
       return undefined;
     };
     if (name === 'shell_exec') {
-      return pick('command', 'cmd', 'args') || JSON.stringify(params).slice(0, 200);
+      return (
+        pick('command', 'cmd', 'args') || JSON.stringify(params).slice(0, 200)
+      );
     }
     if (name === 'web_fetch' || name === 'web_search') {
       return pick('url', 'query') || name;
@@ -1222,15 +1258,17 @@ export class ToolRegistry {
    */
   private truncateToolOutput(result: ToolResult): void {
     if (result.output == null) return;
-    const parsedChars = parseInt(process.env['TOOL_OUTPUT_MAX_CHARS'] || '8000', 10);
+    const parsedChars = parseInt(
+      process.env['TOOL_OUTPUT_MAX_CHARS'] || '8000',
+      10
+    );
     // 环境变量为非数字时 parseInt 返回 NaN，`output.length > NaN` 恒为 false，
     // 会导致输出截断被静默跳过。NaN 时回退默认 8000。
     const maxChars = Number.isFinite(parsedChars) ? parsedChars : 8000;
     if (typeof result.output === 'string') {
       if (result.output.length > maxChars) {
         const originalLength = result.output.length;
-        result.output =
-          result.output.slice(0, maxChars) + '\n...[输出已截断]';
+        result.output = result.output.slice(0, maxChars) + '\n...[输出已截断]';
         result.metadata = result.metadata || {};
         result.metadata.truncation = {
           truncated: true,
@@ -1859,15 +1897,26 @@ export class ToolRegistry {
   /**
    * Phase 3: 语义工具发现 — 根据自然语言意图搜索最匹配的工具
    */
-  searchByIntent(query: string, options?: ToolSearchOptions): ToolSearchResult[] {
+  searchByIntent(
+    query: string,
+    options?: ToolSearchOptions
+  ): ToolSearchResult[] {
     return this.metadataEnhancer.searchByIntent(query, options);
   }
 
   /**
    * Phase 3: 工具推荐 — 根据上下文推荐最相关的工具
    */
-  recommendTools(context: string, recentToolCalls?: string[], limit?: number): ToolSearchResult[] {
-    return this.metadataEnhancer.recommendTools(context, recentToolCalls, limit);
+  recommendTools(
+    context: string,
+    recentToolCalls?: string[],
+    limit?: number
+  ): ToolSearchResult[] {
+    return this.metadataEnhancer.recommendTools(
+      context,
+      recentToolCalls,
+      limit
+    );
   }
 
   /**
