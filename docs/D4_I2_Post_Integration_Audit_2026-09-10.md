@@ -284,3 +284,48 @@ user_input: "用echo探针执行D4-I4全局回放验证"
 - 信念库仍为内存态，持久化属 D6 Memory Authority 范畴
 - TS `LearningAuthority` 的 actionType 粒度问题建议后续与 Python 对齐
 - EvolutionEngine 尚未消费采样/信念结果（延续 2026-07 诚实遗留清单）
+
+---
+
+## 八、D6 Memory Authority（同日, commit a35c721）
+
+### 现状审计（D6-A）
+
+| 项 | 现状 | 结论 |
+| --- | --- | --- |
+| 记忆写路径 | Python MemoryEngine（SQLite）主实现；TS 侧已是 MemoryEngineBridge 壳（HTTP 代理 /v1/memory/*） | ✅ 架构上已收敛 |
+| StateAuthority.readMemory | provider **从未被注册**，快照 MemoryView 恒空壳 | ❌ 检索不服务 Decision（验收②断裂）→ 本轮接通 |
+| 信念/Decision/Evidence | 全内存态，重启即失 | ❌ Risk 4 → 本轮持久化 |
+
+### 实现
+
+- **`agent/core/memory_authority.py`**（新增）：beliefs/belief_history/decisions/
+  evidence 的唯一持久化写路径（SQLite WAL + RLock，`AUTHORITY_STORE_PATH` 可配）；
+  写入失败 `log_ignored` 可观测，绝不静默
+- **三处接线（写入方唯一）**：LearningAuthority→persist_belief_update；
+  DecisionAuthority→persist_decision；GoalAuthority→persist_evidence；
+  `restore_from_store()` 启动恢复（engine.py 组装时调用）
+- **检索服务 Decision**：StateAuthority 新增 `registerMemoryProvider`（独立注册，
+  不等全量 providers）；conversation_loop `set_memory_engine` 把
+  `MemoryEngine.search` 注入快照 MemoryView；engine.py 组装接线
+- **Risk 1 交叉验证端点**：`GET /v1/authority/decisions/{id}`、
+  `/v1/authority/goals/{id}/decisions|evidence|beliefs` — TS delegated 可对
+  Python FINAL 落盘记录做 decisionId↔goalId↔action 绑定查证，未知 404
+
+### 验收（test_d6_memory_authority.py，5/5 通过）
+
+- ✅ round-trip：decide+evidence 落盘，全新实例从同一文件完整读回
+- ✅ Risk 4：LearningAuthority 重建后 `restore_from_store` 信念恢复
+- ✅ 验收②：快照 MemoryView 携带真实检索记忆；provider 故障降级空视图
+- ✅ Risk 1：已裁决 200 可查 / 伪造 decisionId 404 拒绝
+- ✅ 存储故障降级：`is_persistent=False` 且裁决/Evidence 记账照常完成
+
+**过程发现真 bug**：`persist_decision` 占位符 9 vs 列 8 → 静默失败（log_ignored
+接住）——被本测试**首次运行即捕获**，"无静默分歧"验收标准直接产生价值。
+
+- 回归：D4+D5+I4+core_loop+gateway+红线 **139 通过**；导入扫描 PASS
+
+### D6 遗留
+
+- Plan v1→v2→v3 replan 逻辑（Risk 3, basic）→ 归 D7 长时程自治一并处理
+- 信念恢复目前仅 engine 组装时调用；K8s 多副本共享 SQLite 需换 Redis/PG（D7+）
