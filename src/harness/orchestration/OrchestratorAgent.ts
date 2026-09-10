@@ -203,6 +203,17 @@ export class OrchestratorAgent {
 
           const planPayload = planDecision.chosen.action.payload as Record<string, unknown>;
           tasks = (planPayload.tasks as TaskNode[]) || [];
+
+          // D4-I3 验收复核: plan decisionId 与父 goalId 必须下沉到每个子任务，
+          // 否则 G→planDecision→subtask 链在 ID 层断裂（D4-I4 replay 无法回溯）。
+          for (const t of tasks) {
+            t.metadata = {
+              ...t.metadata,
+              parentGoalId: goal.goalId,
+              planDecisionId: planDecision.decisionId,
+              planSnapshotId: snapshot.snapshotId,
+            };
+          }
         }
       } catch (llmError) {
         Logger.warn(
@@ -466,6 +477,52 @@ export class OrchestratorAgent {
     context: string | undefined,
     startTime: number
   ): Promise<AggregatedResult> {
+    // D4-I3 验收复核: 简单任务直通路径同样必须经过 DecisionAuthority（Action Decision）。
+    // 此前实现直接 agent.execute()/dispatch()，无 Goal/Snapshot/Decision —— 注释与实现不符。
+    let simpleGoalId: string | null = null;
+    let simpleDecisionId: string | null = null;
+    try {
+      const goalAuthority = GoalAuthority.getInstance();
+      const stateAuthority = StateAuthority.getInstance();
+      const decisionAuthority = DecisionAuthority.getInstance();
+
+      const goal = goalAuthority.createGoal({
+        description: userGoal,
+        originalInput: userGoal,
+      });
+      simpleGoalId = goal.goalId;
+      const snapshot = await stateAuthority.captureSnapshot([goal.goalId]);
+
+      const decision = await decisionAuthority.decide({
+        goalId: goal.goalId,
+        snapshot,
+        decisionType: DecisionType.ACTION,
+        candidates: [
+          {
+            candidateId: `C_simple_${Date.now().toString(36)}`,
+            proposerId: 'orchestrator_simple_path',
+            action: {
+              type: 'composite',
+              payload: { execute: 'simple_direct', goal: userGoal },
+            },
+            confidence: 0.9,
+            reasoning: 'Simple task direct path — single candidate ratified by DecisionAuthority',
+            estimatedGoalProgress: 0.5,
+          },
+        ],
+      });
+      simpleDecisionId = decision.decisionId;
+      Logger.info(
+        `🔗 D4-I3: simple-path Action Decision ${decision.decisionId} for goal ${goal.goalId}`,
+        'OrchestratorAgent'
+      );
+    } catch (authError) {
+      Logger.warn(
+        `⚠️ D4-I3: simple-path authority 前置失败，降级旧直通路径: ${(authError as Error).message}`,
+        'OrchestratorAgent'
+      );
+    }
+
     // 尝试选择专业化 Agent 执行
     try {
       const agent = AgentFactory.selectAgentByGoal(userGoal);
@@ -514,6 +571,7 @@ export class OrchestratorAgent {
         result.qualityScore = qualityScore;
         this.recordToEvolution(userGoal, result, duration);
 
+        this.recordSimplePathEvidence(simpleGoalId, simpleDecisionId, true, userGoal);
         return result;
       }
     } catch (agentError) {
@@ -554,7 +612,37 @@ export class OrchestratorAgent {
     result.qualityScore = qualityScore;
     this.recordToEvolution(userGoal, result, duration);
 
+    this.recordSimplePathEvidence(simpleGoalId, simpleDecisionId, result.success, userGoal);
     return result;
+  }
+
+  /**
+   * D4-I3 验收复核: 简单路径执行结果以 Evidence 写回同一 goalId（与 I2 模式一致）。
+   * progressDelta 仍为结果驱动 stub，等待 D5 Learning 校准。
+   */
+  private recordSimplePathEvidence(
+    goalId: string | null,
+    decisionId: string | null,
+    success: boolean,
+    userGoal: string
+  ): void {
+    if (!goalId || !decisionId) return;
+    try {
+      GoalAuthority.getInstance().updateFromEvidence({
+        goalId,
+        decisionId,
+        observation: success ? 'simple-path task completed' : 'simple-path task failed',
+        action: { type: 'composite', payload: { execute: 'simple_direct', goal: userGoal } },
+        expectedEffect: `complete: ${userGoal.slice(0, 60)}`,
+        actualEffect: success ? 'success' : 'failed',
+        progressDelta: success ? 0.5 : -0.05,
+      });
+    } catch (e) {
+      Logger.warn(
+        `D4-I3: simple-path evidence write-back failed — ${(e as Error).message}`,
+        'OrchestratorAgent'
+      );
+    }
   }
 
   /**
