@@ -133,18 +133,12 @@ export class MemoryEngineBridge implements IMemoryEngine {
         emotion,
       };
     }
-    Logger.warn(
-      '[MemoryEngineBridge] Python 不可用，storeShortTermMemory 降级为空',
+    Logger.error(
+      '[D7-P0] Python 不可用，storeShortTermMemory FAIL CLOSED — 不得返回伪 MemoryItem',
+      undefined,
       'MemoryEngineBridge'
     );
-    return {
-      id: '',
-      type: MemoryType.SHORT_TERM,
-      content,
-      timestamp: new Date(),
-      scene,
-      emotion,
-    };
+    throw new Error('[D7-P0] MemoryEngineBridge.storeShortTermMemory: Python bridge unavailable — fail closed');
   }
 
   public async storeLongTermMemory(
@@ -167,18 +161,12 @@ export class MemoryEngineBridge implements IMemoryEngine {
         emotion,
       };
     }
-    Logger.warn(
-      '[MemoryEngineBridge] Python 不可用，storeLongTermMemory 降级为空',
+    Logger.error(
+      '[D7-P0] Python 不可用，storeLongTermMemory FAIL CLOSED — 不得返回伪 MemoryItem',
+      undefined,
       'MemoryEngineBridge'
     );
-    return {
-      id: '',
-      type: MemoryType.LONG_TERM,
-      content,
-      timestamp: new Date(),
-      scene,
-      emotion,
-    };
+    throw new Error('[D7-P0] MemoryEngineBridge.storeLongTermMemory: Python bridge unavailable — fail closed');
   }
 
   public async storeInstantMemory(
@@ -201,18 +189,12 @@ export class MemoryEngineBridge implements IMemoryEngine {
         emotion,
       };
     }
-    Logger.warn(
-      '[MemoryEngineBridge] Python 不可用，storeInstantMemory 降级为空',
+    Logger.error(
+      '[D7-P0] Python 不可用，storeInstantMemory FAIL CLOSED — 不得返回伪 MemoryItem',
+      undefined,
       'MemoryEngineBridge'
     );
-    return {
-      id: '',
-      type: MemoryType.INSTANT,
-      content,
-      timestamp: new Date(),
-      scene,
-      emotion,
-    };
+    throw new Error('[D7-P0] MemoryEngineBridge.storeInstantMemory: Python bridge unavailable — fail closed');
   }
 
   public async storeFeedbackSignal(data: {
@@ -233,10 +215,12 @@ export class MemoryEngineBridge implements IMemoryEngine {
       );
       return;
     }
-    Logger.warn(
-      '[MemoryEngineBridge] Python 不可用，storeFeedbackSignal 降级丢弃',
+    Logger.error(
+      '[D7-P0] Python 不可用，storeFeedbackSignal FAIL CLOSED',
+      undefined,
       'MemoryEngineBridge'
     );
+    throw new Error('[D7-P0] MemoryEngineBridge.storeFeedbackSignal: Python bridge unavailable — fail closed');
   }
 
   // ==================== 检索 ====================
@@ -266,11 +250,12 @@ export class MemoryEngineBridge implements IMemoryEngine {
         relevanceScore: r.relevanceScore,
       }));
     }
-    Logger.warn(
-      '[MemoryEngineBridge] Python 不可用，preciseHybridRetrieval 降级为空',
+    Logger.error(
+      '[D7-P0] Python 不可用，preciseHybridRetrieval FAIL CLOSED',
+      undefined,
       'MemoryEngineBridge'
     );
-    return [];
+    throw new Error('[D7-P0] MemoryEngineBridge.preciseHybridRetrieval: Python bridge unavailable — fail closed');
   }
 
   public async retrieveRelevant(params: {
@@ -317,14 +302,12 @@ export class MemoryEngineBridge implements IMemoryEngine {
         };
       }
     }
-    Logger.warn(
-      '[MemoryEngineBridge] Python 不可用，retrieveContext 降级为空',
+    Logger.error(
+      '[D7-P0] Python 不可用，retrieveContext FAIL CLOSED',
+      undefined,
       'MemoryEngineBridge'
     );
-    return {
-      memories: [],
-      preferences: { codingStyle: [], namingRules: [] },
-    };
+    throw new Error('[D7-P0] MemoryEngineBridge.retrieveContext: Python bridge unavailable — fail closed');
   }
 
   // ==================== 用户配置 ====================
@@ -364,11 +347,12 @@ export class MemoryEngineBridge implements IMemoryEngine {
     if (bridge) {
       return await bridge.memoryQueryRecentFeedback(hours);
     }
-    Logger.warn(
-      '[MemoryEngineBridge] Python 不可用，queryRecentFeedback 降级为空',
+    Logger.error(
+      '[D7-P0] Python 不可用，queryRecentFeedback FAIL CLOSED',
+      undefined,
       'MemoryEngineBridge'
     );
-    return [];
+    throw new Error('[D7-P0] MemoryEngineBridge.queryRecentFeedback: Python bridge unavailable — fail closed');
   }
 
   public async updateMemory(
@@ -385,10 +369,12 @@ export class MemoryEngineBridge implements IMemoryEngine {
       await bridge.memoryUpdate(memoryId, updates);
       return;
     }
-    Logger.warn(
-      '[MemoryEngineBridge] Python 不可用，updateMemory 降级丢弃',
+    Logger.error(
+      '[D7-P0] Python 不可用，updateMemory FAIL CLOSED',
+      undefined,
       'MemoryEngineBridge'
     );
+    throw new Error('[D7-P0] MemoryEngineBridge.updateMemory: Python bridge unavailable — fail closed');
   }
 
   // ==================== 内部 / 可选方法 ====================

@@ -1,9 +1,13 @@
 /**
  * /api/chat 对话 API 路由
  * 提供 POST /api/chat 端点，接收用户消息并返回 AI 回复
+ *
+ * Layer 1 收口：bridge 调用注入 traceId/goalId/snapshotId，
+ * 确保 TS→Python 跨进程调用有完整审计链。
  */
 
 import { Request, Response, Router } from 'express';
+import { DecisionGuard } from '../../authority/DecisionGuard';
 import { JiabaixingCore } from '../../core/JiabaixingCore';
 import { Logger } from '../../utils/Logger';
 import { getPythonBridge, isPythonBackend } from '../bootstrap';
@@ -60,12 +64,26 @@ router.post('/chat', async (req: Request, res: Response) => {
 
     if (isPythonBackend()) {
       const bridge = getPythonBridge()!;
+      const traceId = Logger.generateTraceId();
+
+      const guard = DecisionGuard.getInstance();
+      const { decision, snapshot, goalId } = await guard.guardAction({
+        action: { type: 'message', payload: { input } },
+        description: `Chat: ${input.substring(0, 60)}`,
+        executionDomain: 'orchestrator',
+        proposerId: 'chat_route',
+        confidence: 0.8,
+        reasoning: 'User chat message',
+      });
+      const authorityMeta = guard.extractAuthorityMeta(decision, snapshot, goalId);
+
       const result = await bridge.processInput(input, userId);
       res.json({
         success: true,
         response: result.response,
         conversation_id: responseConversationId,
-        trace_id: result.traceId,
+        trace_id: result.traceId || traceId,
+        authorityMeta,
         backend: 'python',
       });
       return;

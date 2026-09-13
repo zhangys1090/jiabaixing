@@ -44,6 +44,7 @@ export class DesktopUIInspector {
   public async initialize(): Promise<void> {
     if (this.initialized) return;
     Logger.info('🔍 DesktopUIInspector 初始化', 'DesktopUIInspector');
+    Logger.info('[AUDIT] bypass action: source=DesktopUIInspector note="uses execSync directly for PowerShell UI inspection, bypasses ActionAuthority — triggered by DesktopMCPServer(external-authorized) or vision observe"', 'DesktopUIInspector');
     this.initialized = true;
   }
 

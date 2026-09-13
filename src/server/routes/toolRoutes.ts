@@ -4,11 +4,14 @@
  * POST /api/tools/execute - 执行已注册的 Harness 工具（image_generate / tts_speak / web_fetch 等）
  * GET  /api/tools/list    - 列出所有已注册工具
  *
- * 复用 ToolRegistry.execute()，与 SkillRegistry 双轨并行
+ * Layer 1 收口：任何 production tool execution 必须经过 DecisionGuard，
+ * 确保 goalId / snapshotId / decisionId 三要素齐全。
+ * DecisionAuthority 是唯一 FINAL action selector。
  */
 
 import express from 'express';
 
+import { DecisionGuard } from '../../authority/DecisionGuard';
 import { JiabaixingCore } from '../../core/JiabaixingCore';
 import { Logger } from '../../utils/Logger';
 
@@ -93,11 +96,34 @@ async function handleToolExecute(
     }
 
     const traceId = Logger.generateTraceId();
+
+    const guard = DecisionGuard.getInstance();
+    const { decision, snapshot, goalId } = await guard.guardAction({
+      action: { type: 'tool_call', payload: { toolName, params: params || {} } },
+      description: `Tool execution: ${toolName}`,
+      executionDomain: 'orchestrator',
+      proposerId: 'tool_route_http',
+      confidence: 0.9,
+      reasoning: `HTTP tool execution request from ${userId || 'api_user'}`,
+    });
+
+    const authorityMeta = guard.extractAuthorityMeta(decision, snapshot, goalId);
+
     const result = await registry.execute(toolName, params || {}, {
       userId: userId || 'api_user',
       traceId,
       permissions: new Set(),
-      metadata: {},
+      metadata: { authorityMeta },
+    });
+
+    guard.reportEvidence({
+      goalId,
+      decisionId: decision.decisionId,
+      action: decision.chosen.action,
+      expectedEffect: decision.chosen.reasoning,
+      actualEffect: result.success ? 'success' : `error: ${result.error}`,
+      observation: result.output,
+      success: result.success,
     });
 
     res.json({
@@ -109,6 +135,7 @@ async function handleToolExecute(
         duration: result.duration,
         traceId,
         toolName,
+        authorityMeta,
       },
     });
   } catch (error) {

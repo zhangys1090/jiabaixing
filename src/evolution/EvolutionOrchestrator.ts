@@ -239,13 +239,14 @@ export class EvolutionOrchestrator {
     // 正向进化闭环：追踪连续模式
     this.trackConsecutivePatterns(record);
 
-    // 检测低质量交互，触发真正的自我进化
+    // E2-3: 低质量交互不再自动触发自我进化。
+    // 自修改必须经 DecisionAuthority → authorityMeta → SelfModificationEngine。
+    // 此处仅记录低质量信号，供 Authority 链路后续决策。
     if (record.qualityScore < 0.5 && this.evolutionEngineV2) {
       Logger.info(
-        `🧬 检测到低质量交互 (${record.qualityScore.toFixed(2)})，触发真正的自我进化`,
+        `⚠️ 检测到低质量交互 (${record.qualityScore.toFixed(2)})，但 E2-3 禁止自动触发自我进化 — 需经 DecisionAuthority`,
         'EvolutionOrchestrator'
       );
-      void this.triggerTrueEvolution(record);
     }
 
     // 统一验证：每20次交互自动记录before快照，10次交互后自动对比
@@ -276,36 +277,12 @@ export class EvolutionOrchestrator {
   /**
    * 触发真正的自我进化（EvolutionEngineV2）
    */
-  public async triggerTrueEvolution(record: InteractionRecord): Promise<void> {
-    if (!this.evolutionEngineV2) return;
-
-    const cause: EvolutionCause = {
-      type: record.success ? 'LOW_SATISFACTION' : 'FAILURE',
-      description: record.success
-        ? `低质量交互: ${record.input.substring(0, 100)}`
-        : `执行失败: ${record.input.substring(0, 100)}`,
-      context: {
-        failureInfo: record.success ? undefined : '执行未成功',
-        satisfactionScore: record.qualityScore,
-      },
-      timestamp: Date.now(),
-    };
-
-    try {
-      const result = await this.evolutionEngineV2.triggerEvolution(cause);
-      if (result) {
-        Logger.info(
-          `🧬 真正自我进化完成: ${result.success ? '成功' : '失败'} | 执行了 ${result.executedActions} 个动作`,
-          'EvolutionOrchestrator'
-        );
-      }
-    } catch (error) {
-      Logger.error(
-        '真正自我进化触发失败',
-        error as Error,
-        'EvolutionOrchestrator'
-      );
-    }
+  public async triggerTrueEvolution(_record: InteractionRecord): Promise<void> {
+    Logger.error(
+      'E2-3: triggerTrueEvolution BLOCKED — self-modification must go through DecisionAuthority, not auto-triggered from quality score',
+      new Error('E2-3: EvolutionOrchestrator auto-trigger is forbidden without Authority approval'),
+      'EvolutionOrchestrator'
+    );
   }
 
   private driveProfileEvolution(record: InteractionRecord): void {
@@ -882,32 +859,14 @@ export class EvolutionOrchestrator {
       'EvolutionOrchestrator'
     );
 
+    // E2-3: runAutoDetection 不再直接触发 evolutionEngineV2.triggerEvolution()。
+    // 自修改必须经 DecisionAuthority → authorityMeta → SelfModificationEngine。
+    // 此处仅记录检测信号，供 Authority 链路后续决策。
     if (this.evolutionEngineV2) {
-      try {
-        const result =
-          await this.evolutionEngineV2.triggerEvolution(detectedCause);
-        if (result) {
-          Logger.info(
-            `🧬 正向进化闭环: 进化完成 → ${result.success ? '成功' : '失败'} | ${result.executedActions} 个动作`,
-            'EvolutionOrchestrator'
-          );
-
-          if (result.success && !result.rollbackNeeded) {
-            void EventBus.emit('proactive_evolution_completed', {
-              cause: detectedCause.type,
-              action: detectedCause.description,
-              result: `执行${result.executedActions}个动作`,
-              timestamp: new Date().toISOString(),
-            });
-          }
-        }
-      } catch (error) {
-        Logger.error(
-          '正向进化闭环触发失败',
-          error as Error,
-          'EvolutionOrchestrator'
-        );
-      }
+      Logger.info(
+        `⚠️ E2-3: 正向进化闭环检测到改进点 (${detectedCause.type})，但禁止自动触发自修改 — 需经 DecisionAuthority`,
+        'EvolutionOrchestrator'
+      );
     } else {
       await this.triggerOptimizationCycle(detectedCause.description);
     }

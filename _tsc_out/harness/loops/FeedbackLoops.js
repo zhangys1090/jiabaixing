@@ -1,0 +1,224 @@
+"use strict";
+/**
+ * FeedbackLoops — 闭环服务
+ *
+ * 将 JiabaixingCore 中的内联闭环逻辑提取为独立服务，
+ * 通过 AFTER_RESPONSE 钩子触发，与 Core 解耦。
+ *
+ * 包含 4 个闭环：
+ * 1. 进化闭环：质量评分 → EvolutionOrchestrator.recordInteraction
+ * 2. 工具失败反馈闭环：工具失败 → FeedbackCollector.recordToolFailure
+ * 3. 偏好学习闭环：用户纠正 → PreferenceManager.applyCorrection
+ * 4. 自动知识提取：对话 → MemoryAssistant.autoExtractKnowledge
+ */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.FeedbackLoops = void 0;
+const EvolutionOrchestrator_1 = require("../../evolution/EvolutionOrchestrator");
+const bridgeRegistry_1 = require("../../ide/bridgeRegistry");
+const Logger_1 = require("../../utils/Logger");
+class FeedbackLoops {
+    deps;
+    constructor(deps) {
+        this.deps = deps;
+    }
+    /**
+     * 创建 AFTER_RESPONSE 钩子函数
+     * 注册到 ConstraintsService 后，每次响应后自动触发所有闭环
+     * @returns LifecycleHook 钩子函数
+     */
+    createAFTER_RESPONSEHook() {
+        return async (ctx) => {
+            await this.executeLoops(ctx);
+            return { proceed: true };
+        };
+    }
+    /**
+     * 执行所有闭环
+     * 非关键闭环异步执行，不阻塞主流程
+     */
+    async executeLoops(ctx) {
+        const meta = ctx.metadata;
+        // 偏好学习闭环 — 快速执行（仅正则匹配 + 偏好提取）
+        try {
+            await this.runPreferenceLoop(meta);
+        }
+        catch (err) {
+            Logger_1.Logger.debug(`偏好学习闭环失败（非关键）: ${err.message}`, 'FeedbackLoops');
+        }
+        // 进化闭环 + 工具失败反馈 — 异步执行
+        setImmediate(() => {
+            this.runEvolutionLoop(meta).catch((err) => {
+                Logger_1.Logger.debug(`进化闭环失败（非关键）: ${err.message}`, 'FeedbackLoops');
+            });
+        });
+        // 自动知识提取 — 异步执行
+        if (this.deps.memoryAssistant) {
+            setImmediate(() => {
+                this.deps
+                    .memoryAssistant.autoExtractKnowledge(meta.input, meta.response, meta.userId)
+                    .catch((err) => Logger_1.Logger.debug(`知识提取失败（非关键）: ${err.message}`, 'FeedbackLoops'));
+            });
+        }
+    }
+    /**
+     * 进化闭环：质量评分 → EvolutionOrchestrator + 工具失败反馈
+     */
+    async runEvolutionLoop(meta) {
+        const qualityScore = meta.quality?.overall ?? 0.7;
+        const input = meta.input;
+        const response = meta.response;
+        const userId = meta.userId;
+        const scene = this.inferSceneFromInput(input);
+        // 从轨迹中提取工具调用详情
+        const trajectory = meta.trace?.trajectory || [];
+        const toolResults = new Map();
+        for (const s of trajectory) {
+            if (s.type === 'tool_result' && s.toolName) {
+                toolResults.set(s.toolName, s.toolResult?.success ?? false);
+            }
+        }
+        const toolCalls = trajectory
+            .filter((s) => s.type === 'tool_call')
+            .map((s) => ({
+            toolName: s.toolName || 'unknown',
+            success: toolResults.get(s.toolName || '') ?? false,
+            executionTime: s.duration || 0,
+        }));
+        // 记录交互到进化引擎（python 模式经 PythonAgentBridge 委派；local 模式用 TS 编排器）
+        try {
+            const bridge = (0, bridgeRegistry_1.getActivePythonBridge)();
+            if (bridge) {
+                void bridge
+                    .submitFeedback({
+                    kind: 'interaction',
+                    traceId: meta.traceId,
+                    input,
+                    response,
+                    success: qualityScore >= 0.5,
+                    qualityScore,
+                    executionDuration: meta.trace?.totalDuration ?? 0,
+                    toolCalls,
+                    scene,
+                    userId: userId || 'default',
+                })
+                    .catch((err) => Logger_1.Logger.debug(`反馈提交失败（非关键）: ${err.message}`, 'FeedbackLoops'));
+            }
+            else {
+                const orchestrator = EvolutionOrchestrator_1.EvolutionOrchestrator.getInstance();
+                orchestrator.recordInteraction({
+                    traceId: meta.traceId,
+                    input,
+                    response,
+                    success: qualityScore >= 0.5,
+                    qualityScore,
+                    executionDuration: meta.trace?.totalDuration ?? 0,
+                    toolCalls,
+                    scene,
+                    userId: userId || 'default',
+                });
+            }
+        }
+        catch (err) {
+            Logger_1.Logger.debug(`进化编排器记录失败（非关键）: ${err.message}`, 'FeedbackLoops');
+        }
+        // 低质量交互触发反馈收集
+        if (qualityScore < 0.5) {
+            this.deps.feedbackCollector.recordLowQuality(input, response, qualityScore, userId, scene);
+        }
+        // 工具失败触发反馈收集
+        for (const tc of toolCalls) {
+            if (!tc.success) {
+                this.deps.feedbackCollector.recordToolFailure(tc.toolName, '工具执行失败', input, userId);
+            }
+        }
+    }
+    /**
+     * 偏好学习闭环：用户纠正 → PreferenceManager
+     */
+    async runPreferenceLoop(meta) {
+        const input = meta.input;
+        const response = meta.response;
+        const userId = meta.userId;
+        const previousResponse = meta.previousResponse || '';
+        const scene = this.inferSceneFromInput(input);
+        // 分析用户输入是否为纠正/重试
+        const feedbackRecord = this.deps.feedbackCollector.analyzeUserInput(input, previousResponse, userId, scene);
+        if (feedbackRecord) {
+            // 将反馈信号传递给进化引擎
+            if (this.deps.evolutionEngine) {
+                this.deps.evolutionEngine.collectFeedback(input, response, {
+                    success: false,
+                    toolsUsed: [],
+                    error: `用户反馈: ${feedbackRecord.type}`,
+                }, scene);
+            }
+            // 从纠正中自动学习用户偏好
+            try {
+                const { PreferenceManager } = await Promise.resolve().then(() => __importStar(require('../../memory/PreferenceManager')));
+                const pm = PreferenceManager.getInstance();
+                const entry = pm.applyCorrection(input, 'general');
+                if (entry) {
+                    Logger_1.Logger.info(`⚡ 从用户纠正中提取偏好: ${entry.key}=${entry.value}`, 'FeedbackLoops');
+                }
+            }
+            catch {
+                // 偏好提取失败不影响主流程
+            }
+        }
+    }
+    /**
+     * 从输入推断场景类型
+     * 迁移自 JiabaixingCore.inferSceneFromInput
+     */
+    inferSceneFromInput(input) {
+        if (/代码|编程|编译|重构|debug|bug|测试|接口|API|函数|类|模块/.test(input))
+            return 'coding';
+        if (/文件|目录|文件夹|打开|搜索|查找|读|写|创建|删除/.test(input))
+            return 'file_operation';
+        if (/桌面|截图|点击|窗口|应用|程序|打开|关闭/.test(input))
+            return 'desktop';
+        if (/记忆|记得|之前|上次|回忆|历史/.test(input))
+            return 'memory';
+        if (/天气|新闻|搜索|查询|什么是|怎么/.test(input))
+            return 'knowledge';
+        if (/提醒|日程|任务|计划|安排/.test(input))
+            return 'planning';
+        if (/你好|嗨|谢谢|再见|早安|晚安/.test(input))
+            return 'greeting';
+        return 'general';
+    }
+}
+exports.FeedbackLoops = FeedbackLoops;

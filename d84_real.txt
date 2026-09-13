@@ -1,0 +1,498 @@
+ts-jest[config] (WARN) 
+    The "ts-jest" config option "isolatedModules" is deprecated and will be removed in v30.0.0. Please use "isolatedModules: true" in C:/zy/jiabaixing/tsconfig.json instead, see https://www.typescriptlang.org/tsconfig/#isolatedModules
+  
+13:57:49 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:49 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:50 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:50 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:50 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:50 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:50 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:50 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:50 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:50 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:50 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:50 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:50 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:50 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:50 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+
+[D8-4 A] G7_type_coercion: goalStatus=active verified=true steps=6 reason=consecutive_failures
+  evidence: "sum("2","3") === 5 鈥?type coercion fixed"
+
+[D8-4 A] G8_missing_await: goalStatus=active verified=true steps=6 reason=consecutive_failures
+  evidence: "getResult() === "hello" 鈥?missing await fixed"
+
+[D8-4 A] G9_file_permission: goalStatus=active verified=true steps=6 reason=consecutive_failures
+  evidence: "output.txt contains "updated" 鈥?permission handled"
+
+[D8-4 A] G10_missing_env_var: goalStatus=active verified=true steps=6 reason=consecutive_failures
+  evidence: "getPort() === 3000 鈥?missing env var handled"
+
+[D8-4 A] G11_loop_condition_inverted: goalStatus=active verified=true steps=6 reason=consecutive_failures
+  evidence: "countItems([1,2,3]) === 3 鈥?loop condition fixed"
+
+[D8-4 A] G12_bom_encoding: goalStatus=active verified=true steps=6 reason=consecutive_failures
+  evidence: "loadConfig() parses correctly 鈥?BOM encoding fixed"
+node:assert:152
+  throw new AssertionError(obj);
+  ^
+
+AssertionError [ERR_ASSERTION]: sum("2","3") should be 5
+
+'23' !== 5
+
+    at Object.<anonymous> (C:\Users\ADMINI~1\AppData\Local\Temp\d8_4_G7_type_coercion_sf_TLuEFT\calc_test.js:3:8)
+    at Module._compile (node:internal/modules/cjs/loader:1812:14)
+    at Object..js (node:internal/modules/cjs/loader:1943:10)
+    at Module.load (node:internal/modules/cjs/loader:1533:32)
+    at Module._load (node:internal/modules/cjs/loader:1335:12)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+    at node:internal/main/run_main_module:33:47 {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: '23',
+  expected: 5,
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+
+Node.js v24.14.0
+
+[D8-4 B] G7_type_coercion: goalStatus=active verified=false steps=6 reason=consecutive_failures
+  evidence: "sum("2","3") !== 5: Command failed: node calc_test.js
+node:assert:152
+  throw new AssertionError(obj);
+  ^
+
+AssertionError [ERR_ASSERTION]: sum("2","3") should be 5
+
+'23' !== 5
+
+    at Object.<anonymous> (C:\Users\ADMINI~1\AppData\Local\Temp\d8_4_G7_type_coercion_sf_TLuEFT\calc_test.js:3:8)
+    at Module._compile (node:internal/modules/cjs/loader:1812:14)
+    at Object..js (node:internal/modules/cjs/loader:1943:10)
+    at Module.load (node:internal/modules/cjs/loader:1533:32)
+    at Module._load (node:internal/modules/cjs/loader:1335:12)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+    at node:internal/main/run_main_module:33:47 {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: '23',
+  expected: 5,
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+
+Node.js v24.14.0
+"
+node:assert:152
+  throw new AssertionError(obj);
+  ^
+
+AssertionError [ERR_ASSERTION]: getResult() should be "hello" not a Promise
++ actual - expected
+
++ Promise {
++   <pending>
++ }
+- 'hello'
+
+    at Object.<anonymous> (C:\Users\ADMINI~1\AppData\Local\Temp\d8_4_G8_missing_await_sf_rVSMYR\async_test.js:4:8)
+    at Module._compile (node:internal/modules/cjs/loader:1812:14)
+    at Object..js (node:internal/modules/cjs/loader:1943:10)
+    at Module.load (node:internal/modules/cjs/loader:1533:32)
+    at Module._load (node:internal/modules/cjs/loader:1335:12)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+    at node:internal/main/run_main_module:33:47 {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: Promise { <pending> },
+  expected: 'hello',
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+
+Node.js v24.14.0
+
+[D8-4 B] G8_missing_await: goalStatus=active verified=false steps=6 reason=consecutive_failures
+  evidence: "getResult() !== "hello": Command failed: node async_test.js
+node:assert:152
+  throw new AssertionError(obj);
+  ^
+
+AssertionError [ERR_ASSERTION]: getResult() should be "hello" not a Promise
++ actual - expected
+
++ Promise {
++   <pending>
++ }
+- 'hello'
+
+    at Object.<anonymous> (C:\Users\ADMINI~1\AppData\Local\Temp\d8_4_G8_missing_await_sf_rVSMYR\async_test.js:4:8)
+    at Module._compile (node:internal/modules/cjs/loader:1812:14)
+    at Object..js (node:internal/modules/cjs/loader:1943:10)
+    at Module.load (node:internal/modules/cjs/loader:1533:32)
+    at Module._load (node:internal/modules/cjs/loader:1335:12)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+    at node:internal/main/run_main_module:33:47 {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: Promise { <pending> },
+  expected: 'hello',
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+
+Node.js v24.14.0
+"
+
+[D8-4 B] G9_file_permission: goalStatus=active verified=false steps=6 reason=consecutive_failures
+  evidence: "output.txt contains "original" not "updated""
+C:\Users\ADMINI~1\AppData\Local\Temp\d8_4_G10_missing_env_var_sf_0tO6ss\config.js:1
+function getPort(){return process.env.PORT.length>0?parseInt(process.env.PORT):3000;}
+                                           ^
+
+TypeError: Cannot read properties of undefined (reading 'length')
+    at getPort (C:\Users\ADMINI~1\AppData\Local\Temp\d8_4_G10_missing_env_var_sf_0tO6ss\config.js:1:44)
+    at Object.<anonymous> (C:\Users\ADMINI~1\AppData\Local\Temp\d8_4_G10_missing_env_var_sf_0tO6ss\config_test.js:3:20)
+    at Module._compile (node:internal/modules/cjs/loader:1812:14)
+    at Object..js (node:internal/modules/cjs/loader:1943:10)
+    at Module.load (node:internal/modules/cjs/loader:1533:32)
+    at Module._load (node:internal/modules/cjs/loader:1335:12)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+    at node:internal/main/run_main_module:33:47
+
+Node.js v24.14.0
+
+[D8-4 B] G10_missing_env_var: goalStatus=active verified=false steps=6 reason=consecutive_failures
+  evidence: "getPort() !== 3000: Command failed: node config_test.js
+C:\Users\ADMINI~1\AppData\Local\Temp\d8_4_G10_missing_env_var_sf_0tO6ss\config.js:1
+function getPort(){return process.env.PORT.length>0?parseInt(process.env.PORT):3000;}
+                                           ^
+
+TypeError: Cannot read properties of undefined (reading 'length')
+    at getPort (C:\Users\ADMINI~1\AppData\Local\Temp\d8_4_G10_missing_env_var_sf_0tO6ss\config.js:1:44)
+    at Object.<anonymous> (C:\Users\ADMINI~1\AppData\Local\Temp\d8_4_G10_missing_env_var_sf_0tO6ss\config_test.js:3:20)
+    at Module._compile (node:internal/modules/cjs/loader:1812:14)
+    at Object..js (node:internal/modules/cjs/loader:1943:10)
+    at Module.load (node:internal/modules/cjs/loader:1533:32)
+    at Module._load (node:internal/modules/cjs/loader:1335:12)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+    at node:internal/main/run_main_module:33:47
+
+Node.js v24.14.0
+"
+
+[D8-4 B] G11_loop_condition_inverted: goalStatus=active verified=true steps=6 reason=consecutive_failures
+  evidence: "countItems([1,2,3]) === 3 鈥?loop condition fixed"
+node:internal/fs/utils:155
+    throw new ERR_INVALID_ARG_VALUE('encoding', encoding, reason);
+    ^
+
+TypeError [ERR_INVALID_ARG_VALUE]: The argument 'encoding' is invalid encoding. Received 'utf'
+    at assertEncoding (node:internal/fs/utils:155:11)
+    at getOptions (node:internal/fs/utils:331:5)
+    at Object.readFileSync (node:fs:434:13)
+    at loadConfig (C:\Users\ADMINI~1\AppData\Local\Temp\d8_4_G12_bom_encoding_sf_qS2Ebh\loader.js:2:36)
+    at Object.<anonymous> (C:\Users\ADMINI~1\AppData\Local\Temp\d8_4_G12_bom_encoding_sf_qS2Ebh\loader_test.js:3:11)
+    at Module._compile (node:internal/modules/cjs/loader:1812:14)
+    at Object..js (node:internal/modules/cjs/loader:1943:10)
+    at Module.load (node:internal/modules/cjs/loader:1533:32)
+    at Module._load (node:internal/modules/cjs/loader:1335:12)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19) {
+  code: 'ERR_INVALID_ARG_VALUE'
+}
+
+Node.js v24.14.0
+node:internal/fs/utils:155
+    throw new ERR_INVALID_ARG_VALUE('encoding', encoding, reason);
+    ^
+
+TypeError [ERR_INVALID_ARG_VALUE]: The argument 'encoding' is invalid encoding. Received 'utf'
+    at assertEncoding (node:internal/fs/utils:155:11)
+    at getOptions (node:internal/fs/utils:331:5)
+    at Object.readFileSync (node:fs:434:13)
+    at loadConfig (C:\Users\ADMINI~1\AppData\Local\Temp\d8_4_G12_bom_encoding_sf_qS2Ebh\loader.js:2:36)
+    at Object.<anonymous> (C:\Users\ADMINI~1\AppData\Local\Temp\d8_4_G12_bom_encoding_sf_qS2Ebh\loader_test.js:3:11)
+    at Module._compile (node:internal/modules/cjs/loader:1812:14)
+    at Object..js (node:internal/modules/cjs/loader:1943:10)
+    at Module.load (node:internal/modules/cjs/loader:1533:32)
+    at Module._load (node:internal/modules/cjs/loader:1335:12)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19) {
+  code: 'ERR_INVALID_ARG_VALUE'
+}
+
+Node.js v24.14.0
+
+[D8-4 B] G12_bom_encoding: goalStatus=active verified=true steps=6 reason=consecutive_failures
+  evidence: "loadConfig() parses correctly 鈥?BOM encoding fixed"
+
+=======================================================
+D8-4 CROSS-TASK GENERALIZATION 鈥?Strategy-Free (Novel)
+=======================================================
+Verified: 2/6
+Rate: 0.33
+False Recovery: 2
+  G7_type_coercion: verified=false status=active
+  G8_missing_await: verified=false status=active
+  G9_file_permission: verified=false status=active
+  G10_missing_env_var: verified=false status=active
+  G11_loop_condition_inverted: verified=true status=active
+  G12_bom_encoding: verified=true status=active
+=======================================================
+
+PASS src/authority/__tests__/D8-4-CrossTaskGeneralization.test.ts
+  D8-4: Cross-task Generalization
+    A: With DA (task-specific + generic + EDR)
+      鈭?G7_type_coercion: with DA (971 ms)
+      鈭?G8_missing_await: with DA (472 ms)
+      鈭?G9_file_permission: with DA (31 ms)
+      鈭?G10_missing_env_var: with DA (472 ms)
+      鈭?G11_loop_condition_inverted: with DA (471 ms)
+      鈭?G12_bom_encoding: with DA (475 ms)
+    B: Strategy-Free (generic + EDR only, DA frozen)
+      鈭?G7_type_coercion: strategy-free (105 ms)
+      鈭?G8_missing_await: strategy-free (97 ms)
+      鈭?G9_file_permission: strategy-free (27 ms)
+      鈭?G10_missing_env_var: strategy-free (87 ms)
+      鈭?G11_loop_condition_inverted: strategy-free (161 ms)
+      鈭?G12_bom_encoding: strategy-free (536 ms)
+      鈭?B-group summary: Strategy-Free Rate for novel tasks (1 ms)
+    Generalization comparison: G1-G6 vs G7-G12
+      鈭?novel task types are distinct from G1-G6
+
+Test Suites: 1 passed, 1 total
+Tests:       14 passed, 14 total
+Snapshots:   0 total
+Time:        4.912 s, estimated 6 s
+Ran all test suites matching /D8-4-CrossTaskGeneralization/i.
+13:57:53 [33mwarn[39m [AutonomousLoop] [D7-3D] Repeated action detected: tool_call count=5 >= 5 鈥?triggering recovery
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [AutonomousLoop] [D7-3D] Consecutive failures: 6 >= 6
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [AutonomousLoop] [D7-3D] Repeated action detected: tool_call count=5 >= 5 鈥?triggering recovery
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [AutonomousLoop] [D7-3D] Consecutive failures: 6 >= 6
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [AutonomousLoop] [D7-3D] Repeated action detected: tool_call count=5 >= 5 鈥?triggering recovery
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [AutonomousLoop] [D7-3D] Consecutive failures: 6 >= 6
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [AutonomousLoop] [D7-3D] Repeated action detected: tool_call count=5 >= 5 鈥?triggering recovery
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [AutonomousLoop] [D7-3D] Consecutive failures: 6 >= 6
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [AutonomousLoop] [D7-3D] Repeated action detected: tool_call count=5 >= 5 鈥?triggering recovery
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [AutonomousLoop] [D7-3D] Consecutive failures: 6 >= 6
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [AutonomousLoop] [D7-3D] Repeated action detected: tool_call count=5 >= 5 鈥?triggering recovery
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [AutonomousLoop] [D7-3D] Consecutive failures: 6 >= 6
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [AutonomousLoop] [D7-3D] Consecutive failures: 6 >= 6
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [AutonomousLoop] [D7-3D] Repeated action detected: tool_call count=5 >= 5 鈥?triggering recovery
+13:57:53 [33mwarn[39m [AutonomousLoop] [D7-3D] Consecutive failures: 6 >= 6
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [AutonomousLoop] [D7-3D] Repeated action detected: tool_call count=5 >= 5 鈥?triggering recovery
+13:57:53 [33mwarn[39m [AutonomousLoop] [D7-3D] Consecutive failures: 6 >= 6
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [AutonomousLoop] [D7-3D] Repeated action detected: tool_call count=5 >= 5 鈥?triggering recovery
+13:57:53 [33mwarn[39m [AutonomousLoop] [D7-3D] Consecutive failures: 6 >= 6
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [AutonomousLoop] [D7-3D] Repeated action detected: tool_call count=5 >= 5 鈥?triggering recovery
+13:57:53 [33mwarn[39m [AutonomousLoop] [D7-3D] Consecutive failures: 6 >= 6
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [StateAuthority] StateAuthority: no read providers registered, returning minimal snapshot
+13:57:53 [33mwarn[39m [ReplanProposerResolver] ReplanProposerResolver: no recovery proposers for domain "desktop" - falling back to legacy registry
+13:57:53 [33mwarn[39m [DecisionExecutor] [D8-1] DesktopActionAuthority not available: Cannot read properties of undefined (reading 'getInstance')
+13:57:53 [33mwarn[39m [AutonomousLoop] [D7-3D] Consecutive failures: 6 >= 6

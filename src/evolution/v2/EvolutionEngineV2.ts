@@ -128,8 +128,28 @@ export class EvolutionEngineV2 {
 
   /**
    * 执行进化计划（完整流程）
+   *
+   * E2-3: EvolutionEngineV2.executePlan 要求 SelfModificationEngine
+   * 已设置有效 authorityMeta（one-shot），否则拒绝执行。
+   * 调用方必须先经 DecisionAuthority.decide() 取得 decision，
+   * 再将 authorityMeta 注入 modifier，然后才能调用本方法。
    */
   private async executePlan(plan: EvolutionPlan): Promise<EvolutionResult> {
+    if (!this.modifier.isAuthorityAvailable()) {
+      Logger.error(
+        `E2-3: EvolutionEngineV2.executePlan BLOCKED — no valid authorityMeta on SelfModificationEngine for plan ${plan.id}`,
+        new Error('E2-3: EvolutionEngineV2 cannot execute plan without authority — setAuthorityMeta() required'),
+        'EvolutionEngineV2'
+      );
+      return {
+        planId: plan.id,
+        success: false,
+        executedActions: 0,
+        error: 'E2-3: authorityMeta required on SelfModificationEngine — self-modification without authority is forbidden',
+        duration: 0,
+      };
+    }
+
     Logger.info(
       `📋 Plan: ${plan.title} (${plan.actions.length} actions, risk: ${plan.estimatedRisk})`,
       'EvolutionEngineV2'

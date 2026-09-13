@@ -35,6 +35,8 @@ import type {
   DecisionCandidate,
   ProposedAction,
 } from '../authority/types';
+import { resolveGoalBinding } from '../core/GoalContextResolver';
+import type { GoalContextResolverInput, ProjectContextInfo } from '../core/GoalContextResolver';
 
 export interface ExecutionAgentConfig {
   safetyLevel?: 'strict' | 'moderate' | 'permissive';
@@ -81,6 +83,7 @@ export class DesktopExecutionAgent extends EventEmitter {
   private initialized: boolean = false;
   private isRunning: boolean = false;
   private currentTaskId: string = '';
+  private _projectContext?: ProjectContextInfo;
 
   private constructor(config?: ExecutionAgentConfig) {
     super();
@@ -286,6 +289,10 @@ export class DesktopExecutionAgent extends EventEmitter {
     return this.mcpServer;
   }
 
+  public setProjectContext(context: ProjectContextInfo): void {
+    this._projectContext = context;
+  }
+
   // ========== 内部执行方法 ==========
 
   /**
@@ -314,6 +321,8 @@ export class DesktopExecutionAgent extends EventEmitter {
     const goal = goalAuthority.createGoal({
       description: taskDescription,
       originalInput: taskDescription,
+      executionDomain: 'desktop',
+      bindings: resolveGoalBinding({ projectContext: this._projectContext }),
     });
     const goalId = goal.goalId;
 
@@ -397,6 +406,8 @@ export class DesktopExecutionAgent extends EventEmitter {
       action.description,
       action.params
     );
+
+    Logger.info(`[AUDIT] DecisionAuthority-gated action: source=DesktopExecutionAgent type=${action.type} note="DecisionAuthority.decide() already applied above; ActionAuthority.executeAction() is the execution phase"`, 'DesktopExecutionAgent');
 
     // D4 Authority: chosen action 的 type 是 proposer 提议的工具名（运行时字符串），
     // DesktopAction.type 联合类型是静态白名单；ActionAuthority/SafetyGuard 在运行时兜底裁决。
@@ -518,6 +529,8 @@ export class DesktopExecutionAgent extends EventEmitter {
       goalAuthority.ensureGoal(delegatedGoalId, {
         description: taskDescription,
         originalInput: taskDescription,
+        executionDomain: 'desktop',
+        bindings: resolveGoalBinding({ projectContext: this._projectContext }),
       });
       goalAuthority.updateFromEvidence({
         goalId: delegatedGoalId,

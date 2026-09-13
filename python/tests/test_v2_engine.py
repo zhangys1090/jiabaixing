@@ -428,3 +428,79 @@ async def test_rollback_to_checkpoint(tmp_path):
     result = await engine.rollback_to_checkpoint(cp.id)
     assert result["success"] is True
     assert test_file.read_text(encoding="utf-8") == "original"
+
+
+# ─── P7-B: EvalGate 门控验证 ───
+
+
+@pytest.mark.anyio
+async def test_p7b_eval_gate_injected_blocks_unsafe_plan(tmp_path):
+    from agent.evaluation.eval_gate import EvalGate, EvalGateConfig
+    from agent.evaluation.independent_service import IndependentEvaluationService
+
+    eval_gate = EvalGate(EvalGateConfig(min_pass_rate=0.8, min_average_score=0.7))
+    independent_eval = IndependentEvaluationService()
+    engine = EvolutionEngineV2(
+        llm_client=None,
+        checkpoint_dir=tmp_path / "cp",
+        eval_gate=eval_gate,
+        independent_eval_service=independent_eval,
+    )
+    assert engine._eval_gate is not None
+    assert engine._independent_eval_service is not None
+
+
+@pytest.mark.anyio
+async def test_p7b_no_eval_gate_fails_closed(tmp_path):
+    engine = EvolutionEngineV2(
+        llm_client=None,
+        checkpoint_dir=tmp_path / "cp",
+    )
+    assert engine._eval_gate is None
+    assert engine._independent_eval_service is None
+    plan = V2EvolutionPlan(
+        id="plan_no_gate",
+        actions=[
+            V2EvolutionAction(type="MODIFY_FILE", target=str(tmp_path / "x.py"), content="x", description="test"),
+        ],
+    )
+    gate_result = await engine._run_eval_gate(plan)
+    assert gate_result["passed"] is False
+    assert "fail-closed" in gate_result["reason"]
+
+
+@pytest.mark.anyio
+async def test_p7b_independent_eval_service_injected(tmp_path):
+    from agent.evaluation.independent_service import IndependentEvaluationService
+
+    independent_eval = IndependentEvaluationService()
+    engine = EvolutionEngineV2(
+        llm_client=None,
+        checkpoint_dir=tmp_path / "cp",
+        independent_eval_service=independent_eval,
+    )
+    assert engine._independent_eval_service is not None
+    plan = V2EvolutionPlan(
+        id="plan_with_eval",
+        actions=[
+            V2EvolutionAction(type="MODIFY_FILE", target=str(tmp_path / "y.py"), content="y", description="test"),
+        ],
+    )
+    gate_result = await engine._run_eval_gate(plan)
+    assert "passed" in gate_result
+
+
+def test_p7b_get_instance_accepts_eval_gate_params():
+    EvolutionEngineV2._instance = None
+    from agent.evaluation.eval_gate import EvalGate, EvalGateConfig
+    from agent.evaluation.independent_service import IndependentEvaluationService
+
+    eval_gate = EvalGate(EvalGateConfig())
+    independent_eval = IndependentEvaluationService()
+    engine = EvolutionEngineV2.get_instance(
+        eval_gate=eval_gate,
+        independent_eval_service=independent_eval,
+    )
+    assert engine._eval_gate is eval_gate
+    assert engine._independent_eval_service is independent_eval
+    EvolutionEngineV2._instance = None

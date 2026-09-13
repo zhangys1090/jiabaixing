@@ -1,10 +1,14 @@
 /**
  * 记忆系统路由 - memory store / search / profile / preferences
+ *
+ * Layer 1 收口：所有 memory write 经过 MemoryAuthorityGuard，
+ * 不再直接调用 memoryEngine.storeShortTermMemory。
  */
 
 import express from 'express';
 import { UserProfile } from '../../memory/UserProfile';
 
+import { MemoryAuthorityGuard } from '../../authority/MemoryAuthorityGuard';
 import { JiabaixingCore } from '../../core/JiabaixingCore';
 import { getActivePythonBridge } from '../../ide/bridgeRegistry';
 import { Logger } from '../../utils/Logger';
@@ -46,13 +50,12 @@ export function registerMemoryRoutes(
             .json({ success: false, error: '记忆引擎未初始化' });
         }
 
-        if (memoryEngine.storeShortTermMemory) {
-          await memoryEngine.storeShortTermMemory(
-            content,
-            (scene as string) || 'general',
-            userId
-          );
-        }
+        const memGuard = MemoryAuthorityGuard.getInstance();
+        await memGuard.writeShortTerm(
+          content,
+          (scene as string) || 'general',
+          userId || 'neutral'
+        );
 
         res.json({
           success: true,

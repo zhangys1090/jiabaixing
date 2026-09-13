@@ -179,6 +179,120 @@ export interface SchedulerEvents {
       timestamp: string;
     },
   ];
+  scheduled_action_pending: [
+    payload: {
+      source: string;
+      jobId: string;
+      jobName: string;
+      command: string;
+      args?: string[];
+      timestamp: string;
+    },
+  ];
+  scheduled_task_due: [
+    payload: {
+      source: string;
+      taskId: string;
+      description: string;
+      targetPlatform?: string | null;
+      timestamp: string;
+    },
+  ];
+  auto_fix_candidate: [
+    payload: {
+      source: string;
+      filePath: string;
+      changeType: string;
+      ruleName: string;
+      timestamp: string;
+    },
+  ];
+  test_request_pending: [
+    payload: {
+      source: string;
+      filePath: string;
+      changeType: string;
+      ruleName: string;
+      timestamp: string;
+    },
+  ];
+  custom_rule_triggered: [
+    payload: {
+      source: string;
+      filePath: string;
+      changeType: string;
+      ruleName: string;
+      customPrompt: string;
+      timestamp: string;
+    },
+  ];
+  goal_replan_suggested: [
+    payload: {
+      goalId: string;
+      observationId: string;
+      impactType: string;
+      reason: string;
+      confidence: number;
+      timestamp: string;
+    },
+  ];
+  goal_replan_requested: [
+    payload: {
+      requestId: string;
+      goalId: string;
+      observationId: string;
+      impactType: string;
+      reason: string;
+      confidence: number;
+      planVersion: number;
+      timestamp: number;
+    },
+  ];
+  goal_replan_executed: [
+    payload: {
+      goalId: string;
+      oldPlanVersion: number;
+      newPlanVersion: number;
+      decisionId: string;
+      planVersion: number;
+    },
+  ];
+  decision_executed: [
+    payload: {
+      goalId: string;
+      decisionId: string;
+      planVersion: number;
+      success: boolean;
+      reason: string;
+    },
+  ];
+  evidence_collected: [
+    payload: {
+      goalId: string;
+      decisionId: string;
+      evidenceId: string;
+      progressDelta: number;
+      actualEffect?: string;
+      verified?: boolean;
+      verdict?: string;
+    },
+  ];
+  autonomous_loop_terminated: [
+    payload: {
+      goalId: string;
+      terminationReason: string;
+      totalSteps: number;
+      totalReplans: number;
+      totalTimeMs: number;
+      finalGoalStatus: string;
+      finalGoalProgress: number;
+    },
+  ];
+  runtime_state_changed: [
+    payload: {
+      state: string;
+    },
+  ];
 }
 
 export interface ProactiveEvents {

@@ -1,6 +1,7 @@
 import { IMemoryEngine } from './JiabaixingCore';
 import { UserProfileSummary } from '../persona/DialogueGenerator';
 import { Logger } from '../utils/Logger';
+import { MemoryAuthorityGuard } from '../authority/MemoryAuthorityGuard';
 
 /**
  * MemoryAssistant 依赖接口
@@ -297,16 +298,19 @@ export class MemoryAssistant {
 
     for (const item of extracted) {
       try {
-        await this.memoryEngine.storeShortTermMemory(
+        const memGuard = MemoryAuthorityGuard.getInstance();
+        await memGuard.writeShortTerm(
           item.content,
-          item.category
+          item.category,
+          'neutral'
         );
 
-        if (item.importance >= 0.8 && this.memoryEngine.storeLongTermMemory) {
+        if (item.importance >= 0.8) {
           try {
-            await this.memoryEngine.storeLongTermMemory(
+            await memGuard.writeLongTerm(
               item.content,
-              item.category
+              item.category,
+              'neutral'
             );
             Logger.info(
               `🧠 Hindsight长期记忆: [${item.category}] ${item.content} (importance=${item.importance})`,

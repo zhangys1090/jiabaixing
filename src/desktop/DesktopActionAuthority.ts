@@ -30,6 +30,14 @@ export interface AuthorizationDecision {
   requireConfirmation?: boolean;
 }
 
+export interface ActionExecutionContext {
+  decisionId: string;
+  goalId: string;
+  planVersion: number;
+  snapshotId: string;
+  authorizationSource: 'autonomous_decision' | 'external_command';
+}
+
 export interface AuthorizedExecutionResult extends DesktopTaskResult {
   authorization: AuthorizationDecision;
 }
@@ -120,5 +128,82 @@ export class DesktopActionAuthority {
 
     const result = await this.executor.executeAction(action);
     return { result, authorization };
+  }
+
+  public validateDecisionContext(context: ActionExecutionContext): AuthorizationDecision {
+    try {
+      const { GoalAuthority } = require('../authority/GoalAuthority');
+      const goalAuthority = GoalAuthority.getInstance();
+      const goal = goalAuthority.getGoal(context.goalId);
+
+      if (!goal) {
+        Logger.warn(
+          `🛡️ ActionAuthority: goal ${context.goalId} not found — STALE`,
+          'ActionAuthority'
+        );
+        return { allowed: false, reason: `goal_not_found: ${context.goalId}` };
+      }
+
+      if (goal.planVersion !== context.planVersion) {
+        Logger.warn(
+          `🛡️ ActionAuthority: STALE_DECISION — goal ${context.goalId} planVersion ${context.planVersion} != current ${goal.planVersion}`,
+          'ActionAuthority'
+        );
+        return {
+          allowed: false,
+          reason: `stale_decision: planVersion ${context.planVersion} != current ${goal.planVersion}`,
+        };
+      }
+
+      const { DecisionAuthority } = require('../authority/DecisionAuthority');
+      const decisionAuthority = DecisionAuthority.getInstance();
+      const history = decisionAuthority.getDecisionHistory(context.goalId);
+      const decision = history.find((d: { decisionId: string }) => d.decisionId === context.decisionId);
+
+      if (!decision) {
+        Logger.warn(
+          `🛡️ ActionAuthority: decision ${context.decisionId} not found in history — INVALID`,
+          'ActionAuthority'
+        );
+        return { allowed: false, reason: `decision_not_found: ${context.decisionId}` };
+      }
+
+      if (decision.planVersion !== context.planVersion) {
+        Logger.warn(
+          `🛡️ ActionAuthority: decision planVersion mismatch — decision ${context.decisionId} has v${decision.planVersion}, context has v${context.planVersion}`,
+          'ActionAuthority'
+        );
+        return {
+          allowed: false,
+          reason: `decision_planVersion_mismatch: ${decision.planVersion} != ${context.planVersion}`,
+        };
+      }
+
+      return { allowed: true };
+    } catch (err) {
+      Logger.error(
+        `🛡️ ActionAuthority: validateDecisionContext error — ${(err as Error).message}`,
+        err as Error,
+        'ActionAuthority'
+      );
+      return { allowed: false, reason: `validation_error: ${(err as Error).message}` };
+    }
+  }
+
+  public async executeWithDecisionContext(
+    actions: DesktopAction[],
+    context: ActionExecutionContext
+  ): Promise<AuthorizedExecutionResult> {
+    const decisionValidation = this.validateDecisionContext(context);
+    if (!decisionValidation.allowed) {
+      return {
+        success: false,
+        actions: [],
+        summary: decisionValidation.reason || 'decision validation failed',
+        authorization: decisionValidation,
+      };
+    }
+
+    return this.execute(actions);
   }
 }

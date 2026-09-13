@@ -671,6 +671,68 @@ export async function bootstrap(): Promise<JiabaixingCore> {
         pythonBridge.connectEvents();
         pythonBridge.connectChatWs();
         core.setPythonBridgeResolver(() => pythonBridge);
+
+        // E3-1: Register Python bridge with MemoryAuthority so that
+        // MemoryAuthority.write/read route through canonical Python owner.
+        try {
+          const { MemoryAuthority } = await import('../authority/MemoryAuthority');
+          const memoryAuth = MemoryAuthority.getInstance();
+          memoryAuth.registerBridge(
+            async (req) => {
+              const bridge = getActivePythonBridge();
+              if (!bridge) {
+                return { success: false, memoryId: '', operationId: '', source: 'failed_closed' as const };
+              }
+              let memoryId = '';
+              switch (req.memoryType) {
+                case 'short_term':
+                  memoryId = await bridge.memoryStoreShortTerm(req.content, req.scene, req.emotion);
+                  break;
+                case 'long_term':
+                  memoryId = await bridge.memoryStoreLongTerm(req.content, req.scene, req.emotion);
+                  break;
+                case 'episodic':
+                  memoryId = await bridge.memoryStoreEpisodic(req.content, {
+                    importance: req.importance ?? 5,
+                    scene: req.scene ?? '',
+                  });
+                  break;
+                case 'feedback':
+                  await bridge.memoryStoreFeedback({
+                    feedbackType: 'success',
+                    message: typeof req.content === 'string' ? req.content : JSON.stringify(req.content),
+                    toolName: req.metadata?.category as string ?? 'general',
+                  });
+                  break;
+                default:
+                  memoryId = await bridge.memoryStoreShortTerm(req.content, req.scene, req.emotion);
+              }
+              return { success: true, memoryId, operationId: '', source: 'python' as const };
+            },
+            async (req) => {
+              const bridge = getActivePythonBridge();
+              if (!bridge) {
+                return { items: [], operationId: '', source: 'failed_closed' as const };
+              }
+              const results = await bridge.memoryRetrieveContext(req.query, undefined, req.limit ?? 10);
+              return {
+                items: results.map((r: any) => ({
+                  id: r.id,
+                  content: r.content,
+                  memoryType: (req.memoryType ?? 'short_term') as any,
+                  relevanceScore: r.relevanceScore ?? 0,
+                  timestamp: r.timestamp ?? Date.now(),
+                })),
+                operationId: '',
+                source: 'python' as const,
+              };
+            }
+          );
+          Logger.info('E3-1: MemoryAuthority Python bridge registered from bootstrap', 'Bootstrap');
+        } catch (bridgeRegErr) {
+          Logger.warn(`E3-1: MemoryAuthority bridge registration failed — ${(bridgeRegErr as Error).message}`, 'Bootstrap');
+        }
+
         bootOk(`Python Agent 桥接成功: ${getPythonAgentUrl()}`);
       } else {
         process.stdout.write('FALLBACK\n');

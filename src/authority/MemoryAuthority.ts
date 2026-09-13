@@ -13,7 +13,7 @@ export interface MemoryAuthorityTrace {
   readonly goalId: string | null;
   readonly decisionId: string | null;
   readonly snapshotId: string | null;
-  readonly source: 'python' | 'ts_bridge' | 'ts_local';
+  readonly source: 'python' | 'ts_bridge' | 'ts_local' | 'failed_closed';
   readonly timestamp: number;
 }
 
@@ -59,7 +59,7 @@ export interface MemoryWriteResult {
   success: boolean;
   memoryId: string;
   operationId: string;
-  source: 'python' | 'ts_bridge' | 'ts_local';
+  source: 'python' | 'ts_bridge' | 'ts_local' | 'failed_closed';
 }
 
 export interface MemoryReadResult {
@@ -71,7 +71,7 @@ export interface MemoryReadResult {
     timestamp: number;
   }>;
   operationId: string;
-  source: 'python' | 'ts_bridge' | 'ts_local';
+  source: 'python' | 'ts_bridge' | 'ts_local' | 'failed_closed';
 }
 
 export interface RogueStoreReport {
@@ -117,6 +117,14 @@ const ROGUE_STORES: ReadonlyArray<RogueStoreReport> = [
   },
 ];
 
+export interface LocalFallbackStore {
+  storeShortTermMemory: (content: string, scene: string, emotion: string) => Promise<unknown>;
+  storeLongTermMemory: (content: string, scene: string, emotion: string) => Promise<unknown>;
+  storeInstantMemory: (content: string, scene: string, emotion: string) => Promise<unknown>;
+  storeFeedbackSignal: (data: { feedbackType: string; rating?: number; message?: string; traceId?: string; toolName?: string; userId?: string; timestamp?: number }) => Promise<unknown>;
+  preciseHybridRetrieval: (query: string, scene?: string, emotion?: string, topK?: number) => Promise<unknown>;
+}
+
 export class MemoryAuthority {
   private static instance: MemoryAuthority | null = null;
   private operationLog: MemoryAuthorityTrace[] = [];
@@ -124,6 +132,7 @@ export class MemoryAuthority {
   private bridgeAvailable: boolean = false;
   private pythonWriteFn: ((req: MemoryWriteRequest) => Promise<MemoryWriteResult>) | null = null;
   private pythonReadFn: ((req: MemoryReadRequest) => Promise<MemoryReadResult>) | null = null;
+  private localFallback: LocalFallbackStore | null = null;
 
   private constructor() {}
 
@@ -146,6 +155,15 @@ export class MemoryAuthority {
     this.pythonReadFn = readFn;
     this.bridgeAvailable = true;
     Logger.info('MemoryAuthority: Python bridge registered', 'MemoryAuthority');
+  }
+
+  public registerLocalFallback(store: LocalFallbackStore): void {
+    this.localFallback = store;
+    Logger.info('MemoryAuthority: local fallback store registered (TS MemoryEngine)', 'MemoryAuthority');
+  }
+
+  public getLocalFallback(): LocalFallbackStore | null {
+    return this.localFallback;
   }
 
   public isBridgeAvailable(): boolean {
@@ -192,7 +210,7 @@ export class MemoryAuthority {
       }
     }
 
-    if (canonicalOwner.process === 'ts_bridge' || (canonicalOwner.process === 'python' && !this.pythonWriteFn)) {
+    if (canonicalOwner.process === 'ts_bridge') {
       this.recordTrace({
         operationId,
         operation: 'store',
@@ -200,14 +218,55 @@ export class MemoryAuthority {
         goalId: request.goalId ?? null,
         decisionId: request.decisionId ?? null,
         snapshotId: request.snapshotId ?? null,
-        source: this.bridgeAvailable ? 'ts_bridge' : 'ts_local',
+        source: 'ts_bridge',
         timestamp: Date.now(),
       });
-      Logger.warn(
-        `MemoryAuthority: write for "${request.memoryType}" went through ${this.bridgeAvailable ? 'ts_bridge' : 'ts_local'} (Python unavailable or no bridge)`,
+      return { success: true, memoryId: '', operationId, source: 'ts_bridge' };
+    }
+
+    if (canonicalOwner.process === 'python' && !this.pythonWriteFn) {
+      if (this.localFallback) {
+        try {
+          await this.dispatchToLocalFallback(request);
+          this.recordTrace({
+            operationId,
+            operation: 'store',
+            memoryType: request.memoryType,
+            goalId: request.goalId ?? null,
+            decisionId: request.decisionId ?? null,
+            snapshotId: request.snapshotId ?? null,
+            source: 'ts_local',
+            timestamp: Date.now(),
+          });
+          Logger.info(
+            `MemoryAuthority: write for "${request.memoryType}" via ts_local fallback (Python bridge unavailable) — operationId=${operationId}`,
+            'MemoryAuthority'
+          );
+          return { success: true, memoryId: '', operationId, source: 'ts_local' };
+        } catch (e) {
+          Logger.error(
+            `MemoryAuthority: ts_local fallback write failed — ${(e as Error).message}`,
+            e as Error,
+            'MemoryAuthority'
+          );
+        }
+      }
+      this.recordTrace({
+        operationId,
+        operation: 'store',
+        memoryType: request.memoryType,
+        goalId: request.goalId ?? null,
+        decisionId: request.decisionId ?? null,
+        snapshotId: request.snapshotId ?? null,
+        source: 'failed_closed',
+        timestamp: Date.now(),
+      });
+      Logger.error(
+        `E2-2: MemoryAuthority write for "${request.memoryType}" FAILED CLOSED — Python canonical owner unavailable, bridge not registered. Refusing silent ts_local fallback to prevent canonicality violation.`,
+        new Error('E2-2: Memory write fail-closed — canonical owner unavailable'),
         'MemoryAuthority'
       );
-      return { success: true, memoryId: `local_${operationId}`, operationId, source: this.bridgeAvailable ? 'ts_bridge' : 'ts_local' };
+      return { success: false, memoryId: '', operationId, source: 'failed_closed' };
     }
 
     return { success: false, memoryId: '', operationId, source: 'ts_local' };
@@ -218,7 +277,12 @@ export class MemoryAuthority {
     const domain = request.memoryType ?? 'short_term';
     const canonicalOwner = this.getCanonicalOwner(domain);
 
-    if (canonicalOwner?.process === 'python' && this.pythonReadFn) {
+    if (!canonicalOwner) {
+      Logger.warn(`MemoryAuthority: unknown domain "${domain}" for read`, 'MemoryAuthority');
+      return { items: [], operationId, source: 'ts_local' };
+    }
+
+    if (canonicalOwner.process === 'python' && this.pythonReadFn) {
       try {
         const result = await this.pythonReadFn(request);
         this.recordTrace({
@@ -237,6 +301,39 @@ export class MemoryAuthority {
       }
     }
 
+    if (canonicalOwner.process === 'python' && !this.pythonReadFn) {
+      this.recordTrace({
+        operationId,
+        operation: 'retrieve',
+        memoryType: domain,
+        goalId: request.goalId ?? null,
+        decisionId: null,
+        snapshotId: null,
+        source: 'failed_closed',
+        timestamp: Date.now(),
+      });
+      Logger.error(
+        `E2-2: MemoryAuthority read for "${domain}" FAILED CLOSED — Python canonical owner unavailable, bridge not registered. Refusing silent ts_local fallback to prevent canonicality violation.`,
+        new Error('E2-2: Memory read fail-closed — canonical owner unavailable'),
+        'MemoryAuthority'
+      );
+      return { items: [], operationId, source: 'failed_closed' };
+    }
+
+    if (canonicalOwner.process === 'ts_bridge') {
+      this.recordTrace({
+        operationId,
+        operation: 'retrieve',
+        memoryType: domain,
+        goalId: request.goalId ?? null,
+        decisionId: null,
+        snapshotId: null,
+        source: 'ts_bridge',
+        timestamp: Date.now(),
+      });
+      return { items: [], operationId, source: 'ts_bridge' };
+    }
+
     this.recordTrace({
       operationId,
       operation: 'retrieve',
@@ -244,10 +341,10 @@ export class MemoryAuthority {
       goalId: request.goalId ?? null,
       decisionId: null,
       snapshotId: null,
-      source: this.bridgeAvailable ? 'ts_bridge' : 'ts_local',
+      source: 'ts_local',
       timestamp: Date.now(),
     });
-    return { items: [], operationId, source: this.bridgeAvailable ? 'ts_bridge' : 'ts_local' };
+    return { items: [], operationId, source: 'ts_local' };
   }
 
   public getOperationLog(filter?: { goalId?: string; memoryType?: MemoryDomain }): MemoryAuthorityTrace[] {
@@ -296,6 +393,34 @@ export class MemoryAuthority {
 
   public recordTraceDirect(trace: MemoryAuthorityTrace): void {
     this.recordTrace(trace);
+  }
+
+  private async dispatchToLocalFallback(request: MemoryWriteRequest): Promise<void> {
+    if (!this.localFallback) throw new Error('No local fallback registered');
+    const { content, memoryType, scene, emotion } = request;
+    const sceneStr = scene || '';
+    const emotionStr = emotion || 'neutral';
+    switch (memoryType) {
+      case 'short_term':
+        await this.localFallback.storeShortTermMemory(content, sceneStr, emotionStr);
+        break;
+      case 'long_term':
+        await this.localFallback.storeLongTermMemory(content, sceneStr, emotionStr);
+        break;
+      case 'episodic':
+        await this.localFallback.storeLongTermMemory(content, sceneStr, emotionStr);
+        break;
+      case 'feedback':
+        await this.localFallback.storeFeedbackSignal({
+          feedbackType: 'success',
+          message: content,
+          traceId: request.metadata?.traceId as string | undefined,
+        });
+        break;
+      default:
+        await this.localFallback.storeShortTermMemory(content, sceneStr, emotionStr);
+        break;
+    }
   }
 
   private recordTrace(trace: MemoryAuthorityTrace): void {

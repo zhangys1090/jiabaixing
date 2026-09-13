@@ -665,9 +665,22 @@ class EvolutionEngineV2:
         self._degraded = False
 
     @classmethod
-    def get_instance(cls, llm_client: LLMClientProtocol | None = None, checkpoint_dir: str | Path | None = None) -> EvolutionEngineV2:
+    def get_instance(
+        cls,
+        llm_client: LLMClientProtocol | None = None,
+        checkpoint_dir: str | Path | None = None,
+        eval_gate: Any | None = None,
+        independent_eval_service: Any | None = None,
+        eval_runner: Any | None = None,
+    ) -> EvolutionEngineV2:
         if cls._instance is None:
-            cls._instance = cls(llm_client=llm_client, checkpoint_dir=checkpoint_dir)
+            cls._instance = cls(
+                llm_client=llm_client,
+                checkpoint_dir=checkpoint_dir,
+                eval_gate=eval_gate,
+                independent_eval_service=independent_eval_service,
+                eval_runner=eval_runner,
+            )
         return cls._instance
 
     async def trigger_evolution(self, cause: V2EvolutionCause) -> V2EvolutionResult | None:

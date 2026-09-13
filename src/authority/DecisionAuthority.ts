@@ -94,6 +94,7 @@ export class DecisionAuthority {
       decisionType: decisionType ?? DecisionType.ACTION,
       goalId,
       snapshotId: snapshot.snapshotId,
+      planVersion: goal.planVersion,
       candidateIds: candidates.map((c) => c.candidateId),
       chosenCandidateId: chosen.candidateId,
       chosen,

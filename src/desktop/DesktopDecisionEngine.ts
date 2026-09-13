@@ -51,6 +51,12 @@ const DEFAULT_POLICY: DecisionPolicy = {
   decayRate: 0.05,
 };
 
+export interface QTableSyncResult {
+  synced: boolean;
+  statesCount: number;
+  reason: string;
+}
+
 export class DesktopDecisionEngine {
   private policy: DecisionPolicy;
   private qTable: Map<string, Map<string, number>>; // Q表: stateKey -> action -> value
@@ -61,6 +67,9 @@ export class DesktopDecisionEngine {
   >;
   private experienceBuffer: DecisionExperience[];
   private maxBufferSize: number = 1000;
+  private bridgeSyncEnabled: boolean = false;
+  private lastSyncTimestamp: number = 0;
+  private unsyncedUpdates: number = 0;
 
   constructor(policy?: Partial<DecisionPolicy>) {
     this.policy = { ...DEFAULT_POLICY, ...policy };
@@ -338,6 +347,7 @@ export class DesktopDecisionEngine {
         (reward + this.policy.discountFactor * maxNextQ - currentQ);
 
     actionQValues.set(action, newQ);
+    this.unsyncedUpdates++;
   }
 
   /**
@@ -460,6 +470,59 @@ export class DesktopDecisionEngine {
     } catch (e) {
       Logger.error('Q表导入失败', e as Error, 'DesktopDecisionEngine');
     }
+  }
+
+  enableBridgeSync(enabled: boolean): void {
+    this.bridgeSyncEnabled = enabled;
+    Logger.info(
+      `P7-D: Bridge sync ${enabled ? 'enabled' : 'disabled'}`,
+      'DesktopDecisionEngine'
+    );
+  }
+
+  getUnsyncedUpdateCount(): number {
+    return this.unsyncedUpdates;
+  }
+
+  isBridgeSyncEnabled(): boolean {
+    return this.bridgeSyncEnabled;
+  }
+
+  getQTableSnapshot(): { states: number; actions: number; unsynced: number; lastSync: number } {
+    let totalActions = 0;
+    for (const actions of this.qTable.values()) {
+      totalActions += actions.size;
+    }
+    return {
+      states: this.qTable.size,
+      actions: totalActions,
+      unsynced: this.unsyncedUpdates,
+      lastSync: this.lastSyncTimestamp,
+    };
+  }
+
+  markSynced(): QTableSyncResult {
+    const statesCount = this.qTable.size;
+    this.unsyncedUpdates = 0;
+    this.lastSyncTimestamp = Date.now();
+    return { synced: true, statesCount, reason: 'ok' };
+  }
+
+  selectActionWithBridgeCheck(
+    state: DecisionState,
+    availableActions: string[],
+    bridgeAvailable: boolean
+  ): DecisionAction {
+    if (!bridgeAvailable && this.bridgeSyncEnabled) {
+      return {
+        actionType: 'wait',
+        confidence: 0,
+        estimatedDuration: 0,
+        riskLevel: 'high',
+        reasoning: 'P7-D FAIL CLOSED: Bridge unavailable, Q-table decisions blocked to prevent Shadow State',
+      };
+    }
+    return this.selectAction(state, availableActions);
   }
 }
 

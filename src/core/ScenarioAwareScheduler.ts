@@ -14,6 +14,11 @@ import { MemoryEngine } from '../memory/MemoryEngine';
 import { EventBus } from '../shared/EventBus';
 import { Logger } from '../utils/Logger';
 import { skillUsageTracker } from '../evolution/SkillUsageTracker';
+import { GoalAuthority } from '../authority/GoalAuthority';
+import { getGoalImpactEvaluator, generateObservationId } from '../authority/GoalImpactEvaluator';
+import { getReplanEvaluator } from '../authority/ReplanEvaluator';
+import { getAutonomousStep } from '../authority/AutonomousStep';
+import type { WorldObservation, GoalImpact, ReplanRequest } from '../authority/types';
 
 type JiabaixingCore = import('./JiabaixingCore').JiabaixingCore;
 
@@ -154,6 +159,9 @@ export class ScenarioAwareScheduler {
     timestamp: string;
   }> = [];
   private readonly MAX_CHANGE_LOG = 200;
+  private lastEvaluatedFileChanges: Set<string> = new Set();
+  private lastEvaluatedEnv: string | null = null;
+  private lastEvaluatedGitKey: string | null = null;
 
   constructor() {
     this.initializeDefaultTasks();
@@ -659,6 +667,166 @@ export class ScenarioAwareScheduler {
         });
       }
     }
+
+    // ── D7-1: Active Goal Impact Evaluation ──
+    await this.evaluateActiveGoalImpacts(snapshot);
+  }
+
+  private async evaluateActiveGoalImpacts(
+    envSnapshot: EnvironmentSnapshot
+  ): Promise<void> {
+    try {
+      const goalAuthority = GoalAuthority.getInstance();
+      const activeGoals = goalAuthority.getActiveGoals();
+
+      if (activeGoals.length === 0) {
+        return;
+      }
+
+      const observations: WorldObservation[] = [];
+
+      const currentEnvKey = envSnapshot.activeEnv || '';
+      if (currentEnvKey !== this.lastEvaluatedEnv && this.lastEvaluatedEnv !== null) {
+        observations.push({
+          observationId: generateObservationId(),
+          source: 'environment',
+          type: 'environment_change',
+          timestamp: envSnapshot.timestamp,
+          payload: {
+            activeEnv: envSnapshot.activeEnv,
+            foregroundWindow: envSnapshot.foregroundWindow,
+            previousEnv: this.lastEvaluatedEnv,
+          },
+        });
+      }
+      this.lastEvaluatedEnv = currentEnvKey;
+
+      let gitKey = '';
+      for (const [repo, state] of this.lastGitState) {
+        gitKey += `${repo}:${state.branch}:${state.hasUncommitted ? '1' : '0'};`;
+      }
+      if (gitKey !== this.lastEvaluatedGitKey && this.lastEvaluatedGitKey !== null) {
+        for (const [repo, state] of this.lastGitState) {
+          observations.push({
+            observationId: generateObservationId(),
+            source: 'git',
+            type: 'git_change',
+            timestamp: new Date().toISOString(),
+            payload: { repos: [{ repo, branch: state.branch, hasUncommitted: state.hasUncommitted }] },
+          });
+          break;
+        }
+      }
+      this.lastEvaluatedGitKey = gitKey;
+
+      const currentFileKeys = new Set<string>();
+      const recentFileChanges = this.fileChangeLog.slice(-5);
+      for (const fc of recentFileChanges) {
+        const key = `${fc.filePath}:${fc.changeType}:${fc.timestamp}`;
+        currentFileKeys.add(key);
+        if (!this.lastEvaluatedFileChanges.has(key)) {
+          observations.push({
+            observationId: generateObservationId(),
+            source: 'file',
+            type: 'file_changed',
+            timestamp: fc.timestamp,
+            payload: { filePath: fc.filePath, changeType: fc.changeType },
+          });
+        }
+      }
+      this.lastEvaluatedFileChanges = currentFileKeys;
+
+      if (observations.length === 0) {
+        return;
+      }
+
+      const evaluator = getGoalImpactEvaluator();
+      const allImpacts: GoalImpact[] = [];
+
+      for (const obs of observations) {
+        const impacts = evaluator.evaluate(activeGoals, obs);
+        allImpacts.push(...impacts);
+      }
+
+      for (const impact of allImpacts) {
+        if (impact.affected) {
+          Logger.info(
+            `[D7-1] Goal ${impact.goalId} affected by ${impact.impactType}: ${impact.reason} (confidence=${impact.confidence.toFixed(2)})`,
+            'ScenarioAwareScheduler'
+          );
+          EventBus.emit('goal_replan_suggested', {
+            goalId: impact.goalId,
+            observationId: impact.observationId,
+            impactType: impact.impactType,
+            reason: impact.reason,
+            confidence: impact.confidence,
+            timestamp: new Date().toISOString(),
+          });
+
+          const affectedGoal = activeGoals.find((g) => g.goalId === impact.goalId);
+          if (affectedGoal) {
+            const evidenceLog = goalAuthority.getEvidenceLog(impact.goalId);
+            const replanEvaluator = getReplanEvaluator();
+            const replanRequest = replanEvaluator.evaluate(affectedGoal, impact, evidenceLog);
+            if (replanRequest) {
+              Logger.info(
+                `[D7-2] ReplanRequest ${replanRequest.requestId} for Goal ${replanRequest.goalId} (plan v${replanRequest.planVersion})`,
+                'ScenarioAwareScheduler'
+              );
+              EventBus.emit('goal_replan_requested', {
+                requestId: replanRequest.requestId,
+                goalId: replanRequest.goalId,
+                observationId: replanRequest.observationId,
+                impactType: replanRequest.impactType,
+                reason: replanRequest.reason,
+                confidence: replanRequest.confidence,
+                planVersion: replanRequest.planVersion,
+                timestamp: replanRequest.timestamp,
+              });
+
+              try {
+                const autonomousStep = getAutonomousStep();
+                const stepResult = await autonomousStep.execute(replanRequest);
+
+                if (stepResult.success) {
+                  Logger.info(
+                    `[D7-3C] Autonomous step completed: Goal ${stepResult.goalId} evidence_delta=${stepResult.evidence.progressDelta.toFixed(2)}`,
+                    'ScenarioAwareScheduler'
+                  );
+                } else {
+                  Logger.warn(
+                    `[D7-3C] Autonomous step partial failure: Goal ${stepResult.goalId} reason=${stepResult.reason}`,
+                    'ScenarioAwareScheduler'
+                  );
+                }
+
+                if (stepResult.replan.decision) {
+                  EventBus.emit('goal_replan_executed', {
+                    goalId: stepResult.goalId,
+                    oldPlanVersion: stepResult.replan.oldPlanVersion,
+                    newPlanVersion: stepResult.replan.newPlanVersion,
+                    decisionId: stepResult.replan.decision.decisionId,
+                    planVersion: stepResult.replan.decision.planVersion,
+                  });
+                }
+              } catch (stepErr) {
+                Logger.error(
+                  `[D7-3C] AutonomousStep failed: ${(stepErr as Error).message}`,
+                  stepErr as Error,
+                  'ScenarioAwareScheduler'
+                );
+              }
+            }
+          }
+        }
+      }
+    } catch (err) {
+      Logger.error(
+        `[D7-1] evaluateActiveGoalImpacts failed: ${(err as Error).message}`,
+        err as Error,
+        'ScenarioAwareScheduler'
+      );
+    }
   }
 
   private shouldExecuteTask(task: ScheduledTask, now: Date): boolean {
@@ -703,16 +871,19 @@ export class ScenarioAwareScheduler {
         }
       }
 
-      // 自然语言任务：通过 JiabaixingCore 执行
-      if (task.naturalDescription && this.llmCore) {
+      // D7-P0: 自然语言任务不再直接执行，改为emit scheduled_task_due事件
+      if (task.naturalDescription) {
         Logger.info(
-          `🤖 执行自然语言任务: "${task.naturalDescription}"${task.targetPlatform ? ' → ' + task.targetPlatform : ''}`,
+          `[D7-P0] Scheduled task due: "${task.naturalDescription}"${task.targetPlatform ? ' → ' + task.targetPlatform : ''} — emitting event, NOT executing`,
           'ScenarioAwareScheduler'
         );
-        const nlInput = task.targetPlatform
-          ? `${task.naturalDescription}，结果发送到${task.targetPlatform}`
-          : task.naturalDescription;
-        await this.llmCore.processInput(nlInput);
+        EventBus.emit('scheduled_task_due', {
+          source: 'ScenarioAwareScheduler',
+          taskId: task.id,
+          description: task.naturalDescription,
+          targetPlatform: task.targetPlatform || null,
+          timestamp: new Date().toISOString(),
+        });
       }
 
       task.lastRun = new Date();
@@ -1377,65 +1548,46 @@ export class ScenarioAwareScheduler {
         break;
 
       case 'auto_fix':
-        if (this.llmCore) {
-          try {
-            Logger.info(
-              `🔧 自动修复: ${path.basename(filePath)}`,
-              'ScenarioAwareScheduler'
-            );
-            await this.llmCore.processInput(
-              `文件 ${filePath} 发生了 ${changeType} 变更，请检查并自动修复可能的问题。`
-            );
-          } catch (error) {
-            Logger.error(
-              `自动修复失败: ${path.basename(filePath)}`,
-              error as Error,
-              'ScenarioAwareScheduler'
-            );
-          }
-        }
+        Logger.info(
+          `[D7-P0] auto_fix candidate: ${path.basename(filePath)} ${changeType} — emitting event, NOT executing`,
+          'ScenarioAwareScheduler'
+        );
+        EventBus.emit('auto_fix_candidate', {
+          source: 'ScenarioAwareScheduler',
+          filePath,
+          changeType,
+          ruleName: rule.name,
+          timestamp: new Date().toISOString(),
+        });
         break;
 
       case 'run_tests':
-        if (this.llmCore) {
-          try {
-            Logger.info(
-              `🧪 运行测试: ${path.basename(filePath)}`,
-              'ScenarioAwareScheduler'
-            );
-            await this.llmCore.processInput(
-              `文件 ${filePath} 发生了 ${changeType} 变更，请运行相关测试验证功能正常。`
-            );
-          } catch (error) {
-            Logger.error(
-              `运行测试失败: ${path.basename(filePath)}`,
-              error as Error,
-              'ScenarioAwareScheduler'
-            );
-          }
-        }
+        Logger.info(
+          `[D7-P0] test_request_pending: ${path.basename(filePath)} ${changeType} — emitting event, NOT executing`,
+          'ScenarioAwareScheduler'
+        );
+        EventBus.emit('test_request_pending', {
+          source: 'ScenarioAwareScheduler',
+          filePath,
+          changeType,
+          ruleName: rule.name,
+          timestamp: new Date().toISOString(),
+        });
         break;
 
       case 'custom':
-        if (this.llmCore && rule.customPrompt) {
-          try {
-            Logger.info(
-              `🎯 自定义动作: ${path.basename(filePath)}`,
-              'ScenarioAwareScheduler'
-            );
-            const prompt = rule.customPrompt
-              .replace('{filePath}', filePath)
-              .replace('{changeType}', changeType)
-              .replace('{fileName}', path.basename(filePath));
-            await this.llmCore.processInput(prompt);
-          } catch (error) {
-            Logger.error(
-              `自定义动作执行失败: ${path.basename(filePath)}`,
-              error as Error,
-              'ScenarioAwareScheduler'
-            );
-          }
-        }
+        Logger.info(
+          `[D7-P0] custom_rule_triggered: ${path.basename(filePath)} ${changeType} — emitting event, NOT executing`,
+          'ScenarioAwareScheduler'
+        );
+        EventBus.emit('custom_rule_triggered', {
+          source: 'ScenarioAwareScheduler',
+          filePath,
+          changeType,
+          ruleName: rule.name,
+          customPrompt: rule.customPrompt || '',
+          timestamp: new Date().toISOString(),
+        });
         break;
     }
   }

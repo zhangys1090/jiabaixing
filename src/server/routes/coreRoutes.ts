@@ -8,6 +8,7 @@ import express from 'express';
 import * as fs from 'fs';
 import * as path from 'path';
 
+import { DecisionGuard } from '../../authority/DecisionGuard';
 import { JiabaixingCore, ProcessInputResult } from '../../core/JiabaixingCore';
 import { getActivePythonBridge } from '../../ide/bridgeRegistry';
 import { EventBus } from '../../shared/EventBus';
@@ -272,6 +273,18 @@ export function registerCoreRoutes(
 
         if (isPythonBackend()) {
           const bridge = getPythonBridge()!;
+
+          const guard = DecisionGuard.getInstance();
+          const { decision, snapshot, goalId } = await guard.guardAction({
+            action: { type: 'message', payload: { input: processedInput } },
+            description: `Process: ${processedInput.substring(0, 60)}`,
+            executionDomain: 'orchestrator',
+            proposerId: 'core_route_process',
+            confidence: 0.8,
+            reasoning: 'Core process input request',
+          });
+          const authorityMeta = guard.extractAuthorityMeta(decision, snapshot, goalId);
+
           const result = await bridge.processInput(
             processedInput,
             userId,
@@ -292,6 +305,7 @@ export function registerCoreRoutes(
             },
             traceId: result.traceId || traceId,
             intent: result.intent || 'chat',
+            authorityMeta,
             backend: 'python',
           });
           return;
@@ -654,6 +668,18 @@ export function registerCoreRoutes(
       if (!registry) {
         return res.json({ success: false, error: '工具注册表不可用' });
       }
+
+      const guard = DecisionGuard.getInstance();
+      const { decision, snapshot, goalId } = await guard.guardAction({
+        action: { type: 'desktop_action', payload: { toolName: 'desktop_screenshot', screenIndex: 0 } },
+        description: 'Desktop screenshot capture',
+        executionDomain: 'desktop',
+        proposerId: 'desktop_api_screenshot',
+        confidence: 0.95,
+        reasoning: 'Desktop panel screenshot request',
+      });
+      const authorityMeta = guard.extractAuthorityMeta(decision, snapshot, goalId);
+
       const result = await registry.execute(
         'desktop_screenshot',
         { screenIndex: 0 },
@@ -661,9 +687,19 @@ export function registerCoreRoutes(
           userId: 'api',
           traceId: `screenshot_${Date.now()}`,
           permissions: new Set(),
-          metadata: {},
+          metadata: { authorityMeta },
         }
       );
+
+      guard.reportEvidence({
+        goalId,
+        decisionId: decision.decisionId,
+        action: decision.chosen.action,
+        expectedEffect: decision.chosen.reasoning,
+        actualEffect: result.success ? 'screenshot captured' : `error: ${result.error}`,
+        observation: result.output,
+        success: result.success,
+      });
       // 截图工具返回 buffer，需要转 base64
       const buffer = result.output as {
         buffer?: Buffer;
@@ -703,6 +739,18 @@ export function registerCoreRoutes(
         if (authority) {
           executeParams._authority_meta = authority;
         }
+
+        const guard = DecisionGuard.getInstance();
+        const { decision, snapshot, goalId } = await guard.guardAction({
+          action: { type: 'desktop_action', payload: { toolName: 'desktop_automate', task } },
+          description: `Desktop automation: ${task.substring(0, 80)}`,
+          executionDomain: 'desktop',
+          proposerId: 'desktop_api_automate',
+          confidence: 0.85,
+          reasoning: 'Desktop automation request via API',
+        });
+        const authorityMeta = guard.extractAuthorityMeta(decision, snapshot, goalId);
+
         const result = await registry.execute(
           'desktop_automate',
           executeParams,
@@ -710,9 +758,20 @@ export function registerCoreRoutes(
             userId: 'api',
             traceId: `auto_${Date.now()}`,
             permissions: new Set(),
-            metadata: authority ? { authority } : {},
+            metadata: { authority: authority || undefined, authorityMeta },
           }
         );
+
+        guard.reportEvidence({
+          goalId,
+          decisionId: decision.decisionId,
+          action: decision.chosen.action,
+          expectedEffect: decision.chosen.reasoning,
+          actualEffect: result.success ? 'automation completed' : `error: ${result.error}`,
+          observation: result.output,
+          success: result.success,
+        });
+
         res.json({ success: true, data: { output: result.output } });
       } catch (error) {
         res.json({ success: false, error: (error as Error).message });

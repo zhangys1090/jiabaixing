@@ -187,26 +187,57 @@ describe('MemoryEngineBridge', () => {
     });
   });
 
-  describe('Python 不可用时的降级', () => {
+  describe('D7-P0: Python 不可用时 FAIL CLOSED', () => {
     beforeEach(() => {
       mockGetBridge.mockReturnValue(null);
     });
 
-    it('storeShortTermMemory 降级返回空 id 但字段完整', async () => {
-      const item = await memoryEngine.storeShortTermMemory('x', 'd', 'e');
-      expect(item.id).toBe('');
-      expect(item.type).toBe(MemoryType.SHORT_TERM);
-      expect(item.content).toBe('x');
+    it('storeShortTermMemory 在 Python 不可用时 throw — 不得返回伪 MemoryItem', async () => {
+      await expect(memoryEngine.storeShortTermMemory('x', 'd', 'e')).rejects.toThrow(
+        'Python bridge unavailable — fail closed'
+      );
     });
 
-    it('preciseHybridRetrieval 降级返回空数组', async () => {
-      const items = await memoryEngine.preciseHybridRetrieval('q');
-      expect(items).toEqual([]);
+    it('storeLongTermMemory 在 Python 不可用时 throw', async () => {
+      await expect(memoryEngine.storeLongTermMemory('x', 'd', 'e')).rejects.toThrow(
+        'Python bridge unavailable — fail closed'
+      );
     });
 
-    it('retrieveContext 降级返回 {memories:[],preferences}', async () => {
-      const ctx = await memoryEngine.retrieveContext('q');
-      expect(ctx).toEqual({ memories: [], preferences: { codingStyle: [], namingRules: [] } });
+    it('storeInstantMemory 在 Python 不可用时 throw', async () => {
+      await expect(memoryEngine.storeInstantMemory('x', 'd', 'e')).rejects.toThrow(
+        'Python bridge unavailable — fail closed'
+      );
+    });
+
+    it('storeFeedbackSignal 在 Python 不可用时 throw', async () => {
+      await expect(
+        memoryEngine.storeFeedbackSignal({ feedbackType: 'success', rating: 5 })
+      ).rejects.toThrow('Python bridge unavailable — fail closed');
+    });
+
+    it('preciseHybridRetrieval 在 Python 不可用时 throw', async () => {
+      await expect(memoryEngine.preciseHybridRetrieval('q')).rejects.toThrow(
+        'Python bridge unavailable — fail closed'
+      );
+    });
+
+    it('retrieveContext 在 Python 不可用时 throw', async () => {
+      await expect(memoryEngine.retrieveContext('q')).rejects.toThrow(
+        'Python bridge unavailable — fail closed'
+      );
+    });
+
+    it('queryRecentFeedback 在 Python 不可用时 throw', async () => {
+      await expect(memoryEngine.queryRecentFeedback(24)).rejects.toThrow(
+        'Python bridge unavailable — fail closed'
+      );
+    });
+
+    it('updateMemory 在 Python 不可用时 throw', async () => {
+      await expect(
+        memoryEngine.updateMemory('m1', { content: 'x' })
+      ).rejects.toThrow('Python bridge unavailable — fail closed');
     });
 
     it('isInitialized 在无 bridge 时为 false', () => {

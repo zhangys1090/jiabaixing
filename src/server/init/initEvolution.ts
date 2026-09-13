@@ -123,23 +123,14 @@ export async function initEvolution(
     // 闭合 Loop B: 每次检查时同步进化权重
     void syncEvolutionWeights();
 
-    // 质量低于0.7时触发V2自进化
+    // E2-3: 质量低于0.7时不再自动触发V2自进化。
+    // 自修改必须经 DecisionAuthority → authorityMeta → SelfModificationEngine。
+    // 此处仅记录低质量信号，供 Authority 链路后续决策。
     if (avgScore < 0.7 && evolutionEngineV2) {
       Logger.info(
-        `🧬 V2自进化触发 | 质量=${(avgScore * 100).toFixed(1)}% | 交互=${metrics.summary.totalInteractions}`,
+        `⚠️ E2-3: V2自进化信号 | 质量=${(avgScore * 100).toFixed(1)}% | 交互=${metrics.summary.totalInteractions} | 但禁止自动触发 — 需经 DecisionAuthority`,
         'Bootstrap'
       );
-
-      void orchestrator.triggerTrueEvolution({
-        input: `Quality score: ${avgScore.toFixed(2)}. Total interactions: ${metrics.summary.totalInteractions}. Trigger self-improvement.`,
-        response: '',
-        success: avgScore > 0.5,
-        qualityScore: avgScore,
-        executionDuration: 0,
-        toolCalls: [],
-        scene: 'auto_optimization',
-        traceId: `auto-evolve-${Date.now()}`,
-      });
     } else {
       Logger.debug(
         `✅ 质量达标 (${(avgScore * 100).toFixed(1)}%)，跳过进化`,

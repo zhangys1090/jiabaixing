@@ -1,14 +1,40 @@
 /**
  * 记忆引擎接口（避免循环依赖）
  * 从 JiabaixingCore.ts 提取，供全系统统一引用
+ *
+ * E2-V2: EpisodicMemoryStore 是 rogue store，不再从它 import 类型。
+ * 情景记忆相关类型在此内联定义，消除对 rogue store 的编译依赖。
  */
 
-import type {
-  EpisodicMemory,
-  RetrievalResult,
-  RetrieveOptions,
-  StoreOptions,
-} from '../memory/EpisodicMemoryStore';
+export interface EpisodicMemory {
+  id: string;
+  content: string;
+  scene?: string;
+  emotion?: string;
+  importance?: number;
+  timestamp: number;
+  decayScore?: number;
+  accessCount?: number;
+  metadata?: Record<string, unknown>;
+}
+
+export interface RetrievalResult {
+  memories: EpisodicMemory[];
+}
+
+export interface StoreOptions {
+  importance?: number;
+  scene?: string;
+  emotion?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface RetrieveOptions {
+  limit?: number;
+  minImportance?: number;
+  scene?: string;
+  emotion?: string;
+}
 
 export interface IMemoryEngine {
   storeShortTermMemory?(
@@ -66,7 +92,7 @@ export interface IMemoryEngine {
   detectBehaviorPatterns?(): unknown[];
   /** 标记用户活跃（用于记忆"做梦"机制判断空闲状态） */
   markUserActive?(): void;
-  getPersistentMemory?(): import('../memory/PersistentMemoryService').PersistentMemoryService;
+  getPersistentMemory?(): unknown;
 
   /** P1-2: 情景记忆存储 — 从 Python 迁移 EpisodicMemoryStore */
   storeEpisodicMemory?(

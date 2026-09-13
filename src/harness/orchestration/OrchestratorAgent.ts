@@ -37,6 +37,8 @@ import { GoalAuthority } from '../../authority/GoalAuthority';
 import { StateAuthority } from '../../authority/StateAuthority';
 import { OrchestratorProposer } from '../../authority/OrchestratorProposer';
 import { DecisionType } from '../../authority/types';
+import { resolveGoalBinding } from '../../core/GoalContextResolver';
+import type { GoalContextResolverInput } from '../../core/GoalContextResolver';
 
 /** LLM 接口（遵循现有系统风格） */
 export interface OrchestratorLLM {
@@ -101,6 +103,7 @@ export class OrchestratorAgent {
   private complexityAnalyzer: TaskComplexityAnalyzer;
   private config: OrchestratorConfig;
   private registry: AgentRegistry;
+  private _projectContext?: GoalContextResolverInput['projectContext'];
 
   constructor(deps: OrchestratorAgentDeps) {
     this.config = { ...DEFAULT_ORCHESTRATOR_CONFIG, ...deps.config };
@@ -172,9 +175,12 @@ export class OrchestratorAgent {
         const goalAuthority = GoalAuthority.getInstance();
         const stateAuthority = StateAuthority.getInstance();
 
+        const goalBinding = resolveGoalBinding(this.buildGoalContext());
         const goal = goalAuthority.createGoal({
           description: userGoal,
           originalInput: userGoal,
+          executionDomain: 'orchestrator',
+          bindings: goalBinding,
         });
         const snapshot = await stateAuthority.captureSnapshot([goal.goalId]);
 
@@ -486,9 +492,12 @@ export class OrchestratorAgent {
       const stateAuthority = StateAuthority.getInstance();
       const decisionAuthority = DecisionAuthority.getInstance();
 
+      const simpleGoalBinding = resolveGoalBinding(this.buildGoalContext());
       const goal = goalAuthority.createGoal({
         description: userGoal,
         originalInput: userGoal,
+        executionDomain: 'orchestrator',
+        bindings: simpleGoalBinding,
       });
       simpleGoalId = goal.goalId;
       const snapshot = await stateAuthority.captureSnapshot([goal.goalId]);
@@ -614,6 +623,16 @@ export class OrchestratorAgent {
 
     this.recordSimplePathEvidence(simpleGoalId, simpleDecisionId, result.success, userGoal);
     return result;
+  }
+
+  setProjectContext(context: GoalContextResolverInput['projectContext']): void {
+    this._projectContext = context;
+  }
+
+  private buildGoalContext(): GoalContextResolverInput {
+    return {
+      projectContext: this._projectContext,
+    };
   }
 
   /**

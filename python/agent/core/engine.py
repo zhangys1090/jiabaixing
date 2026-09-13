@@ -906,7 +906,15 @@ class AgentEngine:
         if self.performance_monitor and self.evolution:
             try:
                 from agent.evolution.v2_engine import EvolutionEngineV2
-                v2_engine = EvolutionEngineV2.get_instance()
+                from agent.evaluation.eval_gate import EvalGate, EvalGateConfig
+                from agent.evaluation.independent_service import IndependentEvaluationService
+
+                _eval_gate = EvalGate(EvalGateConfig())
+                _independent_eval = IndependentEvaluationService()
+                v2_engine = EvolutionEngineV2.get_instance(
+                    eval_gate=_eval_gate,
+                    independent_eval_service=_independent_eval,
+                )
                 self.evolution_trigger = EvolutionTrigger(
                     evolution_engine=v2_engine,
                     monitor=self.performance_monitor,
@@ -918,7 +926,7 @@ class AgentEngine:
                     ),
                 )
                 self.evolution_trigger.start()
-                log.debug("Evolution Trigger ready and started (GAP-02 integrated)")
+                log.debug("Evolution Trigger ready and started (GAP-02 integrated, P7-B EvalGate injected)")
             except Exception as e:
                 log.warning("Evolution Trigger init failed", error=str(e))
                 self.evolution_trigger = None
@@ -4392,7 +4400,15 @@ class AgentEngine:
         try:
             if self.performance_monitor and self.evolution:
                 from agent.evolution.v2_engine import EvolutionEngineV2
-                v2_engine = EvolutionEngineV2.get_instance()
+                from agent.evaluation.eval_gate import EvalGate, EvalGateConfig
+                from agent.evaluation.independent_service import IndependentEvaluationService
+
+                _eval_gate = EvalGate(EvalGateConfig())
+                _independent_eval = IndependentEvaluationService()
+                v2_engine = EvolutionEngineV2.get_instance(
+                    eval_gate=_eval_gate,
+                    independent_eval_service=_independent_eval,
+                )
                 self.evolution_trigger = EvolutionTrigger(
                     evolution_engine=v2_engine,
                     monitor=self.performance_monitor,
@@ -4404,7 +4420,7 @@ class AgentEngine:
                     ),
                 )
                 self.evolution_trigger.start()
-                log.debug("Evolution Trigger ready and started")
+                log.debug("Evolution Trigger ready and started (P7-B EvalGate injected)")
             return self.evolution_trigger
         except Exception as e:
             log.warning("Evolution Trigger init failed", error=str(e))

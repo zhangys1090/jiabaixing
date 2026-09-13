@@ -10,6 +10,7 @@ import path from 'path';
 import type { IMemoryEngine } from '../../core/IMemoryEngine';
 import { Logger } from '../../utils/Logger';
 import type { ChatMessage } from '../types';
+import { MemoryAuthorityGuard } from '../../authority/MemoryAuthorityGuard';
 
 // ============ 类型定义 ============
 
@@ -161,27 +162,16 @@ export class PersistenceService {
     }
 
     try {
+      const memGuard = MemoryAuthorityGuard.getInstance();
       switch (type) {
         case 'instant':
-          await this.deps.memoryEngine.storeInstantMemory!(
-            content,
-            scene,
-            emotion
-          );
+          await memGuard.writeInstant(content, scene ?? '', emotion ?? '');
           break;
         case 'long_term':
-          await this.deps.memoryEngine.storeLongTermMemory!(
-            content,
-            scene,
-            emotion
-          );
+          await memGuard.writeLongTerm(content, scene ?? '', emotion ?? '');
           break;
         default:
-          await this.deps.memoryEngine.storeShortTermMemory!(
-            content,
-            scene,
-            emotion
-          );
+          await memGuard.writeShortTerm(content, scene ?? '', emotion ?? '');
       }
       return 'stored';
     } catch (err) {
@@ -225,7 +215,8 @@ export class PersistenceService {
     if (!this.deps.memoryEngine) return;
 
     try {
-      await this.deps.memoryEngine.storeFeedbackSignal!({
+      const memGuard = MemoryAuthorityGuard.getInstance();
+      await memGuard.writeFeedback({
         ...data,
         timestamp: Date.now(),
       });
@@ -313,10 +304,11 @@ export class PersistenceService {
             ? memory.content
             : JSON.stringify(memory.content);
         try {
-          await this.deps.memoryEngine.storeLongTermMemory!(
+          const memGuard = MemoryAuthorityGuard.getInstance();
+          await memGuard.writeLongTerm(
             memContent,
-            memory.scene,
-            memory.emotion
+            memory.scene ?? '',
+            memory.emotion ?? ''
           );
           // 标记为已晋升，防止重复晋升
           if (memId) {

@@ -63,7 +63,7 @@ export class DesktopLLMProposer implements DecisionProposer {
       const observation = await this.getVisionEngine().observe();
       const tools = this.getMcpServer().listTools();
       const toolsDescription = tools
-        .map((t) => `- ${t.name}: ${t.description}`)
+        .map((t: { name: string; description: string }) => `- ${t.name}: ${t.description}`)
         .join('\n');
 
       const planPrompt = this.buildPlanningPrompt(

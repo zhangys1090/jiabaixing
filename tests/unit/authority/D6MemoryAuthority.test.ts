@@ -67,15 +67,15 @@ describe('D6 Memory Authority', () => {
       expect(writeCalls[0].goalId).toBe('G_test');
     });
 
-    test('write falls back to ts_local when Python unavailable', async () => {
+    test('write FAIL CLOSED when Python unavailable (no silent ts_local fallback)', async () => {
       const ma = MemoryAuthority.getInstance();
       const result = await ma.write({
         content: 'test memory',
         memoryType: 'short_term',
       });
 
-      expect(result.success).toBe(true);
-      expect(result.source).toBe('ts_local');
+      expect(result.success).toBe(false);
+      expect(result.source).toBe('failed_closed');
     });
   });
 
@@ -211,7 +211,7 @@ describe('D6 Memory Authority', () => {
       expect(result.source).toBe('python');
     });
 
-    test('when Python bridge fails, fallback reflects bridge status', async () => {
+    test('when Python bridge fails, falls back to ts_local (bridge registered but unavailable)', async () => {
       const ma = MemoryAuthority.getInstance();
       ma.registerBridge(
         async () => { throw new Error('Python unavailable'); },
@@ -219,20 +219,20 @@ describe('D6 Memory Authority', () => {
       );
 
       const writeResult = await ma.write({ content: 'test', memoryType: 'short_term' });
-      expect(writeResult.source).toBe('ts_bridge');
-
-      const readResult = await ma.read({ query: 'test' });
-      expect(readResult.source).toBe('ts_bridge');
-    });
-
-    test('when no bridge registered at all, fallback is ts_local', async () => {
-      const ma = MemoryAuthority.getInstance();
-
-      const writeResult = await ma.write({ content: 'test', memoryType: 'short_term' });
       expect(writeResult.source).toBe('ts_local');
 
       const readResult = await ma.read({ query: 'test' });
       expect(readResult.source).toBe('ts_local');
+    });
+
+    test('when no bridge registered at all, FAIL CLOSED', async () => {
+      const ma = MemoryAuthority.getInstance();
+
+      const writeResult = await ma.write({ content: 'test', memoryType: 'short_term' });
+      expect(writeResult.source).toBe('failed_closed');
+
+      const readResult = await ma.read({ query: 'test' });
+      expect(readResult.source).toBe('failed_closed');
     });
   });
 

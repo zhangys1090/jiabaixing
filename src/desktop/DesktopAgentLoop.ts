@@ -20,6 +20,8 @@ import { WindowManager } from './WindowManager';
 // 改为路由到 Python 后端的 LLM（经 PythonAgentBridge）。
 import { getPythonBridge } from '../server/bootstrap';
 import { DesktopActionAuthority } from './DesktopActionAuthority';
+import { DecisionGuard } from '../authority/DecisionGuard';
+import { GoalExecutionDomain } from '../authority/types';
 
 export interface DesktopAgentConfig {
   maxRetries?: number;
@@ -280,7 +282,31 @@ export class DesktopAgentLoop {
           `🎮 阶段3: 执行 ${actions.length} 个动作 (尝试 ${attempt + 1}/${this.config.maxRetries + 1})`,
           'DesktopAgentLoop'
         );
+
+        const guard = DecisionGuard.getInstance();
+        const { decision, goalId } = await guard.guardAction({
+          action: {
+            type: 'composite',
+            payload: { actions: actions.map(a => ({ type: a.type })) },
+          },
+          description: `DesktopAgentLoop batch: ${userInput}`,
+          executionDomain: 'desktop' as GoalExecutionDomain,
+          proposerId: 'desktop_agent_loop',
+          confidence: 0.8,
+          reasoning: `LLM-planned desktop actions for: ${userInput}`,
+        });
+
         const executionResult = await this.authority.execute(actions);
+
+        guard.reportEvidence({
+          goalId,
+          decisionId: decision.decisionId,
+          action: decision.chosen.action,
+          expectedEffect: decision.chosen.reasoning,
+          actualEffect: executionResult.success ? 'success' : 'failed',
+          observation: executionResult.summary,
+          success: executionResult.success,
+        });
 
         if (executionResult.success) {
           // ═══════════════════════ 4. 验证 ═══════════════════════

@@ -20,6 +20,11 @@ export interface ConversationState {
   userId: string;
 }
 
+export interface BridgeHistorySource {
+  getRecentMessages(sessionId: string, count: number): Promise<ConversationEntry[]>;
+  getAllMessages(sessionId: string): Promise<ConversationEntry[]>;
+}
+
 export class ConversationHistoryManager {
   private static readonly MAX_HISTORY = 20;
 
@@ -32,6 +37,9 @@ export class ConversationHistoryManager {
   private history: ConversationEntry[] = [];
   private userId: string = 'default';
   private saveDebounceTimer: NodeJS.Timeout | null = null;
+  private bridgeSource: BridgeHistorySource | null = null;
+  private bridgeSyncEnabled: boolean = false;
+  private unsyncedLocalWrites: number = 0;
 
   constructor(userId?: string) {
     this.userId = userId || 'default';
@@ -71,7 +79,15 @@ export class ConversationHistoryManager {
       );
     }
 
-    this.scheduleSave();
+    if (this.bridgeSyncEnabled) {
+      Logger.debug(
+        `P7-C: Bridge sync mode, skipping local save (Python SessionStore is authoritative)`,
+        'ConversationHistoryManager'
+      );
+    } else {
+      this.unsyncedLocalWrites++;
+      this.scheduleSave();
+    }
   }
 
   public addTurn(userContent: string, assistantContent: string): void {
@@ -83,8 +99,38 @@ export class ConversationHistoryManager {
     return this.history.slice(-count);
   }
 
+  public async getRecentFromBridge(count: number = 5): Promise<ConversationEntry[]> {
+    if (this.bridgeSyncEnabled && this.bridgeSource) {
+      try {
+        const bridgeHistory = await this.bridgeSource.getRecentMessages(this.userId, count);
+        return bridgeHistory;
+      } catch (e) {
+        Logger.warn(
+          `P7-C: Bridge history fetch failed, falling back to local: ${(e as Error).message}`,
+          'ConversationHistoryManager'
+        );
+      }
+    }
+    return this.getRecent(count);
+  }
+
   public getAll(): ConversationEntry[] {
     return [...this.history];
+  }
+
+  public async getAllFromBridge(): Promise<ConversationEntry[]> {
+    if (this.bridgeSyncEnabled && this.bridgeSource) {
+      try {
+        const bridgeHistory = await this.bridgeSource.getAllMessages(this.userId);
+        return bridgeHistory;
+      } catch (e) {
+        Logger.warn(
+          `P7-C: Bridge history fetch failed, falling back to local: ${(e as Error).message}`,
+          'ConversationHistoryManager'
+        );
+      }
+    }
+    return this.getAll();
   }
 
   /**
@@ -201,6 +247,32 @@ export class ConversationHistoryManager {
       role: entry.role,
       content: entry.content,
     }));
+  }
+
+  enableBridgeSync(source: BridgeHistorySource): void {
+    this.bridgeSource = source;
+    this.bridgeSyncEnabled = true;
+    Logger.info(
+      `P7-C: Bridge sync enabled, Python SessionStore is authoritative`,
+      'ConversationHistoryManager'
+    );
+  }
+
+  disableBridgeSync(): void {
+    this.bridgeSyncEnabled = false;
+    this.bridgeSource = null;
+    Logger.info(
+      `P7-C: Bridge sync disabled, using local storage`,
+      'ConversationHistoryManager'
+    );
+  }
+
+  isBridgeSyncEnabled(): boolean {
+    return this.bridgeSyncEnabled;
+  }
+
+  getUnsyncedLocalWrites(): number {
+    return this.unsyncedLocalWrites;
   }
 }
 

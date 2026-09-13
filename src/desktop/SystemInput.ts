@@ -50,6 +50,7 @@ export class SystemInput {
   public async initialize(): Promise<void> {
     if (this.initialized) return;
     Logger.info('🖱️ SystemInput 初始化', 'SystemInput');
+    Logger.info('[AUDIT] bypass action: source=SystemInput note="uses spawn/execSync directly for PowerShell keyboard/mouse input, bypasses ActionAuthority — triggered by DesktopMCPServer(external-authorized)"', 'SystemInput');
     try {
       await this.startPersistentSession();
     } catch (err) {

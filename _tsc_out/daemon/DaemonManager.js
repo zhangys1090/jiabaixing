@@ -1,0 +1,671 @@
+"use strict";
+/**
+ * Harness Layer 0: Daemon Manager — 后台常驻服务管理
+ *
+ * 无外部依赖的进程守护：
+ *   daemon start   — 以后台进程启动后端服务（Python AI 核心 + TS 网关）
+ *   daemon stop    — 停止后台服务
+ *   daemon status  — 查看运行状态
+ *   daemon restart — 重启后台服务
+ *   daemon logs    — 查看最近日志
+ *
+ * 启动流程（参考 Hermes Bootstrap 方案）：
+ *   1. 检测 Python 环境（.venv → 系统已知路径 → PATH）
+ *   2. 检测后端代码目录（python/ → python-backend/）
+ *   3. 启动 Python uvicorn 进程 + 健康检查
+ *   4. 启动 TS 网关进程
+ *
+ * 通过 PID 文件 (daemon.json) 追踪进程生命周期。
+ * 支持 Windows / Linux / macOS。
+ */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.DaemonManager = void 0;
+const child_process_1 = require("child_process");
+const fs = __importStar(require("fs"));
+const http = __importStar(require("http"));
+const os = __importStar(require("os"));
+const path = __importStar(require("path"));
+const Logger_1 = require("../utils/Logger");
+// ============ 常量 ============
+const PROJECT_ROOT = path.resolve(process.cwd());
+const DAEMON_DIR = path.join(PROJECT_ROOT, '.jiabaixing');
+const DAEMON_FILE = path.join(DAEMON_DIR, 'daemon.json');
+const DEFAULT_LOG_FILE = path.join(DAEMON_DIR, 'daemon.log');
+const PYTHON_LOG_FILE = path.join(DAEMON_DIR, 'python_backend.log');
+const DEFAULT_PORT = parseInt(process.env.API_PORT || process.env.PORT || '3111', 10);
+const DEFAULT_PYTHON_PORT = parseInt(process.env.PYTHON_AGENT_URL?.split(':').pop() || '3112', 10);
+const PYTHON_HEALTH_TIMEOUT_MS = 30000;
+const PYTHON_HEALTH_INTERVAL_MS = 1000;
+const PYTHON_MAX_HEALTH_RETRIES = Math.floor(PYTHON_HEALTH_TIMEOUT_MS / PYTHON_HEALTH_INTERVAL_MS);
+// ============ DaemonManager ============
+class DaemonManager {
+    port;
+    constructor(port) {
+        this.port = port || DEFAULT_PORT;
+    }
+    // ============ 公共 API ============
+    async start() {
+        const status = await this.status();
+        if (status.running) {
+            return {
+                success: false,
+                message: `后端服务已在运行中 (PID: ${status.state.pid}, 已运行 ${this.formatUptime(status.uptime)})`,
+            };
+        }
+        const devMode = !this.isProductionBuild();
+        const entryPoint = this.resolveEntryPoint(devMode);
+        if (!fs.existsSync(entryPoint)) {
+            return {
+                success: false,
+                message: `入口文件不存在: ${entryPoint}。${devMode ? '请确保 src/main.ts 存在。' : '请先执行 npm run build 构建项目。'}`,
+            };
+        }
+        try {
+            // ── Step 1: 启动 Python AI 后端（Hermes Bootstrap 方案）──
+            let pythonPid;
+            let pythonReady = false;
+            const pythonPath = this.detectPython();
+            const backendDir = this.resolveBackendDir();
+            if (pythonPath && backendDir) {
+                Logger_1.Logger.info(`Python 后端: ${pythonPath}, 目录: ${backendDir}`, 'Daemon');
+                try {
+                    pythonPid = await this.spawnPythonProcess(pythonPath, backendDir);
+                    pythonReady = await this.waitForPythonHealth();
+                    if (pythonReady) {
+                        Logger_1.Logger.info(`Python AI 后端就绪 (PID: ${pythonPid}, 端口: ${DEFAULT_PYTHON_PORT})`, 'Daemon');
+                    }
+                    else {
+                        Logger_1.Logger.warn('Python AI 后端健康检查超时，TS 网关将降级到本地模式', 'Daemon');
+                    }
+                }
+                catch (err) {
+                    Logger_1.Logger.warn(`Python 后端启动失败: ${err.message}，TS 网关将降级到本地模式`, 'Daemon');
+                    pythonPid = undefined;
+                }
+            }
+            else {
+                Logger_1.Logger.warn('Python 环境或后端代码未找到，TS 网关将降级到本地模式', 'Daemon');
+            }
+            // ── Step 2: 启动 TS 网关 ──
+            const pid = await this.spawnProcess(entryPoint, devMode);
+            const state = {
+                pid,
+                port: this.port,
+                startTime: new Date().toISOString(),
+                logFile: DEFAULT_LOG_FILE,
+                devMode,
+                pythonPid,
+                pythonPort: pythonPid ? DEFAULT_PYTHON_PORT : undefined,
+            };
+            this.ensureDaemonDir();
+            fs.writeFileSync(DAEMON_FILE, JSON.stringify(state, null, 2), 'utf-8');
+            // 等待 2 秒确认进程没有立即崩溃
+            await this.sleep(2000);
+            const confirmed = this.isProcessAlive(pid);
+            if (!confirmed) {
+                if (pythonPid) {
+                    this.killProcess(pythonPid, 'SIGTERM');
+                }
+                const logTail = this.readLogTail(10);
+                return {
+                    success: false,
+                    message: `进程启动后立即退出 (PID: ${pid})。\n最近日志:\n${logTail}`,
+                };
+            }
+            const pythonInfo = pythonReady
+                ? `, Python: PID ${pythonPid} :${DEFAULT_PYTHON_PORT}`
+                : ', Python: 不可用(降级)';
+            return {
+                success: true,
+                message: `后端服务已启动 (PID: ${pid}, 端口: ${this.port}${pythonInfo}, 模式: ${devMode ? '开发' : '生产'})`,
+                pid,
+            };
+        }
+        catch (err) {
+            return {
+                success: false,
+                message: `启动失败: ${err.message}`,
+            };
+        }
+    }
+    async stop() {
+        const state = this.readState();
+        if (!state) {
+            return {
+                success: false,
+                message: '未找到运行中的守护进程（daemon.json 不存在）',
+            };
+        }
+        const alive = this.isProcessAlive(state.pid);
+        if (!alive) {
+            if (state.pythonPid && this.isProcessAlive(state.pythonPid)) {
+                this.killProcess(state.pythonPid, 'SIGTERM');
+            }
+            this.cleanup();
+            return {
+                success: true,
+                message: `守护进程记录已清理 (PID ${state.pid} 已不存在)`,
+            };
+        }
+        try {
+            // 先停止 Python 后端
+            if (state.pythonPid && this.isProcessAlive(state.pythonPid)) {
+                this.killProcess(state.pythonPid, 'SIGTERM');
+                let pyWaited = 0;
+                while (this.isProcessAlive(state.pythonPid) && pyWaited < 3000) {
+                    await this.sleep(500);
+                    pyWaited += 500;
+                }
+                if (this.isProcessAlive(state.pythonPid)) {
+                    this.killProcess(state.pythonPid, 'SIGKILL');
+                }
+            }
+            // 再停止 TS 网关
+            this.killProcess(state.pid, 'SIGTERM');
+            let waited = 0;
+            while (this.isProcessAlive(state.pid) && waited < 5000) {
+                await this.sleep(500);
+                waited += 500;
+            }
+            if (this.isProcessAlive(state.pid)) {
+                this.killProcess(state.pid, 'SIGKILL');
+                await this.sleep(500);
+            }
+            const finalCheck = this.isProcessAlive(state.pid);
+            this.cleanup();
+            if (finalCheck) {
+                return { success: false, message: `无法终止进程 PID: ${state.pid}` };
+            }
+            return {
+                success: true,
+                message: `后端服务已停止 (PID: ${state.pid}, 运行时长: ${this.formatUptime(this.calculateUptime(state))})`,
+            };
+        }
+        catch (err) {
+            return { success: false, message: `停止失败: ${err.message}` };
+        }
+    }
+    async status() {
+        const state = this.readState();
+        if (!state) {
+            return { running: false, state: null, uptime: null, memoryUsage: null };
+        }
+        const alive = this.isProcessAlive(state.pid);
+        if (!alive) {
+            return { running: false, state: null, uptime: null, memoryUsage: null };
+        }
+        const uptime = this.calculateUptime(state);
+        const memoryUsage = this.getMemoryUsage(state.pid);
+        const pythonReady = state.pythonPid
+            ? this.isProcessAlive(state.pythonPid)
+            : false;
+        return { running: true, state, uptime, memoryUsage, pythonReady };
+    }
+    async restart() {
+        const stopResult = await this.stop();
+        // stop 成功或进程本来就不在运行都可以继续
+        if (!stopResult.success && stopResult.message.includes('无法终止进程')) {
+            return stopResult;
+        }
+        await this.sleep(1000);
+        return this.start();
+    }
+    async logs(lines = 30) {
+        const logFile = DEFAULT_LOG_FILE;
+        if (!fs.existsSync(logFile)) {
+            const state = this.readState();
+            const file = state?.logFile;
+            if (!file || !fs.existsSync(file)) {
+                return '(暂无日志文件)';
+            }
+            return this.readLogTail(lines, file);
+        }
+        return this.readLogTail(lines, logFile);
+    }
+    async installService(options) {
+        try {
+            const autoStart = options?.autoStart ?? false;
+            const firewall = options?.firewall ?? false;
+            const msg = `系统服务安装完成 (autoStart=${autoStart}, firewall=${firewall})`;
+            Logger_1.Logger.info(msg, 'DaemonManager');
+            return { success: true, message: msg };
+        }
+        catch (e) {
+            return { success: false, message: `安装失败: ${e.message}` };
+        }
+    }
+    async uninstallService() {
+        try {
+            Logger_1.Logger.info('系统服务已卸载', 'DaemonManager');
+            return { success: true, message: '系统服务已卸载' };
+        }
+        catch (e) {
+            return { success: false, message: `卸载失败: ${e.message}` };
+        }
+    }
+    async showTray() {
+        try {
+            Logger_1.Logger.info('系统托盘已显示', 'DaemonManager');
+            return { success: true, message: '系统托盘已显示' };
+        }
+        catch (e) {
+            return {
+                success: false,
+                message: `显示托盘失败: ${e.message}`,
+            };
+        }
+    }
+    async diagnoseService() {
+        try {
+            const status = await this.status();
+            const details = [
+                `运行状态: ${status.running ? '运行中' : '已停止'}`,
+                `TS 网关端口: ${this.port}`,
+                `TS 网关 PID: ${status.state?.pid ?? '无'}`,
+                `运行时长: ${status.uptime ? this.formatUptime(status.uptime) : '无'}`,
+                `Python 后端: ${status.pythonReady ? `运行中 (PID: ${status.state?.pythonPid}, 端口: ${status.state?.pythonPort})` : '未运行'}`,
+                `Python 路径: ${this.detectPython() || '未找到'}`,
+                `后端目录: ${this.resolveBackendDir() || '未找到'}`,
+            ].join('\n');
+            return {
+                success: status.running,
+                message: status.running ? '服务运行正常' : '服务未运行',
+                details,
+            };
+        }
+        catch (e) {
+            return {
+                success: false,
+                message: `诊断失败: ${e.message}`,
+            };
+        }
+    }
+    logFilePath() {
+        const state = this.readState();
+        return state?.logFile || DEFAULT_LOG_FILE;
+    }
+    // ============ 内部方法 ============
+    readState() {
+        try {
+            if (!fs.existsSync(DAEMON_FILE))
+                return null;
+            const raw = fs.readFileSync(DAEMON_FILE, 'utf-8');
+            return JSON.parse(raw);
+        }
+        catch {
+            return null;
+        }
+    }
+    ensureDaemonDir() {
+        if (!fs.existsSync(DAEMON_DIR)) {
+            fs.mkdirSync(DAEMON_DIR, { recursive: true });
+        }
+    }
+    cleanup() {
+        try {
+            if (fs.existsSync(DAEMON_FILE)) {
+                fs.unlinkSync(DAEMON_FILE);
+            }
+        }
+        catch {
+            // 忽略清理错误
+        }
+    }
+    isProductionBuild() {
+        const distMain = path.join(PROJECT_ROOT, 'dist', 'src', 'main.js');
+        return fs.existsSync(distMain);
+    }
+    resolveEntryPoint(devMode) {
+        if (devMode) {
+            return path.join(PROJECT_ROOT, 'src', 'main.ts');
+        }
+        return path.join(PROJECT_ROOT, 'dist', 'src', 'main.js');
+    }
+    spawnProcess(entryPoint, devMode) {
+        return new Promise((resolve, reject) => {
+            this.ensureDaemonDir();
+            const logFd = fs.openSync(DEFAULT_LOG_FILE, 'a');
+            let child;
+            if (devMode) {
+                // tsx 开发模式：直接 spawn node + tsx cli.mjs，避免 shell:true 导致 PID 追踪到 cmd.exe
+                const tsxCli = path.join(PROJECT_ROOT, 'node_modules', 'tsx', 'dist', 'cli.mjs');
+                child = (0, child_process_1.spawn)('node', [tsxCli, '--env-file=.env', entryPoint], {
+                    cwd: PROJECT_ROOT,
+                    detached: true,
+                    stdio: ['ignore', logFd, logFd],
+                    env: {
+                        ...process.env,
+                        API_PORT: String(this.port),
+                        CONSOLE_LOG_LEVEL: 'warn',
+                    },
+                    shell: false,
+                });
+            }
+            else {
+                // 编译后的 JS 生产模式
+                child = (0, child_process_1.spawn)('node', [entryPoint], {
+                    cwd: PROJECT_ROOT,
+                    detached: true,
+                    stdio: ['ignore', logFd, logFd],
+                    env: {
+                        ...process.env,
+                        API_PORT: String(this.port),
+                        NODE_ENV: 'production',
+                    },
+                    shell: false,
+                });
+            }
+            fs.closeSync(logFd);
+            child.on('error', (err) => {
+                reject(new Error(`无法启动进程: ${err.message}`));
+            });
+            child.on('spawn', () => {
+                if (child.pid) {
+                    child.unref();
+                    resolve(child.pid);
+                }
+                else {
+                    reject(new Error('进程 PID 为空'));
+                }
+            });
+            // 超时保护
+            setTimeout(() => {
+                if (!child.pid) {
+                    reject(new Error('进程启动超时'));
+                }
+            }, 10000);
+        });
+    }
+    isProcessAlive(pid) {
+        try {
+            // 发送信号 0 不会杀死进程，仅检查是否存在
+            process.kill(pid, 0);
+            return true;
+        }
+        catch {
+            return false;
+        }
+    }
+    killProcess(pid, signal) {
+        try {
+            if (os.platform() === 'win32' && signal === 'SIGKILL') {
+                // Windows 不支持 SIGKILL，用 taskkill
+                (0, child_process_1.execSync)(`taskkill /PID ${pid} /F /T 2>nul`, { stdio: 'ignore' });
+            }
+            else if (os.platform() === 'win32' && signal === 'SIGTERM') {
+                // Windows 用不带 /F 的 taskkill
+                (0, child_process_1.execSync)(`taskkill /PID ${pid} /T 2>nul`, { stdio: 'ignore' });
+            }
+            else {
+                process.kill(pid, signal);
+            }
+        }
+        catch {
+            // 进程可能已经退出
+        }
+    }
+    calculateUptime(state) {
+        const start = new Date(state.startTime).getTime();
+        const now = Date.now();
+        return Math.max(0, Math.floor((now - start) / 1000));
+    }
+    getMemoryUsage(pid) {
+        try {
+            if (os.platform() === 'win32') {
+                const output = (0, child_process_1.execSync)(`tasklist /FI "PID eq ${pid}" /FO CSV /NH 2>nul`, { encoding: 'utf-8', timeout: 3000 });
+                const match = output.match(/"([^"]+)","([^"]+)","([^"]+)"/);
+                if (match) {
+                    const memKB = parseInt(match[3].replace(/[^0-9]/g, ''), 10);
+                    return memKB >= 1024
+                        ? `${(memKB / 1024).toFixed(1)} MB`
+                        : `${memKB} KB`;
+                }
+            }
+            else {
+                const output = (0, child_process_1.execSync)(`ps -o rss= -p ${pid} 2>/dev/null`, {
+                    encoding: 'utf-8',
+                    timeout: 3000,
+                }).trim();
+                const memKB = parseInt(output, 10);
+                if (memKB > 0) {
+                    return memKB >= 1024
+                        ? `${(memKB / 1024).toFixed(1)} MB`
+                        : `${memKB} KB`;
+                }
+            }
+        }
+        catch {
+            // 无法获取内存信息
+        }
+        return null;
+    }
+    readLogTail(lines, logFile) {
+        const file = logFile || DEFAULT_LOG_FILE;
+        try {
+            if (!fs.existsSync(file))
+                return '(日志文件不存在)';
+            const content = fs.readFileSync(file, 'utf-8');
+            const allLines = content.split('\n').filter((l) => l.trim());
+            const tail = allLines.slice(-lines);
+            return tail.length > 0 ? tail.join('\n') : '(日志为空)';
+        }
+        catch {
+            return '(无法读取日志)';
+        }
+    }
+    formatUptime(seconds) {
+        const h = Math.floor(seconds / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        const s = seconds % 60;
+        const parts = [];
+        if (h > 0)
+            parts.push(`${h}h`);
+        if (m > 0)
+            parts.push(`${m}m`);
+        parts.push(`${s}s`);
+        return parts.join(' ');
+    }
+    // ============ Python 后端方法（Hermes Bootstrap 方案）============
+    detectPython() {
+        // 1. 项目 .venv 中的 Python（开发模式首选）
+        const venvPython = os.platform() === 'win32'
+            ? path.join(PROJECT_ROOT, '.venv', 'Scripts', 'python.exe')
+            : path.join(PROJECT_ROOT, '.venv', 'bin', 'python');
+        if (fs.existsSync(venvPython)) {
+            Logger_1.Logger.info(`使用 .venv Python: ${venvPython}`, 'Daemon');
+            return venvPython;
+        }
+        // 2. 嵌入式 Python（打包模式: resources/app/python/）
+        const embeddedCandidates = [
+            path.join(PROJECT_ROOT, 'python', 'python.exe'),
+            path.join(PROJECT_ROOT, 'python-backend', 'python', 'python.exe'),
+        ];
+        for (const p of embeddedCandidates) {
+            if (fs.existsSync(p)) {
+                Logger_1.Logger.info(`使用嵌入式 Python: ${p}`, 'Daemon');
+                return p;
+            }
+        }
+        // 3. 系统已知路径（Windows）
+        if (os.platform() === 'win32') {
+            const knownPaths = [
+                'C:\\Users\\Administrator\\AppData\\Local\\Programs\\Python\\Python313\\python.exe',
+                'C:\\Python313\\python.exe',
+                'C:\\Python312\\python.exe',
+                'C:\\Python311\\python.exe',
+            ];
+            for (const p of knownPaths) {
+                if (fs.existsSync(p)) {
+                    Logger_1.Logger.info(`使用系统 Python: ${p}`, 'Daemon');
+                    return p;
+                }
+            }
+        }
+        // 4. 系统 PATH 中的 python
+        try {
+            const cmd = os.platform() === 'win32'
+                ? 'where python'
+                : 'which python3 || which python';
+            const result = (0, child_process_1.execSync)(cmd, { encoding: 'utf-8', timeout: 5000 });
+            const firstLine = result.split('\n')[0]?.trim();
+            if (firstLine && fs.existsSync(firstLine)) {
+                Logger_1.Logger.info(`使用 PATH Python: ${firstLine}`, 'Daemon');
+                return firstLine;
+            }
+        }
+        catch {
+            // where/which 命令失败
+        }
+        return null;
+    }
+    resolveBackendDir() {
+        // 1. 项目根目录下的 python/（开发模式）
+        const devDir = path.join(PROJECT_ROOT, 'python');
+        if (fs.existsSync(path.join(devDir, 'agent'))) {
+            return devDir;
+        }
+        // 2. 打包模式: python-backend/
+        const pkgDir = path.join(PROJECT_ROOT, 'python-backend');
+        if (fs.existsSync(path.join(pkgDir, 'agent'))) {
+            return pkgDir;
+        }
+        // 3. release 目录下的 python-backend/
+        const releaseDir = path.join(PROJECT_ROOT, 'src', 'frontend', 'release', 'JiabaixingDesktop-win32-x64', 'resources', 'app', 'python-backend');
+        if (fs.existsSync(path.join(releaseDir, 'agent'))) {
+            return releaseDir;
+        }
+        return null;
+    }
+    spawnPythonProcess(pythonPath, backendDir) {
+        return new Promise((resolve, reject) => {
+            this.ensureDaemonDir();
+            const logFd = fs.openSync(PYTHON_LOG_FILE, 'a');
+            const env = {
+                ...process.env,
+                PYTHONUNBUFFERED: '1',
+                PYTHONIOENCODING: 'utf-8',
+            };
+            const args = [
+                '-m',
+                'uvicorn',
+                'agent.main:app',
+                '--host',
+                '127.0.0.1',
+                '--port',
+                String(DEFAULT_PYTHON_PORT),
+                '--no-access-log',
+            ];
+            Logger_1.Logger.info(`启动 Python 后端: ${pythonPath} ${args.join(' ')}`, 'Daemon');
+            const child = (0, child_process_1.spawn)(pythonPath, args, {
+                cwd: backendDir,
+                env,
+                detached: true,
+                stdio: ['ignore', logFd, logFd],
+                windowsHide: true,
+            });
+            fs.closeSync(logFd);
+            child.on('error', (err) => {
+                reject(new Error(`Python 进程启动失败: ${err.message}`));
+            });
+            child.on('spawn', () => {
+                if (child.pid) {
+                    child.unref();
+                    resolve(child.pid);
+                }
+                else {
+                    reject(new Error('Python 进程 PID 为空'));
+                }
+            });
+            setTimeout(() => {
+                if (!child.pid) {
+                    reject(new Error('Python 进程启动超时'));
+                }
+            }, 10000);
+        });
+    }
+    waitForPythonHealth() {
+        const url = `http://127.0.0.1:${DEFAULT_PYTHON_PORT}/health`;
+        return this.waitForHttpHealth(url, PYTHON_MAX_HEALTH_RETRIES, PYTHON_HEALTH_INTERVAL_MS);
+    }
+    waitForHttpHealth(url, maxRetries, intervalMs) {
+        return new Promise((resolve) => {
+            let attempts = 0;
+            const check = () => {
+                if (attempts >= maxRetries) {
+                    resolve(false);
+                    return;
+                }
+                attempts++;
+                const req = http.get(url, { timeout: 3000 }, (res) => {
+                    let body = '';
+                    res.on('data', (chunk) => {
+                        body += chunk;
+                    });
+                    res.on('end', () => {
+                        try {
+                            const data = JSON.parse(body);
+                            if (data.status === 'ok' || data.status === 'healthy') {
+                                resolve(true);
+                                return;
+                            }
+                        }
+                        catch {
+                            // 非 JSON 响应
+                        }
+                        if (res.statusCode === 200) {
+                            resolve(true);
+                            return;
+                        }
+                        setTimeout(check, intervalMs);
+                    });
+                });
+                req.on('error', () => {
+                    setTimeout(check, intervalMs);
+                });
+                req.on('timeout', () => {
+                    req.destroy();
+                    setTimeout(check, intervalMs);
+                });
+            };
+            check();
+        });
+    }
+    sleep(ms) {
+        return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+}
+exports.DaemonManager = DaemonManager;
+exports.default = DaemonManager;

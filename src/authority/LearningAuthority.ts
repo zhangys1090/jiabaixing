@@ -205,6 +205,10 @@ export class LearningAuthority {
     return Array.from(this.beliefs.values());
   }
 
+  public getBeliefCount(): number {
+    return this.beliefs.size;
+  }
+
   public getBeliefHistory(): BeliefUpdate[] {
     return [...this.beliefHistory];
   }

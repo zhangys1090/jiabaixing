@@ -126,7 +126,7 @@ describe('GoalAuthority v2', () => {
       expect(authority.getEvidenceLog(goal.goalId)).toHaveLength(2);
     });
 
-    it('clamps progress to [0, 1] and auto-completes at 1.0', () => {
+    it('clamps progress to [0, 1] but does not auto-complete without verification', () => {
       const goal = authority.createGoal({ description: 'test', originalInput: 'test' });
 
       authority.updateFromEvidence({
@@ -137,7 +137,7 @@ describe('GoalAuthority v2', () => {
 
       const g = authority.getGoal(goal.goalId)!;
       expect(g.progress).toBe(1);
-      expect(g.status).toBe(GoalStatus.COMPLETED);
+      expect(g.status).toBe(GoalStatus.ACTIVE);
     });
 
     it('clamps negative progress to 0', () => {
@@ -183,13 +183,13 @@ describe('GoalAuthority v2', () => {
       const goal = authority.createGoal({ description: '整理文件', originalInput: '整理文件' });
       expect(goal.planVersion).toBe(1);
 
-      const afterReplan = authority.replan(goal.goalId, 'strategy failed, trying different approach');
+      const afterReplan = authority.replan(goal.goalId, 'strategy failed, trying different approach', 1);
       expect(afterReplan.goalId).toBe(goal.goalId);
       expect(afterReplan.planVersion).toBe(2);
       expect(afterReplan.status).toBe(GoalStatus.ACTIVE);
       expect(afterReplan.metadata['replanReason_v2']).toBe('strategy failed, trying different approach');
 
-      const afterReplan2 = authority.replan(goal.goalId, 'second replan');
+      const afterReplan2 = authority.replan(goal.goalId, 'second replan', 2);
       expect(afterReplan2.planVersion).toBe(3);
       expect(afterReplan2.metadata['replanReason_v3']).toBe('second replan');
     });
@@ -255,7 +255,7 @@ describe('GoalAuthority v2', () => {
         action: { type: 'desktop_action', payload: {} },
         expectedEffect: 'classify', actualEffect: 'classified', progressDelta: 0.3,
       });
-      authority.replan(goal.goalId, 'need different classification strategy');
+      authority.replan(goal.goalId, 'need different classification strategy', 1);
 
       const final = authority.getGoal(originalId);
       expect(final).not.toBeNull();

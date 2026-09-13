@@ -171,6 +171,8 @@ describe('D4-I4 Global Authority Replay Audit', () => {
         progressDelta: 0.5,
       });
 
+      goalAuthority.markCompleted(goal.goalId);
+
       // Verify final state
       const finalGoal = goalAuthority.getGoal(goal.goalId);
       expect(finalGoal.status).toBe('completed');
@@ -278,6 +280,8 @@ describe('D4-I4 Global Authority Replay Audit', () => {
         actualEffect: 'success',
         progressDelta: 0.5,
       });
+
+      goalAuthority.markCompleted(goal.goalId);
 
       // Verify final state
       const finalGoal = goalAuthority.getGoal(goal.goalId);
@@ -443,6 +447,8 @@ describe('D4-I4 Global Authority Replay Audit', () => {
       expect(evidenceLog.length).toBe(2);
       expect(evidenceLog[0].decisionId).toBe(d1.decisionId);
       expect(evidenceLog[1].decisionId).toBe(d2.decisionId);
+
+      goalAuthority.markCompleted(goal.goalId);
 
       const finalGoal = goalAuthority.getGoal(goal.goalId);
       expect(finalGoal.progress).toBe(1);

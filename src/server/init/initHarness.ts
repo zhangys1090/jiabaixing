@@ -21,6 +21,7 @@ import type { HarnessToolDeps } from '../../harness/tools/registerHarnessTools';
 import { MCPToolBridge } from '../../harness/tools/registry/MCPToolBridge';
 import { OutputGuardrailEngine } from '../../harness/verification/OutputGuardrailEngine';
 import { SpeechSynthesizer } from '../../interaction/SpeechSynthesizer';
+import { MemoryAuthorityGuard } from '../../authority/MemoryAuthorityGuard';
 import { MemoryEngine, type MemoryItem } from '../../memory/MemoryEngine';
 import { UserProfile } from '../../memory/UserProfile';
 import { SceneRecognizer } from '../../multimodal/SceneRecognizer';
@@ -102,17 +103,10 @@ export async function initHarness(
         storeConversation: async (input, response, metadata) => {
           try {
             const summary = `用户: ${input.substring(0, 200)}\n助手: ${response.substring(0, 500)}`;
-            await memoryEngine.storeShortTermMemory(
-              summary,
-              'conversation',
-              'neutral'
-            );
+            const memGuard = MemoryAuthorityGuard.getInstance();
+            await memGuard.writeShortTerm(summary, 'conversation', 'neutral');
             if (metadata.quality && Number(metadata.quality) >= 0.8) {
-              await memoryEngine.storeLongTermMemory(
-                summary,
-                'conversation',
-                'neutral'
-              );
+              await memGuard.writeLongTerm(summary, 'conversation', 'neutral');
             }
             Logger.debug(
               `💾 对话已持久化 (quality=${metadata.quality})`,
@@ -174,32 +168,26 @@ export async function initHarness(
                 content: string,
                 scene?: string,
                 emotion?: string
-              ) =>
-                memoryEngine.storeShortTermMemory(
-                  content,
-                  scene || '',
-                  emotion || 'neutral'
-                ),
+              ) => {
+                const memGuard = MemoryAuthorityGuard.getInstance();
+                await memGuard.writeShortTerm(content, scene || '', emotion || 'neutral');
+              },
               storeLongTermMemory: async (
                 content: string,
                 scene?: string,
                 emotion?: string
-              ) =>
-                memoryEngine.storeLongTermMemory(
-                  content,
-                  scene || '',
-                  emotion || 'neutral'
-                ),
+              ) => {
+                const memGuard = MemoryAuthorityGuard.getInstance();
+                await memGuard.writeLongTerm(content, scene || '', emotion || 'neutral');
+              },
               storeInstantMemory: async (
                 content: string,
                 scene?: string,
                 emotion?: string
-              ) =>
-                memoryEngine.storeInstantMemory(
-                  content,
-                  scene || '',
-                  emotion || 'neutral'
-                ),
+              ) => {
+                const memGuard = MemoryAuthorityGuard.getInstance();
+                await memGuard.writeInstant(content, scene || '', emotion || 'neutral');
+              },
               preciseHybridRetrieval: async (
                 query: string,
                 scene?: string,
@@ -236,8 +224,9 @@ export async function initHarness(
                 toolName?: string;
                 userId?: string;
                 timestamp?: number;
-              }) =>
-                memoryEngine.storeFeedbackSignal({
+              }) => {
+                const memGuard = MemoryAuthorityGuard.getInstance();
+                await memGuard.writeFeedback({
                   feedbackType:
                     (data.feedbackType as
                       | 'success'
@@ -251,7 +240,8 @@ export async function initHarness(
                   toolName: data.toolName,
                   userId: data.userId,
                   timestamp: data.timestamp,
-                }),
+                });
+              },
             }
           : null,
         conversationHistory: conversationHistoryManager
@@ -410,7 +400,8 @@ export async function initHarness(
           return results;
         },
         storeShortTermMemory: async (content, category) => {
-          await memoryEngine.storeShortTermMemory(content, category, 'neutral');
+          const memGuard = MemoryAuthorityGuard.getInstance();
+          await memGuard.writeShortTerm(content, category, 'neutral');
           return true;
         },
         checkDuplicate: async (content: string, category: string) => {
@@ -429,11 +420,8 @@ export async function initHarness(
         },
         storeWithMetadata: async (content, category, metadata) => {
           const emotionTag = metadata.importance >= 7 ? 'important' : 'neutral';
-          await memoryEngine.storeShortTermMemory(
-            content,
-            category,
-            emotionTag
-          );
+          const memGuard = MemoryAuthorityGuard.getInstance();
+          await memGuard.writeShortTerm(content, category, emotionTag);
           return true;
         },
         updateAccessStats: async (query: string) => {
@@ -875,14 +863,12 @@ export async function initHarness(
               }));
           },
           saveTask: async (task) => {
-            await memoryEngine.storeShortTermMemory(
-              JSON.stringify(task),
-              'task',
-              'neutral'
-            );
+            const memGuard = MemoryAuthorityGuard.getInstance();
+            await memGuard.writeShortTerm(JSON.stringify(task), 'task', 'neutral');
           },
           deleteTask: async (taskId: string) => {
-            await memoryEngine.storeShortTermMemory(
+            const memGuard = MemoryAuthorityGuard.getInstance();
+            await memGuard.writeShortTerm(
               JSON.stringify({
                 _deleted: true,
                 id: taskId,
@@ -897,14 +883,12 @@ export async function initHarness(
         calendarStore: {
           getEvents: async () => [],
           saveEvent: async (event) => {
-            await memoryEngine.storeShortTermMemory(
-              JSON.stringify(event),
-              'calendar',
-              'neutral'
-            );
+            const memGuard = MemoryAuthorityGuard.getInstance();
+            await memGuard.writeShortTerm(JSON.stringify(event), 'calendar', 'neutral');
           },
           deleteEvent: async (eventId: string) => {
-            await memoryEngine.storeShortTermMemory(
+            const memGuard = MemoryAuthorityGuard.getInstance();
+            await memGuard.writeShortTerm(
               JSON.stringify({
                 _deleted: true,
                 id: eventId,
@@ -919,14 +903,12 @@ export async function initHarness(
         reminderStore: {
           getReminders: async () => [],
           saveReminder: async (reminder) => {
-            await memoryEngine.storeShortTermMemory(
-              JSON.stringify(reminder),
-              'reminder',
-              'neutral'
-            );
+            const memGuard = MemoryAuthorityGuard.getInstance();
+            await memGuard.writeShortTerm(JSON.stringify(reminder), 'reminder', 'neutral');
           },
           deleteReminder: async (reminderId: string) => {
-            await memoryEngine.storeShortTermMemory(
+            const memGuard = MemoryAuthorityGuard.getInstance();
+            await memGuard.writeShortTerm(
               JSON.stringify({
                 _deleted: true,
                 id: reminderId,
@@ -982,14 +964,12 @@ export async function initHarness(
               }));
           },
           saveNote: async (note) => {
-            await memoryEngine.storeShortTermMemory(
-              JSON.stringify(note),
-              'note',
-              'neutral'
-            );
+            const memGuard = MemoryAuthorityGuard.getInstance();
+            await memGuard.writeShortTerm(JSON.stringify(note), 'note', 'neutral');
           },
           deleteNote: async (noteId: string) => {
-            await memoryEngine.storeShortTermMemory(
+            const memGuard = MemoryAuthorityGuard.getInstance();
+            await memGuard.writeShortTerm(
               JSON.stringify({
                 _deleted: true,
                 id: noteId,
@@ -1111,14 +1091,12 @@ export async function initHarness(
               .filter((x: unknown) => !!x);
           },
           saveSkill: async (skill) => {
-            await memoryEngine.storeShortTermMemory(
-              JSON.stringify(skill),
-              'skill',
-              'neutral'
-            );
+            const memGuard = MemoryAuthorityGuard.getInstance();
+            await memGuard.writeShortTerm(JSON.stringify(skill), 'skill', 'neutral');
           },
           deleteSkill: async (skillName: string) => {
-            await memoryEngine.storeShortTermMemory(
+            const memGuard = MemoryAuthorityGuard.getInstance();
+            await memGuard.writeShortTerm(
               JSON.stringify({
                 _deleted: true,
                 name: skillName,
@@ -1362,6 +1340,46 @@ export async function initHarness(
     }
 
     core.setHarness(harness);
+
+    const { StateAuthority } = await import('../../authority/StateAuthority');
+    const stateAuthority = StateAuthority.getInstance();
+    stateAuthority.registerProviders({
+      readWorldState: async () => {
+        return { observation: null, platform: 'server' as const, timestamp: Date.now() };
+      },
+      readMemory: async (query: string) => {
+        const me = core.getMemoryEngine();
+        if (me?.retrieveRelevant) {
+          const results = await me.retrieveRelevant({ query, limit: 5 });
+          return { relevantMemories: results, query, timestamp: Date.now() };
+        }
+        return { relevantMemories: [], query, timestamp: Date.now() };
+      },
+      readContext: async (activeGoalIds: string[]) => {
+        const chm = core.getConversationHistoryManager?.();
+        const conversationHistory = chm ? (chm as unknown as { getHistory?: () => unknown[] }).getHistory?.() ?? [] : [];
+        return {
+          systemPrompt: '',
+          conversationHistory,
+          fileContexts: [],
+          personaSummary: '',
+          activeGoalIds,
+          timestamp: Date.now(),
+        };
+      },
+      readCapabilities: async () => {
+        const reg = harness?.getToolRegistry?.();
+        return {
+          availableTools: reg ? reg.getRegisteredToolNames() : [],
+          availableSkills: [],
+          desktopAvailable: false,
+          bridgeAvailable: !!getActivePythonBridge(),
+        };
+      },
+      getAgentId: () => 'jiabaixing',
+      getSafetyStatus: () => 'nominal' as const,
+    });
+    Logger.info('🏛️ StateAuthority: read providers registered', 'Bootstrap');
 
     // P0-6: 注入 AgentFactory 全局执行函数，使专业化 Agent 可执行
     AgentFactory.injectExecuteFn(

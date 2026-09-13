@@ -24,6 +24,28 @@ export enum GoalPriority {
   CRITICAL = 10,
 }
 
+export type BindingSource =
+  | 'explicit'
+  | 'workspace_context'
+  | 'desktop_context'
+  | 'task_context';
+
+export type GoalExecutionDomain =
+  | 'orchestrator'
+  | 'desktop'
+  | 'self_modification'
+  | 'tool_execution';
+
+export interface GoalBinding {
+  repository?: string;
+  repositoryPath?: string;
+  paths?: string[];
+  resources?: string[];
+  source: BindingSource;
+  confidence: number;
+  resolvedAt: number;
+}
+
 export interface Goal {
   readonly goalId: string;
   readonly description: string;
@@ -38,7 +60,9 @@ export interface Goal {
   abandonmentCondition: string;
   currentStage: string;
   planVersion: number;
+  executionDomain: GoalExecutionDomain;
   metadata: Record<string, unknown>;
+  readonly bindings?: GoalBinding;
 }
 
 // ─── 2. CanonicalDecisionSnapshot ─────────────────────────────
@@ -110,6 +134,7 @@ export interface CanonicalDecisionSnapshot {
 // purposes in the authority hierarchy.
 
 export enum DecisionType {
+  GOAL = 'goal',
   PLAN = 'plan',
   ACTION = 'action',
 }
@@ -140,6 +165,7 @@ export interface Decision {
   readonly decisionType: DecisionType;
   readonly goalId: string;
   readonly snapshotId: string;
+  readonly planVersion: number;
   readonly candidateIds: readonly string[];
   readonly chosenCandidateId: string;
   readonly chosen: DecisionCandidate;
@@ -170,6 +196,55 @@ export interface GoalEvidence {
   readonly actualEffect: string;
   readonly progressDelta: number;
   readonly timestamp: number;
+  readonly verified?: boolean;
+  readonly verificationReason?: string;
+}
+
+// ─── D7-4.1: Three-Layer Evidence Truth ──────────────────────
+// Layer 1: ActionExecutionResult — did the action execute?
+// Layer 2: EnvironmentObservationResult — what is the real world state?
+// Layer 3: GoalEvidenceEvaluation — does the observation support the goal?
+
+export type ExecutionStatus = 'executed' | 'execution_failed' | 'dispatched' | 'not_executed';
+
+export interface ActionExecutionResult {
+  readonly executionId: string;
+  readonly decisionId: string;
+  readonly goalId: string;
+  readonly planVersion: number;
+  readonly status: ExecutionStatus;
+  readonly actionType: string;
+  readonly rawResult: unknown;
+  readonly error?: string;
+  readonly timestamp: number;
+}
+
+export type VerificationStatus = 'verified' | 'unverified' | 'contradicted';
+
+export interface EnvironmentObservationResult {
+  readonly observationId: string;
+  readonly executionId: string;
+  readonly goalId: string;
+  readonly verificationStatus: VerificationStatus;
+  readonly observedState: Record<string, unknown>;
+  readonly verificationMethod: string;
+  readonly verificationReason: string;
+  readonly timestamp: number;
+}
+
+export type GoalEvaluationVerdict = 'completed' | 'continue' | 'replan' | 'failed' | 'unverified';
+
+export interface GoalEvidenceEvaluation {
+  readonly evaluationId: string;
+  readonly goalId: string;
+  readonly decisionId: string;
+  readonly verdict: GoalEvaluationVerdict;
+  readonly verified: boolean;
+  readonly verificationReason: string;
+  readonly observedProgressDelta: number;
+  readonly predictedProgressDelta: number;
+  readonly environmentObservation: EnvironmentObservationResult | null;
+  readonly timestamp: number;
 }
 
 // ─── Shared helpers ───────────────────────────────────────────
@@ -177,4 +252,55 @@ export interface GoalEvidence {
 export interface GoalStatusEvaluation {
   status: GoalStatus;
   reason: string;
+}
+
+// ─── D7-1: World Observation + Goal Impact ────────────────────
+// Design principle: Observation is FACT, Impact is EVALUATION, Replan is SUGGESTION.
+// None of these mutate Goal or trigger Decision/Action.
+
+export type WorldObservationSource = 'environment' | 'git' | 'file' | 'proactive' | 'scheduled';
+
+export interface WorldObservation {
+  observationId: string;
+  source: WorldObservationSource;
+  type: string;
+  timestamp: string;
+  payload: unknown;
+}
+
+export type GoalImpactType =
+  | 'environment_change'
+  | 'file_change'
+  | 'git_change'
+  | 'schedule_due'
+  | 'proactive_signal'
+  | 'resource_deleted'
+  | 'resource_invalidated'
+  | 'structural_change'
+  | 'failure_detected'
+  | 'recovery_needed';
+
+export interface GoalImpact {
+  goalId: string;
+  observationId: string;
+  affected: boolean;
+  impactType: GoalImpactType;
+  reason: string;
+  confidence: number;
+}
+
+// ─── D7-2: ReplanRequest ──────────────────────────────────────
+// Design principle: ReplanRequest is a REQUEST, not an EXECUTION.
+// It does NOT mutate Goal, trigger Decision, or execute Action.
+// D7-2 produces ReplanRequest; D7-3 consumes it.
+
+export interface ReplanRequest {
+  requestId: string;
+  goalId: string;
+  observationId: string;
+  impactType: GoalImpactType;
+  reason: string;
+  confidence: number;
+  planVersion: number;
+  timestamp: number;
 }

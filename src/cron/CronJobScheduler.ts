@@ -456,62 +456,37 @@ export class CronJobScheduler {
       };
     }
 
+    Logger.warn(
+      `[D7-P0] CronJob "${job.name}" BLOCKED — no DecisionAuthority/ActionAuthority in cron path. Emitting scheduled_action_pending event.`
+    );
+
+    const args = (job.args || []).map((a) => {
+      const safe = String(a).replace(/[^a-zA-Z0-9_\-./:@]/g, '_');
+      return safe;
+    });
+    const pendingCommand = `${job.command} ${args.join(' ')}`;
+
     try {
-      const { exec } = await import('child_process');
-      const timeout = job.timeout ?? 60_000;
-
-      return new Promise<CronJobResult>((resolve) => {
-        let stdout = '';
-        let stderr = '';
-        const args = (job.args || []).map((a) => {
-          const safe = String(a).replace(/[^a-zA-Z0-9_\-./:@]/g, '_');
-          return safe;
-        });
-        const safeCommand = `${job.command} ${args.join(' ')}`;
-        const child = exec(
-          safeCommand,
-          { timeout, cwd: process.cwd() },
-          (error, stdOut, stdErr) => {
-            stdout = stdOut?.toString() ?? '';
-            stderr = stdErr?.toString() ?? '';
-            resolve({
-              jobId: job.id,
-              jobName: job.name,
-              startTime,
-              endTime: new Date(),
-              exitCode: error ? Number(error.code) || 1 : 0,
-              stdout,
-              stderr,
-              success: !error,
-            });
-          }
-        );
-
-        child.on('error', () => {
-          resolve({
-            jobId: job.id,
-            jobName: job.name,
-            startTime,
-            endTime: new Date(),
-            exitCode: 1,
-            stdout: '',
-            stderr: 'Process execution error',
-            success: false,
-          });
-        });
-      });
-    } catch (err) {
-      return {
+      EventBus.emit('scheduled_action_pending', {
+        source: 'CronJobScheduler',
         jobId: job.id,
         jobName: job.name,
-        startTime,
-        endTime: new Date(),
-        exitCode: 1,
-        stdout: '',
-        stderr: (err as Error).message,
-        success: false,
-      };
-    }
+        command: pendingCommand,
+        args: job.args,
+        timestamp: new Date().toISOString(),
+      });
+    } catch { /* EventBus unavailable — still do not exec */ }
+
+    return {
+      jobId: job.id,
+      jobName: job.name,
+      startTime,
+      endTime: new Date(),
+      exitCode: -1,
+      stdout: '',
+      stderr: `[D7-P0] Blocked: cron shell execution requires DecisionAuthority → ActionAuthority. Command: ${pendingCommand}`,
+      success: false,
+    };
   }
 
   private loadJobs(): void {

@@ -3,12 +3,17 @@
  *
  * 将 ToolRegistry.execute(...) 归一为 ActionChannel 契约。
  * 编排层经 ActionDispatcher 以 channel='tool' 调度任意已注册工具。
+ *
+ * Layer 1 收口：任何 production tool execution 必须经过 DecisionGuard，
+ * 确保 goalId / snapshotId / decisionId 审计跟踪完整。
  */
 
 import type { ToolRegistry } from '../../tools/registry/ToolRegistry';
 import type { ToolResult } from '../../types';
 import type { ActionChannel, ActionRequest, ActionResult } from '../types';
 import { Logger } from '../../../utils/Logger';
+import { DecisionGuard } from '../../../authority/DecisionGuard';
+import { GoalExecutionDomain } from '../../../authority/types';
 
 export class ToolChannel implements ActionChannel {
   readonly kind = 'tool' as const;
@@ -30,11 +35,42 @@ export class ToolChannel implements ActionChannel {
     }
 
     try {
+      const guard = DecisionGuard.getInstance();
+      const { decision, snapshot, goalId } = await guard.guardAction({
+        action: {
+          type: 'tool_call',
+          payload: { toolName: tool, params: request.params },
+        },
+        description: `ToolChannel execution: ${tool}`,
+        executionDomain: 'tool_execution' as GoalExecutionDomain,
+        proposerId: 'tool_channel_proposer',
+        confidence: 0.85,
+        reasoning: `Harness tool dispatch: ${tool}`,
+      });
+
+      const authorityMeta = guard.extractAuthorityMeta(decision, snapshot, goalId);
+
       const result: ToolResult = await this.registry.execute(
         tool,
         request.params ?? {},
-        (request.context ?? {}) as import('../../types').ToolContext
+        {
+          ...(request.context ?? {}),
+          metadata: {
+            ...((request.context as unknown as Record<string, unknown>)?.metadata ?? {}),
+            authorityMeta,
+          },
+        } as import('../../types').ToolContext
       );
+
+      guard.reportEvidence({
+        goalId,
+        decisionId: decision.decisionId,
+        action: decision.chosen.action,
+        expectedEffect: decision.chosen.reasoning,
+        actualEffect: result.success ? 'success' : `error: ${result.error}`,
+        observation: result.output,
+        success: result.success,
+      });
 
       return {
         channel: 'tool',

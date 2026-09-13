@@ -13,7 +13,10 @@ import {
   DesktopAction,
   DesktopActionResult,
 } from './DesktopActionExecutor';
+import { DesktopActionAuthority } from './DesktopActionAuthority';
 import { NormalizedCoordinateSystem } from './NormalizedCoordinates';
+import { DecisionGuard } from '../authority/DecisionGuard';
+import { GoalExecutionDomain } from '../authority/types';
 
 export interface MCPTool {
   name: string;
@@ -389,7 +392,31 @@ export class DesktopMCPServer extends EventEmitter {
     this.emit('tool_call', { name, args });
 
     try {
+      Logger.info('[AUDIT] DecisionAuthority-gated action: source=DesktopMCP type=tool_call', 'DesktopMCP');
+      const guard = DecisionGuard.getInstance();
+      const { decision, goalId } = await guard.guardAction({
+        action: {
+          type: 'tool_call',
+          payload: { toolName: name, args },
+        },
+        description: `MCP tool: ${name}`,
+        executionDomain: 'desktop' as GoalExecutionDomain,
+        proposerId: 'desktop_mcp_server',
+        confidence: 0.8,
+        reasoning: `MCP tool call: ${name}`,
+      });
+
       const result = await this.executeTool(name, args);
+
+      guard.reportEvidence({
+        goalId,
+        decisionId: decision.decisionId,
+        action: decision.chosen.action,
+        expectedEffect: decision.chosen.reasoning,
+        actualEffect: result.isError ? 'error' : 'success',
+        observation: result,
+        success: !result.isError,
+      });
       this.emit('tool_result', { name, result });
       return result;
     } catch (error) {
@@ -776,9 +803,6 @@ export class DesktopMCPServer extends EventEmitter {
   }
 
   public async shutdown(): Promise<void> {
-    if (this.executor) {
-      await this.executor.shutdown();
-    }
     this.initialized = false;
     Logger.info('🔧 DesktopMCP Server 已关闭', 'DesktopMCP');
   }

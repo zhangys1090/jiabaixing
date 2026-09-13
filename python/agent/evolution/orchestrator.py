@@ -466,8 +466,8 @@ class EvolutionOrchestrator:
 
             # 验证回滚：有引擎被触发优化时，将基线加入待验证队列
             if triggered > 0:
-                pre_snapshot.tool_weights = dict(self._evolution_engine._tool_weights) if self._evolution_engine else {}
-                pre_snapshot.v2_plan_ids = v2_plan_ids_in_cycle
+                if not pre_snapshot.v2_plan_ids and v2_plan_ids_in_cycle:
+                    pre_snapshot.v2_plan_ids = v2_plan_ids_in_cycle
                 self._pending_rollbacks[cycle_id] = pre_snapshot
                 log.info(
                     "Rollback baseline saved, pending verification",
@@ -744,19 +744,32 @@ class EvolutionOrchestrator:
         }
 
     def _take_baseline_snapshot(self, cycle_id: str, reason: str) -> RollbackSnapshot:
-        """拍优化前的状态基线快照。"""
+        """拍优化前的状态基线快照（P7-E: 包含 V1 tool_weights + V2 plan IDs）。"""
         avg_q = self._calculate_avg_quality()
         avg_rt = (
             sum(self._response_time_history) / len(self._response_time_history)
             if self._response_time_history else 0.0
         )
+        v1_weights: dict[str, float] = {}
+        if self._evolution_engine:
+            try:
+                v1_weights = dict(self._evolution_engine._tool_weights)
+            except Exception:
+                pass
+        v2_plans: list[str] = []
+        if self._evolution_engine_v2:
+            try:
+                v2_plans = list(self._evolution_engine_v2._pending_monitoring.keys()) if hasattr(self._evolution_engine_v2, '_pending_monitoring') else []
+            except Exception:
+                pass
         return RollbackSnapshot(
             cycle_id=cycle_id,
             timestamp=time.time(),
             avg_quality=avg_q,
             avg_response_time_ms=avg_rt,
             interaction_count=self._interaction_count,
-            tool_weights={},
+            tool_weights=v1_weights,
+            v2_plan_ids=v2_plans,
             reason=reason,
         )
 

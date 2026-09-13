@@ -18,6 +18,9 @@ import {
   WindowStateSnapshot,
 } from './snapshot/types';
 import { WindowInfo, WindowManager } from './WindowManager';
+import { DesktopActionAuthority } from './DesktopActionAuthority';
+import { DecisionGuard } from '../authority/DecisionGuard';
+import { GoalExecutionDomain } from '../authority/types';
 
 export {
   ClipboardStateSnapshot,
@@ -177,12 +180,34 @@ export class StateSnapshotManager {
 
       if (options.restoreWindows !== false && snapshot.foregroundWindowHandle) {
         try {
+          Logger.info('[AUDIT] DecisionAuthority-gated action: source=StateSnapshotManager type=restoreWindowState', 'StateSnapshotManager');
+          const guard = DecisionGuard.getInstance();
+          const { decision, goalId } = await guard.guardAction({
+            action: {
+              type: 'desktop_action',
+              payload: { actionType: 'restoreWindowState', handle: snapshot.foregroundWindowHandle },
+            },
+            description: 'Restore foreground window state',
+            executionDomain: 'desktop' as GoalExecutionDomain,
+            proposerId: 'state_snapshot_manager',
+            confidence: 0.9,
+            reasoning: 'Checkpoint restore: window state',
+          });
           const { result: actionResult, authorization } =
             await this.authority.executeAction({
               type: 'restoreWindowState',
               params: { handle: snapshot.foregroundWindowHandle },
               description: '恢复前台窗口状态',
             });
+          guard.reportEvidence({
+            goalId,
+            decisionId: decision.decisionId,
+            action: decision.chosen.action,
+            expectedEffect: decision.chosen.reasoning,
+            actualEffect: actionResult.success ? 'success' : `error: ${actionResult.error}`,
+            observation: actionResult.output,
+            success: actionResult.success,
+          });
           if (!authorization.allowed) {
             throw new Error(authorization.reason || '窗口恢复被安全策略阻止');
           }

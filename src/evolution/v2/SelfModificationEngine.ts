@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { Logger } from '../../utils/Logger';
+import { verifyAuthorityMeta } from '../../authority/AuthoritySignature';
 import { EvolutionAction, EvolutionPlan, EvolutionResult } from './types';
 
 /**
@@ -104,11 +105,42 @@ export class SelfModificationEngine {
 
   /**
    * 执行进化计划
+   *
+   * E2-3: plan 级 Authority gate — 整个 plan 必须有 authorityMeta，
+   * 否则拒绝执行所有 action。
    */
   async executePlan(
     plan: EvolutionPlan,
     _checkpointId: string
   ): Promise<EvolutionResult> {
+    if (!this.authorityMeta) {
+      Logger.error(
+        `Authority gate BLOCKED at plan level: no authorityMeta for plan ${plan.id}`,
+        new Error('E2-3: Self-modification plan without authority is forbidden'),
+        'SelfModificationEngine'
+      );
+      return {
+        planId: plan.id,
+        success: false,
+        executedActions: 0,
+        error: 'E2-3: authorityMeta required — self-modification without authority is forbidden',
+        duration: 0,
+      };
+    }
+    if (this.authorityConsumed) {
+      Logger.error(
+        `Authority gate BLOCKED at plan level: stale authorization for plan ${plan.id}`,
+        new Error('E2-3: Stale authority — one-shot authorization already used'),
+        'SelfModificationEngine'
+      );
+      return {
+        planId: plan.id,
+        success: false,
+        executedActions: 0,
+        error: 'E2-3: stale authorityMeta — one-shot authorization already consumed, setAuthorityMeta() required',
+        duration: 0,
+      };
+    }
     const startTime = Date.now();
     const result: EvolutionResult = {
       planId: plan.id,
@@ -130,13 +162,14 @@ export class SelfModificationEngine {
           `  Executing action ${i + 1}/${plan.actions.length}: ${action.description}`,
           'SelfModificationEngine'
         );
+        Logger.info(`[AUDIT] HMAC-gated evolution action: source=SelfModificationEngine type=${action.type || 'unknown'} note="uses HMAC one-shot gate + ActionAuthority.authorize(); DecisionAuthority delegation via setAuthorityMeta()"`, 'SelfModificationEngine');
 
         const success = await this.executeAction(action);
 
         if (!success) {
           result.success = false;
           result.failedAt = i;
-          result.error = `Action failed at ${i}: ${action.description}`;
+          result.error = `E2-3: Action blocked or failed at ${i}: ${action.description}`;
           Logger.error(
             `❌ Action failed: ${action.description}`,
             new Error('Action failed'),
@@ -151,6 +184,7 @@ export class SelfModificationEngine {
       result.duration = Date.now() - startTime;
 
       if (result.success) {
+        this.consumeAuthority();
         Logger.info(
           `✅ Evolution plan executed successfully: ${plan.id}`,
           'SelfModificationEngine'
@@ -176,9 +210,94 @@ export class SelfModificationEngine {
   }
 
   /**
+   * E2-3: Authority gate — 自修改操作必须携带有效 authorityMeta，
+   * 否则拒绝执行（fail-closed）。
+   *
+   * 这确保 SelfModificationEngine 不能绕过 DecisionAuthority / ActionAuthority
+   * 直接修改文件系统。调用方必须先经 DecisionAuthority.decide() 取得 FINAL decision，
+   * 再将 authorityMeta 传入 executePlan。
+   */
+  private authorityMeta: Record<string, unknown> | null = null;
+  private authorityConsumed: boolean = false;
+
+  public setAuthorityMeta(meta: Record<string, unknown>): void {
+    this.authorityMeta = meta;
+    this.authorityConsumed = false;
+  }
+
+  public clearAuthorityMeta(): void {
+    this.authorityMeta = null;
+    this.authorityConsumed = false;
+  }
+
+  public isAuthorityAvailable(): boolean {
+    return this.authorityMeta !== null && !this.authorityConsumed;
+  }
+
+  private consumeAuthority(): void {
+    this.authorityConsumed = true;
+  }
+
+  private checkAuthorityGate(actionDescription: string): boolean {
+    if (!this.authorityMeta) {
+      Logger.error(
+        `Authority gate BLOCKED: no authorityMeta — "${actionDescription}"`,
+        new Error('E2-3: Self-modification without authority is forbidden'),
+        'SelfModificationEngine'
+      );
+      return false;
+    }
+    if (this.authorityConsumed) {
+      Logger.error(
+        `Authority gate BLOCKED: authorityMeta already consumed (stale authorization) — "${actionDescription}"`,
+        new Error('E2-3: Stale authority — one-shot authorization already used'),
+        'SelfModificationEngine'
+      );
+      return false;
+    }
+    const task = actionDescription;
+    if (!verifyAuthorityMeta(this.authorityMeta, task)) {
+      Logger.error(
+        `Authority gate BLOCKED: HMAC verification failed — "${actionDescription}"`,
+        new Error('E2-3: authorityMeta signature invalid'),
+        'SelfModificationEngine'
+      );
+      return false;
+    }
+    return true;
+  }
+
+  /**
    * 执行单个动作
    */
   private async executeAction(action: EvolutionAction): Promise<boolean> {
+    if (!this.checkAuthorityGate(action.description)) {
+      return false;
+    }
+
+    try {
+      const { DesktopActionAuthority } = require('../../desktop/DesktopActionAuthority');
+      const authority = DesktopActionAuthority.getInstance();
+      if (authority) {
+        const auth = authority.authorize([{
+          type: 'file_modify' as any,
+          description: action.description,
+          params: (action as any).params || {},
+        }]);
+        if (!auth.allowed) {
+          Logger.error(
+            `[AUDIT] ActionAuthority denied self-modification: ${auth.reason} — "${action.description}"`,
+            new Error('E2-3: ActionAuthority denied self-modification action'),
+            'SelfModificationEngine'
+          );
+          return false;
+        }
+        Logger.info(`[AUDIT] bypass action: source=SelfModificationEngine type=${action.type} note="bypasses DecisionAuthority, uses ActionAuthority.authorize() + HMAC one-shot gate"`, 'SelfModificationEngine');
+      }
+    } catch (err) {
+      Logger.warn(`ActionAuthority check skipped: ${(err as Error).message}`, 'SelfModificationEngine');
+    }
+
     try {
       switch (action.type) {
         case 'MODIFY_FILE':

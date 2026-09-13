@@ -1,0 +1,146 @@
+"use strict";
+/**
+ * AgentFactory — Agent 工厂
+ *
+ * 根据场景创建对应的专业化 Agent。
+ * 提供 goal → Agent 的智能选择能力。
+ * P0-6修复：自动注入默认执行函数，确保 isReady=true
+ */
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.AgentFactory = void 0;
+const Logger_1 = require("../../utils/Logger");
+const CodingAgent_1 = require("./CodingAgent");
+const DesktopAgent_1 = require("./DesktopAgent");
+const FileAgent_1 = require("./FileAgent");
+/** 场景关键词映射 */
+const SCENE_KEYWORDS = {
+    coding: [
+        '代码',
+        '编程',
+        '编译',
+        '重构',
+        'debug',
+        'bug',
+        '测试',
+        '接口',
+        'API',
+        '函数',
+        '类',
+        '模块',
+        'review',
+        '修复',
+        '生成代码',
+        '分析代码',
+    ],
+    file: [
+        '文件',
+        '目录',
+        '文件夹',
+        '打开',
+        '搜索',
+        '查找',
+        '读',
+        '写',
+        '创建',
+        '删除',
+        '编辑',
+        '列表',
+        'grep',
+    ],
+    desktop: [
+        '桌面',
+        '截图',
+        '点击',
+        '窗口',
+        '应用',
+        '程序',
+        '自动化',
+        '屏幕',
+        '鼠标',
+        '键盘',
+    ],
+};
+/** 全局执行函数注入器 — 外部可注入实际执行逻辑 */
+let globalExecuteFn = null;
+class AgentFactory {
+    static cache = new Map();
+    /**
+     * 注入全局执行函数 — 在系统初始化时调用
+     * 使所有 AgentFactory 创建的 Agent 自动具备执行能力
+     * @param fn - 执行函数
+     */
+    static injectExecuteFn(fn) {
+        globalExecuteFn = fn;
+        for (const agent of AgentFactory.cache.values()) {
+            if (!agent.isReady) {
+                agent.setExecuteFn(fn);
+            }
+        }
+        Logger_1.Logger.info('🏭 AgentFactory: 全局执行函数已注入', 'AgentFactory');
+    }
+    /**
+     * 根据场景创建 Agent
+     * @param scene - 场景类型
+     * @returns Agent 实例
+     */
+    static createAgent(scene) {
+        const cacheKey = scene;
+        const cached = this.cache.get(cacheKey);
+        if (cached) {
+            return cached;
+        }
+        let agent;
+        switch (scene) {
+            case 'coding':
+                agent = new CodingAgent_1.CodingAgent();
+                break;
+            case 'file':
+                agent = new FileAgent_1.FileAgent();
+                break;
+            case 'desktop':
+                agent = new DesktopAgent_1.DesktopAgent();
+                break;
+            default:
+                throw new Error(`未知 Agent 场景: ${scene}`);
+        }
+        if (globalExecuteFn && !agent.isReady) {
+            agent.setExecuteFn(globalExecuteFn);
+        }
+        this.cache.set(cacheKey, agent);
+        Logger_1.Logger.info(`🏭 AgentFactory 创建: ${agent.name} (ready=${agent.isReady})`, 'AgentFactory');
+        return agent;
+    }
+    /**
+     * 创建所有 Agent 实例
+     * @returns 所有 Agent 实例数组
+     */
+    static createAllAgents() {
+        return [
+            this.createAgent('coding'),
+            this.createAgent('file'),
+            this.createAgent('desktop'),
+        ];
+    }
+    /**
+     * 根据目标智能选择 Agent
+     * @param goal - 用户目标
+     * @returns 最匹配的 Agent 实例
+     */
+    static selectAgentByGoal(goal) {
+        const lowerGoal = goal.toLowerCase();
+        for (const scene of ['coding', 'file', 'desktop']) {
+            const keywords = SCENE_KEYWORDS[scene];
+            if (keywords.some((kw) => lowerGoal.includes(kw.toLowerCase()))) {
+                Logger_1.Logger.info(`🎯 目标匹配场景: ${scene} (goal: ${goal.substring(0, 50)})`, 'AgentFactory');
+                return this.createAgent(scene);
+            }
+        }
+        Logger_1.Logger.info(`🎯 目标未匹配特定场景，使用默认 CodingAgent`, 'AgentFactory');
+        return this.createAgent('coding');
+    }
+    /** 清除缓存 */
+    static clearCache() {
+        this.cache.clear();
+    }
+}
+exports.AgentFactory = AgentFactory;

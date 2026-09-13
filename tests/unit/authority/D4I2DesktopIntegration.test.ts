@@ -319,6 +319,8 @@ describe('D4-I2 Desktop Integration', () => {
         progressDelta: 0.5,
       });
 
+      goalAuthority.markCompleted(goalId);
+
       const finalGoal = goalAuthority.getGoal(goalId);
       expect(finalGoal.status).toBe('completed');
       expect(finalGoal.progress).toBe(1);

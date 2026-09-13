@@ -66,6 +66,7 @@ export class WindowManager {
   public async initialize(): Promise<void> {
     if (this.initialized) return;
     Logger.info('🪟 WindowManager 初始化', 'WindowManager');
+    Logger.info('[AUDIT] bypass action: source=WindowManager note="uses execSync directly for PowerShell window operations, bypasses ActionAuthority — triggered by DesktopMCPServer(external-authorized) or DesktopAgentLoop(external-authorized)"', 'WindowManager');
     this.initialized = true;
   }
 

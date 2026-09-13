@@ -1,0 +1,708 @@
+"use strict";
+/**
+ * 进化编排器 v2
+ * 统一调度全部七个进化引擎，确保优化不冲突，提供系统级可观测性
+ *
+ * 职责：
+ * 1. 统一入口：recordInteraction() 同时驱动所有子引擎
+ * 2. 优化协调：协调各引擎优化周期，防止冲突
+ * 3. 统一指标：从所有引擎聚合指标，提供全局视图
+ * 4. 调度管理：统一管理定时优化（替代各引擎独立调度）
+ * 5. 自我修复：自动检测并修复问题
+ * 6. 自我重构：自动优化代码结构
+ * 7. 自我增强：自动扩展功能
+ */
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.EvolutionOrchestrator = void 0;
+const EventBus_1 = __importDefault(require("../shared/EventBus"));
+const Logger_1 = require("../utils/Logger");
+/**
+ * @deprecated TS 侧进化编排器已收口（P2-3，2026-08-03）。
+ * 生产路径（AGENT_BACKEND=python，默认）下，`initEvolution.ts` 不再启动本引擎，
+ * 进化执行/数据由 Python `agent.evolution` 经 `PythonAgentBridge` 接管。
+ * 本类仅作为 AGENT_BACKEND=local 的废弃回退存根保留，请勿在新代码中依赖其运行时行为。
+ */
+class EvolutionOrchestrator {
+    static instance;
+    evolutionEngineV2 = null;
+    profileEvolution = null;
+    taskAdjuster = null;
+    static MAX_RESULTS_SIZE = 200;
+    eventBus = EventBus_1.default;
+    interactionCount = 0;
+    qualityHistory = [];
+    responseTimeHistory = [];
+    optimizationCycles = [];
+    cyclesToday = 0;
+    lastCycleDay = Date.now();
+    optimizationInProgress = false;
+    maxQualityHistory = 500;
+    maxResponseTimeHistory = 500;
+    maxOptimizationCycles = 100;
+    // 各引擎的冷却期（毫秒）
+    engineCooldowns = new Map();
+    engineLastTriggered = new Map();
+    defaultCooldownMs = 5 * 60 * 1000;
+    // 定时调度
+    unifiedTimer = null;
+    isRunning = false;
+    static create() {
+        return new EvolutionOrchestrator();
+    }
+    static getInstance() {
+        if (!EvolutionOrchestrator.instance) {
+            EvolutionOrchestrator.instance = new EvolutionOrchestrator();
+        }
+        return EvolutionOrchestrator.instance;
+    }
+    /**
+     * 注册所有子引擎
+     */
+    registerEngines(engines) {
+        this.evolutionEngineV2 = engines.evolutionEngineV2 || null;
+        this.profileEvolution = engines.profileEvolution || null;
+        this.taskAdjuster = engines.taskAdjuster || null;
+        const activeEngines = [];
+        if (this.evolutionEngineV2)
+            activeEngines.push('EvolutionEngineV2 (真正自我进化)');
+        if (this.profileEvolution)
+            activeEngines.push('ProfileEvolution');
+        if (this.taskAdjuster)
+            activeEngines.push('DynamicTaskAdjuster');
+        Logger_1.Logger.info(`🎯 进化编排器已注册 ${activeEngines.length} 个引擎: ${activeEngines.join(', ')}`, 'EvolutionOrchestrator');
+    }
+    /**
+     * 启动统一调度
+     */
+    start() {
+        if (this.isRunning) {
+            Logger_1.Logger.warn('⚠️ 进化编排器已在运行', 'EvolutionOrchestrator');
+            return;
+        }
+        this.isRunning = true;
+        Logger_1.Logger.info('🎯 进化编排器已启动', 'EvolutionOrchestrator');
+        this.setupEventListeners();
+        this.startAutoDetection();
+    }
+    /**
+     * 停止统一调度
+     */
+    stop() {
+        this.isRunning = false;
+        if (this.unifiedTimer) {
+            clearInterval(this.unifiedTimer);
+            this.unifiedTimer = null;
+        }
+        this.stopAutoDetection();
+        Logger_1.Logger.info('🎯 进化编排器已停止', 'EvolutionOrchestrator');
+    }
+    /**
+     * P1+P2: 统一交互记录入口
+     * 一次调用同时驱动全部四个闭环
+     */
+    recordInteraction(record) {
+        this.interactionCount++;
+        this.qualityHistory.push(record.qualityScore);
+        this.responseTimeHistory.push(record.executionDuration);
+        if (this.qualityHistory.length > this.maxQualityHistory) {
+            this.qualityHistory = this.qualityHistory.slice(-this.maxQualityHistory);
+        }
+        if (this.responseTimeHistory.length > this.maxResponseTimeHistory) {
+            this.responseTimeHistory = this.responseTimeHistory.slice(-this.maxResponseTimeHistory);
+        }
+        // 并行驱动所有子引擎
+        this.driveProfileEvolution(record);
+        // 正向进化闭环：追踪连续模式
+        this.trackConsecutivePatterns(record);
+        // E2-3: 低质量交互不再自动触发自我进化。
+        // 自修改必须经 DecisionAuthority → authorityMeta → SelfModificationEngine。
+        // 此处仅记录低质量信号，供 Authority 链路后续决策。
+        if (record.qualityScore < 0.5 && this.evolutionEngineV2) {
+            Logger_1.Logger.info(`⚠️ 检测到低质量交互 (${record.qualityScore.toFixed(2)})，但 E2-3 禁止自动触发自我进化 — 需经 DecisionAuthority`, 'EvolutionOrchestrator');
+        }
+        // 统一验证：每20次交互自动记录before快照，10次交互后自动对比
+        if (this.interactionCount % 20 === 0) {
+            const pendingVerification = this.verificationResults.length > 0
+                ? this.verificationResults[this.verificationResults.length - 1]
+                : null;
+            if (!pendingVerification ||
+                Date.now() - pendingVerification.verifiedAt > 300000) {
+                const snapshotId = this.recordBeforeSnapshot('auto_periodic_check');
+                // 10次交互后验证
+                const targetCount = this.interactionCount + 10;
+                setTimeout(() => {
+                    if (this.interactionCount >= targetCount) {
+                        this.recordAfterSnapshot(snapshotId);
+                    }
+                }, 30000);
+            }
+        }
+        // 更新每日周期计数
+        this.updateDailyCycleCount();
+    }
+    /**
+     * 触发真正的自我进化（EvolutionEngineV2）
+     */
+    async triggerTrueEvolution(_record) {
+        Logger_1.Logger.error('E2-3: triggerTrueEvolution BLOCKED — self-modification must go through DecisionAuthority, not auto-triggered from quality score', new Error('E2-3: EvolutionOrchestrator auto-trigger is forbidden without Authority approval'), 'EvolutionOrchestrator');
+    }
+    driveProfileEvolution(record) {
+        if (!this.profileEvolution || !record.userId)
+            return;
+        try {
+            this.profileEvolution.recordFeedback({
+                traceId: record.traceId,
+                taskId: record.traceId,
+                inputText: record.input,
+                scene: record.scene || 'unknown',
+                emotion: 'neutral',
+                isSuccess: record.success,
+                loopCount: record.toolCalls?.length || 0,
+                totalExecutionTime: record.executionDuration,
+                toolExecutions: record.toolCalls?.map((tc) => ({
+                    toolName: tc.toolName,
+                    params: {},
+                    success: tc.success,
+                    executionTime: tc.executionTime,
+                    retryCount: 0,
+                })) || [],
+                failureReasons: [],
+                reflection: null,
+                timestamp: Date.now(),
+            }, record.userId);
+            // 每30次交互自动触发一次画像进化验证
+            if (this.interactionCount > 0 && this.interactionCount % 30 === 0) {
+                const snapshotId = this.recordBeforeSnapshot('profile_update');
+                setTimeout(() => {
+                    if (this.interactionCount > 0) {
+                        this.recordAfterSnapshot(snapshotId);
+                    }
+                }, 15000);
+            }
+        }
+        catch {
+            // 静默失败
+        }
+    }
+    /**
+     * P1+P2: 统一优化触发
+     * 协调各引擎的优化周期，防止冲突
+     */
+    async triggerOptimizationCycle(reason, force = false) {
+        if (this.optimizationInProgress && !force) {
+            Logger_1.Logger.warn('⚠️ 优化周期已在执行中，跳过本次触发', 'EvolutionOrchestrator');
+            return null;
+        }
+        this.optimizationInProgress = true;
+        const cycleId = `opt_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        const timestamp = Date.now();
+        const results = [];
+        try {
+            // 检查各引擎冷却期
+            const _canTriggerEngine = (engineName) => {
+                const cooldown = this.engineCooldowns.get(engineName) || this.defaultCooldownMs;
+                const lastTriggered = this.engineLastTriggered.get(engineName) || 0;
+                return force || Date.now() - lastTriggered >= cooldown;
+            };
+            // 按顺序触发各引擎的优化（不并行以避免冲突）
+            this.optimizationCycles.push({
+                cycleId,
+                timestamp,
+                enginesParticipated: results
+                    .filter((r) => r.triggered)
+                    .map((r) => r.engineName),
+                results,
+                overallScore: this.calculateOverallScore(),
+            });
+            if (this.optimizationCycles.length > this.maxOptimizationCycles) {
+                this.optimizationCycles = this.optimizationCycles.slice(-this.maxOptimizationCycles);
+            }
+            this.cyclesToday++;
+            const triggeredCount = results.filter((r) => r.triggered).length;
+            void EventBus_1.default.emit('optimization_cycle_completed', {
+                cycleId,
+                timestamp,
+                improvements: triggeredCount,
+                results,
+                overallScore: this.optimizationCycles[this.optimizationCycles.length - 1]
+                    .overallScore,
+            });
+            Logger_1.Logger.info(`🔄 优化周期完成: ${cycleId} (参与: ${results.filter((r) => r.triggered).length}/${results.length} 个引擎)`, 'EvolutionOrchestrator');
+        }
+        finally {
+            this.optimizationInProgress = false;
+        }
+        return this.optimizationCycles[this.optimizationCycles.length - 1];
+    }
+    // ── 统一优化效果验证框架 ──
+    //
+    // 职责：替代三套独立的验证机制（RealTimeFeedbackLoop / EvolutionOptimizer / ContinuousPerformanceOptimizer）
+    // 设计：beforeSnapshot → [优化执行] → 等待N次交互 → afterSnapshot → 对比报告
+    // 覆盖：- 通用质量验证（quality trend before/after）
+    //       - 工具权重下游验证（单工具成功率变化）
+    //       - 用户画像进化验证（profile更新前后质量变化）
+    verificationSnapshots = [];
+    verificationResults = [];
+    /** 记录优化前的基线快照 */
+    recordBeforeSnapshot(target, relatedEvent) {
+        const snapshotId = 'ver_before_' + Date.now();
+        const recentQuality = this.qualityHistory.slice(-30);
+        const recentResponseTimes = this.responseTimeHistory.slice(-30);
+        const toolSuccessRates = {};
+        this.verificationSnapshots.push({
+            id: snapshotId,
+            type: 'before_optimization',
+            timestamp: Date.now(),
+            metrics: {
+                avgQualityScore: recentQuality.length > 0
+                    ? recentQuality.reduce((s, v) => s + v, 0) / recentQuality.length
+                    : 0,
+                avgResponseTime: recentResponseTimes.length > 0
+                    ? recentResponseTimes.reduce((s, v) => s + v, 0) /
+                        recentResponseTimes.length
+                    : 0,
+                toolSuccessRates,
+                interactionCount: this.interactionCount,
+            },
+            context: { target, relatedEvent },
+        });
+        return snapshotId;
+    }
+    /** 记录优化后的快照并与基线对比 */
+    recordAfterSnapshot(beforeSnapshotId) {
+        const before = this.verificationSnapshots.find((s) => s.id === beforeSnapshotId);
+        if (!before)
+            return null;
+        const recentQuality = this.qualityHistory.slice(-30);
+        const afterScore = recentQuality.length > 0
+            ? recentQuality.reduce((s, v) => s + v, 0) / recentQuality.length
+            : 0;
+        const improvement = afterScore - before.metrics.avgQualityScore;
+        let toolVerificationDetail = '';
+        // 用户画像进化验证：前后质量对比
+        let profileVerificationDetail = '';
+        if (before.context.target === 'profile_update') {
+            const interactionsAfter = this.interactionCount - before.metrics.interactionCount;
+            profileVerificationDetail = ` | 画像更新后已交互${interactionsAfter}次`;
+        }
+        const confidence = improvement > 0.1 ? 'high' : improvement > 0.03 ? 'medium' : 'low';
+        const success = improvement > 0;
+        const result = {
+            id: `ver_${Date.now()}`,
+            type: before.context.target === 'profile_update'
+                ? 'profile_update'
+                : before.context.target?.startsWith('tool_')
+                    ? 'tool_weight'
+                    : 'optimization',
+            target: before.context.target || 'general',
+            beforeScore: before.metrics.avgQualityScore,
+            afterScore,
+            improvement,
+            verifiedAt: Date.now(),
+            confidence,
+            success,
+        };
+        this.verificationResults.push(result);
+        if (this.verificationResults.length > 100) {
+            this.verificationResults = this.verificationResults.slice(-100);
+        }
+        Logger_1.Logger.info(`📊 效果验证: ${result.type}/${result.target} | ${before.metrics.avgQualityScore.toFixed(2)} → ${afterScore.toFixed(2)} (${improvement > 0 ? '+' : ''}${improvement.toFixed(2)})${toolVerificationDetail}${profileVerificationDetail}`, 'EvolutionOrchestrator');
+        return {
+            result: success ? 'improved' : 'declined',
+            improvement,
+            verificationResult: result,
+        };
+    }
+    /** 简化接口：在优化周期中自动执行 before/after 验证 */
+    async triggerOptimizationCycleWithVerification(reason, force = false) {
+        const snapshotId = this.recordBeforeSnapshot(reason);
+        const cycle = await this.triggerOptimizationCycle(reason, force);
+        // 延迟验证：等 10 次交互后再记录 after 快照
+        const targetInteractions = this.interactionCount + 10;
+        let retryCount = 0;
+        const MAX_RETRIES = 60; // 最多等待 5 分钟（60 * 5s）
+        const checkAndVerify = () => {
+            if (this.interactionCount >= targetInteractions) {
+                this.recordAfterSnapshot(snapshotId);
+            }
+            else if (retryCount < MAX_RETRIES) {
+                retryCount++;
+                setTimeout(checkAndVerify, 5000);
+            }
+            else {
+                Logger_1.Logger.warn(`验证超时：${reason}，已等待 ${MAX_RETRIES * 5} 秒`, 'EvolutionOrchestrator');
+            }
+        };
+        setTimeout(checkAndVerify, 5000);
+        return { cycle, verificationId: snapshotId };
+    }
+    /** 获取验证报告 */
+    getVerificationReport() {
+        return this.verificationResults.slice(-20).map((r) => ({
+            type: r.type,
+            target: r.target,
+            before: r.beforeScore.toFixed(2),
+            after: r.afterScore.toFixed(2),
+            improvement: `${r.improvement > 0 ? '+' : ''}${r.improvement.toFixed(2)}`,
+            verdict: r.success ? '✅ 改善' : '⚠️ 未改善',
+        }));
+    }
+    /**
+     * P1: 获取统一进化指标
+     * 从所有引擎聚合指标，提供全局视图
+     */
+    getUnifiedMetrics() {
+        const recentQuality = this.qualityHistory.slice(-50);
+        const avgQuality = recentQuality.length > 0
+            ? recentQuality.reduce((s, v) => s + v, 0) / recentQuality.length
+            : 0;
+        const recentResponseTimes = this.responseTimeHistory.slice(-50);
+        const avgResponseTime = recentResponseTimes.length > 0
+            ? recentResponseTimes.reduce((s, v) => s + v, 0) /
+                recentResponseTimes.length
+            : 0;
+        const sortedTimes = [...recentResponseTimes].sort((a, b) => a - b);
+        const p95Index = Math.ceil(sortedTimes.length * 0.95) - 1;
+        const p95Time = p95Index >= 0 ? sortedTimes[p95Index] : 0;
+        const qualityTrend = this.calculateQualityTrend();
+        const failureCount = this.qualityHistory.filter((s) => s < 0.4).length;
+        const failureRate = this.qualityHistory.length > 0
+            ? failureCount / this.qualityHistory.length
+            : 0;
+        const successfulCycles = this.optimizationCycles.filter((c) => c.results.some((r) => r.triggered)).length;
+        const cycleSuccessRate = this.optimizationCycles.length > 0
+            ? successfulCycles / this.optimizationCycles.length
+            : 0;
+        const toolWeights = {};
+        const codeEvolutionMetrics = this.evolutionEngineV2
+            ? this.getCodeEvolutionMetricsSafe()
+            : null;
+        return {
+            summary: {
+                totalInteractions: this.interactionCount,
+                totalOptimizations: this.optimizationCycles.length,
+                averageQualityScore: avgQuality,
+                weeklyImprovement: codeEvolutionMetrics?.qualityImprovement ?? 0,
+                enginesActive: [
+                    ...(this.evolutionEngineV2
+                        ? ['EvolutionEngineV2 (真正自我进化)']
+                        : []),
+                    ...(this.profileEvolution ? ['ProfileEvolution'] : []),
+                    ...(this.taskAdjuster ? ['DynamicTaskAdjuster'] : []),
+                ],
+            },
+            quality: {
+                current: avgQuality,
+                trend: qualityTrend,
+                recentScores: recentQuality.slice(-20),
+                failureRate,
+            },
+            performance: {
+                averageResponseTime: avgResponseTime,
+                p95ResponseTime: p95Time,
+                throughput: this.interactionCount > 0
+                    ? (this.interactionCount / (Date.now() - this.startTime)) * 3600000
+                    : 0,
+            },
+            optimization: {
+                lastCycleTime: this.optimizationCycles.length > 0
+                    ? this.optimizationCycles[this.optimizationCycles.length - 1]
+                        .timestamp
+                    : null,
+                cyclesToday: this.cyclesToday,
+                totalCycles: this.optimizationCycles.length,
+                successRate: cycleSuccessRate,
+                recentCycles: this.optimizationCycles.slice(-10),
+            },
+            evolution: codeEvolutionMetrics,
+            codeEvolution: codeEvolutionMetrics,
+            engines: {
+                toolWeights,
+                userProfileConfidence: this.profileEvolution
+                    ? this.profileEvolution.getStatistics
+                        ? this.profileEvolution.getStatistics().averageLearningConfidence
+                        : 0
+                    : 0,
+                taskAdjustmentCount: this.taskAdjuster
+                    ? this.taskAdjuster.getAdjustmentHistory
+                        ? this.taskAdjuster.getAdjustmentHistory().length
+                        : 0
+                    : 0,
+            },
+            verification: {
+                totalVerifications: this.verificationResults.length,
+                successRate: this.verificationResults.length > 0
+                    ? this.verificationResults.filter((r) => r.success).length /
+                        this.verificationResults.length
+                    : 0,
+                recentResults: this.verificationResults.slice(-10).map((r) => ({
+                    type: r.type,
+                    target: r.target,
+                    before: r.beforeScore.toFixed(2),
+                    after: r.afterScore.toFixed(2),
+                    verdict: r.success ? 'improved' : 'declined',
+                    confidence: r.confidence,
+                })),
+            },
+        };
+    }
+    /**
+     * 设置各引擎的冷却期
+     */
+    setEngineCooldown(engineName, cooldownMs) {
+        this.engineCooldowns.set(engineName, cooldownMs);
+    }
+    /**
+     * 重置每日周期计数
+     */
+    resetDailyCount() {
+        this.cyclesToday = 0;
+        this.lastCycleDay = Date.now();
+    }
+    // ── 以下为私有辅助方法 ──
+    startTime = Date.now();
+    autoDetectionTimer = null;
+    AUTO_DETECTION_INTERVAL_MS = 5 * 60 * 1000;
+    consecutiveLowQualityCount = 0;
+    consecutiveFailureCount = 0;
+    lastAutoDetectionTime = 0;
+    AUTO_DETECTION_COOLDOWN_MS = 10 * 60 * 1000;
+    setupEventListeners() {
+        void EventBus_1.default.on('feedback_collected', async () => {
+            if (this.isRunning && this.interactionCount % 20 === 0) {
+                this.scheduleDeferredOptimization('周期性检查');
+            }
+        });
+        void EventBus_1.default.on('optimization_requested', async (payload) => {
+            if (this.isRunning) {
+                await this.triggerOptimizationCycle(payload.target);
+            }
+        });
+    }
+    /**
+     * 启动自动检测定时器
+     * 每5分钟扫描一次系统状态，自动发现改进点并触发进化
+     */
+    startAutoDetection() {
+        if (this.autoDetectionTimer)
+            return;
+        Logger_1.Logger.info('🔍 正向进化闭环: 自动检测已启动', 'EvolutionOrchestrator');
+        this.autoDetectionTimer = setInterval(() => {
+            void this.runAutoDetection();
+        }, this.AUTO_DETECTION_INTERVAL_MS);
+        // P1-2: 进化周期自动化 — 定时触发优化周期
+        // 原实现仅靠 recordInteraction 间接触发优化，
+        // 现在增加独立的定时优化调度器，确保即使低频交互也能持续进化。
+        this.startOptimizationScheduler();
+    }
+    /** P1-2: 优化周期定时调度器 */
+    optimizationSchedulerTimer = null;
+    static OPTIMIZATION_SCHEDULER_INTERVAL_MS = 10 * 60 * 1000;
+    startOptimizationScheduler() {
+        if (this.optimizationSchedulerTimer)
+            return;
+        const interval = parseInt(process.env['EVOLUTION_OPT_INTERVAL_MS'] || '0', 10) ||
+            EvolutionOrchestrator.OPTIMIZATION_SCHEDULER_INTERVAL_MS;
+        Logger_1.Logger.info(`⏰ P1-2: 进化优化定时调度器已启动 (间隔=${interval}ms)`, 'EvolutionOrchestrator');
+        this.optimizationSchedulerTimer = setInterval(() => {
+            if (!this.isRunning)
+                return;
+            const avgQuality = this.qualityHistory.length > 0
+                ? this.qualityHistory.reduce((a, b) => a + b, 0) /
+                    this.qualityHistory.length
+                : 1;
+            const threshold = parseFloat(process.env['EVOLUTION_OPT_QUALITY_THRESHOLD'] || '0.6');
+            if (avgQuality < threshold) {
+                Logger_1.Logger.info(`⏰ P1-2: 定时调度器检测到平均质量 ${avgQuality.toFixed(2)} < 阈值 ${threshold}，触发优化周期`, 'EvolutionOrchestrator');
+                void this.triggerOptimizationCycle(`scheduled:avg_quality=${avgQuality.toFixed(2)}`);
+            }
+        }, interval);
+    }
+    stopOptimizationScheduler() {
+        if (this.optimizationSchedulerTimer) {
+            clearInterval(this.optimizationSchedulerTimer);
+            this.optimizationSchedulerTimer = null;
+            Logger_1.Logger.info('⏰ P1-2: 进化优化定时调度器已停止', 'EvolutionOrchestrator');
+        }
+    }
+    stopAutoDetection() {
+        if (this.autoDetectionTimer) {
+            clearInterval(this.autoDetectionTimer);
+            this.autoDetectionTimer = null;
+        }
+        this.stopOptimizationScheduler();
+    }
+    /**
+     * 正向进化闭环核心：自动检测改进点
+     * 扫描质量趋势、失败模式、性能瓶颈、技能使用统计
+     * 发现问题后自动触发 EvolutionEngineV2
+     */
+    async runAutoDetection() {
+        if (!this.isRunning)
+            return;
+        const now = Date.now();
+        if (now - this.lastAutoDetectionTime < this.AUTO_DETECTION_COOLDOWN_MS) {
+            return;
+        }
+        const detectedCause = this.detectEvolutionCause();
+        if (!detectedCause)
+            return;
+        this.lastAutoDetectionTime = now;
+        Logger_1.Logger.info(`🔍 正向进化闭环: 自动检测到改进点 → ${detectedCause.type}: ${detectedCause.description}`, 'EvolutionOrchestrator');
+        // E2-3: runAutoDetection 不再直接触发 evolutionEngineV2.triggerEvolution()。
+        // 自修改必须经 DecisionAuthority → authorityMeta → SelfModificationEngine。
+        // 此处仅记录检测信号，供 Authority 链路后续决策。
+        if (this.evolutionEngineV2) {
+            Logger_1.Logger.info(`⚠️ E2-3: 正向进化闭环检测到改进点 (${detectedCause.type})，但禁止自动触发自修改 — 需经 DecisionAuthority`, 'EvolutionOrchestrator');
+        }
+        else {
+            await this.triggerOptimizationCycle(detectedCause.description);
+        }
+    }
+    /**
+     * 检测进化原因 — 正向进化闭环的关键
+     * 综合分析质量趋势、失败模式、性能瓶颈、技能使用
+     */
+    detectEvolutionCause() {
+        const recentQuality = this.qualityHistory.slice(-30);
+        if (recentQuality.length < 5)
+            return null;
+        const avgQuality = recentQuality.reduce((s, v) => s + v, 0) / recentQuality.length;
+        const trend = this.calculateQualityTrend();
+        if (trend === 'declining' && avgQuality < 0.5) {
+            return {
+                type: 'LOW_SATISFACTION',
+                description: `质量持续下降: 近30次平均${avgQuality.toFixed(2)}，趋势declining`,
+                context: { satisfactionScore: avgQuality },
+                timestamp: Date.now(),
+            };
+        }
+        if (this.consecutiveFailureCount >= 3) {
+            this.consecutiveFailureCount = 0;
+            return {
+                type: 'FAILURE',
+                description: `连续${this.consecutiveFailureCount}次交互失败`,
+                context: { failureInfo: 'consecutive_failures' },
+                timestamp: Date.now(),
+            };
+        }
+        const recentResponseTimes = this.responseTimeHistory.slice(-20);
+        if (recentResponseTimes.length >= 10) {
+            const avgTime = recentResponseTimes.reduce((s, v) => s + v, 0) /
+                recentResponseTimes.length;
+            const olderTimes = this.responseTimeHistory.slice(-40, -20);
+            if (olderTimes.length >= 5) {
+                const olderAvg = olderTimes.reduce((s, v) => s + v, 0) / olderTimes.length;
+                if (avgTime > olderAvg * 1.5 && avgTime > 5000) {
+                    return {
+                        type: 'PERFORMANCE_ISSUE',
+                        description: `响应时间退化: ${olderAvg.toFixed(0)}ms → ${avgTime.toFixed(0)}ms`,
+                        context: {
+                            performanceMetric: {
+                                name: 'response_time',
+                                value: avgTime,
+                                threshold: olderAvg * 1.3,
+                            },
+                        },
+                        timestamp: Date.now(),
+                    };
+                }
+            }
+        }
+        if (this.interactionCount > 50 && avgQuality > 0.7 && trend === 'stable') {
+            const lastOptTime = this.optimizationCycles.length > 0
+                ? this.optimizationCycles[this.optimizationCycles.length - 1]
+                    .timestamp
+                : 0;
+            if (Date.now() - lastOptTime > 60 * 60 * 1000) {
+                return {
+                    type: 'PROACTIVE_IMPROVEMENT',
+                    description: `系统稳定运行(${avgQuality.toFixed(2)})，可主动优化提升`,
+                    context: { satisfactionScore: avgQuality },
+                    timestamp: Date.now(),
+                };
+            }
+        }
+        return null;
+    }
+    /**
+     * 增强的 recordInteraction — 正向进化闭环感知
+     * 追踪连续低质量/失败交互，触发自动检测
+     */
+    trackConsecutivePatterns(record) {
+        if (record.qualityScore < 0.4) {
+            this.consecutiveLowQualityCount++;
+        }
+        else {
+            this.consecutiveLowQualityCount = 0;
+        }
+        if (!record.success) {
+            this.consecutiveFailureCount++;
+        }
+        else {
+            this.consecutiveFailureCount = 0;
+        }
+        if (this.consecutiveLowQualityCount >= 3 ||
+            this.consecutiveFailureCount >= 2) {
+            void this.runAutoDetection();
+        }
+    }
+    scheduleDeferredOptimization(reason) {
+        setImmediate(() => {
+            void this.triggerOptimizationCycle(reason);
+        });
+    }
+    updateDailyCycleCount() {
+        const now = Date.now();
+        const oneDay = 24 * 60 * 60 * 1000;
+        if (now - this.lastCycleDay > oneDay) {
+            this.cyclesToday = 0;
+            this.lastCycleDay = now;
+        }
+    }
+    calculateQualityTrend() {
+        const recent = this.qualityHistory.slice(-50);
+        if (recent.length < 10)
+            return 'stable';
+        const half = Math.floor(recent.length / 2);
+        const firstHalf = recent.slice(0, half);
+        const secondHalf = recent.slice(half);
+        const avgFirst = firstHalf.reduce((s, v) => s + v, 0) / firstHalf.length;
+        const avgSecond = secondHalf.reduce((s, v) => s + v, 0) / secondHalf.length;
+        const diff = avgSecond - avgFirst;
+        if (diff > 0.05)
+            return 'improving';
+        if (diff < -0.05)
+            return 'declining';
+        return 'stable';
+    }
+    calculateOverallScore() {
+        const recentScores = this.qualityHistory.slice(-20);
+        if (recentScores.length === 0)
+            return 0.5;
+        const avg = recentScores.reduce((s, v) => s + v, 0) / recentScores.length;
+        const activeEngineCount = [this.profileEvolution, this.taskAdjuster].filter(Boolean).length;
+        return avg * (0.5 + 0.5 * (activeEngineCount / 2));
+    }
+    /**
+     * 安全获取 V2 代码进化指标
+     */
+    getCodeEvolutionMetricsSafe() {
+        try {
+            if (this.evolutionEngineV2 &&
+                typeof this.evolutionEngineV2
+                    .getMetrics === 'function') {
+                return this.evolutionEngineV2.getMetrics();
+            }
+        }
+        catch {
+            // 静默
+        }
+        return null;
+    }
+}
+exports.EvolutionOrchestrator = EvolutionOrchestrator;
+exports.default = EvolutionOrchestrator;

@@ -303,3 +303,38 @@ class TestOrchestratorMetrics:
         assert m.quality_trend == "improving"
         assert m.cycle_success_rate == 0.8
         assert m.verification_success_rate == 0.9
+
+    def test_p7e_baseline_snapshot_captures_v1_weights(self):
+        orch = EvolutionOrchestrator.get_instance()
+        evo = EvolutionEngine()
+        evo._tool_weights = {"shell_exec": 0.8, "file_read": 0.6}
+        orch.register_engines(evolution_engine=evo)
+        snapshot = orch._take_baseline_snapshot("cycle_test", "test")
+        assert snapshot.tool_weights == {"shell_exec": 0.8, "file_read": 0.6}
+
+    def test_p7e_baseline_snapshot_captures_v2_plan_ids(self):
+        orch = EvolutionOrchestrator.get_instance()
+        v2 = EvolutionEngineV2()
+        v2._pending_monitoring = {"plan_abc": {"status": "monitoring"}, "plan_def": {"status": "monitoring"}}
+        orch.register_engines(evolution_engine_v2=v2)
+        snapshot = orch._take_baseline_snapshot("cycle_test", "test")
+        assert set(snapshot.v2_plan_ids) == {"plan_abc", "plan_def"}
+
+    def test_p7e_baseline_snapshot_empty_when_no_engines(self):
+        EvolutionOrchestrator.reset_instance()
+        orch = EvolutionOrchestrator.get_instance()
+        snapshot = orch._take_baseline_snapshot("cycle_test", "test")
+        assert snapshot.tool_weights == {}
+        assert snapshot.v2_plan_ids == []
+
+    def test_p7e_rollback_restores_v1_weights_from_baseline(self):
+        orch = EvolutionOrchestrator.get_instance()
+        evo = EvolutionEngine()
+        evo._tool_weights = {"shell_exec": 0.8, "file_read": 0.6}
+        orch.register_engines(evolution_engine=evo)
+        snapshot = orch._take_baseline_snapshot("cycle_test", "test")
+        assert snapshot.tool_weights == {"shell_exec": 0.8, "file_read": 0.6}
+        evo._tool_weights = {"shell_exec": 0.3, "file_read": 0.2}
+        assert evo._tool_weights != snapshot.tool_weights
+        evo._tool_weights = dict(snapshot.tool_weights)
+        assert evo._tool_weights == {"shell_exec": 0.8, "file_read": 0.6}

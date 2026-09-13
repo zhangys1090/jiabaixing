@@ -13,14 +13,17 @@ const SNAP = 'SS_test456';
 const DEC = 'D_test789';
 const TASK = '打开记事本并输入Hello World';
 
+const PLAN_V = 1;
+
 function makeMeta(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   const ahash = actionHash(TASK);
   return {
     authority_goalId: GOAL,
     authority_snapshotId: SNAP,
     authority_decisionId: DEC,
+    authority_planVersion: PLAN_V,
     authority_actionHash: ahash,
-    authority_sig: signAuthorityMeta(GOAL, SNAP, DEC, ahash),
+    authority_sig: signAuthorityMeta(GOAL, SNAP, DEC, PLAN_V, ahash),
     ...overrides,
   };
 }
