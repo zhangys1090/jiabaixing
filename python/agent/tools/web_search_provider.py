@@ -401,6 +401,11 @@ class WebSearchRegistry:
                 self._available_cache[name] = (False, time.monotonic())
         if last_error is not None:
             _log.warning("所有搜索后端均失败", error=str(last_error))
+            # 修复：全后端失败必须抛异常，让调用方得到明确失败，
+            # 而不是误以为"搜索正常但无结果"。
+            raise RuntimeError(
+                f"所有搜索后端均不可用（最后一个错误: {last_error}）"
+            )
         return []
 
     @property

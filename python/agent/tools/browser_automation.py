@@ -212,9 +212,13 @@ class BrowserAutomation:
             return session_id
 
         except ImportError:
+            # 修复：不再静默假装启动成功（否则后续 navigate/click 全部报
+            # 误导性的"浏览器未启动，请先调用 launch()"），直接抛出明确错误。
             log.warning("Playwright 未安装，浏览器自动化功能不可用")
-            self._sessions[session_id] = session
-            return session_id
+            raise RuntimeError(
+                "Playwright 未安装，浏览器自动化功能不可用。"
+                "请运行: pip install playwright && playwright install chromium"
+            )
         except Exception as e:
             log.error(f"浏览器启动失败: {e}")
             raise

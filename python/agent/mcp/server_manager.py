@@ -143,7 +143,7 @@ class MCPServerManager:
         self.register_server(MCPServerConfig(
             name="filesystem",
             command="npx",
-            args=["@modelcontextprotocol/server-filesystem", os.getcwd()],
+            args=["--yes", "@modelcontextprotocol/server-filesystem", os.getcwd()],
             description="文件系统操作服务器",
             enabled=True,
             auto_start=False,
@@ -151,25 +151,25 @@ class MCPServerManager:
         self.register_server(MCPServerConfig(
             name="sqlite",
             command="npx",
-            args=["@modelcontextprotocol/server-sqlite", "--db-path", "./data"],
-            description="SQLite数据库操作服务器",
-            enabled=True,
+            args=["--yes", "@modelcontextprotocol/server-sqlite", "--db-path", "./data"],
+            description="SQLite数据库操作服务器（npm 包 @modelcontextprotocol/server-sqlite 不存在，已禁用）",
+            enabled=False,
             auto_start=False,
         ))
         self.register_server(MCPServerConfig(
             name="browser",
             command="npx",
-            args=["@anthropic-ai/mcp-server-browser"],
-            description="浏览器自动化服务器",
-            enabled=True,
+            args=["--yes", "@anthropic-ai/mcp-server-browser"],
+            description="浏览器自动化服务器（npm 包 @anthropic-ai/mcp-server-browser 不存在，已禁用）",
+            enabled=False,
             auto_start=False,
         ))
         self.register_server(MCPServerConfig(
             name="cron",
             command="npx",
-            args=["@anthropic-ai/mcp-server-cron"],
-            description="定时任务服务器",
-            enabled=True,
+            args=["--yes", "@anthropic-ai/mcp-server-cron"],
+            description="定时任务服务器（npm 包 @anthropic-ai/mcp-server-cron 不存在，已禁用）",
+            enabled=False,
             auto_start=False,
         ))
 

@@ -587,7 +587,7 @@ class SubAgentDelegator:
 
 DELEGATE_TASK_DEF = ToolDefinition(
     name="delegate_task",
-    description="将任务委派给子 Agent 执行，支持独立上下文和超时控制。适用场景：并行处理多个独立任务、将复杂任务拆分给专门执行者。不适用：简单直接可用单个工具完成的任务。",
+    description="将任务委派给子 Agent 执行，支持独立上下文和超时控制。适用场景：并行处理多个只读/低风险的独立任务（如分别检索、分别阅读多个文件）。重要限制：子 Agent 只有只读/低风险工具白名单，无法执行 shell、代码执行、写文件或浏览器操作；需要这些能力的任务必须由你自己用 shell_exec/execute_code 等直接完成，不要委派。不适用：简单直接可用单个工具完成的任务。",
     short_desc="委派任务给子Agent",
     category=ToolCategory.COGNITION,
     tags=["delegate", "sub-agent", "task", "cognition", "parallel"],

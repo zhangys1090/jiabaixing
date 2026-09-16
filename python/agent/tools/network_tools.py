@@ -150,7 +150,7 @@ async def web_search_executor(params: dict[str, Any]) -> ToolResult:
         output = f"找到 {len(results)} 条结果:\n" + "\n\n".join(formatted)
         return ToolResult(success=True, output=output, duration=time.time() - start)
     except ImportError:
-        return ToolResult(success=True, output="网络搜索服务未配置，请设置搜索API Key", duration=time.time() - start)
+        return ToolResult(success=False, error="网络搜索服务未配置，请设置搜索API Key", duration=time.time() - start)
     except Exception as e:
         log.warning("network_tools 异常处理", error=str(e))
         return ToolResult(success=False, error=f"搜索失败: {e}")
