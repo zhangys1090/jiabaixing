@@ -629,7 +629,7 @@ async def ws_root(websocket: WebSocket):
                     "content": "任务已被用户取消",
                 })
             except Exception as e:
-                log.debug("main 异常处理", error=str(e))
+                log.error("ws_root stream 异常", error=str(e), exc_info=True)
                 humanized = _humanize_error(str(e))
                 await websocket.send_json({
                     "type": "error",
@@ -731,15 +731,16 @@ async def _stream_process(
                     return
                 yield {"type": "token", "content": content[i:i + 20]}
 
-        yield {
-            "type": "done",
-            "trace_id": result.get("trace_id", "") if not streaming_supported else "",
-            "quality_score": result.get("quality_score", 0.0),
-            "finish_reason": result.get("finish_reason", "stop"),
-        }
+        if not streaming_supported:
+            yield {
+                "type": "done",
+                "trace_id": result.get("trace_id", ""),
+                "quality_score": result.get("quality_score", 0.0),
+                "finish_reason": result.get("finish_reason", "stop"),
+            }
 
     except Exception as e:
-        log.debug("main 异常处理", error=str(e))
+        log.error("_stream_process 异常", error=str(e))
         yield {"type": "error", "content": str(e), "quality_score": 0.0, "finish_reason": "error"}
 
 

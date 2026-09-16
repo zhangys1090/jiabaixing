@@ -134,10 +134,16 @@ async function main() {
   }
 
   // 运行Prettier检查
-  if (stagedFiles.length > 0) {
+  // Run Prettier check only on prettier-parseable files;
+  // files without a parser (.png/.gitignore/install.sh) are skipped.
+  const prettierFiles = filterFiles(
+    stagedFiles,
+    '\.(md|json|ts|tsx|js|jsx|css|less|scss|yml|yaml|html|mdx)$'
+  );
+  if (prettierFiles.length > 0) {
     log.info('Running Prettier check...');
-    const prettierCmd = `npx prettier --check ${stagedFiles.join(' ')}`;
-    if (!runCommand(prettierCmd, { stdio: 'inherit', ignoreError: true })) {
+    const prettierCmd = `npx prettier --check ${prettierFiles.join(' ')}`;
+    if (!runCommand(prettierCmd, { stdio: 'inherit' })) {
       log.error('Prettier check failed');
       log.warn('Please run "npm run format" to format your code.');
       process.exit(1);
@@ -148,7 +154,7 @@ async function main() {
   // 运行TypeScript类型检查
   if (filteredBackendFiles.length > 0) {
     log.info('Running TypeScript check...');
-    if (!runCommand('npx tsc --noEmit', { stdio: 'inherit', ignoreError: true })) {
+    if (!runCommand('npx tsc --noEmit', { stdio: 'inherit' })) {
       log.error('TypeScript check failed');
       log.warn('Please fix the TypeScript errors before committing.');
       process.exit(1);

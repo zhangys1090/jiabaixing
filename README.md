@@ -82,7 +82,15 @@ LLM 负责推理与选工具，引擎与 Harness 负责权限、预算、验证�
 - 左侧会话管理、中间对话工作区、底部状态栏（模型 / 就绪 / 工具 / 记忆）
 - 就绪状态：当前配置模型 `deepseek-v4`，前端已连接本地后端
 
-**交互任务演示**：当前代码存在一个已知运行时缺陷，阻塞了"输入 → 工具执行 → 结果"完整链路的演示（详见 [已知问题](#已知问题)）。修复后我们会补上真实任务的 GIF / 录屏演示。
+**真实任务演示**（2026-09-16 本机实测，经 `POST /api/process` 网关 → WS → Python 引擎全链路）：
+
+| 任务 | 输入 | 结果（摘录） | 工具调用 |
+| --- | --- | --- | --- |
+| 自我介绍 | `你好` | 完整自我介绍 + 日程/待办实时查询 | calendar、task_manage |
+| 文件任务 | `列出 C:\zy\jiabaixing 目录下最近修改的 3 个文件` | 扫描 108,861 个文件，返回最近修改的 3 个文件及修改时间 | file_list、shell_exec、execute_code |
+| 记忆写入 | `记住：项目代号 jiabaixing，本周目标完成 P2 迁移；喜欢用中文交流` | 写入长期记忆，随后的新会话可召回 | memory_store、memory_recall |
+
+> 完整 GIF / 录屏演示待补（当前为真实响应文本记录）。
 
 ---
 
@@ -159,6 +167,7 @@ bash install.sh   # 一键：环境检查 → npm install → LLM 配置向导
 - 旧 README 的"874 tests"为过时数字，已按 2026-09-16 实跑结果改写。
 - 366 个失败用例分类（本机全量运行口径）：含需要运行环境/服务的 E2E 用例、空测试套件（条件跳过类）、以及少量真实代码问题（如 `src/evolution/StrategyAdapter` 模块缺失导致的相关用例）。逐项修复清单见仓库 Issue（待建）。
 - Python 侧 CI 以 `-m "e2e or boundary"` 与全量 `pytest -n auto` 分两档执行，覆盖率门禁见 `python/pyproject.toml`。
+- **2026-09-16 真实运行修复**（非测试数字，均以真实任务复现 + 修复 + 复验）：WS 流式收尾 `result` 未绑定、权限校验 `'str' object has no attribute 'value'`、记忆工具 `Logger._log() got an unexpected keyword argument 'error'`、`/health` uptime 负值；并清理记忆库中 6 条 golden 评估测试残留。修复后 T1 聊天 / T2 文件任务 / T3 记忆写入经网关真实打通。
 
 ---
 
@@ -169,7 +178,7 @@ bash install.sh   # 一键：环境检查 → npm install → LLM 配置向导
 | 位置 | 版本表述 |
 | --- | --- |
 | `package.json` | 5.0.0 |
-| `python/pyproject.toml` | 0.1.0 |
+| `python/pyproject.toml` | 5.0.0（2026-09-16 已对齐） |
 | 开发文档（PROJECT.md 等） | V6.1 |
 | Web 界面欢迎页 / 状态栏 | V5.0 / v5.0.0 |
 
@@ -213,11 +222,11 @@ Current → Local Agent → Tools / Memory / Verification → More real-world ta
 
 真实待办（不含宏大的 AGI 宣言）：
 
-- [ ] 修复"已知问题"中的交互任务链路缺陷（`cross_session_memory`）
-- [ ] 统一版本号（package.json / pyproject / 文档 / UI）
+- [x] 修复"已知问题"中的交互任务链路缺陷（`cross_session_memory`、WS 流式收尾、权限校验、记忆工具日志、uptime）——2026-09-16 真实任务验证通过
+- [ ] 统一版本号（文档 V6.1 / UI V5.0 与 package.json 5.0.0 的显示对齐）
 - [ ] 修复 jest 366 个失败用例并收敛为绿色门禁
 - [ ] 发布桌面端 Release 安装包（Windows NSIS / macOS dmg / Linux AppImage）
-- [ ] 补齐真实任务 Demo（GIF / 录屏）
+- [ ] 补齐真实任务 Demo 的 GIF / 录屏版本
 - [ ] 文档站与真实部署入口
 
 ---
@@ -236,17 +245,22 @@ Current → Local Agent → Tools / Memory / Verification → More real-world ta
 
 | 问题 | 影响 | 状态 |
 | --- | --- | --- |
-| `AgentEngine has no attribute 'cross_session_memory'` | `/api/process` 交互任务每次请求报错（引擎 v2 初始化未注册跨会话记忆，v1 路径有） | 已复现并定位（2026-09-16），修复待办 |
-| 版本号分裂 | package.json 5.0.0 / python 0.1.0 / 开发文档 6.1 / UI V5.0 | 待统一 |
+| ~~`AgentEngine has no attribute 'cross_session_memory'`~~ | ~~`/api/process` 交互任务报错~~ | ✅ 已修复（2026-09-16，engine 预置 + 子系统注册） |
+| ~~WS 流式收尾 `result` 未绑定~~ | ~~网关 WS 流式在工具执行后报 `UnboundLocalError`~~ | ✅ 已修复（`_stream_process` 收尾条件化 + 流式路径补标准 done 事件） |
+| ~~权限校验 `'str' object has no attribute 'value'`~~ | ~~shell_exec 等执行类工具全部 permission_denied~~ | ✅ 已修复（`PermissionGuard.check` 规范化 risk_level 入参） |
+| ~~记忆工具 `Logger._log() got an unexpected keyword argument 'error'`~~ | ~~memory_store 全部失败~~ | ✅ 已修复（memory_tools 5 处标准 Logger 误用 `error=` kwargs） |
+| ~~`/health` uptime 负值~~ | ~~`monotonic() - epoch` 口径错误~~ | ✅ 已修复（改为 `time.time()`） |
+| 记忆库存在历史测试残留 | 早期评估/调试数据（如 golden 用例、`hello`/`test` 对话）混入用户记忆库，检索可能被干扰 | 已清理 6 条 golden 残留（2026-09-16），其余 300+ 条历史数据待用户确认后治理 |
+| 版本号显示分裂 | 文档 V6.1 / UI V5.0 / 代码 5.0.0 | 代码侧已对齐 5.0.0，文档与 UI 显示待统一 |
 | jest 366 个失败用例 | 含环境依赖 E2E、空套件与少量真实缺陷（如 `StrategyAdapter` 缺失） | 分类修复中，清单待建 Issue |
 
-复现交互缺陷：
+真实验收（修复后）：
 
 ```bash
 curl -X POST http://localhost:3111/api/process \
   -H "Content-Type: application/json" \
   -d '{"input":"你好"}'
-# → {"success":true,"data":{"response":"处理请求时遇到问题: AgentEngine has no attribute 'cross_session_memory'"}}
+# → {"success":true,"data":{"response":"你好呀！我是**家百星（Jiabaixing）**...","finishReason":"stop",...}}
 ```
 
 ---

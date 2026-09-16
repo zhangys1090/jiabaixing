@@ -133,6 +133,9 @@ SUBSYSTEM_DEPS: list[SubsystemSpec] = [
     # ── 数据层 ──
     SubsystemSpec("trajectory_db", "_init_trajectory_db", critical=False),
     SubsystemSpec("memory", "_init_memory", ("llm",), critical=False),
+    # 跨会话记忆 + 主动行为引擎（2026-09-16 修复：v2 路径此前缺失该子系统，
+    # 导致 process_input 访问 engine.cross_session_memory 必崩）
+    SubsystemSpec("cross_session_memory", "_init_cross_session_memory", ("memory",), critical=False),
     # ── 工具层 (并行) ──
     SubsystemSpec("extension_catalog", "_init_extension_catalog", critical=False),
     SubsystemSpec("tool_registry", "_init_tool_registry", critical=False),

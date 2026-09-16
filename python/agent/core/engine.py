@@ -207,6 +207,26 @@ class AgentEngine:
         # 当 _init_multi_agent_orchestrator 因 self.loop 未就绪而跳过赋值时，
         # 主对话路径读取 self._multi_agent_orchestrator 会崩溃。
         self._multi_agent_orchestrator: Any = None
+        # 跨会话记忆 / 主动行为引擎（可选子系统，由 v2 依赖图 _init_cross_session_memory
+        # 初始化；预置为 None 使 process_input / process_input_stream 的
+        # "if self.cross_session_memory is not None" 守卫在初始化前不抛 AttributeError）
+        self.cross_session_memory: Any = None
+        self.proactive_engine: Any = None
+        # A3 行为边界监控 / R2 场景→工具集映射（v2 依赖图可选子系统）。
+        # 预置为 None，避免 process_input / _process_with_conversation 的
+        # "if self._xxx is not None" 守卫在未初始化时触发 __getattr__ 抛 AttributeError。
+        self._behavior_monitor: Any = None
+        self._toolset_mapper: Any = None
+        # 其余 v1 initialize() 私有属性（v2 依赖图不创建，统一预置避免 __getattr__ 崩溃）：
+        # 懒加载守卫（is None → 构建）或可选能力（is not None → 启用）均安全降级。
+        self._cross_device: Any = None
+        self._evolution_orchestrator: Any = None
+        self._operation_self_repair: Any = None
+        self._reflection_kb: Any = None
+        self._screen_semantics: Any = None
+        self._semantic_selector: Any = None
+        self._tool_selection_memory: Any = None
+        self._visual_memory: Any = None
 
     _ENGINE_OWN_ATTRS: frozenset[str] = frozenset({
         "a2a_remote_endpoints",
@@ -214,6 +234,11 @@ class AgentEngine:
         "_registry", "_degraded_subsystems", "_degraded_reasons",
         "_domain_proxy_enabled", "_loop_strategies", "_counter_lock",
         "_multi_agent_orchestrator",
+        "cross_session_memory", "proactive_engine",
+        "_behavior_monitor", "_toolset_mapper",
+        "_cross_device", "_evolution_orchestrator", "_operation_self_repair",
+        "_reflection_kb", "_screen_semantics", "_semantic_selector",
+        "_tool_selection_memory", "_visual_memory",
     })
 
     def __getattr__(self, name: str) -> Any:
@@ -1663,9 +1688,14 @@ class AgentEngine:
 
             # R1: 动态预算 — 根据任务复杂度调整 max_tool_rounds
             # D2: 复杂度同时联动推理深度
+            # 修复（2026-09-16）：_complexity 默认值前置，避免 conversation 为 None 时
+            # 下方 R5 委托判断引用未绑定变量而 UnboundLocalError。
+            _complexity = "moderate"
             if self.conversation is not None:
                 try:
-                    _complexity = self._assess_input_complexity(message)
+                    _assessed = self._assess_input_complexity(message)
+                    if _assessed:
+                        _complexity = _assessed
                     _budget_map = {"simple": 4, "moderate": 8, "complex": 14, "very_complex": 20}
                     _dynamic_rounds = _budget_map.get(_complexity, 10)
                     self.conversation.set_max_tool_rounds(_dynamic_rounds)
@@ -3419,6 +3449,8 @@ class AgentEngine:
         # 用于累积完整响应内容，以便最终持久化
         response_buffer: list[str] = []
         _stream_quality_score: float = 0.7
+        _stream_rounds_used: int = 0
+        _stream_duration: float = 0.0
 
         # 4. 委托给 ConversationLoop.run_stream
         if self.conversation:
@@ -3454,6 +3486,11 @@ class AgentEngine:
                         _qs = event.get("quality_score")
                         if isinstance(_qs, (int, float)) and _qs > 0:
                             _stream_quality_score = float(_qs)
+                    # 流式收尾统计：从 stream_done 事件提取轮次/耗时
+                    if event.get("type") == "stream_done":
+                        _sd_meta = event.get("metadata", {}) or {}
+                        _stream_rounds_used = _sd_meta.get("total_rounds", 0) or event.get("rounds_used", 0)
+                        _stream_duration = event.get("duration", 0.0) or _sd_meta.get("duration_ms", 0) / 1000.0
 
                     # 透传事件
                     yield event
@@ -3570,6 +3607,16 @@ class AgentEngine:
                     except Exception as _e3_exc:
                         log_ignored(log, "engine.AgentEngine.process_input_stream.E3", _e3_exc)
 
+                yield {
+                    "type": "done",
+                    "trace_id": "",
+                    "session_id": session_id,
+                    "content": "".join(response_buffer).strip(),
+                    "quality_score": _stream_quality_score,
+                    "rounds_used": _stream_rounds_used,
+                    "duration": _stream_duration,
+                    "finish_reason": "stop",
+                }
                 return
             except _asyncio.CancelledError:
                 if self.session_store:
@@ -3583,7 +3630,7 @@ class AgentEngine:
                 yield {"type": "done", "trace_id": "", "content": "任务已取消", "quality_score": 0.0, "finish_reason": "cancelled"}
                 return
             except Exception as e:
-                log.error("Stream loop failed, fallback to raw LLM", error=str(e))
+                log.error("Stream loop failed, fallback to raw LLM", error=str(e), exc_info=True)
                 # 继续走下面的降级路径
 
         # 6. 降级：ConversationLoop 不可用时，使用裸 LLM 流式
@@ -3638,6 +3685,7 @@ class AgentEngine:
             yield {"type": "done", "trace_id": "", "content": "任务已取消", "quality_score": 0.0, "finish_reason": "cancelled"}
             return
         except Exception as e:
+            log.error("Stream fallback failed", error=str(e), exc_info=True)
             yield {"type": "error", "content": str(e)}
 
         # 降级路径也做安全检查 + 持久化会话历史
@@ -3756,6 +3804,46 @@ class AgentEngine:
             return self.memory
         except Exception as e:
             log.warning("Memory Engine init failed", error=str(e))
+            return None
+
+    async def _init_cross_session_memory(self) -> Any | None:
+        """初始化跨会话记忆与主动行为引擎（v1 路径能力的 v2 子系统化补齐）。
+
+        背景：v1 initialize() 在 Phase 4 手动创建 CrossSessionMemory + ProactiveEngine；
+        v2 依赖图路径此前未注册该子系统，导致 process_input / process_input_stream
+        访问 self.cross_session_memory 时 __getattr__ 抛 AttributeError（每次交互请求必崩）。
+        此处以子系统形式补齐，行为与 v1 一致：初始化失败仅降级为 None，不阻断启动。
+
+        Returns:
+            跨会话记忆实例；失败时为 None。
+        """
+        try:
+            from agent.memory.cross_session import CrossSessionMemory, ProactiveEngine
+
+            self.cross_session_memory = CrossSessionMemory()
+            perception_bus = None
+            try:
+                from agent.perception.bus import PerceptionBus, PerceptionLevel
+
+                perception_bus = PerceptionBus(
+                    tool_registry=self.tool_registry,
+                    llm=self.llm,
+                    level=PerceptionLevel(os.environ.get("PERCEPTION_LEVEL", "standard")),
+                )
+                log.debug("PerceptionBus ready (cross-session)")
+            except Exception as _e:
+                log.warning("PerceptionBus init failed", error=str(_e))
+
+            self.proactive_engine = ProactiveEngine(
+                memory=self.cross_session_memory,
+                perception_bus=perception_bus,
+            )
+            log.debug("Cross-session Memory + Proactive Engine ready")
+            return self.cross_session_memory
+        except Exception as _e:
+            log.warning("Cross-session Memory init failed", error=str(_e))
+            self.cross_session_memory = None
+            self.proactive_engine = None
             return None
 
     async def _init_trajectory_db(self) -> TrajectoryDatabase | None:

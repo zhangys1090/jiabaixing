@@ -186,6 +186,14 @@ class PermissionGuard:
         session_id = context.session_id or "default"
         trace_id = context.trace_id or "unknown"
 
+        # 兼容 str/枚举两种风险等级入参：工具定义解析出来的是字符串，
+        # 而 RISK_ORDER / risk_level.value 需要枚举。统一在此规范化。
+        if isinstance(risk_level, str):
+            try:
+                risk_level = RiskLevel(risk_level)
+            except ValueError:
+                risk_level = RiskLevel.LOW
+
         stats = self._get_or_create_stats(session_id)
         limits = self._get_or_create_limits(session_id)
 

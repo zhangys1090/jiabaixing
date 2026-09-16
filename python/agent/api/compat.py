@@ -103,7 +103,7 @@ async def health():
     import sys
     import time as _time
     eng = _get_engine()
-    uptime = (_time.monotonic() - eng._start_time) if eng and eng._start_time else 0.0
+    uptime = (_time.time() - eng._start_time) if eng and eng._start_time else 0.0
     llm_available = await eng.llm.check_available() if eng else False
     ts_healthy = False
     try:
