@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import difflib
+import logging
 import os
 import shutil
 import subprocess
@@ -190,15 +191,23 @@ def _resolve_path(raw_path: str) -> Path:
         raise ValueError(f"路径包含非法遍历字符: {raw_path}")
     p = Path(raw_path).expanduser()
     if not p.is_absolute():
-        project_root = Path(os.environ.get("PROJECT_ROOT", Path(__file__).resolve().parent.parent.parent))
+        project_root = Path(
+            os.environ.get(
+                "PROJECT_ROOT",
+                # 布局: repo/python/agent/tools/file_tools.py → 向上 4 层为 repo 根
+                Path(__file__).resolve().parent.parent.parent.parent,
+            )
+        )
         python_root = project_root / "python"
-        cwd = Path(os.getcwd()).parent.parent
-        cwd_project = cwd if cwd != python_root else project_root
-        for base in [cwd_project, project_root, python_root, Path(os.getcwd())]:
+        cwd = Path(os.getcwd()).resolve()
+        bases = [cwd, project_root, python_root]
+        if cwd != project_root and cwd != python_root:
+            bases.append(cwd.parent)  # cwd 位于子目录时尝试上一级
+        for base in dict.fromkeys(bases):
             candidate = base / p
             if candidate.exists():
                 return candidate.resolve()
-        p = Path(os.getcwd()) / p
+        p = cwd / p
     return p.resolve()
 
 

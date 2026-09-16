@@ -75,6 +75,10 @@ class ToolCallGuard:
     _CACHE_TTL_MS = 5 * 60 * 1000
     _MAX_HISTORY = 20
     _MAX_SAME_TOOL = 2
+    # 执行类工具（shell/代码执行）在多步真实任务中同一轮内常需多次调用，
+    # 上限放宽，避免"统计文件大小"这类任务被限流打断。
+    _MAX_SAME_TOOL_EXEC = 5
+    _EXEC_TOOLS = {"shell_exec", "execute_code", "run_python", "bash_exec", "code_exec", "web_search", "web_fetch", "web_browse", "browser_navigate", "browser_get_text"}
     _DEDUP_WINDOW_MS = 30_000
 
     def __init__(self) -> None:
@@ -170,9 +174,10 @@ class ToolCallGuard:
                     reason=f"{age_sec}秒前已调用相同参数",
                 )
 
+        max_same = self._MAX_SAME_TOOL_EXEC if tool_name in self._EXEC_TOOLS else self._MAX_SAME_TOOL
         tool_count = self._per_tool_counts.get(tool_name, 0)
-        if tool_count >= self._MAX_SAME_TOOL:
-            log.warning("工具速率限制", tool=tool_name, count=tool_count, max=self._MAX_SAME_TOOL)
+        if tool_count >= max_same:
+            log.warning("工具速率限制", tool=tool_name, count=tool_count, max=max_same)
             return GuardResult(
                 blocked=True,
                 result={
@@ -182,7 +187,7 @@ class ToolCallGuard:
                     "validated": True,
                     "metadata": {"rateLimited": True},
                 },
-                reason=f"已调用 {tool_count} 次，超过上限 {self._MAX_SAME_TOOL}",
+                reason=f"已调用 {tool_count} 次，超过上限 {max_same}",
             )
 
         return GuardResult(blocked=False)
