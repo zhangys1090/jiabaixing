@@ -121,7 +121,7 @@ tmp/
 .f1_verify/
 .p1out/
 .p1verify/
-.husky/
+.husky/_
 
 # Audit artifacts (dev process files, not source)
 _audit*.json
