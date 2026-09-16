@@ -117,10 +117,13 @@ cd ..
 Copy-Item .env.example .env   # 填入 API Key；或运行交互式向导
 npm run setup
 
-# 4. 启动
-npm run start            # 后端(:3111) + 前端开发服务器
-# 或仅后端（前端使用已构建的静态页面）
-npm run start:backend    # 访问 http://localhost:3111
+# 4. 启动（后端 :3111，已验证路径，前端使用已构建的静态页面）
+npm run start:backend
+# 访问 http://localhost:3111
+
+# 或完整开发模式（前端热更新，需先安装 src/frontend 依赖）
+# cd src/frontend && npm install && cd ..
+# npm run start
 ```
 
 ### Linux / WSL
