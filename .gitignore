@@ -150,3 +150,23 @@ server-*.log
 frontend_*.log
 frontend-*.log
 windows-startup*.log
+
+# ─── 2026-09-16 包装清理：已入库的调试/运行期产物（git rm --cached 后生效）───
+*.rdb
+process.env*
+/_tsc_out/
+FINAL_REALITY_ACCEPTANCE_TRACE/
+FINAL_REALITY_ACCEPTANCE_REPORT.json
+D7-0_*.md
+E2_AUTHORITY_CLOSURE_AUDIT.md
+E3_PRODUCTION_AUTHORITY_PROOF.md
+jiabaixing-task.xml
+e2e_screenshot_*.png
+d84_*.txt
+tmp_*.js
+tmp_*.txt
+test_edr_*.js
+test_regex_*.js
+test_t09_dap.js
+tests/test-output/
+src/frontend/.env.development

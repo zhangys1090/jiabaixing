@@ -2,8 +2,9 @@
 # Jiabaixing V5.0 — 一键安装脚本
 # ====================================
 # 用法:
-#   curl -fsSL https://jiabaixing.ai/install.sh | bash
-#   或: bash install.sh
+#   bash install.sh
+#   （远程一键安装可先下载脚本:
+#    curl -fsSL https://raw.githubusercontent.com/zhangys1090/jiabaixing/main/install.sh | bash）
 #
 # 自动完成: 检查依赖 → 安装 → npm install → 配置向导 → 验证启动
 
