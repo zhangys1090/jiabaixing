@@ -112,7 +112,11 @@ function setupRoutes(broadcast: (data: Record<string, unknown>) => void): void {
         }
         return envOrigin
           ? envOrigin.split(',').map((s) => s.trim())
-          : ['http://localhost:3100'];
+          : [
+              'http://localhost:3100',
+              'http://localhost:3111',
+              'http://127.0.0.1:3111',
+            ];
       })(),
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
