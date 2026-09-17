@@ -675,21 +675,35 @@ export async function bootstrap(): Promise<JiabaixingCore> {
         // E3-1: Register Python bridge with MemoryAuthority so that
         // MemoryAuthority.write/read route through canonical Python owner.
         try {
-          const { MemoryAuthority } = await import('../authority/MemoryAuthority');
+          const { MemoryAuthority } =
+            await import('../authority/MemoryAuthority');
           const memoryAuth = MemoryAuthority.getInstance();
           memoryAuth.registerBridge(
             async (req) => {
               const bridge = getActivePythonBridge();
               if (!bridge) {
-                return { success: false, memoryId: '', operationId: '', source: 'failed_closed' as const };
+                return {
+                  success: false,
+                  memoryId: '',
+                  operationId: '',
+                  source: 'failed_closed' as const,
+                };
               }
               let memoryId = '';
               switch (req.memoryType) {
                 case 'short_term':
-                  memoryId = await bridge.memoryStoreShortTerm(req.content, req.scene, req.emotion);
+                  memoryId = await bridge.memoryStoreShortTerm(
+                    req.content,
+                    req.scene,
+                    req.emotion
+                  );
                   break;
                 case 'long_term':
-                  memoryId = await bridge.memoryStoreLongTerm(req.content, req.scene, req.emotion);
+                  memoryId = await bridge.memoryStoreLongTerm(
+                    req.content,
+                    req.scene,
+                    req.emotion
+                  );
                   break;
                 case 'episodic':
                   memoryId = await bridge.memoryStoreEpisodic(req.content, {
@@ -700,21 +714,41 @@ export async function bootstrap(): Promise<JiabaixingCore> {
                 case 'feedback':
                   await bridge.memoryStoreFeedback({
                     feedbackType: 'success',
-                    message: typeof req.content === 'string' ? req.content : JSON.stringify(req.content),
-                    toolName: req.metadata?.category as string ?? 'general',
+                    message:
+                      typeof req.content === 'string'
+                        ? req.content
+                        : JSON.stringify(req.content),
+                    toolName: (req.metadata?.category as string) ?? 'general',
                   });
                   break;
                 default:
-                  memoryId = await bridge.memoryStoreShortTerm(req.content, req.scene, req.emotion);
+                  memoryId = await bridge.memoryStoreShortTerm(
+                    req.content,
+                    req.scene,
+                    req.emotion
+                  );
               }
-              return { success: true, memoryId, operationId: '', source: 'python' as const };
+              return {
+                success: true,
+                memoryId,
+                operationId: '',
+                source: 'python' as const,
+              };
             },
             async (req) => {
               const bridge = getActivePythonBridge();
               if (!bridge) {
-                return { items: [], operationId: '', source: 'failed_closed' as const };
+                return {
+                  items: [],
+                  operationId: '',
+                  source: 'failed_closed' as const,
+                };
               }
-              const results = await bridge.memoryRetrieveContext(req.query, undefined, req.limit ?? 10);
+              const results = await bridge.memoryRetrieveContext(
+                req.query,
+                undefined,
+                req.limit ?? 10
+              );
               return {
                 items: results.map((r: any) => ({
                   id: r.id,
@@ -728,9 +762,15 @@ export async function bootstrap(): Promise<JiabaixingCore> {
               };
             }
           );
-          Logger.info('E3-1: MemoryAuthority Python bridge registered from bootstrap', 'Bootstrap');
+          Logger.info(
+            'E3-1: MemoryAuthority Python bridge registered from bootstrap',
+            'Bootstrap'
+          );
         } catch (bridgeRegErr) {
-          Logger.warn(`E3-1: MemoryAuthority bridge registration failed — ${(bridgeRegErr as Error).message}`, 'Bootstrap');
+          Logger.warn(
+            `E3-1: MemoryAuthority bridge registration failed — ${(bridgeRegErr as Error).message}`,
+            'Bootstrap'
+          );
         }
 
         bootOk(`Python Agent 桥接成功: ${getPythonAgentUrl()}`);
@@ -796,6 +836,105 @@ export async function bootstrap(): Promise<JiabaixingCore> {
       );
     } else {
       process.stdout.write('SKIP (Python主实现)\n');
+    }
+
+    // StateAuthority providers 通用注册（不依赖 TS Harness 是否启用）：
+    // Python 主实现模式下 initHarness 被跳过，此前 DecisionGuard.captureSnapshot
+    // 每次请求都返回 minimal snapshot（3111 日志警告）。这里在网关初始化前统一
+    // 注册真实读取器；TS 兜底模式下 harness 工具注册表同样可用。
+    {
+      const { StateAuthority } = await import('../authority/StateAuthority');
+      const stateAuthority = StateAuthority.getInstance();
+      try {
+        stateAuthority.registerProviders({
+          readWorldState: async () => {
+            const bridge = getActivePythonBridge();
+            return {
+              observation: bridge
+                ? { pythonBridge: 'connected', mode: 'python-main' }
+                : { pythonBridge: 'disconnected' },
+              platform: 'server' as const,
+              timestamp: Date.now(),
+            };
+          },
+          readMemory: async (query: string) => {
+            try {
+              const me = core.getMemoryEngine();
+              const retrieve = (
+                me as unknown as {
+                  retrieveRelevant?: (p: {
+                    query: string;
+                    limit?: number;
+                  }) => Promise<unknown[]>;
+                }
+              )?.retrieveRelevant;
+              if (typeof retrieve === 'function') {
+                const results = await retrieve.call(me, { query, limit: 5 });
+                return {
+                  relevantMemories: results,
+                  query,
+                  timestamp: Date.now(),
+                };
+              }
+            } catch (e) {
+              Logger.warn(
+                `StateAuthority: memory read failed — ${(e as Error).message}`,
+                'Bootstrap'
+              );
+            }
+            return { relevantMemories: [], query, timestamp: Date.now() };
+          },
+          readContext: async (activeGoalIds: string[]) => {
+            let conversationHistory: unknown[] = [];
+            try {
+              const chm = core.getConversationHistoryManager?.();
+              conversationHistory =
+                (
+                  chm as unknown as { getHistory?: () => unknown[] }
+                )?.getHistory?.() ?? [];
+            } catch (e) {
+              Logger.warn(
+                `StateAuthority: context read failed — ${(e as Error).message}`,
+                'Bootstrap'
+              );
+            }
+            return {
+              systemPrompt: '',
+              conversationHistory,
+              fileContexts: [],
+              personaSummary: '',
+              timestamp: Date.now(),
+            };
+          },
+          readCapabilities: async () => {
+            const bridge = getActivePythonBridge();
+            let availableTools: string[] = [];
+            try {
+              const reg = harness?.getToolRegistry?.();
+              availableTools = reg ? reg.getRegisteredToolNames() : [];
+            } catch {
+              availableTools = [];
+            }
+            return {
+              availableTools,
+              availableSkills: [],
+              desktopAvailable: false,
+              bridgeAvailable: !!bridge,
+            };
+          },
+          getAgentId: () => 'jiabaixing',
+          getSafetyStatus: () => 'nominal' as const,
+        });
+        Logger.info(
+          '🏛️ StateAuthority: read providers registered (通用路径)',
+          'Bootstrap'
+        );
+      } catch (err) {
+        Logger.warn(
+          `StateAuthority: providers 注册失败 — ${(err as Error).message}`,
+          'Bootstrap'
+        );
+      }
     }
 
     bootStep('网关隔离');

@@ -170,7 +170,11 @@ export async function initHarness(
                 emotion?: string
               ) => {
                 const memGuard = MemoryAuthorityGuard.getInstance();
-                await memGuard.writeShortTerm(content, scene || '', emotion || 'neutral');
+                await memGuard.writeShortTerm(
+                  content,
+                  scene || '',
+                  emotion || 'neutral'
+                );
               },
               storeLongTermMemory: async (
                 content: string,
@@ -178,7 +182,11 @@ export async function initHarness(
                 emotion?: string
               ) => {
                 const memGuard = MemoryAuthorityGuard.getInstance();
-                await memGuard.writeLongTerm(content, scene || '', emotion || 'neutral');
+                await memGuard.writeLongTerm(
+                  content,
+                  scene || '',
+                  emotion || 'neutral'
+                );
               },
               storeInstantMemory: async (
                 content: string,
@@ -186,7 +194,11 @@ export async function initHarness(
                 emotion?: string
               ) => {
                 const memGuard = MemoryAuthorityGuard.getInstance();
-                await memGuard.writeInstant(content, scene || '', emotion || 'neutral');
+                await memGuard.writeInstant(
+                  content,
+                  scene || '',
+                  emotion || 'neutral'
+                );
               },
               preciseHybridRetrieval: async (
                 query: string,
@@ -864,7 +876,11 @@ export async function initHarness(
           },
           saveTask: async (task) => {
             const memGuard = MemoryAuthorityGuard.getInstance();
-            await memGuard.writeShortTerm(JSON.stringify(task), 'task', 'neutral');
+            await memGuard.writeShortTerm(
+              JSON.stringify(task),
+              'task',
+              'neutral'
+            );
           },
           deleteTask: async (taskId: string) => {
             const memGuard = MemoryAuthorityGuard.getInstance();
@@ -884,7 +900,11 @@ export async function initHarness(
           getEvents: async () => [],
           saveEvent: async (event) => {
             const memGuard = MemoryAuthorityGuard.getInstance();
-            await memGuard.writeShortTerm(JSON.stringify(event), 'calendar', 'neutral');
+            await memGuard.writeShortTerm(
+              JSON.stringify(event),
+              'calendar',
+              'neutral'
+            );
           },
           deleteEvent: async (eventId: string) => {
             const memGuard = MemoryAuthorityGuard.getInstance();
@@ -904,7 +924,11 @@ export async function initHarness(
           getReminders: async () => [],
           saveReminder: async (reminder) => {
             const memGuard = MemoryAuthorityGuard.getInstance();
-            await memGuard.writeShortTerm(JSON.stringify(reminder), 'reminder', 'neutral');
+            await memGuard.writeShortTerm(
+              JSON.stringify(reminder),
+              'reminder',
+              'neutral'
+            );
           },
           deleteReminder: async (reminderId: string) => {
             const memGuard = MemoryAuthorityGuard.getInstance();
@@ -965,7 +989,11 @@ export async function initHarness(
           },
           saveNote: async (note) => {
             const memGuard = MemoryAuthorityGuard.getInstance();
-            await memGuard.writeShortTerm(JSON.stringify(note), 'note', 'neutral');
+            await memGuard.writeShortTerm(
+              JSON.stringify(note),
+              'note',
+              'neutral'
+            );
           },
           deleteNote: async (noteId: string) => {
             const memGuard = MemoryAuthorityGuard.getInstance();
@@ -1092,7 +1120,11 @@ export async function initHarness(
           },
           saveSkill: async (skill) => {
             const memGuard = MemoryAuthorityGuard.getInstance();
-            await memGuard.writeShortTerm(JSON.stringify(skill), 'skill', 'neutral');
+            await memGuard.writeShortTerm(
+              JSON.stringify(skill),
+              'skill',
+              'neutral'
+            );
           },
           deleteSkill: async (skillName: string) => {
             const memGuard = MemoryAuthorityGuard.getInstance();
@@ -1340,46 +1372,6 @@ export async function initHarness(
     }
 
     core.setHarness(harness);
-
-    const { StateAuthority } = await import('../../authority/StateAuthority');
-    const stateAuthority = StateAuthority.getInstance();
-    stateAuthority.registerProviders({
-      readWorldState: async () => {
-        return { observation: null, platform: 'server' as const, timestamp: Date.now() };
-      },
-      readMemory: async (query: string) => {
-        const me = core.getMemoryEngine();
-        if (me?.retrieveRelevant) {
-          const results = await me.retrieveRelevant({ query, limit: 5 });
-          return { relevantMemories: results, query, timestamp: Date.now() };
-        }
-        return { relevantMemories: [], query, timestamp: Date.now() };
-      },
-      readContext: async (activeGoalIds: string[]) => {
-        const chm = core.getConversationHistoryManager?.();
-        const conversationHistory = chm ? (chm as unknown as { getHistory?: () => unknown[] }).getHistory?.() ?? [] : [];
-        return {
-          systemPrompt: '',
-          conversationHistory,
-          fileContexts: [],
-          personaSummary: '',
-          activeGoalIds,
-          timestamp: Date.now(),
-        };
-      },
-      readCapabilities: async () => {
-        const reg = harness?.getToolRegistry?.();
-        return {
-          availableTools: reg ? reg.getRegisteredToolNames() : [],
-          availableSkills: [],
-          desktopAvailable: false,
-          bridgeAvailable: !!getActivePythonBridge(),
-        };
-      },
-      getAgentId: () => 'jiabaixing',
-      getSafetyStatus: () => 'nominal' as const,
-    });
-    Logger.info('🏛️ StateAuthority: read providers registered', 'Bootstrap');
 
     // P0-6: 注入 AgentFactory 全局执行函数，使专业化 Agent 可执行
     AgentFactory.injectExecuteFn(
