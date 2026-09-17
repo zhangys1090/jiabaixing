@@ -154,8 +154,16 @@ class GoalAuthority:
             goal.metadata["abandonmentReason"] = reason
         return goal
 
-    def replan(self, goalId: str, reason: str) -> Goal:
+    def replan(
+        self,
+        goalId: str,
+        reason: str,
+        expectedVersion: int | None = None,
+    ) -> Goal:
         goal = self._get_goal_or_throw(goalId)
+        # 并发安全：若调用方给出期望版本且已被并发 replan 越过，拒绝重复递增。
+        if expectedVersion is not None and goal.planVersion != expectedVersion:
+            return goal
         goal.planVersion += 1
         goal.updatedAt = time.time()
         goal.metadata[f"replanReason_v{goal.planVersion}"] = reason

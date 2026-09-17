@@ -40,11 +40,26 @@ from agent.tools.registry import ToolRegistry
 # LLM tool_calls 必须经 DecisionAuthority 做 FINAL 决策才能执行。
 from agent.core.goal_authority import GoalAuthority
 from agent.core.state_authority import StateAuthority
-from agent.core.decision_authority import DecisionAuthority, LLMProposer
-from agent.core.authority_types import DecisionContext
+from agent.core.decision_authority import (
+    DecisionAuthority,
+    LLMProposer,
+    RecoveryProposer,
+    SkillProposer,
+)
+from agent.core.authority_types import (
+    CapabilitySet,
+    ContextView,
+    DecisionContext,
+    MemoryView,
+    WorldView,
+)
 
 # D2 (P2 第4轮回灌): 会话级认知信号(情绪/反思)注入 ReAct 循环 LLM 上下文
 from agent.core.cognition_buffer import inject_cognition_into_messages
+
+# 回合链路摘要：把一轮对话的完整执行链落成可分析的结构化记录，
+# 供 scripts/analyze_failure_corpus.py 产出失败地图（M0–M15）。
+from agent.core.trace_digest import TraceDigest
 
 try:
     from agent.harness.trace_log import TraceLog, TraceEventType
@@ -56,7 +71,230 @@ except ImportError:
 log = StructuredLogger("conversation_loop")
 
 
+class _LoopStateProviders:
+    """ML4 fix: 生产路径真实状态读取器 — 快照不再空壳。
+
+    此前 StateAuthority.registerProviders() 在生产路径零调用，captureSnapshot
+    在无 providers 时返回 world/context/capabilities 全空的 minimal snapshot，
+    Decision 基于空状态裁决（日志实锤 "no read providers registered"）。
+
+    本类把主循环**已经在采集**的真实信息接进快照：
+        - world: 最近工具执行结果（真实环境反馈）
+        - context: 工作目录（文件系统上下文）
+        - capabilities: 已注册工具名列表（能力面）
+        - memory: 复用 set_memory_engine 注入的 _read_memory（与
+          registerMemoryProvider 同一检索链，全量模式不丢记忆）
+
+    纯读取：不写入任何状态、不做决策（StateReadProviders 协议约束）。
+    """
+
+    def __init__(self, loop: Any) -> None:
+        self._loop = loop
+
+    def getAgentId(self) -> str:
+        return "python-agent"
+
+    def getSafetyStatus(self) -> str:
+        return "nominal"
+
+    async def readWorldState(self) -> WorldView:
+        try:
+            recent: list[dict[str, Any]] = []
+            for tr in getattr(self._loop, "_last_tool_results", [])[-5:]:
+                recent.append({
+                    "tool": getattr(tr, "name", ""),
+                    "success": bool(getattr(tr, "success", False)),
+                    "output": (getattr(tr, "output", "") or "")[:120],
+                })
+            return WorldView(observation=recent or None, platform="desktop")
+        except Exception:
+            return WorldView()
+
+    async def readMemory(self, query: str) -> MemoryView:
+        try:
+            rm = getattr(self._loop, "_read_memory", None)
+            if rm is not None:
+                return await rm(query)
+        except Exception:
+            pass
+        return MemoryView(query=query)
+
+    async def readContext(self, goalIds: list[str]) -> ContextView:
+        try:
+            from pathlib import Path
+            cwd = str(Path.cwd())
+            return ContextView(systemPrompt="", fileContexts=[cwd])
+        except Exception:
+            return ContextView()
+
+    async def readCapabilities(self) -> CapabilitySet:
+        try:
+            reg = getattr(self._loop, "_tool_registry", None)
+            names: list[str] = []
+            if reg is not None:
+                try:
+                    if hasattr(reg, "filter_tools"):
+                        names = [
+                            getattr(d, "name", "")
+                            for d in (reg.filter_tools(None) or [])
+                            if getattr(d, "name", "")
+                        ]
+                    elif hasattr(reg, "get_all_tools"):
+                        names = list(reg.get_all_tools().keys())
+                except Exception:
+                    names = []
+            return CapabilitySet(
+                availableTools=names[:300],
+                desktopAvailable=True,
+                bridgeAvailable=True,
+            )
+        except Exception:
+            return CapabilitySet()
+
+
+
 _MAX_TOOL_RETRIES = 3
+
+#: 生产环境标识（与 engine.py:699 / main.py:232 的 ENV 约定保持一致）。
+_PRODUCTION_ENVS = frozenset({"production", "prod", "staging", "stage"})
+
+
+def is_production_env() -> bool:
+    """当前是否生产环境（读 ENV 环境变量，默认 development）。"""
+    return os.environ.get("ENV", "development").strip().lower() in _PRODUCTION_ENVS
+
+
+def enforce_authority_invariant(use_authority: bool) -> bool:
+    """Layer 1 不变量守卫：生产环境下禁止关闭 Authority 链。
+
+    Layer 1 不变量是"任何生产动作都必须携带 goalId + snapshotId + decisionId"。
+    若允许生产环境传 ``use_authority=False``，工具将**在没有任何 Authority 身份**
+    的情况下被执行 —— 这是一个静默旁路，且事后无法从审计链看出来。
+
+    因此 ``use_authority=False`` 被明确限定为 **LEGACY / TEST ONLY**：
+    仅测试、离线验证脚本与显式兼容接口可以使用。生产环境请求关闭即报错，
+    因为该开关**无法通过环境变量配置**，在生产变为 False 的唯一途径是代码改动
+    —— 这种改动必须在启动时就响亮地失败，而不是让服务带着旁路静默运行。
+
+    Args:
+        use_authority: 调用方请求的开关值。
+
+    Returns:
+        生效值。请求 True 时恒为 True。
+
+    Raises:
+        ValueError: 生产环境下请求 False 时。
+    """
+    if use_authority:
+        return True
+    if is_production_env():
+        raise ValueError(
+            "生产环境禁止 use_authority=False —— 该开关为 LEGACY/TEST ONLY。"
+            "它会产生'动作被执行但不带 goalId/snapshotId/decisionId'的静默旁路，"
+            "直接违反 Layer 1 不变量（任何生产动作必须经过 Authority）。"
+        )
+    log.warning(
+        "D4 Authority DISABLED — LEGACY/TEST ONLY 路径：动作将不带 Authority 身份",
+        env=os.environ.get("ENV", "development"),
+    )
+    return False
+
+
+def action_outcome_tokens(result: Any) -> tuple[str, str]:
+    """把一次工具执行归一化为 Evidence 的 (expectedEffect, actualEffect)。
+
+    为什么需要归一化:
+        LearningAuthority.compute_prediction_error() 的分类逻辑依赖
+        expected/actual 为 "success" / "failed" 这类语义标记
+        （见 learning_authority.py:146-160）。此前主循环把工具原始输出
+        截断后塞进 actualEffect，导致既非 "success" 也非 "failed"，
+        分类永远落到词重叠兜底分支 —— PredictionError 退化为
+        "模板串 vs 工具输出" 的 Jaccard 距离噪声，Learning 学的是噪声。
+
+    归一化后的分类行为:
+        - 成功: expected="success" == actual="success" → match, magnitude 0
+        - 失败: actual 以 "failed" 开头 → over_prediction, magnitude 1.0
+        即 D5 设计的"连续失败 → 信念下调 confidence → 决策改选"链路真实可达。
+
+    Args:
+        result: ToolResult（或任何有 success/error 属性的对象）。
+
+    Returns:
+        (expectedEffect, actualEffect) 二元组。
+        expectedEffect 表达"决策时对该动作的预期"：该动作成功推进目标。
+        预测的进度量不放在这里 —— 它由 updateFromEvidence 的
+        progressDelta 单独承载，避免污染分类语义。
+    """
+    success = bool(getattr(result, "success", False))
+    if success:
+        return "success", "success"
+    err = (getattr(result, "error", None) or "").strip()
+    return "success", (f"failed: {err}" if err else "failed")
+
+
+def reconcile_tool_messages(messages: list[dict[str, Any]]) -> int:
+    """对账并补齐悬空的 tool_call_id（P0 修复，2026-09-17）。
+
+    背景（真实故障，由 LLM 失败报文捕获定位）::
+
+        BadRequestError: An assistant message with 'tool_calls' must be followed
+        by tool messages responding to each 'tool_call_id'.
+        (insufficient tool messages following tool_calls message)
+
+    成因:
+        assistant 消息在裁决**之前**就带上了全部 tool_calls
+        （``assistant_msg["tool_calls"] = tool_calls_raw``），
+        但只有 DecisionAuthority **接受**的候选才会执行并追加 tool 消息。
+        候选被拒 / fail-closed / 连续失败提前跳出 / 执行异常 ——
+        都会让该 tool_call_id 悬空，下一轮请求违反 OpenAI 契约，
+        **整轮失败**且用户只看到"请求参数有误"。
+
+    修法:
+        不改"先记 tool_calls 再裁决"的顺序（那是证据链需要），
+        而是在**发给 LLM 之前**对账：为每个没有对应 tool 消息的
+        tool_call_id 合成一条占位 tool 消息，明确告知模型该动作未发生及原因。
+        在发送前做（而不是在执行循环里做）可以覆盖所有成因，
+        也让 run() / run_stream() 两条消息管线共用同一份逻辑。
+
+    Args:
+        messages: 将要发给 LLM 的消息列表（就地修改）。
+
+    Returns:
+        补齐的条数（诊断用）。
+    """
+    if not messages:
+        return 0
+
+    present: set[str] = set()
+    for m in messages:
+        if isinstance(m, dict) and m.get("role") == "tool":
+            tcid = m.get("tool_call_id")
+            if tcid:
+                present.add(str(tcid))
+
+    patched = 0
+    for m in messages:
+        if not isinstance(m, dict) or m.get("role") != "assistant":
+            continue
+        calls = m.get("tool_calls") or []
+        if not isinstance(calls, list):
+            continue
+        for c in calls:
+            cid = str(c.get("id") or "") if isinstance(c, dict) else ""
+            if not cid or cid in present:
+                continue
+            messages.append({
+                "role": "tool",
+                "tool_call_id": cid,
+                "content": (
+                    "[not executed] 该动作未被执行：DecisionAuthority 未接受此候选"
+                    "（fail-closed / 姿态拒绝 / 候选被拒 / 执行中断）。"
+                    "请根据当前状态重新决策，不要假设该动作已产生效果。"
+                ),
+            })
+            present.add(cid)
+            patched += 1
+    return patched
 
 
 class ConversationLoop:
@@ -119,6 +357,9 @@ class ConversationLoop:
             strategy_hint: W10: 策略选择提示，控制使用哪种执行策略。
             use_authority: D4 Authority 链开关，True 时 LLM tool_calls 必须经过
                            DecisionAuthority 才能执行；False 时回退旧行为（直接执行）。
+                           **LEGACY / TEST ONLY** —— 仅供测试与离线验证脚本使用。
+                           生产环境（ENV ∈ production/prod/staging/stage）请求 False
+                           会抛 ValueError，防止产生无 Authority 身份的动作旁路。
         """
         self._llm = llm
         self._tool_registry = tool_registry
@@ -148,19 +389,48 @@ class ConversationLoop:
         self._tool_timeouts: dict[str, float] = tool_timeouts or {}
         self._default_tool_timeout = default_tool_timeout
 
-        # D4 Authority: 三权实例接线（use_authority=False 回退旧行为，零回归）。
-        self._use_authority = use_authority
+        # D4 Authority: 三权实例接线。
+        # use_authority=False 是 **LEGACY / TEST ONLY** 开关（见
+        # enforce_authority_invariant 的文档）—— 生产环境请求关闭会直接报错，
+        # 避免出现"动作执行但无 Authority 身份"的静默旁路。
+        self._use_authority = enforce_authority_invariant(use_authority)
         if self._use_authority:
             self._goal_authority = GoalAuthority.getInstance()
             self._state_authority = StateAuthority.getInstance()
             self._decision_authority = DecisionAuthority.getInstance()
             self._llm_proposer = LLMProposer()
+            self._skill_proposer = SkillProposer()
+            # D4-M4: 真实第二候选源 —— 基于实测工具可靠性 + schema 兼容性的替补。
+            # 数据源在 set_tool_selection_memory() / 构造时注入；未就绪时恒返回空列表，
+            # 此时 DecisionAuthority 会如实标记 competitionDegraded=True。
+            self._recovery_proposer = RecoveryProposer(tool_registry=tool_registry)
             self._decision_authority.registerProposer(self._llm_proposer)
+            self._decision_authority.registerProposer(self._skill_proposer)
+            self._decision_authority.registerProposer(self._recovery_proposer)
+            # ML4 fix: 注册真实状态读取器 — 快照不再 minimal。
+            # 失败不阻断启动（退化为原 minimal snapshot），但必须留痕。
+            try:
+                self._state_authority.registerProviders(
+                    _LoopStateProviders(self)
+                )
+                log.info("ML4: state read providers registered")
+            except Exception as _prov_exc:
+                log.warning("ML4: state providers registration failed", error=str(_prov_exc))
         else:
             self._goal_authority = None
             self._state_authority = None
             self._decision_authority = None
             self._llm_proposer = None
+            self._skill_proposer = None
+            self._recovery_proposer = None
+
+        # L0 ActionAuthority: 动作执行前的最后一道权力门禁（七层中 Python 侧曾缺失的层）。
+        # 无论 use_authority 与否都构造 —— legacy 路径由门禁显式放行并留痕。
+        from agent.core.action_authority import ActionAuthority, ActionContext, VERDICT_ALLOW
+
+        self._action_authority = ActionAuthority(
+            decision_authority=self._decision_authority
+        )
 
         # W10: 策略选择提示。用户可通过 strategy_hint 控制执行策略偏好，
         # 如 "fast"（优先并行/低超时）、"safe"（串行/高超时/严格验证）、
@@ -187,6 +457,37 @@ class ConversationLoop:
         self._continual_learning: Any = None
         self._memory_engine: Any = None
         self._cross_device_coordinator: Any = None
+        self._last_tool_results: list[Any] = []
+        self._pending_replan_context: str | None = None
+
+    @property
+    def use_authority(self) -> bool:
+        """D4 Authority 链当前是否生效（只读视图，供启动断言与健康检查使用）。"""
+        return self._use_authority
+
+    def set_use_authority(self, enabled: bool) -> None:
+        """运行时切换 Authority 链 —— 与构造参数受**同一不变量守卫**约束。
+
+        Args:
+            enabled: 目标状态。
+
+        Raises:
+            ValueError: 生产环境下请求关闭时。
+        """
+        self._use_authority = enforce_authority_invariant(bool(enabled))
+
+    def assert_authority_invariant(self) -> None:
+        """启动断言：非 legacy 模式下 Authority 链必须处于开启状态。
+
+        Raises:
+            RuntimeError: Authority 被关闭却仍处于生产环境（不应发生，
+                是构造守卫与运行时 setter 之外的第三道防线）。
+        """
+        if not self._use_authority and is_production_env():
+            raise RuntimeError(
+                "Layer 1 不变量违规：生产环境下 Authority 链处于关闭状态。"
+                "任何生产动作都必须携带 goalId/snapshotId/decisionId。"
+            )
 
     def set_long_task_orchestrator(self, orchestrator: Any) -> None:
         """绑定长任务编排器，使对话循环可自动委托长任务."""
@@ -220,8 +521,16 @@ class ConversationLoop:
         self._reflection_kb = kb
 
     def set_tool_selection_memory(self, memory: Any) -> None:
-        """R2: 工具选择记忆 — 记录工具选择历史，优化未来选择。"""
+        """R2: 工具选择记忆 — 记录工具选择历史，优化未来选择。
+
+        同时把该记忆绑定给 RecoveryProposer（第二意见来源，D4-M4）
+        和 DecisionAuthority（M5：打分时实测成功率优先于 proposer 乐观估计）。
+        """
         self._tool_selection_memory = memory
+        if self._recovery_proposer is not None:
+            self._recovery_proposer.bind(tool_selection_memory=memory)
+        if self._decision_authority is not None:
+            self._decision_authority.set_tool_selection_memory(memory)
 
     def set_behavior_monitor(self, monitor: Any) -> None:
         """A3: 行为边界监控 — 每次工具调用后记录，检测异常模式。"""
@@ -892,6 +1201,13 @@ class ConversationLoop:
                 break
             budget.increment()
             # OTel追踪：记录循环迭代span
+            # ML6 fix: replan 上下文注入 — replan 后通知 LLM 新规划版本，
+            # 让后续 Decision 基于新规划（避免 LLM 不知道已 replan，继续旧路径）。
+            if self._pending_replan_context:
+                turn.messages.append(
+                    {"role": "system", "content": self._pending_replan_context}
+                )
+                self._pending_replan_context = None
             from agent.core.tracing import get_tracing_manager
             _tracing = get_tracing_manager()
             _iter_span = _tracing.start_span("loop.iteration", {"round": budget.current_round, "trace_id": trace_id})
@@ -940,6 +1256,20 @@ class ConversationLoop:
                         })
                     except Exception as _exc:
                         log_ignored(log, "conversation_loop.ConversationLoop.run", _exc)
+
+                # P0 修复（2026-09-17）：发送前对账，补齐悬空的 tool_call_id。
+                # 真实故障见 reconcile_tool_messages 的文档 —— 否则下一轮请求
+                # 违反 OpenAI 契约，整轮失败且用户只看到"请求参数有误"。
+                try:
+                    _reconciled = reconcile_tool_messages(llm_messages)
+                    if _reconciled:
+                        log.warning(
+                            "tool_calls 对账：补齐悬空的 tool 消息",
+                            patched=_reconciled,
+                            round=budget.current_round,
+                        )
+                except Exception as _rec_exc:
+                    log.debug("tool message reconcile skipped", error=str(_rec_exc))
 
                 response = await self._llm.chat(
                     messages=llm_messages,
@@ -1060,11 +1390,18 @@ class ConversationLoop:
             if self._continual_learning is not None and content:
                 try:
                     _cl_knowledge = self._continual_learning.retrieve_relevant_knowledge(
-                        query=message, top_k=3,
+                        query=user_input, top_k=3,
                     )
                     if _cl_knowledge:
                         _cl_tips = [f"  - {k.title}: {k.content[:80]}" for k in _cl_knowledge[:2]]
                         log.info("P2-2: 持续学习检索到相关经验", count=len(_cl_knowledge))
+                        # M9 fix: 将检索到的经验注入 LLM context，而非仅 log
+                        _cl_context = "\n".join(_cl_tips)
+                        _cl_msg = {
+                            "role": "system",
+                            "content": f"[相关经验]\n{_cl_context}",
+                        }
+                        turn.messages.append(_cl_msg)
                 except Exception as _cl_exc:
                     log.debug("P2-2: 持续学习检索异常，非阻断", error=str(_cl_exc))
 
@@ -1096,41 +1433,53 @@ class ConversationLoop:
             round_calls: list[ToolCall] = []
             decision_id: str | None = None
 
+            # P0 修复（2026-09-17）：goal 已 COMPLETED 时正常收口（与 run_stream 同构）。
+            # 否则 decide() 抛 "goal is COMPLETED, not active" 会被误报成
+            # "所有Proposer均未产生候选动作"，把已完成的任务判成授权失败。
+            if self._use_authority and goal_id:
+                _goal_now = self._goal_authority.getGoal(goal_id)
+                if _goal_now is not None and str(
+                    getattr(getattr(_goal_now, "status", None), "value", "")
+                ) == "completed":
+                    final_content = content or "目标已完成。"
+                    turn.state = TurnState.COMPLETED
+                    finish_reason = "goal_completed"
+                    _tracing.end_span(_iter_span)
+                    break
+
             # D4 Authority: LLM tool_calls 必须经 DecisionAuthority 做 FINAL 决策。
+            # M4 fix: 多 Proposer 竞争 — LLMProposer + SkillProposer 同时 propose，
+            # DecisionAuthority.decideWithProposers() 收集所有候选后做 FINAL 裁决。
             # 无候选/决策失败 → 拒绝执行（fail-closed，无任何绕过路径）。
             if self._use_authority and goal_id and snapshot_id:
                 latest_snapshot = self._state_authority.getLatestSnapshot()
                 if latest_snapshot is None:
                     latest_snapshot = await self._state_authority.captureSnapshot(activeGoalIds=[goal_id])
-                candidates = await self._llm_proposer.propose(
-                    goal=self._goal_authority.getGoal(goal_id),
-                    snapshot=latest_snapshot,
-                    tool_calls_raw=tool_calls_raw,
-                )
-                if not candidates:
+
+                self._llm_proposer.pending_tool_calls = tool_calls_raw
+                if self._recovery_proposer is not None:
+                    self._recovery_proposer.pending_tool_calls = tool_calls_raw
+                try:
+                    decision = await self._decision_authority.decideWithProposers(
+                        goalId=goal_id,
+                        snapshot=latest_snapshot,
+                    )
+                except ValueError as _no_cand_exc:
                     log.error(
-                        "D4 Authority: LLMProposer produced no candidates — no action will execute",
+                        "D4 Authority: no candidates from any proposer — no action will execute",
                         goalId=goal_id,
                         snapshotId=snapshot_id,
-                        toolCallCount=len(tool_calls_raw),
+                        error=str(_no_cand_exc),
                     )
                     turn.state = TurnState.FAILED
-                    turn.error = "DecisionAuthority: no candidates produced, action denied"
-                    final_content = "决策授权失败：无法生成候选动作，拒绝执行。"
+                    turn.error = f"DecisionAuthority: no candidates, action denied — {_no_cand_exc}"
+                    final_content = "决策授权失败：所有Proposer均未产生候选动作，拒绝执行。"
                     finish_reason = "authority_denied"
                     _tracing.end_span(_iter_span)
                     break
-
-                dctx = DecisionContext(
-                    goalId=goal_id,
-                    snapshot=latest_snapshot,
-                    candidates=candidates,
-                )
-                try:
-                    decision = await self._decision_authority.decide(dctx)
                 except Exception as _dec_exc:
                     log.error(
-                        "D4 Authority: DecisionAuthority.decide() failed — NO ACTION WILL EXECUTE",
+                        "D4 Authority: DecisionAuthority.decideWithProposers() failed — NO ACTION WILL EXECUTE",
                         goalId=goal_id,
                         snapshotId=snapshot_id,
                         error=str(_dec_exc),
@@ -1141,6 +1490,10 @@ class ConversationLoop:
                     finish_reason = "authority_denied"
                     _tracing.end_span(_iter_span)
                     break
+                finally:
+                    self._llm_proposer.pending_tool_calls = None
+                    if self._recovery_proposer is not None:
+                        self._recovery_proposer.pending_tool_calls = None
 
                 decision_id = decision.decisionId
                 for cand in decision.acceptedCandidates:
@@ -1167,10 +1520,27 @@ class ConversationLoop:
                     goalId=goal_id,
                     snapshotId=snapshot_id,
                     chosenTool=round_calls[0].name if round_calls else "none",
-                    candidateCount=len(candidates),
+                    candidateCount=len(decision.candidateIds),
+                    proposerCount=decision.proposerCount,
+                    competitionDegraded=decision.competitionDegraded,
                     selectionReason=decision.selectionReason,
                 )
             else:
+                # P7-G fix: Authority fail-closed — 当 use_authority=True 但
+                # goal_id/snapshot_id 缺失时，拒绝执行而非降级。
+                if self._use_authority:
+                    log.error(
+                        "D4 Authority FAIL-CLOSED: use_authority=True but goal_id or snapshot_id missing — refusing to execute",
+                        goalId=goal_id,
+                        snapshotId=snapshot_id,
+                        toolCallCount=len(tool_calls_raw),
+                    )
+                    turn.state = TurnState.FAILED
+                    turn.error = "Authority fail-closed: goal/snapshot unavailable, refusing execution"
+                    final_content = "安全拒绝：授权信息缺失，无法验证操作安全性。"
+                    finish_reason = "authority_fail_closed"
+                    _tracing.end_span(_iter_span)
+                    break
                 for tc_raw in tool_calls_raw:
                     fn = tc_raw.get("function", {})
                     tc = ToolCall(
@@ -1183,6 +1553,53 @@ class ConversationLoop:
 
             # P1-6: 优先并行执行（无依赖工具并发），回退串行；语义与原行为一致。
             await self._dispatch_tool_calls(round_calls, turn, budget)
+            self._last_tool_results = list(turn.tool_results)
+
+            # ML6 fix: 循环内 replan — 失败形态触发（与 run_stream 的 M8 重设计
+            # 对齐：失败连击≥2 或本轮失败≥2），planVersion<3 时 replan 并注入
+            # 下一轮 LLM 上下文。原实现把 replan 放在 while 循环之后 ——
+            # 触发时循环已结束，planVersion++ 对本次 run 零影响（死代码）。
+            if self._use_authority and goal_id:
+                try:
+                    _g_now = self._goal_authority.getGoal(goal_id)
+                    _streak = 0
+                    for _tr in reversed(turn.tool_results):
+                        if not getattr(_tr, "success", False):
+                            _streak += 1
+                        else:
+                            break
+                    _round_fails = sum(
+                        1 for _tr in self._last_tool_results
+                        if not getattr(_tr, "success", False)
+                    )
+                    if (
+                        _g_now is not None
+                        and _g_now.planVersion < 3
+                        and (_streak >= 2 or _round_fails >= 2)
+                    ):
+                        self._goal_authority.replan(
+                            goalId=goal_id,
+                            reason=(
+                                f"failure_pattern: streak={_streak}, "
+                                f"round_fails={_round_fails}"
+                            ),
+                            expectedVersion=_g_now.planVersion,
+                        )
+                        _pv = _g_now.planVersion + 1
+                        self._pending_replan_context = (
+                            f"[系统提示] 当前任务已触发 replan（planVersion → {_pv}）。"
+                            "原因：连续失败/重复失误。请基于新规划调整策略，"
+                            "避免重复使用失败的工具或参数。"
+                        )
+                        log.warning(
+                            "ML6: replan triggered in-loop",
+                            goalId=goal_id,
+                            streak=_streak,
+                            roundFails=_round_fails,
+                            newPlanVersion=_pv,
+                        )
+                except Exception as _ml6_exc:
+                    log.debug("ML6: in-loop replan failed, non-blocking", error=str(_ml6_exc))
 
             # P2-2: 持续学习 — 记录本轮工具执行经验
             if self._continual_learning is not None:
@@ -1254,28 +1671,42 @@ class ConversationLoop:
             try:
                 decision_history = self._decision_authority.getDecisionHistory(goal_id)
                 latest_decision = decision_history[-1] if decision_history else None
+                # ML5 fix: progress 验证驱动 + 按 decisionId 去重。
+                # 原实现每个 chosen 成功工具都加 estimatedGoalProgress 差值，
+                # 一轮并行 3 个工具进度虚增 3 次；且所有工具复用最后一个
+                # decision 的估计值。改为：每个 decision（=一轮）只推进一次
+                # （第一个 chosen 成功工具），其余 chosen 成功工具 delta=0
+                # （evidence 仍逐条记账，审计不丢）；失败工具各自 -0.05。
+                _progressed_decisions: set[str] = set()
                 for tr in turn.tool_results:
                     auth_meta = tr.metadata
                     is_chosen = auth_meta.get("authority_isChosen", False)
-                    if is_chosen and latest_decision:
-                        progress_delta = latest_decision.chosen.estimatedGoalProgress - self._goal_authority.getGoal(goal_id).progress
-                        progress_delta = max(0.0, min(0.5, progress_delta))
-                    else:
-                        progress_delta = 0.0
+                    dec_id = str(auth_meta.get("authority_decisionId", "") or "")
                     if not tr.success:
                         progress_delta = -0.05
+                    elif (
+                        is_chosen and latest_decision and dec_id not in _progressed_decisions
+                    ):
+                        progress_delta = latest_decision.chosen.estimatedGoalProgress - self._goal_authority.getGoal(goal_id).progress
+                        progress_delta = max(0.0, min(0.5, progress_delta))
+                        _progressed_decisions.add(dec_id)
+                    else:
+                        progress_delta = 0.0
+                    _exp_effect, _act_effect = action_outcome_tokens(tr)
                     self._goal_authority.updateFromEvidence(
                         goalId=goal_id,
                         decisionId=decision_id,
                         actionName=tr.name,
                         actionParams={"tool_call_id": tr.tool_call_id},
                         observation=tr.output[:500] if tr.output else None,
-                        expectedEffect=f"execute {tr.name} successfully",
-                        actualEffect=tr.output[:200] if tr.success and tr.output else (f"failed: {tr.error}" if tr.error else "no output"),
+                        expectedEffect=_exp_effect,
+                        actualEffect=_act_effect,
                         progressDelta=progress_delta,
                     )
             except Exception as _ev_exc:
                 log.warning("D4 Authority evidence write-back failed", error=str(_ev_exc))
+
+        # ML6 fix: replan 已移入循环内（失败形态触发 + 上下文注入）。
 
         tool_results_for_finalizer = [
             {"name": tr.name, "result": tr.output, "success": tr.success, "error": tr.error or ""}
@@ -1435,10 +1866,46 @@ class ConversationLoop:
 
         # D4 Authority: ToolCall.metadata 中的 authority_* 注入工具参数，
         # 由 desktop_automate 等工具透传到 TS delegated 路径（附 HMAC 签名）。
+        _auth_keys: dict[str, Any] = {}
         if tool_call.metadata:
-            authority_keys = {k: v for k, v in tool_call.metadata.items() if k.startswith("authority_")}
-            if authority_keys:
-                params["_authority_meta"] = authority_keys
+            _auth_keys = {k: v for k, v in tool_call.metadata.items() if k.startswith("authority_")}
+            if _auth_keys:
+                params["_authority_meta"] = _auth_keys
+
+        # ── L0 ActionAuthority：执行前的最后一道权力门禁 ──
+        # 回答"这个动作有权被执行吗"（与 schema 校验的"参数合法吗"互补）。
+        # fail-closed：身份不全 / provenance 无法回查 / 候选不在 accepted 集 / 姿态拒绝 → 一律拒绝。
+        from agent.core.action_authority import (
+            ActionContext as _ActionContext,
+            VERDICT_ALLOW as _VERDICT_ALLOW,
+        )
+
+        _l0 = self._action_authority.check(_ActionContext(
+            toolName=tool_call.name,
+            toolCallId=tool_call.id,
+            goalId=_auth_keys.get("authority_goalId"),
+            snapshotId=_auth_keys.get("authority_snapshotId"),
+            decisionId=_auth_keys.get("authority_decisionId"),
+            candidateId=_auth_keys.get("authority_candidateId"),
+            proposerId=_auth_keys.get("authority_proposerId"),
+            useAuthority=bool(self._use_authority),
+        ))
+        if _l0.verdict != _VERDICT_ALLOW:
+            log.error(
+                "L0 ActionAuthority 拒绝执行",
+                tool=tool_call.name,
+                toolCallId=tool_call.id,
+                reason=_l0.reason,
+                detail=_l0.detail,
+            )
+            return ToolResult(
+                tool_call_id=tool_call.id,
+                name=tool_call.name,
+                output=f"动作被 Authority 拒绝执行: {_l0.detail}",
+                success=False,
+                error=_l0.reason,
+                duration=time.time() - start,
+            )
 
         # T-04: Schema 参数校验——在权限检查前拦截非法参数。
         if self._schema_validator:
@@ -1759,11 +2226,16 @@ class ConversationLoop:
         history: list[dict[str, str]] | None = None,
         use_tools: bool = True,
         images: list[dict[str, Any]] | None = None,
+        authority_meta: dict[str, Any] | None = None,
     ):
         """P0-1/P1-4: 流式 ReAct 循环 — 富类型流式事件。
 
         每一轮 LLM 调用都使用 chat_stream 进行实时 token 输出，
         同时通过 ThinkScrubber 分离思考过程并 yield thinking 事件。
+
+        与 run() 一致，本方法同样经过 D4 Authority 链：
+        Goal → Snapshot → DecisionAuthority → Action → Evidence → Replan → Learning。
+        两条路径产生的 goalId/snapshotId/decisionId 语义完全同构。
 
         事件类型:
         - stream_start: 流开始
@@ -1773,6 +2245,7 @@ class ConversationLoop:
         - token: 文本 token 增量
         - llm_request: W8 LLM调用开始（含消息数/工具数）
         - llm_response: W8 LLM响应完成（含token用量/finish_reason）
+        - authority: D4 决策事件（含 goalId/snapshotId/decisionId/候选集）
         - tool_start: 工具调用开始
         - tool_progress: W8 工具执行中间进度（含阶段/百分比）
         - tool_end: 工具调用结束（含结果摘要）
@@ -1781,6 +2254,12 @@ class ConversationLoop:
         - reflection: 中间评估结果
         - stream_done: 流结束（含汇总元数据）
         - error: 错误
+
+        Args:
+            authority_meta: 上游（TS 网关）传入的跨进程委派三元组
+                {authority_goalId, authority_snapshotId, authority_decisionId}。
+                传入时本进程**不再新建 Goal**，而是绑定到既有 Goal 身份，
+                避免跨进程出现两套权力层（AUTHORITY_RECONSTRUCTION §9.7）。
 
         Yields:
             dict 事件: {"type": str, "content": str, "metadata": {...}, ...}
@@ -1793,6 +2272,184 @@ class ConversationLoop:
         tool_call_count = 0
         tool_success_count = 0
         total_tool_duration_ms = 0.0
+
+        # ── D4 Authority: 建立/绑定 Goal 身份 + State 快照 ──
+        # 与 run() 同构：goalId/snapshotId 贯穿全轮，使流式路径同样可审计、可回放。
+        goal_id: str | None = None
+        snapshot_id: str | None = None
+        decision_id: str | None = None
+        delegated_meta: dict[str, Any] | None = None
+        if self._use_authority:
+            if authority_meta:
+                # 跨进程委派：只接受身份三元组，不接受 Decision 语义
+                # （§9.7 Cross-Process Delegation Is Identity-Only）。
+                _g = authority_meta.get("authority_goalId")
+                _s = authority_meta.get("authority_snapshotId")
+                _d = authority_meta.get("authority_decisionId")
+                if _g and _s:
+                    goal_id, snapshot_id = str(_g), str(_s)
+                    decision_id = str(_d) if _d else None
+                    delegated_meta = {
+                        "authority_goalId": goal_id,
+                        "authority_snapshotId": snapshot_id,
+                        "authority_decisionId": decision_id or "",
+                    }
+                else:
+                    # §9.8 委派防伪：三元组不全 → 拒绝委派，退回本进程自建身份。
+                    log.warning(
+                        "D4 Authority: delegated authority_meta incomplete, ignoring",
+                        hasGoal=bool(_g),
+                        hasSnapshot=bool(_s),
+                    )
+            if not goal_id:
+                try:
+                    goal = self._goal_authority.createGoal(
+                        description=user_input[:200],
+                        originalInput=user_input,
+                    )
+                    goal_id = goal.goalId
+                    snapshot = await self._state_authority.captureSnapshot(
+                        activeGoalIds=[goal_id]
+                    )
+                    snapshot_id = snapshot.snapshotId
+                except Exception as _auth_exc:
+                    log.warning(
+                        "Authority goal/snapshot creation failed (stream), continuing without",
+                        error=str(_auth_exc),
+                    )
+
+        # 本轮流式执行累积的工具结果 —— replan / Learning 需要完整的动作-结果序列。
+        stream_tool_results: list[Any] = []
+        _authority_closed = {"done": False, "digest_emitted": False}
+
+        # 回合链路摘要（诊断用，任何记录失败都不影响主循环）
+        digest = TraceDigest(
+            turn_id=trace_id, session_id=session_id, user_input=user_input
+        )
+        digest.authority_enabled = bool(self._use_authority)
+        digest.set_identity(goal_id, snapshot_id)
+        if goal_id:
+            try:
+                _g0 = self._goal_authority.getGoal(goal_id)
+                digest.note_goal_progress_start(_g0.progress if _g0 else None)
+            except Exception as _dg_exc:
+                log.debug("digest: goal progress snapshot failed", error=str(_dg_exc))
+
+        async def _close_authority() -> None:
+            """流式路径的 Authority 收口：Replan + Learning（与 run() 同构，幂等）。
+
+            调用点：每个 stream_done 之前。设计约束见开发标准 §9.6
+            —— Learning 失败不得阻断主链路。
+            """
+            if not self._use_authority or not goal_id or _authority_closed["done"]:
+                return
+            _authority_closed["done"] = True
+
+            # M8 重设计（2026-09-17）：replan 触发条件由"progress 绝对阈值"
+            # 改为"**失败形态**"。原条件（progress<0.3）在成功一次 chosen 动作
+            # （+0.5）后窗口立即关闭 —— 真实语料 36 回合 15 次失败动作，
+            # replan 触发 0 次（休眠）。新条件度量失败本身：
+            #   a) 失败连击 ≥2（末尾连续失败）
+            #   b) 本回合重复预测失误（over_prediction ≥2，即模型持续高估）
+            # 任一命中且 planVersion 未达上限即 replan。
+            try:
+                goal = self._goal_authority.getGoal(goal_id)
+
+                _fail_results = [r for r in stream_tool_results
+                                 if not getattr(r, "success", False)]
+                _streak = 0
+                for r in reversed(stream_tool_results):
+                    if not getattr(r, "success", False):
+                        _streak += 1
+                    else:
+                        break
+                _over_pred = sum(
+                    1 for rd in digest.rounds
+                    for a in (rd.get("actions") or [])
+                    if a.get("errorType") == "over_prediction"
+                )
+
+                _trigger = False
+                _why = ""
+                if goal is None:
+                    _why = "goal_missing"
+                elif str(getattr(getattr(goal, "status", None), "value", "")) == "completed":
+                    _why = "goal_completed"
+                elif getattr(goal, "planVersion", 0) >= 3:
+                    _why = "plan_version_cap_reached"
+                elif _streak >= 2:
+                    _trigger = True
+                    _why = f"consecutive_failures={_streak}"
+                elif _over_pred >= 2:
+                    _trigger = True
+                    _why = f"repeated_prediction_error={_over_pred}"
+                elif _fail_results:
+                    _why = f"isolated_failures={len(_fail_results)}_below_threshold"
+                else:
+                    _why = "no_failure_in_turn"
+
+                if goal is not None and _trigger:
+                    self._goal_authority.replan(
+                        goalId=goal_id,
+                        reason=f"{_why}; progress={goal.progress:.2f}",
+                        expectedVersion=goal.planVersion,
+                    )
+                    log.warning(
+                        "M8(stream): replan triggered by failure pattern",
+                        goalId=goal_id,
+                        trigger=_why,
+                        progress=round(goal.progress, 2),
+                    )
+                    digest.record_replan(
+                        before=goal.planVersion,
+                        after=goal.planVersion + 1,
+                        reason=_why,
+                    )
+                else:
+                    digest.replan = {"triggered": False, "reason": _why}
+            except Exception as _replan_exc:
+                log.debug(
+                    "M8(stream): replan trigger failed, non-blocking",
+                    error=str(_replan_exc),
+                )
+
+            # P2-2: 持续学习 —— 对话结束时触发（模式识别 + 知识沉淀）
+            if self._continual_learning is not None:
+                try:
+                    _cl_report = await self._continual_learning.learn()
+                    if _cl_report.adjustments_made > 0 or _cl_report.knowledge_solidified > 0:
+                        log.info(
+                            "P2-2(stream): 持续学习完成",
+                            patterns=_cl_report.new_patterns_found,
+                            adjustments=_cl_report.adjustments_made,
+                            solidified=_cl_report.knowledge_solidified,
+                        )
+                except Exception as _cl_exc:
+                    log.debug(
+                        "P2-2(stream): 持续学习触发异常，非阻断",
+                        error=str(_cl_exc),
+                    )
+
+        def _emit_digest(finish_reason: str, quality_score: float | None) -> None:
+            """收口链路摘要并落盘（诊断用；任何失败都不得影响主循环）。
+
+            幂等：同一回合重复调用只落盘一次（错误路径与正常出口可能都会调）。
+            """
+            if _authority_closed["digest_emitted"]:
+                return
+            _authority_closed["digest_emitted"] = True
+            try:
+                _gp = None
+                if goal_id:
+                    _g_end = self._goal_authority.getGoal(goal_id)
+                    _gp = _g_end.progress if _g_end else None
+                digest.finalize(
+                    finish_reason, quality_score, goal_progress_end=_gp
+                )
+                digest.persist()
+            except Exception as _dg_exc:
+                log.debug("digest finalize failed, non-blocking", error=str(_dg_exc))
+
 
         messages: list[dict[str, Any]] = []
         if system_prompt:
@@ -1879,6 +2536,20 @@ class ConversationLoop:
             }
 
             try:
+                # P0 修复（2026-09-17）：发送前对账，补齐悬空的 tool_call_id。
+                # run_stream 的 assistant 消息在裁决前就带上了全部 tool_calls，
+                # 被拒候选会让对应 tool_call_id 悬空 → 下一轮违反 OpenAI 契约。
+                try:
+                    _reconciled = reconcile_tool_messages(messages)
+                    if _reconciled:
+                        log.warning(
+                            "tool_calls 对账：补齐悬空的 tool 消息(stream)",
+                            patched=_reconciled,
+                            round=round_idx + 1,
+                        )
+                except Exception as _rec_exc:
+                    log.debug("tool message reconcile skipped", error=str(_rec_exc))
+
                 response = await self._llm.chat(
                     messages=messages,
                     tools=tools_schema if round_idx < max_rounds - 1 else None,
@@ -1889,6 +2560,9 @@ class ConversationLoop:
                 classified = self._error_classifier.classify_llm_error(e)
                 consecutive_failures += 1
                 if consecutive_failures >= max_consecutive_failures:
+                    # 失败回合同样要留链路摘要 —— 否则"失败最重的回合无痕迹"，
+                    # 对失败语料是致命的（_emit_digest 幂等，重复调用安全）。
+                    _emit_digest("llm_error", None)
                     yield {
                         "type": "error",
                         "content": classified.user_message,
@@ -1898,6 +2572,7 @@ class ConversationLoop:
                         },
                     }
                     return
+                _emit_digest("llm_error", None)
                 yield {
                     "type": "error",
                     "content": classified.user_message,
@@ -1926,9 +2601,44 @@ class ConversationLoop:
                 if tokens_used:
                     stream_budget.add_tokens(tokens_used)
 
+            # P2-1（run_stream 对齐 run()）：世界模型对拟执行动作做预判。
+            # 此前该消费只存在于非流式路径 —— 默认生产路径（WS 流式）从未喂过
+            # 世界模型。低置信度预判会作为**当轮风险惩罚**注入 DecisionAuthority
+            # 打分（set_world_model_risk）—— World 节点从"只告警"变为"进决策"。
+            if self._world_model is not None and tool_calls_raw:
+                async def _do_wm_stream():
+                    _wm_low: dict[str, float] = {}
+                    try:
+                        wm_state = await self._world_model.build_current_state()
+                        for tc_raw in tool_calls_raw[:3]:
+                            tc_fn = tc_raw.get("function", {})
+                            pred = await self._world_model.predict(
+                                wm_state, tc_fn.get("name", ""), "",
+                            )
+                            if pred.confidence_level.value == "low":
+                                log.warning(
+                                    "P2-1(stream): 世界模型预判低置信度",
+                                    action=tc_fn.get("name", ""),
+                                    confidence=round(pred.confidence, 3),
+                                    risks=pred.risks,
+                                )
+                                _wm_low[tc_fn.get("name", "")] = float(pred.confidence)
+                            wm_state = pred.predicted_state_after
+                    except Exception as exc:
+                        log.debug("P2-1(stream): 世界模型预判异常，非阻断", error=str(exc))
+                    if self._decision_authority is not None:
+                        self._decision_authority.set_world_model_risk(_wm_low or None)
+
+                try:
+                    await asyncio.wait_for(_do_wm_stream(), timeout=10)
+                except Exception as _wm_exc:
+                    log.debug("world model predict skipped", error=str(_wm_exc))
+
             if stream_budget.is_token_exhausted:
                 _qs = tool_success_count / max(tool_call_count, 1) if tool_call_count > 0 else 0.0
                 _dur_ms = int((_t.time() - start_time) * 1000)
+                await _close_authority()
+                _emit_digest("token_budget_exhausted", round(_qs * 0.7, 4))
                 yield {
                     "type": "stream_done",
                     "content": "",
@@ -1965,7 +2675,7 @@ class ConversationLoop:
                         if hasattr(self, '_current_complexity') and self._current_complexity:
                             _rc_complexity = self._current_complexity
                         chain = await self._reasoning_chain_engine.reason(
-                            query=message,
+                            query=user_input,
                             complexity=_rc_complexity,
                         )
                         # D1: 自动验证推理链
@@ -1997,7 +2707,7 @@ class ConversationLoop:
                             "metadata": _chain_metadata,
                         }
                         # D3: 验证分数低或高风险关键词时触发反事实推理
-                        if _verify_score < 0.7 or any(kw in message for kw in ["删除", "格式化", "重置", "覆盖", "不可逆"]):
+                        if _verify_score < 0.7 or any(kw in user_input for kw in ["删除", "格式化", "重置", "覆盖", "不可逆"]):
                             try:
                                 _cf_result = await self._reasoning_chain_engine.counterfactual(chain)
                                 if _cf_result.get("counterfactual_paths"):
@@ -2021,6 +2731,8 @@ class ConversationLoop:
                     yield {"type": "token", "content": content[i:i + 10]}
                 _qs = 0.7 if content else 0.3
                 _dur_ms = int((_t.time() - start_time) * 1000)
+                await _close_authority()
+                _emit_digest("complete", _qs)
                 yield {
                     "type": "stream_done",
                     "content": "",
@@ -2047,13 +2759,166 @@ class ConversationLoop:
             assistant_msg["tool_calls"] = tool_calls_raw
             messages.append(assistant_msg)
 
-            for tc_raw in tool_calls_raw:
-                fn = tc_raw.get("function", {})
-                tc = ToolCall(
-                    id=tc_raw.get("id", f"tc_{uuid.uuid4().hex[:6]}"),
-                    name=fn.get("name", ""),
-                    arguments=fn.get("arguments", "{}"),
+            # ── D4 Authority: LLM tool_calls 必须经 DecisionAuthority 做 FINAL 决策 ──
+            # 与 run() 同构（见本文件 run() 内的同名区块）。无候选/决策失败 → fail-closed，
+            # 拒绝执行任何动作，不存在绕过路径。
+            round_calls: list[ToolCall] = []
+            if self._use_authority and goal_id and snapshot_id:
+                # P0 修复（2026-09-17）：goal 已 COMPLETED 时**正常收口**，而非 fail-closed。
+                # 真实故障（收敛闭环 M0→M3）：任务做完后 progress 达 1.0 → GoalAuthority
+                # 置 COMPLETED → 下一轮 decide() 抛 "goal is COMPLETED, not active"
+                # → 被 except ValueError 误报成"所有Proposer均未产生候选动作"
+                # → 回合被杀，用户拿到"决策授权失败"而不是结果。
+                # 目标完成是 Authority 的正常终态，不是授权违规。
+                _goal_now = self._goal_authority.getGoal(goal_id)
+                if _goal_now is not None and str(
+                    getattr(getattr(_goal_now, "status", None), "value", "")
+                ) == "completed":
+                    _qs = tool_success_count / max(tool_call_count, 1) if tool_call_count > 0 else 0.7
+                    _dur_ms = int((_t.time() - start_time) * 1000)
+                    await _close_authority()
+                    _emit_digest("goal_completed", round(_qs, 4))
+                    yield {
+                        "type": "stream_done",
+                        "content": "",
+                        "trace_id": trace_id,
+                        "session_id": session_id,
+                        "quality_score": round(_qs, 4),
+                        "rounds_used": round_idx + 1,
+                        "duration": _dur_ms / 1000.0,
+                        "finish_reason": "goal_completed",
+                        "metadata": {
+                            "total_rounds": round_idx + 1,
+                            "tool_calls": tool_call_count,
+                            "tool_successes": tool_success_count,
+                            "duration_ms": _dur_ms,
+                            "tool_duration_ms": int(total_tool_duration_ms),
+                            "finish_reason": "goal_completed",
+                        },
+                    }
+                    return
+                _latest_snapshot = self._state_authority.getLatestSnapshot()
+                if _latest_snapshot is None:
+                    _latest_snapshot = await self._state_authority.captureSnapshot(
+                        activeGoalIds=[goal_id]
+                    )
+                self._llm_proposer.pending_tool_calls = tool_calls_raw
+                if self._recovery_proposer is not None:
+                    self._recovery_proposer.pending_tool_calls = tool_calls_raw
+                try:
+                    decision = await self._decision_authority.decideWithProposers(
+                        goalId=goal_id,
+                        snapshot=_latest_snapshot,
+                    )
+                except ValueError as _no_cand_exc:
+                    log.error(
+                        "D4 Authority(stream): no candidates from any proposer — no action will execute",
+                        goalId=goal_id,
+                        snapshotId=snapshot_id,
+                        error=str(_no_cand_exc),
+                    )
+                    # P0 修复（2026-09-17）：被拒回合同样落链路摘要（消除语料 unmatched）
+                    _emit_digest("authority_denied", 0.0)
+                    yield {
+                        "type": "error",
+                        "content": "决策授权失败：所有Proposer均未产生候选动作，拒绝执行。",
+                        "metadata": {
+                            "finish_reason": "authority_denied",
+                            "goal_id": goal_id,
+                            "snapshot_id": snapshot_id,
+                        },
+                    }
+                    return
+                except Exception as _dec_exc:
+                    log.error(
+                        "D4 Authority(stream): DecisionAuthority.decideWithProposers() failed — NO ACTION WILL EXECUTE",
+                        goalId=goal_id,
+                        snapshotId=snapshot_id,
+                        error=str(_dec_exc),
+                    )
+                    yield {
+                        "type": "error",
+                        "content": "决策授权失败，拒绝执行任何动作。",
+                        "metadata": {
+                            "finish_reason": "authority_denied",
+                            "goal_id": goal_id,
+                            "snapshot_id": snapshot_id,
+                        },
+                    }
+                    return
+                finally:
+                    self._llm_proposer.pending_tool_calls = None
+                    if self._recovery_proposer is not None:
+                        self._recovery_proposer.pending_tool_calls = None
+
+                decision_id = decision.decisionId
+                digest.record_decision(decision, round_idx + 1)
+                for cand in decision.acceptedCandidates:
+                    payload = cand.action.payload
+                    _tc = ToolCall(
+                        id=payload.get("id", f"tc_{uuid.uuid4().hex[:6]}"),
+                        name=payload.get("name", ""),
+                        arguments=payload.get("arguments", "{}"),
+                    )
+                    _tc.metadata = {
+                        "authority_goalId": goal_id,
+                        "authority_snapshotId": snapshot_id,
+                        "authority_decisionId": decision_id,
+                        "authority_candidateId": cand.candidateId,
+                        "authority_proposerId": cand.proposerId,
+                        "authority_isChosen": cand.candidateId == decision.chosenCandidateId,
+                    }
+                    round_calls.append(_tc)
+
+                yield {
+                    "type": "authority",
+                    "content": "",
+                    "metadata": {
+                        "goal_id": goal_id,
+                        "snapshot_id": snapshot_id,
+                        "decision_id": decision_id,
+                        "chosen_candidate": decision.chosenCandidateId,
+                        "candidate_count": len(decision.candidateIds),
+                        "proposer_set": sorted(decision.proposerSet),
+                        "proposer_count": decision.proposerCount,
+                        "competition_degraded": decision.competitionDegraded,
+                        "selection_reason": decision.selectionReason,
+                        "round": round_idx + 1,
+                    },
+                }
+            elif self._use_authority:
+                # fail-closed: Authority 开启但 goal/snapshot 缺失 → 拒绝执行而非降级。
+                log.error(
+                    "D4 Authority(stream) FAIL-CLOSED: use_authority=True but goal_id/snapshot_id missing — refusing to execute",
+                    goalId=goal_id,
+                    snapshotId=snapshot_id,
+                    toolCallCount=len(tool_calls_raw),
                 )
+                # P0 修复（2026-09-17）：fail-closed 回合同样要落链路摘要。
+                # 此前该 return 路径不落盘 → 被拒回合在语料中**无痕迹**，
+                # 收敛流水线会把它判为 unmatched，diff 不可信（真实发生）。
+                _emit_digest("authority_fail_closed", 0.0)
+                yield {
+                    "type": "error",
+                    "content": "安全拒绝：授权信息缺失，无法验证操作安全性。",
+                    "metadata": {
+                        "finish_reason": "authority_fail_closed",
+                        "goal_id": goal_id,
+                        "snapshot_id": snapshot_id,
+                    },
+                }
+                return
+            else:
+                # Authority 显式关闭时的旧行为（use_authority=False，零回归路径）。
+                for tc_raw in tool_calls_raw:
+                    fn = tc_raw.get("function", {})
+                    round_calls.append(ToolCall(
+                        id=tc_raw.get("id", f"tc_{uuid.uuid4().hex[:6]}"),
+                        name=fn.get("name", ""),
+                        arguments=fn.get("arguments", "{}"),
+                    ))
+
+            for tc in round_calls:
 
                 yield {
                     "type": "tool_start",
@@ -2081,6 +2946,94 @@ class ConversationLoop:
                 tool_duration = (_t.time() - tool_start) * 1000
                 total_tool_duration_ms += tool_duration
                 tool_call_count += 1
+
+                # ── D4 Authority: Evidence 写回（动作→证据闭环）──
+                # 与 run() 同构，但粒度更细：run() 在整轮结束后批量写回，
+                # 流式路径在每次动作后立即写回 —— 即便后续提前 return，
+                # 已执行动作的证据也不会丢失。
+                stream_tool_results.append(tool_result)
+                # ML5(stream) fix: decision 级 progress 去重集合（实例级，每个
+                # decisionId 只推进一次 —— 每轮 decisionId 唯一，天然按轮去重，
+                # 并行多个 chosen 工具不再虚增进度）。
+                if not hasattr(self, "_stream_progressed_decisions"):
+                    self._stream_progressed_decisions = set()
+                # 预测误差的归一化标记在两条分支上都要有，供链路摘要记录
+                _exp_effect, _act_effect = action_outcome_tokens(tool_result)
+                _auth_meta = getattr(tc, "metadata", None) or {}
+                _pe_type, _pe_mag = "", None
+                if self._use_authority and goal_id and decision_id:
+                    try:
+                        _stream_decision_key = (
+                            _auth_meta.get("authority_decisionId", "") or decision_id
+                        )
+                        if (
+                            _auth_meta.get("authority_isChosen", False)
+                            and _stream_decision_key not in self._stream_progressed_decisions
+                        ):
+                            _goal_now = self._goal_authority.getGoal(goal_id)
+                            _hist = self._decision_authority.getDecisionHistory(goal_id)
+                            _predicted = (
+                                getattr(_hist[-1].chosen, "estimatedGoalProgress", None)
+                                if _hist else None
+                            )
+                            if _goal_now is not None and _predicted is not None:
+                                progress_delta = max(
+                                    0.0, min(0.5, _predicted - _goal_now.progress)
+                                )
+                            else:
+                                progress_delta = 0.0
+                        else:
+                            progress_delta = 0.0
+                        if not tool_result.success:
+                            progress_delta = -0.05
+                        elif (
+                            _auth_meta.get("authority_isChosen", False)
+                            and progress_delta > 0
+                        ):
+                            # 只有"验证成功 + 实际推进"才登记去重键
+                            self._stream_progressed_decisions.add(_stream_decision_key)
+                        self._goal_authority.updateFromEvidence(
+                            goalId=goal_id,
+                            decisionId=decision_id,
+                            actionName=tc.name,
+                            actionParams={"tool_call_id": tc.id},
+                            observation=(
+                                tool_result.output[:500] if tool_result.output else None
+                            ),
+                            expectedEffect=_exp_effect,
+                            actualEffect=_act_effect,
+                            progressDelta=progress_delta,
+                        )
+                        # 取回本次证据产生的预测误差（仅用于链路摘要，不参与决策）
+                        try:
+                            from agent.core.learning_authority import LearningAuthority
+
+                            _pes = LearningAuthority.getInstance().get_prediction_errors()
+                            if _pes and _pes[-1].decisionId == decision_id:
+                                _pe_type = _pes[-1].errorType
+                                _pe_mag = _pes[-1].errorMagnitude
+                        except Exception as _pe_exc:
+                            log.debug("digest: prediction error lookup failed", error=str(_pe_exc))
+                    except Exception as _ev_exc:
+                        log.warning(
+                            "D4 Authority(stream) evidence write-back failed",
+                            error=str(_ev_exc),
+                            tool=tc.name,
+                        )
+
+                digest.record_action(
+                    tool_name=tc.name,
+                    success=tool_result.success,
+                    error=tool_result.error,
+                    output=tool_result.output,
+                    is_chosen=bool(_auth_meta.get("authority_isChosen", False)),
+                    expected_effect=_exp_effect,
+                    actual_effect=_act_effect,
+                    error_type=_pe_type,
+                    error_magnitude=_pe_mag,
+                    duration_ms=tool_duration,
+                )
+
                 if tool_result.success:
                     tool_success_count += 1
                     consecutive_failures = 0
@@ -2089,6 +3042,8 @@ class ConversationLoop:
                     if consecutive_failures >= max_consecutive_failures:
                         _qs = tool_success_count / max(tool_call_count, 1) if tool_call_count > 0 else 0.0
                         _dur_ms = int((_t.time() - start_time) * 1000)
+                        await _close_authority()
+                        _emit_digest("failure_exhausted", round(_qs * 0.5, 4))
                         yield {
                             "type": "stream_done",
                             "content": "",
@@ -2138,7 +3093,7 @@ class ConversationLoop:
                 if self._semantic_verifier is not None and tool_result.success and tool_result.output:
                     try:
                         sv_result = await self._semantic_verifier.verify(
-                            input_text=message,
+                            input_text=user_input,
                             output=tool_result.output,
                             level="minimal",
                         )
@@ -2220,6 +3175,8 @@ class ConversationLoop:
 
         _qs = tool_success_count / max(tool_call_count, 1) if tool_call_count > 0 else 0.5
         _dur_ms = int((_t.time() - start_time) * 1000)
+        await _close_authority()
+        _emit_digest("max_rounds", round(_qs, 4))
         yield {
             "type": "stream_done",
             "content": "",
