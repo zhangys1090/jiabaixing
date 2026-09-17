@@ -118,10 +118,13 @@ _FORBIDDEN_PATTERNS = [
     r"pip\s+install\s+--user", r"npm\s+install\s+-g",
     r"python\s+-c\s+.*__import__", r"perl\s+-e",
     r"bash\s+-c\s+.*rm", r"sh\s+-c\s+.*rm",
-    r"nohup\b", r"screen\b", r"tmux\b",
-    r"crontab\b", r"at\b",
-    r"mount\b", r"umount\b",
-    r"chroot\b", r"su\b", r"sudo\b",
+    # P0 修复（2026-09-17）：以下命令只在**命令头**位置才危险。
+    # 原来无锚点的 \bat\b 会匹配命令中任意位置的单词 at（路径/参数/回显文本），
+    # 是收敛闭环 REGRESSED 的直接原因。其余同类（crontab/nohup/screen/tmux/
+    # mount/umount/chroot/su/sudo）一并加命令头锚点，避免同类误拦。
+    r"^\s*(?:sudo\s+|doas\s+)?(?:crontab|at|nohup|screen|tmux)\b",
+    r"^\s*(?:sudo\s+|doas\s+)?(?:mount|umount|chroot)\b",
+    r"^\s*(?:sudo\s+|doas\s+)?(?:su|sudo)\b",
     r"kill\s+-9\s+1\b", r"killall\b",
 ]
 
@@ -293,21 +296,45 @@ async def code_fix_executor(params: dict[str, Any]) -> ToolResult:
         return ToolResult(success=False, error=f"代码修复失败: {e}")
 
 
-async def shell_exec_executor(params: dict[str, Any]) -> ToolResult:
-    import re
-    import time
-    start = time.time()
-    command = str(params.get("command", ""))
-    timeout_ms = int(params.get("timeout", 30000))
-    cwd = params.get("cwd")
+def check_command_security(command: str) -> ToolResult | None:
+    """命令安全守卫（可独立测试的纯函数）。
 
-    if not command:
+    P0 修复（2026-09-17）：
+      1. 禁止命令由整串**子串匹配**改为按**命令头 token 序列**匹配 ——
+         原实现会把 `python format_code.py`、"npm run restart"、`dir C:/mount`、
+         `echo done at 5pm` 这类**含关键词的正常命令**误拦。
+         真实故障：收敛闭环 REGRESSED 的直接原因（`at\\b` 匹配了命令中的单词 at）。
+      2. 禁止模式中只作为命令头才危险的调度/会话类命令（at/crontab/nohup/
+         screen/tmux/mount/umount/chroot/su/sudo）加上命令头锚点。
+    语义保持：危险命令出现在**任意一段**复合命令（& | ; && ||）的头部，仍然拦截。
+
+    Args:
+        command: 待检查的命令串。
+
+    Returns:
+        ToolResult（success=False）表示拦截；None 表示放行。
+    """
+    if not command or not command.strip():
         return ToolResult(success=False, error="命令不能为空")
 
-    cmd_lower = command.lower().strip()
+    segments = re.split(r"&&|\|\||[|;&]", command)
+    seg_tokens: list[list[str]] = []
+    for seg in segments:
+        parts = seg.strip().split()
+        if not parts:
+            continue
+        toks = [parts[0].lower()]
+        if toks[0] in ("sudo", "doas") and len(parts) > 1:
+            toks.append(parts[1].lower())  # 兼容 sudo/doas 前缀
+        seg_tokens.append(toks)
+
     for forbidden in _FORBIDDEN_COMMANDS:
-        if forbidden.lower() in cmd_lower:
-            return ToolResult(success=False, error=f"禁止执行的命令: {forbidden}")
+        f_toks = forbidden.lower().split()
+        if not f_toks:
+            continue
+        for toks in seg_tokens:
+            if len(toks) >= len(f_toks) and toks[: len(f_toks)] == f_toks:
+                return ToolResult(success=False, error=f"禁止执行的命令: {forbidden}")
 
     for pattern in _FORBIDDEN_PATTERNS:
         if re.search(pattern, command, re.IGNORECASE):
@@ -316,6 +343,19 @@ async def shell_exec_executor(params: dict[str, Any]) -> ToolResult:
                 error=f"命令匹配禁止模式: {pattern}",
                 metadata={"security_violation": True},
             )
+    return None
+
+
+async def shell_exec_executor(params: dict[str, Any]) -> ToolResult:
+    import time
+    start = time.time()
+    command = str(params.get("command", ""))
+    timeout_ms = int(params.get("timeout", 30000))
+    cwd = params.get("cwd")
+
+    _blocked = check_command_security(command)
+    if _blocked is not None:
+        return _blocked
 
     # T-02: 命令白名单检查——提取首个命令词，必须匹配允许列表
     first_token = command.strip().split()[0] if command.strip() else ""
@@ -366,20 +406,52 @@ async def shell_exec_executor(params: dict[str, Any]) -> ToolResult:
 
     # T-02: 使用 shell=False + shlex.split 避免shell注入
     import shlex
-    try:
-        cmd_parts = shlex.split(command, posix=True)
-    except ValueError:
-        cmd_parts = [command]
+    # P0 修复（2026-09-17，R-A）：Windows 上 dir/type/echo 等 shell 内建命令
+    # 没有 .exe，`shell=False` 直接抛 [WinError 2] 系统找不到指定的文件 ——
+    # 真实语料中 shell_exec 的主要失败形态。Windows 走 shell=True；
+    # 安全性由上游三道守卫保证（禁止命令头匹配 + 允许列表 + 沙箱 HIGH 预检），
+    # 且命令在到达此处前已经过 check_command_security。
+    # R-B 修复：非零退出码此前 success=False 但 **error=None**，
+    # 失败原因只藏在 output 里 —— 分类器与模型都无法归因。
+    import os as _os
+
+    # 编码：Windows cmd.exe 输出用系统首选编码（本机 cp936），UTF-8 硬解会崩读线程
+    # （真实复现：UnicodeDecodeError: 'utf-8' codec can't decode byte 0xc7）。
+    _encoding = "utf-8"
+    _errors = "strict"
+    if _os.name == "nt":
+        import locale as _locale
+
+        _encoding = _locale.getpreferredencoding(False) or "utf-8"
+        _errors = "replace"
 
     try:
-        result = subprocess.run(
-            cmd_parts,
-            shell=False,
-            capture_output=True,
-            text=True,
-            timeout=timeout_sec,
-            cwd=cwd,
-        )
+        if _os.name == "nt":
+            result = subprocess.run(
+                command,
+                shell=True,
+                capture_output=True,
+                text=True,
+                encoding=_encoding,
+                errors=_errors,
+                timeout=timeout_sec,
+                cwd=cwd,
+            )
+        else:
+            try:
+                cmd_parts = shlex.split(command, posix=True)
+            except ValueError:
+                cmd_parts = [command]
+            result = subprocess.run(
+                cmd_parts,
+                shell=False,
+                capture_output=True,
+                text=True,
+                encoding=_encoding,
+                errors=_errors,
+                timeout=timeout_sec,
+                cwd=cwd,
+            )
 
         output_parts: list[str] = []
         if result.stdout:
@@ -388,13 +460,21 @@ async def shell_exec_executor(params: dict[str, Any]) -> ToolResult:
             output_parts.append(f"[stderr]\n{result.stderr[:5000]}")
 
         output = "\n".join(output_parts) if output_parts else "(无输出)"
+        ok = result.returncode == 0
 
-        if result.returncode != 0:
+        err: str | None = None
+        if not ok:
             output = f"退出码: {result.returncode}\n{output}"
+            err = f"命令退出码 {result.returncode}"
+            if result.stderr:
+                err += f"; stderr: {result.stderr[:300]}"
+            elif not output_parts:
+                err += "; 无任何输出（命令可能不存在或立即退出）"
 
         return ToolResult(
-            success=result.returncode == 0,
+            success=ok,
             output=output,
+            error=err,
             duration=time.time() - start,
             metadata={"exit_code": result.returncode},
         )

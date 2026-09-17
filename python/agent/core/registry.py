@@ -239,6 +239,7 @@ class SubsystemRegistry:
                     f"缺少方法 {spec.factory!r}"
                 )
             results[spec.name] = None
+            self._report_degraded(engine, spec, f"Missing method {spec.factory!r}")
             return
 
         start = time.perf_counter()
@@ -279,6 +280,33 @@ class SubsystemRegistry:
                 error=str(e),
             )
             results[spec.name] = None
+            self._report_degraded(engine, spec, str(e))
+
+    def _report_degraded(
+        self,
+        engine: "AgentEngine",
+        spec: SubsystemSpec,
+        reason: str,
+    ) -> None:
+        """把 boot 失败的子系统登记到 Engine 的降级账本。
+
+        为什么需要: v2 路径此前只在本地 log.warning 后继续，从不调用
+        Engine._mark_subsystem_degraded，导致 get_degraded_report() 与
+        /health 对 v2 启动失败完全不可见（降级账本只反映 v1 路径）。
+        本方法是纯观测性补写，不改变任何启动语义。
+
+        Args:
+            engine: AgentEngine 实例（可能未实现该接口，此时静默跳过）。
+            spec: 失败的子系统声明。
+            reason: 失败原因字符串。
+        """
+        marker = getattr(engine, "_mark_subsystem_degraded", None)
+        if marker is None:
+            return
+        try:
+            marker(spec.name, reason, spec.critical)
+        except Exception as e:
+            log.debug("degraded marker failed", name=spec.name, error=str(e))
 
     def _log_boot_summary(self, metrics: dict[str, dict[str, Any]]) -> None:
         """打印启动摘要报告。"""

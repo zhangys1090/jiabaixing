@@ -1054,6 +1054,9 @@ class AgentEngine:
                 trace_log=getattr(self, "harness_trace_log", None),
                 context_window_manager=getattr(self, "harness_context_window", None),
             )
+            # Layer 1 不变量生产入口断言：任何生产动作都必须携带
+            # goalId/snapshotId/decisionId，故 legacy（无 Authority）模式在生产不可接受。
+            self.conversation.assert_authority_invariant()
             log.debug("Conversation Loop ready (with safety modules + hooks + verification + harness_trace + context_window)")
         except Exception as e:
             log.warning("Conversation Loop init failed", error=str(e))
@@ -3360,6 +3363,7 @@ class AgentEngine:
         message: str,
         session_id: str = "default",
         cancel_token: "asyncio.Event | None" = None,
+        authority_meta: "dict[str, Any] | None" = None,
     ):
         """真正的流式 ReAct 循环 — 支持工具调用 + 思考过程 + 会话历史 + 记忆检索。
 
@@ -3370,6 +3374,9 @@ class AgentEngine:
             message: 用户输入
             session_id: 会话ID
             cancel_token: 取消令牌，设置后中止流式输出
+            authority_meta: TS 网关传入的跨进程委派三元组
+                {authority_goalId, authority_snapshotId, authority_decisionId}。
+                只传身份、不传 Decision 语义（AUTHORITY_RECONSTRUCTION §9.7）。
 
         Yields:
             dict 事件: {"type": "token"|"thinking"|"tool_start"|"tool_end"|"done"|"error", ...}
@@ -3461,6 +3468,7 @@ class AgentEngine:
                     system_prompt=system_prompt,
                     history=history,
                     use_tools=True,
+                    authority_meta=authority_meta,
                 ):
                     # 检查取消 — 持久化已接收的部分响应后再退出
                     if cancel_token and cancel_token.is_set():
@@ -4240,6 +4248,9 @@ class AgentEngine:
                 trace_log=getattr(self, "harness_trace_log", None),
                 context_window_manager=getattr(self, "harness_context_window", None),
             )
+            # Layer 1 不变量生产入口断言：任何生产动作都必须携带
+            # goalId/snapshotId/decisionId，故 legacy（无 Authority）模式在生产不可接受。
+            self.conversation.assert_authority_invariant()
             log.debug("Conversation Loop ready (with safety modules + hooks + verification + harness_trace + context_window)")
 
             # R3+R4+R2: 注入因果建模器、反思知识库、工具选择记忆

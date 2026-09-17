@@ -75,9 +75,19 @@ router.post('/chat', async (req: Request, res: Response) => {
         confidence: 0.8,
         reasoning: 'User chat message',
       });
-      const authorityMeta = guard.extractAuthorityMeta(decision, snapshot, goalId);
+      const authorityMeta = guard.extractAuthorityMeta(
+        decision,
+        snapshot,
+        goalId
+      );
 
-      const result = await bridge.processInput(input, userId);
+      const result = await bridge.processInput(
+        input,
+        userId,
+        traceId,
+        undefined,
+        authorityMeta
+      );
       res.json({
         success: true,
         response: result.response,

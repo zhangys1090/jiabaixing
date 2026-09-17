@@ -7,10 +7,7 @@
  */
 
 import { Logger } from '../utils/Logger';
-import {
-    DesktopAction,
-    DesktopTaskResult,
-} from './DesktopActionExecutor';
+import { DesktopAction, DesktopTaskResult } from './DesktopActionExecutor';
 import { DesktopUIInspector } from './DesktopUIInspector';
 import { DesktopObservation, DesktopVisionEngine } from './DesktopVisionEngine';
 import { StateSnapshotManager } from './StateSnapshotManager';
@@ -287,7 +284,7 @@ export class DesktopAgentLoop {
         const { decision, goalId } = await guard.guardAction({
           action: {
             type: 'composite',
-            payload: { actions: actions.map(a => ({ type: a.type })) },
+            payload: { actions: actions.map((a) => ({ type: a.type })) },
           },
           description: `DesktopAgentLoop batch: ${userInput}`,
           executionDomain: 'desktop' as GoalExecutionDomain,
@@ -594,195 +591,10 @@ ${observation.visionAnalysis.description ? `\n视觉分析: ${observation.vision
     }
   }
 
-  /**
-   * 正则模式：自然语言 → 动作规划（LLM 不可用时的降级方案）
-   */
-  private planActions(
-    input: string,
-    observation: DesktopObservation
-  ): DesktopAction[] {
-    void observation;
-    const lower = input.toLowerCase().trim();
-    const actions: DesktopAction[] = [];
-
-    if (/看看|观察|截图|屏幕|桌面/.test(lower)) {
-      actions.push({ type: 'observe', params: {}, description: '观察桌面' });
-      return actions;
-    }
-
-    if (/记事本|notepad/.test(lower)) {
-      const textMatch = lower.match(/输入[""']([^""']+)[""']/);
-      const text = textMatch ? textMatch[1] : 'Hello from jiabaixing!';
-      const saveMatch = lower.match(/保存[到为]?\s*([\w\\\.:\/]+)/);
-      const savePath = saveMatch ? saveMatch[1] : undefined;
-
-      actions.push(
-        {
-          type: 'shell',
-          params: { command: 'start notepad' },
-          description: '打开记事本',
-        },
-        { type: 'wait', params: { ms: 1000 }, description: '等待启动' }
-      );
-
-      if (/输入|打字|写/.test(lower)) {
-        actions.push({
-          type: 'type',
-          params: { text },
-          description: '输入文字',
-        });
-      }
-
-      if (savePath) {
-        actions.push(
-          { type: 'key', params: { key: 'CTRL' }, description: 'Ctrl' },
-          { type: 'key', params: { key: 'S' }, description: 'S' },
-          { type: 'wait', params: { ms: 500 }, description: '等待对话框' },
-          { type: 'type', params: { text: savePath }, description: '输入路径' },
-          { type: 'key', params: { key: 'ENTER' }, description: '确认' }
-        );
-      }
-
-      return actions;
-    }
-
-    const clickMatch = lower.match(/点击\s*\(?\s*(\d+)\s*,\s*(\d+)\s*\)?/);
-    if (clickMatch) {
-      const x = parseInt(clickMatch[1]);
-      const y = parseInt(clickMatch[2]);
-      actions.push(
-        {
-          type: 'moveMouse',
-          params: { x, y },
-          description: `移动 (${x},${y})`,
-        },
-        { type: 'click', params: { x, y }, description: '点击' }
-      );
-      return actions;
-    }
-
-    if (/点击.*中央|点击.*中间|点击.*中心/.test(lower)) {
-      const screen = this.windowManager.getScreenSize();
-      const cx = Math.floor(screen.width / 2);
-      const cy = Math.floor(screen.height / 2);
-      actions.push(
-        {
-          type: 'moveMouse',
-          params: { x: cx, y: cy },
-          description: `移动到中央 (${cx},${cy})`,
-        },
-        { type: 'click', params: { x: cx, y: cy }, description: '点击中央' }
-      );
-      return actions;
-    }
-
-    const appMatch = lower.match(/打开\s*(.+)/);
-    if (appMatch) {
-      const app = appMatch[1].trim();
-      actions.push(
-        { type: 'openApp', params: { app }, description: `打开 ${app}` },
-        { type: 'wait', params: { ms: 2000 }, description: '等待启动' },
-        { type: 'observe', params: {}, description: '观察结果' }
-      );
-      return actions;
-    }
-
-    const activateMatch = lower.match(/激活|切换到|聚焦\s*(.+)/);
-    if (activateMatch) {
-      const title = activateMatch[1].trim();
-      actions.push({
-        type: 'activateWindow',
-        params: { title },
-        description: `激活 ${title}`,
-      });
-      return actions;
-    }
-
-    const closeMatch = lower.match(/关闭\s*(.+)/);
-    if (closeMatch) {
-      const title = closeMatch[1].trim();
-      actions.push({
-        type: 'closeWindow',
-        params: { title },
-        description: `关闭 ${title}`,
-      });
-      return actions;
-    }
-
-    const scrollMatch = lower.match(/滚动\s*([\d-]+)/);
-    if (scrollMatch) {
-      const delta = parseInt(scrollMatch[1]);
-      actions.push({
-        type: 'scroll',
-        params: { delta },
-        description: `滚动 ${delta}`,
-      });
-      return actions;
-    }
-
-    const dragMatch = lower.match(
-      /拖拽\s*\(?\s*(\d+)\s*,\s*(\d+)\s*\)?\s*到\s*\(?\s*(\d+)\s*,\s*(\d+)\s*\)?/
-    );
-    if (dragMatch) {
-      actions.push({
-        type: 'drag',
-        params: {
-          fromX: parseInt(dragMatch[1]),
-          fromY: parseInt(dragMatch[2]),
-          toX: parseInt(dragMatch[3]),
-          toY: parseInt(dragMatch[4]),
-        },
-        description: '拖拽',
-      });
-      return actions;
-    }
-
-    const typeMatch = lower.match(/输入[""']([^""']+)[""']/);
-    if (typeMatch) {
-      actions.push({
-        type: 'type',
-        params: { text: typeMatch[1] },
-        description: `输入 "${typeMatch[1]}"`,
-      });
-      return actions;
-    }
-
-    const keyMatch = lower.match(/按\s*(.+)/);
-    if (keyMatch) {
-      const key = keyMatch[1].trim().toUpperCase();
-      actions.push({
-        type: 'key',
-        params: { key },
-        description: `按键 ${key}`,
-      });
-      return actions;
-    }
-
-    if (/截图|拍照|capture/.test(lower)) {
-      actions.push({ type: 'screenshot', params: {}, description: '截图' });
-      return actions;
-    }
-
-    if (/复制|拷贝|copy/.test(lower)) {
-      actions.push({
-        type: 'clipboardRead',
-        params: {},
-        description: '读取剪贴板',
-      });
-      return actions;
-    }
-
-    if (/粘贴|paste/.test(lower)) {
-      actions.push({
-        type: 'keyCombo',
-        params: { keys: ['CTRL', 'V'] },
-        description: 'Ctrl+V 粘贴',
-      });
-      return actions;
-    }
-
-    return actions;
-  }
+  // ⚠️ Shadow Path 已封堵（2026-09-17）：原 planActions() 正则本地规划已删除。
+  // 该方法是 Bridge 断连时"绕过 Python 安全链"的本地规则执行入口（设计文档 0912 的 Shadow Path）。
+  // 现策略：Bridge 不可用 → 主循环与 llmPlanActions 双重 FAIL CLOSED（见上方 BRIDGE_UNAVAILABLE_FAIL_CLOSED）。
+  // 动作执行必须经 Python DecisionAuthority/L0 或 DesktopActionAuthority 门禁。
 
   /**
    * 生成汇报

@@ -156,6 +156,13 @@ class Decision:
     proposerSet: list[str] = field(default_factory=list)
     vetoReason: str | None = None
     timestamp: float = field(default_factory=time.time)
+    # 竞争度审计（2026-09-17）：
+    # candidateCount 是候选**条数**，proposerCount 是候选**来源数**。
+    # 只有来源数 < 2 时，"FINAL 裁决"才是幂等映射 —— 这条事实此前不可观测，
+    # 导致"DecisionAuthority 是唯一 selector"在单来源时语义为空却看不出来。
+    proposerCount: int = 0
+    candidateCount: int = 0
+    competitionDegraded: bool = False
 
 
 class DecisionProposer(Protocol):

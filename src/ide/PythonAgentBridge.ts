@@ -254,14 +254,21 @@ export class PythonAgentBridge implements ACPDeps {
     message: string,
     sessionId?: string,
     traceId?: string,
-    images?: Array<{ url: string; mimeType?: string }>
+    images?: Array<{ url: string; mimeType?: string }>,
+    authorityMeta?: Record<string, unknown>
   ): Promise<BridgeProcessResult> {
     const sid = sessionId ?? 'default';
     const tid = traceId ?? randomUUID();
 
     if (this.chatWs?.readyState === WebSocket.OPEN) {
       try {
-        return await this._processInputViaWs(message, sid, tid, images);
+        return await this._processInputViaWs(
+          message,
+          sid,
+          tid,
+          images,
+          authorityMeta
+        );
       } catch (wsError) {
         const err = wsError as Error;
         Logger.warn(
@@ -273,7 +280,13 @@ export class PythonAgentBridge implements ACPDeps {
     }
 
     try {
-      return await this._processInputViaHttp(message, sid, tid, images);
+      return await this._processInputViaHttp(
+        message,
+        sid,
+        tid,
+        images,
+        authorityMeta
+      );
     } catch (httpError) {
       const err = httpError as Error;
       const bridgeErr = new BridgeError(
@@ -1903,12 +1916,26 @@ export class PythonAgentBridge implements ACPDeps {
     message: string,
     sessionId: string,
     traceId?: string,
-    images?: Array<{ url: string; mimeType?: string }>
+    images?: Array<{ url: string; mimeType?: string }>,
+    authorityMeta?: Record<string, unknown>
   ): Promise<BridgeProcessResult> {
     const requestId = `chat_${++this._requestIdCounter}_${Date.now()}`;
     const headers: Record<string, string> = {};
     if (traceId) {
       headers['x-trace-id'] = traceId;
+    }
+    if (authorityMeta?.authority_goalId) {
+      headers['x-authority-goal-id'] = String(authorityMeta.authority_goalId);
+    }
+    if (authorityMeta?.authority_snapshotId) {
+      headers['x-authority-snapshot-id'] = String(
+        authorityMeta.authority_snapshotId
+      );
+    }
+    if (authorityMeta?.authority_decisionId) {
+      headers['x-authority-decision-id'] = String(
+        authorityMeta.authority_decisionId
+      );
     }
     try {
       const { data } = await this.client.post(
@@ -1919,6 +1946,7 @@ export class PythonAgentBridge implements ACPDeps {
           trace_id: traceId,
           request_id: requestId,
           images: images ?? [],
+          authority: authorityMeta ?? null,
         },
         { headers }
       );
@@ -1962,7 +1990,8 @@ export class PythonAgentBridge implements ACPDeps {
     message: string,
     sessionId: string,
     traceId: string,
-    images?: Array<{ url: string; mimeType?: string }>
+    images?: Array<{ url: string; mimeType?: string }>,
+    authorityMeta?: Record<string, unknown>
   ): Promise<BridgeProcessResult> {
     return new Promise((resolve, reject) => {
       const requestId = `chat_${++this._requestIdCounter}_${Date.now()}`;
@@ -1989,6 +2018,7 @@ export class PythonAgentBridge implements ACPDeps {
             trace_id: traceId,
             request_id: requestId,
             images: images ?? [],
+            authority: authorityMeta ?? null,
           })
         );
       } catch (err) {

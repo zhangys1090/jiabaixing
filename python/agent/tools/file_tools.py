@@ -620,6 +620,14 @@ async def file_search_executor(params: dict[str, Any]) -> ToolResult:
         return ToolResult(success=False, error=f"路径不是目录: {dir_path}")
 
     results: list[str] = []
+    # P0 修复（2026-09-17）：此前 os.walk 里直接引用 _IGNORE_DIRS，
+    # 但该常量在本函数作用域内**从未定义**（只在其它几个函数里各自局部定义过）
+    # → 只要目标目录有效就抛 NameError，file_search 主路径 100% 失败。
+    # 由真实任务失败语料（M7）定位：`file_search 执行失败：NameError: name '_IGNORE_DIRS' is not defined`。
+    _IGNORE_DIRS = {
+        "node_modules", ".git", "dist", "build", "__pycache__",
+        ".venv", "venv", ".mypy_cache", ".pytest_cache",
+    }
     for root, dirs, files in os.walk(dir_path):
         dirs[:] = [d for d in dirs if d not in _IGNORE_DIRS and not d.startswith(".")]
         for f in files:
@@ -662,7 +670,16 @@ async def file_edit_executor(params: dict[str, Any]) -> ToolResult:
     if not raw_path:
         return ToolResult(success=False, error="文件路径不能为空")
     if not old_text:
-        return ToolResult(success=False, error="原始文本不能为空")
+        # P0 修复（2026-09-17，R-C）：真实语料 M7。原报错"原始文本不能为空"
+        # 没告诉模型该怎么自纠 —— 改为给出可执行的行动指引。
+        return ToolResult(
+            success=False,
+            error=(
+                "file_edit 需要 old_text（要被替换的原文，必须与文件中的内容精确匹配）。"
+                "若尚未读取文件请先用 file_read 获取内容；"
+                "若要新建文件或整文件写入，请改用 file_write 工具。"
+            ),
+        )
 
     file_path = _resolve_path(raw_path)
 

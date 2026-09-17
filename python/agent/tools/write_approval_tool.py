@@ -446,10 +446,26 @@ async def write_approval_executor(params: dict[str, Any]) -> ToolResult:
     elif action == "approve":
         request_id = str(params.get("request_id", "")).strip()
         if not request_id:
-            return ToolResult(
-                success=False, error="批准操作需要提供 request_id",
-                duration=time.time() - start,
-            )
+            # P0 修复（2026-09-17）：模型二次调用常忘带 request_id（真实语料 M7）。
+            # 当恰好只有一个待审批请求时直接采用 —— 无歧义、可审计；
+            # 多个时明确要求指定，绝不静默猜测。
+            _pending = mgr.get_pending()
+            if len(_pending) == 1:
+                request_id = _pending[0].id
+            elif len(_pending) > 1:
+                return ToolResult(
+                    success=False,
+                    error=(
+                        f"需要提供 request_id（当前有 {len(_pending)} 个待审批请求："
+                        f"{[r.id for r in _pending][:5]}）"
+                    ),
+                    duration=time.time() - start,
+                )
+            else:
+                return ToolResult(
+                    success=False, error="批准操作需要提供 request_id（当前无待审批请求）",
+                    duration=time.time() - start,
+                )
         ok = mgr.approve(request_id)
         if not ok:
             return ToolResult(
@@ -466,10 +482,24 @@ async def write_approval_executor(params: dict[str, Any]) -> ToolResult:
         request_id = str(params.get("request_id", "")).strip()
         reason = str(params.get("reason", "")).strip()
         if not request_id:
-            return ToolResult(
-                success=False, error="拒绝操作需要提供 request_id",
-                duration=time.time() - start,
-            )
+            # P0 修复（2026-09-17）：与 approve 同样的便利回退（见上方说明）
+            _pending = mgr.get_pending()
+            if len(_pending) == 1:
+                request_id = _pending[0].id
+            elif len(_pending) > 1:
+                return ToolResult(
+                    success=False,
+                    error=(
+                        f"需要提供 request_id（当前有 {len(_pending)} 个待审批请求："
+                        f"{[r.id for r in _pending][:5]}）"
+                    ),
+                    duration=time.time() - start,
+                )
+            else:
+                return ToolResult(
+                    success=False, error="拒绝操作需要提供 request_id（当前无待审批请求）",
+                    duration=time.time() - start,
+                )
         ok = mgr.deny(request_id, reason)
         if not ok:
             return ToolResult(

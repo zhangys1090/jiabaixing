@@ -5,13 +5,17 @@ import re
 from typing import Any
 
 from agent.llm.provider import LLMProvider
-import logging
 from agent.loop.types import (
     EvaluatorOutput,
     LoopContext,
     StepResult,
 )
-logger = logging.getLogger(__name__)
+from agent.core.logger import StructuredLogger
+
+# 项目统一日志器：stdlib logging.Logger 不接受 error= 这类结构化字段，
+# 此前此处用 logging.getLogger 导致降级日志本身抛 TypeError，
+# 把"LLM 评估失败→降级为规则评估"的真实降级路径变成硬失败。
+logger = StructuredLogger("evaluator")
 
 
 class Evaluator:

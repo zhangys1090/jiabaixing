@@ -166,6 +166,16 @@ class MemoryStore:
     ) -> str:
         import json
 
+        # P0 修复（2026-09-17）：memories.scene/emotion/memory_type 在 schema 里是
+        # NOT NULL，虽然各自带 DEFAULT，但**显式传 None 会覆盖默认值**并写入 NULL
+        # → 触发 `NOT NULL constraint failed: memories.scene`。
+        # 真实故障路径：memory_store 工具未传 scene → MemoryStoreOptions.scene=None
+        # → PersistenceService.store_memory → store(scene=None) → 每次写入必失败。
+        # 在**最底层边界**兜底，覆盖所有调用方（含未来新增的），而不是逐个修上层。
+        scene = scene or ""
+        emotion = emotion or "neutral"
+        memory_type = memory_type or "short_term"
+
         mem_id = str(uuid.uuid4())
         tokens = ChineseTokenizer.tokenize(content)
         token_str = " ".join(tokens)

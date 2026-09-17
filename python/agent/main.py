@@ -483,6 +483,13 @@ async def ws_root(websocket: WebSocket):
             trace_id = data.get("trace_id", "")
             request_id = data.get("request_id", "")
 
+            # D4 Authority: 接收 TS 网关下发的跨进程委派三元组。
+            # 只接受身份（goalId/snapshotId/decisionId），不接受 Decision 语义
+            # （AUTHORITY_RECONSTRUCTION §9.7）。缺失或不全时下游自动回退为本进程自建身份。
+            authority_meta = data.get("authority") or data.get("authority_meta") or None
+            if authority_meta is not None and not isinstance(authority_meta, dict):
+                authority_meta = None
+
             # P1: 创建取消令牌
             cancel_token = asyncio.Event()
             _cancel_tokens[session_id] = cancel_token
@@ -526,6 +533,7 @@ async def ws_root(websocket: WebSocket):
                     session_id=session_id,
                     cancel_token=cancel_token,
                     trace_id=trace_id,
+                    authority_meta=authority_meta,
                 ):
                     event_type = event.get("type", "")
 
@@ -659,6 +667,7 @@ async def _stream_process(
     session_id: str,
     cancel_token: asyncio.Event,
     trace_id: str = "",
+    authority_meta: "dict[str, Any] | None" = None,
 ):
     """P0-1: 流式处理包装器，将 engine.process_input 的同步结果转为异步事件流。
 
@@ -668,6 +677,7 @@ async def _stream_process(
     - 思考过程事件 (thinking)
     - 进度事件 (progress)
     - 取消支持 (cancel_token)
+    - D4 Authority 跨进程委派 (authority_meta 透传到 ConversationLoop.run_stream)
     """
     try:
         # 尝试获取流式输出
@@ -676,7 +686,10 @@ async def _stream_process(
         if streaming_supported:
             # P0-1: 真正的流式 token 输出（带工具调用+思考过程+会话历史）
             async for event in engine.process_input_stream(
-                message, session_id, cancel_token=cancel_token
+                message,
+                session_id,
+                cancel_token=cancel_token,
+                authority_meta=authority_meta,
             ):
                 if cancel_token.is_set():
                     yield {"type": "done", "trace_id": "", "content": "任务已取消"}

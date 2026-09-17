@@ -10,7 +10,6 @@
 
 Usage:
     from agent.core.otel_tracer import otel_trace, get_tracer
-logger = logging.getLogger(__name__)
 
     @otel_trace("loop.execute")
     async def execute(self, ...):
@@ -29,6 +28,8 @@ import os
 from typing import Any, Callable, Optional, TypeVar
 
 from opentelemetry import trace
+
+logger = logging.getLogger(__name__)
 
 
 # 模块常量

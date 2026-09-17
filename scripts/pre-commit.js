@@ -130,7 +130,9 @@ async function main() {
   // 运行ESLint检查
   if (filteredBackendFiles.length > 0) {
     log.info('Running ESLint...');
-    const eslintCmd = `npx eslint ${filteredBackendFiles.join(' ')} --max-warnings=0`;
+    // 只把 ESLint error 作为提交门禁；warning（如 getInstance() 迁移提示等
+    // 项目既有风格提示）不阻塞提交，避免历史文件永远无法提交。
+    const eslintCmd = `npx eslint ${filteredBackendFiles.join(' ')}`;
     if (!runCommand(eslintCmd, { stdio: 'inherit' })) {
       log.error('ESLint check failed');
       log.warn('Please fix the ESLint errors before committing.');

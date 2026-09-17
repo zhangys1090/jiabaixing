@@ -104,7 +104,13 @@ async def memory_recall_executor(params: dict[str, Any]) -> ToolResult:
 
     memory = _get_memory_engine()
     if not memory:
-        return ToolResult(success=True, output="记忆系统暂不可用，无法召回记忆")
+        # P0（2026-09-17）：依赖不可用不是成功。此前报 success=True 会把
+        # "记忆从未写入"伪装成正常动作，导致失败地图统计不出任何工具失败。
+        return ToolResult(
+            success=False,
+            output="记忆系统暂不可用，无法召回记忆",
+            error="memory engine unavailable",
+        )
 
     try:
         results = await memory.search(query=query, limit=limit)
@@ -141,7 +147,12 @@ async def memory_search_executor(params: dict[str, Any]) -> ToolResult:
 
     memory = _get_memory_engine()
     if not memory:
-        return ToolResult(success=True, output="记忆系统暂不可用")
+        # P0（2026-09-17）：依赖不可用不是成功，见 memory_recall_executor 的说明。
+        return ToolResult(
+            success=False,
+            output="记忆系统暂不可用",
+            error="memory engine unavailable",
+        )
 
     try:
         results = await memory.search(query=query, limit=limit)
@@ -188,7 +199,12 @@ async def memory_store_executor(params: dict[str, Any]) -> ToolResult:
 
     memory = _get_memory_engine()
     if not memory:
-        return ToolResult(success=True, output="记忆系统暂不可用，内容未存储")
+        # P0（2026-09-17）：依赖不可用不是成功，见 memory_recall_executor 的说明。
+        return ToolResult(
+            success=False,
+            output="记忆系统暂不可用，内容未存储",
+            error="memory engine unavailable",
+        )
 
     try:
         if mem_type == "instant":
@@ -218,7 +234,12 @@ async def knowledge_query_executor(params: dict[str, Any]) -> ToolResult:
 
     memory = _get_memory_engine()
     if not memory:
-        return ToolResult(success=True, output="知识库暂不可用")
+        # P0（2026-09-17）：依赖不可用不是成功，见 memory_recall_executor 的说明。
+        return ToolResult(
+            success=False,
+            output="知识库暂不可用",
+            error="memory engine unavailable",
+        )
 
     try:
         search_query = f"{domain} {query}" if domain else query

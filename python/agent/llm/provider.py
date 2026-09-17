@@ -118,6 +118,21 @@ class LLMProvider:
             if primary.base_url:
                 litellm.api_base = primary.base_url
 
+        # R-2 修复（2026-09-17）：启动期配置一致性校验。
+        # providers.json 的 primary 会**覆盖** .env 的 model/base_url/api_key，
+        # 此前该覆盖完全静默 —— 一个残留的测试 provider 就能让每次 LLM 调用
+        # 都失败，且排查成本极高。这里把"静默覆盖"变成"显式告警"。
+        # 只读校验，不修改任何配置；校验失败绝不阻断构造。
+        try:
+            from agent.llm.provider_consistency import (
+                check_provider_consistency,
+                log_findings,
+            )
+
+            log_findings(check_provider_consistency())
+        except Exception as _cons_exc:
+            log.debug("provider consistency check skipped", error=str(_cons_exc))
+
     def get_circuit_breaker(self, provider_name: str = "") -> CircuitBreaker:
         """获取指定 provider 的熔断器。"""
         name = provider_name or self.model
@@ -312,6 +327,17 @@ class LLMProvider:
         model_override: str | None = None,
         system_prompt: str | None = None,
     ) -> dict[str, Any]:
+        # P0 架构修正（2026-09-17）：tool_calls 契约对账放在**唯一漏斗**处。
+        # 全仓 80+ 个 llm.chat() 调用点最终都汇到这里 —— 在主循环的两个调用点
+        # 各修一份是打地鼠（delegate_tool / loop/executor 等带 tools 的路径
+        # 依然会漏）。就地修改 messages，因此 run_stream 的持久历史也会被一并修正。
+        try:
+            from agent.llm.message_contract import reconcile_tool_messages
+
+            reconcile_tool_messages(messages)
+        except Exception as _mc_exc:
+            log.debug("message contract reconcile skipped", error=str(_mc_exc))
+
         # 灰度版本切换时跳过 transport，统一走 litellm 路径
         transport = None if model_override else self._resolve_transport()
         if transport is not None:
@@ -325,7 +351,9 @@ class LLMProvider:
                 # 此处回退到 litellm 路径（其自带多厂商故障转移 + 退避重试）。
                 log_ignored(None, "provider.chat.transport_fallback", e)
                 return await self._do_chat_via_litellm(
-                    messages, tools, stream, model_override=self.model, system_prompt=system_prompt
+                    messages, tools, stream,
+                    model_override=model_override or self.model,
+                    system_prompt=system_prompt,
                 )
 
         return await self._do_chat_via_litellm(
@@ -512,9 +540,21 @@ class LLMProvider:
 
         last_exc: Exception | None = None
         response: Any = None
+        # R-6: 记录最后一次尝试的完整请求上下文，供失败时落盘定位根因
+        last_kwargs: dict[str, Any] | None = None
+        last_provider: str = ""
+        last_attempt_idx: int = -1
         for attempt_idx, prov in enumerate(ordered):
             attempt_kwargs: dict[str, Any] = dict(kwargs)
-            attempt_kwargs["model"] = prov.model or effective_model
+            # P0 修复（2026-09-17）：failover 链里的 prov.model 是 providers.json 中
+            # 的**原始**模型名，此前直接透传给 litellm —— 缺 provider 前缀时
+            # litellm 抛 BadRequestError("LLM Provider NOT provided")，
+            # 导致主路失败后**所有**回退也都失败（故障转移形同虚设）。
+            # 归一化必须与 __init__ 对 self.model 的处理保持一致。
+            if prov.model:
+                attempt_kwargs["model"] = self._normalize_model(prov.model)
+            else:
+                attempt_kwargs["model"] = effective_model
             if prov.api_key:
                 attempt_kwargs["api_key"] = prov.api_key
             elif "api_key" in attempt_kwargs and not api_key:
@@ -538,6 +578,9 @@ class LLMProvider:
             except Exception as e:
                 log.debug("provider 异常处理", error=str(e))
                 last_exc = e
+                last_kwargs = attempt_kwargs
+                last_provider = prov.name
+                last_attempt_idx = attempt_idx
                 await self.rate_limiter.record_result(False)
                 if self.credential_pool and prov.api_key:
                     self.credential_pool.report_failure(prov.api_key)
@@ -552,6 +595,23 @@ class LLMProvider:
 
         if response is None:
             if last_exc is not None:
+                # R-6 修复（2026-09-17）：失败时把完整请求报文落盘。
+                # 此前只留下分类后的用户文案，原始 model/temperature/max_tokens/
+                # tools schema/messages 全部丢失 —— 4/14 回合的 `请求参数有误`
+                # 因此无法定位根因。诊断设施失败不得影响主链路。
+                try:
+                    from agent.llm.failure_capture import capture_llm_failure
+
+                    capture_llm_failure(
+                        model=str((last_kwargs or {}).get("model", effective_model)),
+                        request=last_kwargs or {},
+                        exc=last_exc,
+                        provider_name=last_provider,
+                        attempt_idx=last_attempt_idx,
+                        attempt_total=len(ordered),
+                    )
+                except Exception as _cap_exc:
+                    log.debug("llm failure capture skipped", error=str(_cap_exc))
                 raise last_exc
             raise RuntimeError("No available LLM provider in fallback chain")
 

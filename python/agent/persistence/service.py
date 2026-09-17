@@ -12,7 +12,17 @@ from agent.memory.engine import MemoryEngine
 from agent.persistence.trajectory import TrajectoryDatabase
 from agent.core.logger import log_ignored
 import logging
-logger = logging.getLogger(__name__)
+
+from agent.core.logger import StructuredLogger
+
+# P0 修复（2026-09-17）：此前用 stdlib `logging.getLogger`，但本文件 8 处
+# 都调 `logger.warning(msg, error=str(e))` —— stdlib Logger 不接受 `error=`
+# 这类结构化字段，会在 except 块内抛 TypeError。
+# 后果：**整个 persistence/service.py 的异常处理路径都是坏的** ——
+# 真实错误（如 memories.scene NOT NULL 约束冲突）被 TypeError 顶掉，
+# 上层只看到"没有日志、返回空字符串"，于是静默 fallthrough 到另一条同样失败的路径。
+# 与 evaluator.py / otel_tracer.py 属同一类缺陷。
+logger = StructuredLogger("persistence_service")
 
 
 @dataclass

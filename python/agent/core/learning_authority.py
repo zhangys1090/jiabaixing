@@ -115,21 +115,53 @@ class LearningAuthority:
         self._belief_history: list[BeliefUpdate] = []
         self._prediction_errors: list[PredictionError] = []
         # decisionId → (proposerId, actionName)：证据写回时回查 proposer
-        self._decision_provenance: dict[str, tuple[str, str]] = {}
+        # decisionId → provenance。当前格式为 dict（含 byAction 动作名索引）；
+        # 兼容历史 tuple[str, str] 格式供读取侧回退。
+        self._decision_provenance: dict[str, Any] = {}
 
     # ---------------------------------------------------------- 证据侧入口
 
     def record_decision(self, decision: Decision) -> None:
-        """DecisionAuthority 裁决后登记 provenance，供 learn() 回查 proposer。"""
-        action_name = ""
-        payload = decision.chosen.action.payload if decision.chosen else {}
-        if isinstance(payload, dict):
-            action_name = str(payload.get("name", ""))
+        """DecisionAuthority 裁决后登记 provenance，供 learn() 回查 proposer。
+
+        重要（2026-09-17 修复）:
+            一个 decisionId 下可能有**多个**被接受的候选同时执行 ——
+            ``run()`` / ``run_stream()`` 会执行全部 ``acceptedCandidates``。
+            因此必须按**动作名**索引 proposer，不能只记 chosen 的 proposer，
+            否则 A 提出的动作会被记到 B 名下：
+            例：chosen = ``llm::shell_exec``，同时执行的还有
+            ``recovery::code_executor`` —— 后者若按 chosen 归档会变成
+            ``llm::code_executor``，导致 recovery 的候选**永远学不到东西**，
+            同时凭空生成一个幽灵信念。
+
+        存储格式:
+            ``{decisionId: {"chosenProposerId", "chosenActionName", "byAction"}}``
+            ``byAction`` = {动作名: 提出该动作的 proposerId}。
+            读取侧同时兼容历史 tuple 格式。
+        """
+        chosen_payload: dict[str, Any] = {}
+        if decision.chosen and isinstance(decision.chosen.action.payload, dict):
+            chosen_payload = decision.chosen.action.payload
+        chosen_action = str(chosen_payload.get("name", ""))
+        chosen_proposer = decision.chosen.proposerId if decision.chosen else "unknown"
+
+        # 按动作名索引：只有被接受（=会被执行）的候选才会产生证据
+        by_action: dict[str, str] = {}
+        for cand in decision.acceptedCandidates:
+            payload = cand.action.payload if isinstance(cand.action.payload, dict) else {}
+            act = str(payload.get("name", ""))
+            if act:
+                by_action.setdefault(act, cand.proposerId)
+        # chosen 一定被执行，其归属以 chosen 为准（同一动作被多个 proposer 提出时）
+        if chosen_action:
+            by_action[chosen_action] = chosen_proposer
+
         with self._mu:
-            self._decision_provenance[decision.decisionId] = (
-                decision.chosen.proposerId if decision.chosen else "unknown",
-                action_name,
-            )
+            self._decision_provenance[decision.decisionId] = {
+                "chosenProposerId": chosen_proposer,
+                "chosenActionName": chosen_action,
+                "byAction": by_action,
+            }
             if len(self._decision_provenance) > _MAX_HISTORY:
                 # 淘汰最早的 10% 防无限增长
                 drop = max(1, _MAX_HISTORY // 10)
@@ -189,7 +221,18 @@ class LearningAuthority:
         proposer_id, provenance_action = "unknown", ""
         with self._mu:
             provenance = self._decision_provenance.get(evidence.decisionId)
-        if provenance is not None:
+        # 关键修复（2026-09-17）: 按**实际执行的动作名**回查提出它的 proposer，
+        # 而不是一律采用 chosen 的 proposer。原因见 record_decision 的文档。
+        if isinstance(provenance, dict):
+            by_action = provenance.get("byAction") or {}
+            provenance_action = str(provenance.get("chosenActionName", ""))
+            proposer_id = str(
+                by_action.get(evidence.actionName or "")
+                or provenance.get("chosenProposerId")
+                or "unknown"
+            )
+        elif isinstance(provenance, tuple):
+            # 兼容历史格式 (proposerId, actionName)
             proposer_id, provenance_action = provenance
         action_name = evidence.actionName or provenance_action or "unknown"
 
