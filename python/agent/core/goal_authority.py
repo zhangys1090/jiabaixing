@@ -48,6 +48,9 @@ class GoalAuthority:
     def __init__(self) -> None:
         self._goals: dict[str, Goal] = {}
         self._evidence_log: dict[str, list[GoalEvidence]] = {}
+        # 长任务 Goal 复用：session_id → goalId 绑定。同一会话的后续请求复用
+        # 同一 Goal 身份（progress/evidence/planVersion 跨轮延续）。
+        self._session_goals: dict[str, str] = {}
 
     def createGoal(
         self,
@@ -74,6 +77,105 @@ class GoalAuthority:
 
     def getGoal(self, goalId: str) -> Goal | None:
         return self._goals.get(goalId)
+
+    def getOrCreateGoal(
+        self,
+        description: str,
+        originalInput: str,
+        session_id: str | None = None,
+        explicit_goal_id: str | None = None,
+        priority: GoalPriority = GoalPriority.MEDIUM,
+        parentGoalId: str | None = None,
+        successCondition: str = "",
+        abandonmentCondition: str = "",
+    ) -> Goal:
+        """跨请求 Goal 身份复用（长任务编排）。
+
+        优先级：
+        1. explicit_goal_id（TS 网关委派身份 / 长任务编排器显式指定）：
+           已存在 → 复用；不存在 → 以该 ID 落库（避免 getGoal/replan 断链）。
+        2. session_id 绑定过 ACTIVE Goal → 复用（跨轮延续，description 追加轮次）。
+        3. 否则新建并绑定 session。
+
+        复用不改变 Goal 身份（goalId/planVersion 延续），只把新输入追加到描述，
+        使 replan / Evidence / Learning 的跨轮价值真正兑现。
+        """
+        if explicit_goal_id:
+            existing = self._goals.get(explicit_goal_id)
+            if existing:
+                if session_id:
+                    self._session_goals[session_id] = existing.goalId
+                _log.info(
+                    "Goal reused (delegated)",
+                    goalId=existing.goalId,
+                    sessionId=session_id or "",
+                    planVersion=existing.planVersion,
+                )
+                return existing
+            # 委派身份在本进程不存在（如 TS 网关下发）→ 以相同 ID 落库。
+            goal = Goal(
+                goalId=explicit_goal_id,
+                description=description,
+                originalInput=originalInput,
+                priority=priority,
+                parentGoalId=parentGoalId,
+                successCondition=successCondition,
+                abandonmentCondition=abandonmentCondition,
+                currentStage="created",
+                planVersion=1,
+            )
+            self._goals[goal.goalId] = goal
+            if session_id:
+                self._session_goals[session_id] = goal.goalId
+            _log.info(
+                "Goal registered (delegated id)",
+                goalId=goal.goalId,
+                sessionId=session_id or "",
+            )
+            return goal
+
+        if session_id:
+            bound_id = self._session_goals.get(session_id)
+            if bound_id:
+                bound = self._goals.get(bound_id)
+                if bound is not None and bound.status == GoalStatus.ACTIVE:
+                    # 跨轮复用：追加本轮描述，保留 originalInput（长任务语义）。
+                    if description and description != bound.description:
+                        bound.description = (
+                            f"{bound.description} | 续: {description[:200]}"
+                        )
+                    bound.updatedAt = time.time()
+                    _log.info(
+                        "Goal reused (session)",
+                        goalId=bound.goalId,
+                        sessionId=session_id,
+                        planVersion=bound.planVersion,
+                        progress=bound.progress,
+                    )
+                    return bound
+
+        goal = self.createGoal(
+            description=description,
+            originalInput=originalInput,
+            priority=priority,
+            parentGoalId=parentGoalId,
+            successCondition=successCondition,
+            abandonmentCondition=abandonmentCondition,
+        )
+        if session_id:
+            self._session_goals[session_id] = goal.goalId
+        _log.info(
+            "Goal created",
+            goalId=goal.goalId,
+            sessionId=session_id or "",
+        )
+        return goal
+
+    def _unbindSessionForGoal(self, goalId: str) -> None:
+        """Goal 完结/放弃后解除 session 绑定，下次请求新建 Goal。"""
+        for sid, gid in list(self._session_goals.items()):
+            if gid == goalId:
+                self._session_goals.pop(sid, None)
 
     def getActiveGoals(self) -> list[Goal]:
         return [g for g in self._goals.values() if g.status == GoalStatus.ACTIVE]
@@ -144,6 +246,7 @@ class GoalAuthority:
         goal.updatedAt = time.time()
         if reason:
             goal.metadata["completionReason"] = reason
+        self._unbindSessionForGoal(goalId)
         return goal
 
     def markAbandoned(self, goalId: str, reason: str = "") -> Goal:
@@ -152,6 +255,7 @@ class GoalAuthority:
         goal.updatedAt = time.time()
         if reason:
             goal.metadata["abandonmentReason"] = reason
+        self._unbindSessionForGoal(goalId)
         return goal
 
     def replan(

@@ -1039,14 +1039,16 @@ class ConversationLoop:
                 log_ignored(log, "conversation_loop.ConversationLoop.run", _exc)
 
         # D4 Authority: 每轮对话创建稳定 Goal 身份 + State 快照（goalId/snapshotId 贯穿全程）。
+        # 长任务 Goal 复用：同 session 的后续请求复用 ACTIVE Goal（跨轮延续 progress/evidence/planVersion）。
         goal_id: str | None = None
         snapshot_id: str | None = None
         decision_id: str | None = None
         if self._use_authority:
             try:
-                goal = self._goal_authority.createGoal(
+                goal = self._goal_authority.getOrCreateGoal(
                     description=user_input[:200],
                     originalInput=user_input,
+                    session_id=session_id,
                 )
                 goal_id = goal.goalId
                 snapshot = await self._state_authority.captureSnapshot(activeGoalIds=[goal_id])
@@ -2294,6 +2296,20 @@ class ConversationLoop:
                         "authority_snapshotId": snapshot_id,
                         "authority_decisionId": decision_id or "",
                     }
+                    # 长任务 Goal 复用：TS 网关委派 goalId 在本进程落库（不存在时以该 ID
+                    # 注册），避免后续 getGoal/replan/evidence 因身份缺失而断链。
+                    try:
+                        self._goal_authority.getOrCreateGoal(
+                            description=user_input[:200],
+                            originalInput=user_input,
+                            session_id=session_id,
+                            explicit_goal_id=goal_id,
+                        )
+                    except Exception as _g_exc:
+                        log.warning(
+                            "D4 Authority: delegated goal registration failed, continuing",
+                            error=str(_g_exc),
+                        )
                 else:
                     # §9.8 委派防伪：三元组不全 → 拒绝委派，退回本进程自建身份。
                     log.warning(
@@ -2303,9 +2319,10 @@ class ConversationLoop:
                     )
             if not goal_id:
                 try:
-                    goal = self._goal_authority.createGoal(
+                    goal = self._goal_authority.getOrCreateGoal(
                         description=user_input[:200],
                         originalInput=user_input,
+                        session_id=session_id,
                     )
                     goal_id = goal.goalId
                     snapshot = await self._state_authority.captureSnapshot(
