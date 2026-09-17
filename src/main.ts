@@ -84,6 +84,7 @@ import { registerTraeRoutes } from './server/routes/traeRoutes';
 import { registerTrajectoryRoutes } from './server/routes/trajectoryRoutes';
 
 import { bootstrap } from './server/bootstrap';
+import { SystemInitState } from './server/SystemInitState';
 import { setupEventBus } from './server/eventBusSetup';
 import { gracefulShutdown } from './server/shutdown';
 import { setupWebSocket } from './server/websocket/index';
@@ -370,6 +371,17 @@ async function startServer(): Promise<void> {
   const broadcast = setupEventBus(wss, core);
   setupRoutes(broadcast);
   await setupStaticFiles();
+  // 核心初始化同步完成（bootstrap await 已结束）→ 标记系统就绪。
+  // SystemInitState 是 WS ensureCoreReady 的 gate：无步骤标记 done 时 isReady()
+  // 恒为 false，导致所有 user_input 被 system_not_ready 拒绝（P0：WS 链路不可用）。
+  // 当前实现无异步懒加载步骤，故在监听前直接整体标记 ready。
+  try {
+    const initState = SystemInitState.getInstance();
+    initState.registerStep('core', '核心系统');
+    initState.markStepDone('core');
+  } catch (_initExc) {
+    Logger.warn('SystemInitState 标记就绪失败，WS 可能拒绝 user_input', 'Main');
+  }
   setupWebSocket(wss, core);
   registerShutdownHandlers(core);
 }

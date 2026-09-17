@@ -141,17 +141,22 @@ export async function processInputOnce(
 
       if (isPythonMode) {
         Logger.info(
-          `✅ 处理完成, traceId: ${result.traceId}（Python 后端模式：响应由 EventBus WS 通道推送，跳过 response_ready）`,
+          `✅ 处理完成, traceId: ${result.traceId}（Python 后端模式：bridge 同步返回，补发 response_ready）`,
           'WsProcessor'
         );
+        // 修复 P0：core.processInput 的 Python 分支经 bridge.processInput 同步返回
+        // 完整响应，并无 EventBus 流式事件。原实现只发 ack 导致 WS 客户端永远收不到
+        // 响应内容。这里同时补发 response_ready（标准消息，前端/CLI 均可消费）。
         setTimeout(() => {
           if (ws.readyState === WebSocket.OPEN) {
             ws.send(
               JSON.stringify({
-                type: 'response_ready_ack',
+                type: 'response_ready',
                 data: {
+                  response: result.response,
                   traceId: result.traceId || traceId,
                   success: true,
+                  quality: result.quality ?? 0.7,
                   source: 'python_bridge',
                 },
               })
